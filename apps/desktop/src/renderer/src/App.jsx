@@ -1,3 +1,4 @@
+import { ArcoAction } from '@mica-config-ui/web'
 import { confirmAction, alertAction } from './desktop-dialog'
 import { lazyView } from './lazy-view'
 import { Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
@@ -2646,24 +2647,25 @@ export default function App() {
             {isMobile ? (
               <div className="flex h-8 shrink-0 items-center justify-between border-b border-line pl-3.5 pr-2">
                 <span className="text-xs font-semibold text-fg-soft">会话</span>
-                <button
+                <ArcoAction
                   type="button"
+                  iconOnly
                   title="关闭"
                   aria-label="关闭会话列表"
-                  className="grid size-7 place-items-center rounded-md text-fg-soft hover:bg-overlay-strong hover:text-fg-max"
+                  className="grid size-7 place-items-center"
                   onClick={closeMobileDrawer}
                 >
                   <IconX size={15} />
-                </button>
+                </ArcoAction>
               </div>
             ) : (
               <div className="h-8 shrink-0 drag-region" aria-hidden="true" />
             )}
             <nav className="no-drag shrink-0 px-2 pb-2 pt-1">
-              <button
+              <ArcoAction
                 type="button"
                 title="New Session"
-                className="flex h-7 w-full items-center gap-2 rounded-md px-2.5 text-left text-[13px] text-nav-fg transition-colors hover:bg-overlay hover:text-fg-max"
+                className="flex h-7 w-full items-center gap-2 px-2.5 text-left text-[13px] transition-colors"
                 onClick={() => {
                   closeMobileDrawer()
                   createSession()
@@ -2671,16 +2673,12 @@ export default function App() {
               >
                 <IconRocket size={14} className="shrink-0 opacity-60" />
                 <span>New Session</span>
-              </button>
-              <button
+              </ArcoAction>
+              <ArcoAction
                 type="button"
                 aria-pressed={view === 'stats'}
                 title="查看使用统计"
-                className={`flex h-7 w-full items-center gap-2 rounded-md px-2.5 text-left text-[13px] font-medium transition-colors ${
-                  view === 'stats'
-                    ? 'bg-active text-fg-max'
-                    : 'text-nav-fg hover:bg-overlay hover:text-fg-max'
-                }`}
+                className="flex h-7 w-full items-center gap-2 px-2.5 text-left text-[13px] font-medium transition-colors"
                 onClick={() => {
                   closeMobileDrawer()
                   setView('stats')
@@ -2688,11 +2686,11 @@ export default function App() {
               >
                 <IconChartBar size={14} className="shrink-0 opacity-75" />
                 <span>Stats</span>
-              </button>
-              <button
+              </ArcoAction>
+              <ArcoAction
                 type="button"
                 title="打开 Mica 设置"
-                className="flex h-7 w-full items-center gap-2 rounded-md px-2.5 text-left text-[13px] font-medium text-nav-fg transition-colors hover:bg-overlay hover:text-fg-max"
+                className="flex h-7 w-full items-center gap-2 px-2.5 text-left text-[13px] font-medium transition-colors"
                 onClick={() => {
                   closeMobileDrawer()
                   openConfigPage('config')
@@ -2700,7 +2698,7 @@ export default function App() {
               >
                 <IconSettings size={14} className="shrink-0 opacity-75" />
                 <span>Settings</span>
-              </button>
+              </ArcoAction>
               {/* 插件声明的桌面入口（清单 `desktop.entry` + 插件目录里的 desktop.jsx）：
                   宿主只画一行和一张卡片 / 一层整页，里面是什么由插件决定。 */}
               <PluginEntries onOpenPage={openPluginPage} session={pluginSession} />
@@ -2710,14 +2708,14 @@ export default function App() {
               {/* 有插件上报了「等人点一下」的事（手机端页面落后之类）时，这一行右侧点一个
                   提示点：那个动作藏在「Plugins → 某张卡 → 操作」里，不点开就永远看不见。
                   点进去直接落在那个插件的详情上，不用自己再找。 */}
-              <button
+              <ArcoAction
                 type="button"
                 title={
                   pluginAttention
                     ? `${pluginAttention.pluginName}：${pluginAttention.text}`
                     : '插件（查看已装载的插件与它们的设置）'
                 }
-                className="flex h-7 w-full items-center gap-2 rounded-md px-2.5 text-left text-[13px] font-medium text-nav-fg transition-colors hover:bg-overlay hover:text-fg-max"
+                className="flex h-7 w-full items-center gap-2 px-2.5 text-left text-[13px] font-medium transition-colors"
                 onClick={() => {
                   closeMobileDrawer()
                   // 点开就算看过了：同一对「本机版 vs 中转机版」只点一次（插件那边点动作也会撤）。
@@ -2735,7 +2733,7 @@ export default function App() {
                     }`}
                   />
                 ) : null}
-              </button>
+              </ArcoAction>
             </nav>
             <SessionTree
               sessions={displayedSessions}
@@ -2819,16 +2817,17 @@ export default function App() {
             className={`safe-top drag-region flex h-8 shrink-0 items-center gap-1.5 border-b border-line bg-panel px-3 text-xs font-medium text-fg-soft transition-[padding] ${!isMobile && !shareView && sidebarHidden ? 'pl-30' : ''}`}
           >
             {isMobile && !shareView && !viewOwnsWindow && (
-              <button
+              <ArcoAction
                 type="button"
+                iconOnly
                 title="会话列表"
                 aria-label="会话列表"
                 aria-expanded={drawerOpen}
-                className="no-drag -ml-1 grid size-7 shrink-0 place-items-center rounded-md text-fg-soft hover:bg-overlay hover:text-fg-max"
+                className="no-drag -ml-1 grid size-7 shrink-0 place-items-center"
                 onClick={() => setSessionsOpen((open) => !open)}
               >
                 <IconMenu2 size={16} />
-              </button>
+              </ArcoAction>
             )}
             {/* 返回对话是主区顶栏最左的入口（与 CLI 的 prompt 前导一致）：非对话视图
                 下始终出现在最前，不要挪回右侧（分享页也留着它：那页只是没有左侧会话
@@ -2836,16 +2835,16 @@ export default function App() {
                 视图名（Files / Stats）不再重复展示——各自页面自带标识，
                 这一栏只留返回入口。 */}
             {view !== 'chat' && (
-              <button
+              <ArcoAction
                 type="button"
                 title="返回对话"
                 aria-label="返回对话"
-                className="no-drag flex h-6 shrink-0 items-center gap-1 rounded-md px-1.5 text-fg-muted transition-colors hover:bg-overlay hover:text-fg-max"
+                className="no-drag flex h-6 shrink-0 items-center gap-1 px-1.5 transition-colors"
                 onClick={() => setView('chat')}
               >
                 <IconMessage size={13} />
                 <span>返回对话</span>
-              </button>
+              </ArcoAction>
             )}
             {view === 'chat' && (
               <span className="min-w-0 truncate text-fg-strong">
@@ -2865,8 +2864,9 @@ export default function App() {
                 const title = terminalIconTitle(terminal)
                 const flashSeq = controlFlashes[`terminal:${terminal.id}`] || 0
                 return (
-                  <button
+                  <ArcoAction
                     key={terminal.id}
+                    iconOnly
                     type="button"
                     title={title}
                     aria-label={title}
@@ -2877,11 +2877,7 @@ export default function App() {
                       closeTerminalControl(terminal)
                     }}
                     onClick={() => toggleTerminalControl(terminal)}
-                    className={`relative grid size-6 shrink-0 place-items-center rounded-md transition-colors ${
-                      terminal.windowVisible
-                        ? 'bg-overlay-strong text-fg-max hover:bg-overlay-heavy'
-                        : 'text-fg-soft hover:bg-overlay hover:text-fg-max'
-                    }`}
+                    className="relative grid size-6 shrink-0 place-items-center transition-colors"
                   >
                     <IconTerminal
                       key={flashSeq}
@@ -2893,7 +2889,7 @@ export default function App() {
                         {badge}
                       </span>
                     )}
-                  </button>
+                  </ArcoAction>
                 )
               })}
               {activeBrowsers.map((browser) => {
@@ -2901,8 +2897,9 @@ export default function App() {
                 const title = browserIconTitle(browser)
                 const flashSeq = controlFlashes[`browser:${browser.id}`] || 0
                 return (
-                  <button
+                  <ArcoAction
                     key={browser.id}
+                    iconOnly
                     type="button"
                     title={title}
                     aria-label={title}
@@ -2913,11 +2910,7 @@ export default function App() {
                       closeBrowser(browser)
                     }}
                     onClick={() => toggleBrowser(browser)}
-                    className={`relative grid size-6 shrink-0 place-items-center rounded-md transition-colors ${
-                      browser.visible
-                        ? 'bg-overlay-strong text-fg-max hover:bg-overlay-heavy'
-                        : 'text-fg-soft hover:bg-overlay hover:text-fg-max'
-                    }`}
+                    className="relative grid size-6 shrink-0 place-items-center transition-colors"
                   >
                     <IconWorld
                       key={flashSeq}
@@ -2933,25 +2926,23 @@ export default function App() {
                         {badge}
                       </span>
                     )}
-                  </button>
+                  </ArcoAction>
                 )
               })}
-              <button
+              <ArcoAction
+                iconOnly
                 type="button"
                 title={activeTerminalOpen ? '收起终端 (Ctrl+`)' : '展开终端 (Ctrl+`)'}
                 aria-label={activeTerminalOpen ? '收起终端' : '展开终端'}
                 aria-pressed={activeTerminalOpen}
-                className={`grid size-6 place-items-center rounded-md transition-colors ${
-                  activeTerminalOpen
-                    ? 'bg-overlay-strong text-fg-max hover:bg-overlay-heavy'
-                    : 'text-fg-soft hover:bg-overlay hover:text-fg-max'
-                }`}
+                className="grid size-6 place-items-center transition-colors"
                 onClick={toggleActiveTerminal}
               >
                 <IconTerminal2 size={14} />
-              </button>
-              <button
+              </ArcoAction>
+              <ArcoAction
                 type="button"
+                iconOnly={!gitBadge}
                 title={
                   view === 'files'
                     ? '返回对话'
@@ -2967,11 +2958,7 @@ export default function App() {
                       : '打开编辑器'
                 }
                 aria-pressed={view === 'files'}
-                className={`flex h-6 items-center gap-1 rounded-md px-1 transition-colors ${
-                  view === 'files'
-                    ? 'bg-overlay-strong text-fg-max hover:bg-overlay-heavy'
-                    : 'text-fg-soft hover:bg-overlay hover:text-fg-max'
-                }`}
+                className="flex h-6 items-center gap-1 px-1 transition-colors"
                 onClick={toggleFilesView}
               >
                 <IconBrandVscode size={14} />
@@ -2990,7 +2977,7 @@ export default function App() {
                     )}
                   </span>
                 )}
-              </button>
+              </ArcoAction>
             </div>
           </header>
           <div ref={contentRef} className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
@@ -3131,38 +3118,41 @@ export default function App() {
                             />
                           ) : null}
                         </button>
-                        <button
+                        <ArcoAction
                           type="button"
+                          iconOnly
                           title="关闭终端"
-                          className={`grid h-4 w-4 shrink-0 place-items-center rounded text-fg-muted transition-opacity hover:bg-overlay-strong hover:text-fg-max ${
+                          className={`grid h-4 w-4 shrink-0 place-items-center transition-opacity ${
                             isMobile ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
                           }`}
                           onClick={() => closeRightTerm(node.id)}
                         >
                           <IconX size={11} />
-                        </button>
+                        </ArcoAction>
                       </div>
                     )
                   })}
                 </div>
-                <button
+                <ArcoAction
                   type="button"
+                  iconOnly
                   title="新建终端"
                   aria-label="新建终端"
-                  className="grid h-6 w-6 shrink-0 place-items-center rounded-md text-fg-soft transition-colors hover:bg-overlay hover:text-fg-max"
+                  className="grid h-6 w-6 shrink-0 place-items-center transition-colors"
                   onClick={createRightTerm}
                 >
                   <IconPlus size={14} />
-                </button>
-                <button
+                </ArcoAction>
+                <ArcoAction
                   type="button"
+                  iconOnly
                   title="收起终端 (Ctrl+`)"
                   aria-label="收起终端"
-                  className="grid h-6 w-6 shrink-0 place-items-center rounded-md text-fg-soft transition-colors hover:bg-overlay hover:text-fg-max"
+                  className="grid h-6 w-6 shrink-0 place-items-center transition-colors"
                   onClick={() => setTerminalOpen(false)}
                 >
                   <IconX size={13} />
-                </button>
+                </ArcoAction>
               </div>
               <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
                 {/* 分块还没到就先给个说明：空白面板和「终端坏了」在屏幕上是一样的。 */}
@@ -3201,24 +3191,24 @@ export default function App() {
             }`}
           >
             {gitIsCurrent && git.status?.root ? (
-              <button
+              <ArcoAction
                 ref={branchButtonRef}
                 type="button"
                 title="切换或创建 Git 分支"
                 aria-haspopup="dialog"
                 aria-expanded={branchPickerOpen}
                 // 有路径时给分支名封顶并把宽度让给路径；没有路径就用满可用宽度。
-                className={`-ml-1.5 flex h-full items-center gap-1.5 rounded-sm px-1.5 text-left hover:bg-overlay-strong hover:text-fg-max ${
+                className={`-ml-1.5 flex h-full items-center gap-1.5 px-1.5 text-left ${
                   activeCwd ? 'max-w-[45%] shrink-0' : 'min-w-0'
                 }`}
                 onClick={() => setBranchPickerOpen(true)}
               >
                 <IconGitBranch size={13} className="shrink-0" />
                 <span className="truncate">{git.status.branch || 'detached'}</span>
-              </button>
+              </ArcoAction>
             ) : null}
             {activeCwd && (
-              <button
+              <ArcoAction
                 ref={cwdButtonRef}
                 type="button"
                 title={
@@ -3226,31 +3216,29 @@ export default function App() {
                     ? activeCwd
                     : `${activeCwd}\n当前目录不存在或已被移动，点击切换正确的项目目录`
                 }
-                className={`ml-auto min-w-0 truncate rounded-sm px-1.5 py-0.5 text-right hover:bg-overlay ${
-                  cwdValid
-                    ? 'text-fg-dim hover:text-fg-strong'
-                    : 'text-danger hover:bg-danger/10 hover:text-danger'
-                }`}
+                tone={cwdValid ? undefined : 'danger'}
+                className={`ml-auto min-w-0 truncate px-1.5 py-0.5 text-right ${cwdValid ? 'text-fg-dim' : ''}`}
                 onClick={() => {
                   setCwdSwitchError('')
                   setCwdModalOpen(true)
                 }}
               >
                 {activeCwd}
-              </button>
+              </ArcoAction>
             )}
           </footer>
         </main>
       </div>
       {/* 编辑器与统计页里侧栏由视图让出，这枚开关此刻没有可切换的东西——留着只会点了没反应。 */}
       {!isMobile && !shareView && !viewOwnsWindow && (
-        <button
+        <ArcoAction
           type="button"
+          iconOnly
           title={sidebarCollapsed ? '展开侧栏' : '收起侧栏'}
           aria-label={sidebarCollapsed ? '展开侧栏' : '收起侧栏'}
           aria-expanded={!sidebarCollapsed}
           /* top-1 + size-6：中心与顶栏（h-8）里的图标同一水平线，别用 top-2 那种整体偏低的尺寸。 */
-          className="no-drag fixed top-1 z-50 grid size-6 place-items-center rounded-sm text-fg-soft hover:bg-overlay hover:text-fg-max"
+          className="no-drag fixed top-1 z-50 grid size-6 place-items-center"
           style={{
             left: sidebarCollapsed
               ? SIDEBAR_TOGGLE_COLLAPSED_LEFT
@@ -3259,7 +3247,7 @@ export default function App() {
           onClick={setCollapsed}
         >
           <IconLayoutSidebarLeftCollapse size={16} />
-        </button>
+        </ArcoAction>
       )}
       <Suspense fallback={null}>
         <QuickSearch

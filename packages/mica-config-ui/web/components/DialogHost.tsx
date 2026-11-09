@@ -1,5 +1,6 @@
 import { useState, useSyncExternalStore } from 'react';
 import { Button } from './Ui.js';
+import { Input } from './ArcoSettings.js';
 import { Modal } from './Modal.js';
 import {
   createDialogStore,
@@ -67,12 +68,11 @@ function PromptDialog({ request }: { request: PromptDialogRequest }) {
         {request.message ? <p className="dialog-message">{request.message}</p> : null}
         <label className="dialog-field">
           <span>{request.label ?? '名称'}</span>
-          <input
-            className="text-input"
+          <Input
             value={value}
             placeholder={request.placeholder}
             autoFocus
-            onChange={(event) => setValue(event.target.value)}
+            onChange={setValue}
             onKeyDown={(event) => {
               if (event.key !== 'Enter') return;
               event.preventDefault();

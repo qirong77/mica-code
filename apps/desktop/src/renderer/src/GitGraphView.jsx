@@ -7,7 +7,7 @@ import {
   IconRefresh,
   IconSearch
 } from '@tabler/icons-react'
-import { Button, SelectMenu } from '@mica-config-ui/web'
+import { Button, Input, SelectMenu } from '@mica-config-ui/web'
 import { absoluteTime, relativeTime } from './git-blame'
 import { statusColor, statusLabel } from './git-decorations'
 import {
@@ -323,21 +323,14 @@ export function GitGraphView({ cwd, onOpenFile, onClose, mobile = false }) {
             onChange={setBranch}
           />
         </span>
-        {/* 宽度与内边距都写在 .text-input 那一侧（见 @mica-config-ui/web 的 styles.css）：
-            它的规则不在 @layer 里，这边的 Tailwind w-56 / pl-6 会被压掉——宽度退回
-            浏览器给搜索框的默认值，图标正好压在占位文字上。 */}
-        <span className="relative inline-flex w-56 items-center">
-          <IconSearch
-            size={13}
-            className="pointer-events-none absolute top-1/2 left-[7px] -translate-y-1/2 text-fg-muted"
-          />
-          <input
-            type="search"
+        <span className="inline-flex w-56 items-center">
+          <Input
             value={query}
             placeholder="搜索说明、作者或提交号"
             spellCheck={false}
-            onChange={(event) => setQuery(event.target.value)}
-            className="text-input is-compact text-input-with-icon"
+            onChange={setQuery}
+            height={28}
+            prefix={<IconSearch size={13} />}
           />
         </span>
         <span className="text-[11px] text-fg-dim">

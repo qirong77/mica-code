@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { CalendarDays, Download, Plus, Sparkles, Trash2, Upload, ZoomIn, ZoomOut } from 'lucide-react';
-import { Alert, Button, Empty, Segmented } from '@mica-config-ui/web';
+import { Alert, Button, Empty, Input, Segmented } from '@mica-config-ui/web';
 import { addDays, daysBetween, todayOf } from './dates.js';
 import {
   BAR_HEIGHT,
@@ -645,10 +645,10 @@ export default function SchedulePage({ api }) {
             <CalendarDays size={15} />
           </span>
           <span className="w-[9rem] shrink-0 sm:w-[14rem]">
-            <input
+            <Input
               aria-label="排期名称"
               value={title}
-              onChange={(event) => changeTitle(event.target.value)}
+              onChange={changeTitle}
               onBlur={commitTitleNow}
               onKeyDown={(event) => {
                 if (event.key === 'Enter') event.currentTarget.blur();
@@ -692,12 +692,7 @@ export default function SchedulePage({ api }) {
               disabled={zoom <= ZOOM_MIN}
               onClick={() => applyZoom(zoom / ZOOM_STEP, null)}
             />
-            <Button
-              variant="ghost"
-              size="compact"
-              title="恢复默认缩放"
-              onClick={() => applyZoom(1, null)}
-            >
+            <Button variant="ghost" size="compact" title="恢复默认缩放" onClick={() => applyZoom(1, null)}>
               {Math.round(zoom * 100)}%
             </Button>
             <Button

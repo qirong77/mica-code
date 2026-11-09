@@ -1,5 +1,7 @@
-import { useEffect, useState } from 'react';
-import type { ReactNode } from 'react';
+import { forwardRef, useEffect, useMemo, useState } from 'react';
+import type { ReactNode, TableHTMLAttributes } from 'react';
+import Table from '@arco-design/web-react/es/Table';
+import '../arco-settings.css';
 import { pageRangeLabel, pageWindow } from './dataTableModel.js';
 import { Button } from './Ui.js';
 
@@ -63,65 +65,62 @@ export function DataTable<T>({
 
   const range = pageWindow(rows.length, page, pageSize);
   const visible = rows.slice(range.start, range.end);
+  const data = visible.map((row) => ({ key: rowKey(row), cells: renderCells(row) }));
+  const components = useMemo(
+    () => ({
+      table: forwardRef<HTMLTableElement, TableHTMLAttributes<HTMLTableElement>>((props, ref) => (
+        <table {...props} ref={ref} aria-label={ariaLabel} />
+      )),
+    }),
+    [ariaLabel],
+  );
 
   return (
     <div className="data-table-scope">
-      <table className="data-table" aria-label={ariaLabel}>
-        <thead>
-          <tr>
-            {columns.map((column) => (
-              <th
-                key={column.key}
-                scope="col"
-                className={cellClass(column)}
-                style={column.width ? { width: column.width } : undefined}
-              >
-                {column.sortable ? (
-                  <button
-                    type="button"
-                    className={`data-table-sort${sort?.key === column.key ? ' is-active' : ''}`}
-                    aria-pressed={sort?.key === column.key}
-                    onClick={() => onSortChange?.(column.key)}
-                  >
-                    {/* 只有声明了短标签的列才走宽窄两套文案：其它列没有 `narrowLabel`，
-                        窄容器下不应该变成空表头。 */}
-                    {column.narrowLabel ? (
-                      <>
-                        <span className="data-table-label-wide">{column.label}</span>
-                        <span className="data-table-label-narrow">{column.narrowLabel}</span>
-                      </>
-                    ) : (
-                      column.label
-                    )}
-                    {sort?.key === column.key ? (
-                      <span className="data-table-arrow" aria-hidden="true">
-                        {sort.desc ? '▼' : '▲'}
-                      </span>
-                    ) : null}
-                  </button>
-                ) : (
-                  column.label
-                )}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {visible.map((row) => {
-            const cells = renderCells(row);
-            return (
-              <tr key={rowKey(row)}>
-                {columns.map((column, index) => (
-                  <td key={column.key} className={cellClass(column)}>
-                    {cells[index]}
-                  </td>
-                ))}
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
-      {visible.length === 0 ? <div className="data-table-empty">{emptyText}</div> : null}
+      <Table<{ key: string; cells: ReactNode[] }>
+        className="data-table data-table-arco"
+        components={components}
+        data={data}
+        rowKey="key"
+        tableLayoutFixed
+        border={false}
+        hover={false}
+        size="mini"
+        pagination={false}
+        noDataElement={<div className="data-table-empty">{emptyText}</div>}
+        columns={columns.map((column, index) => ({
+          key: column.key,
+          className: cellClass(column),
+          align: column.align,
+          headerCellStyle: column.width ? { width: column.width } : undefined,
+          onHeaderCell: () => ({ scope: 'col' }),
+          render: (_cell, row) => row.cells[index],
+          title: column.sortable ? (
+            <button
+              type="button"
+              className={`data-table-sort${sort?.key === column.key ? ' is-active' : ''}`}
+              aria-pressed={sort?.key === column.key}
+              onClick={() => onSortChange?.(column.key)}
+            >
+              {column.narrowLabel ? (
+                <>
+                  <span className="data-table-label-wide">{column.label}</span>
+                  <span className="data-table-label-narrow">{column.narrowLabel}</span>
+                </>
+              ) : (
+                column.label
+              )}
+              {sort?.key === column.key ? (
+                <span className="data-table-arrow" aria-hidden="true">
+                  {sort.desc ? '▼' : '▲'}
+                </span>
+              ) : null}
+            </button>
+          ) : (
+            column.label
+          ),
+        }))}
+      />
       {range.pageCount > 1 ? (
         <div className="data-table-footer">
           <span className="data-table-range">{pageRangeLabel(range)}</span>

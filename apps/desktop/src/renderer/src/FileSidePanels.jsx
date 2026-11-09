@@ -8,6 +8,7 @@ import {
   IconRefresh,
   IconX
 } from '@tabler/icons-react'
+import { ArcoAction, Input } from '@mica-config-ui/web'
 import { FileSystemIcon } from './FileIcon'
 import { createSearchRequestId } from './search-request'
 import {
@@ -28,7 +29,7 @@ const PANEL_ACTION =
 // 列表行：22px 高、4px 圆角（VS Code 的列表行悬浮块），悬浮底色比面板更暗。
 const ROW_BASE = 'flex h-[22px] w-full items-center rounded text-left'
 const FIELD_BASE =
-  'h-[26px] w-full rounded-[2px] border bg-overlay-subtle px-2 text-[12px] text-fg-strong placeholder:text-fg-dim focus:outline-none'
+  'h-[26px] w-full'
 
 function Spinner() {
   return (
@@ -42,20 +43,16 @@ function Spinner() {
 /** VS Code 的搜索开关：Aa（区分大小写）/ ab（全字匹配）/ .*（正则）。 */
 function Toggle({ active, label, title, onClick }) {
   return (
-    <button
+    <ArcoAction
       type="button"
       title={title}
       aria-label={title}
       aria-pressed={active}
-      className={`grid h-5 min-w-5 shrink-0 place-items-center rounded-[3px] px-0.5 font-mono text-[11px] leading-none ${
-        active
-          ? 'bg-overlay-heavy text-fg-max'
-          : 'text-fg-muted hover:bg-overlay-strong hover:text-fg-strong'
-      }`}
+      className="grid h-5 min-w-5 shrink-0 place-items-center px-0.5 font-mono text-[11px] leading-none"
       onClick={onClick}
     >
       {label}
-    </button>
+    </ArcoAction>
   )
 }
 
@@ -172,7 +169,8 @@ export function SearchPanel({ root, onOpenFile, activePath }) {
     <div className="flex h-full min-h-0 flex-col">
       <header className={PANEL_HEADER}>
         <span className={PANEL_TITLE}>搜索</span>
-        <button
+        <ArcoAction
+          iconOnly
           type="button"
           title="刷新"
           aria-label="刷新"
@@ -180,8 +178,9 @@ export function SearchPanel({ root, onOpenFile, activePath }) {
           onClick={() => setNonce((value) => value + 1)}
         >
           <IconRefresh size={15} />
-        </button>
-        <button
+        </ArcoAction>
+        <ArcoAction
+          iconOnly
           type="button"
           title="清除搜索"
           aria-label="清除搜索"
@@ -193,17 +192,17 @@ export function SearchPanel({ root, onOpenFile, activePath }) {
           }}
         >
           <IconX size={15} />
-        </button>
+        </ArcoAction>
       </header>
       <div className="shrink-0 space-y-1 px-2 pb-1">
         <div className="flex h-[26px] items-center gap-1 rounded-[2px] border border-line bg-overlay-subtle px-2 focus-within:border-accent/70">
-          <input
+          <Input
             type="text"
             value={query}
             placeholder="搜索"
             aria-label="搜索文件内容"
-            className="h-full min-w-0 flex-1 bg-transparent text-[12px] text-fg-strong placeholder:text-fg-dim focus:outline-none"
-            onChange={(event) => setQuery(event.target.value)}
+            className="h-full min-w-0 flex-1"
+            onChange={setQuery}
           />
           {busy && <Spinner />}
           <Toggle
@@ -225,23 +224,23 @@ export function SearchPanel({ root, onOpenFile, activePath }) {
             onClick={() => setRegex((v) => !v)}
           />
         </div>
-        <input
+        <Input
           type="text"
           value={include}
           placeholder="包含的文件"
           aria-label="包含的文件"
           title="逗号分隔的文件名或路径通配（*.ts、src/**）"
-          className={`${FIELD_BASE} border-line-soft`}
-          onChange={(event) => setInclude(event.target.value)}
+          className={FIELD_BASE}
+          onChange={setInclude}
         />
-        <input
+        <Input
           type="text"
           value={exclude}
           placeholder="排除的文件"
           aria-label="排除的文件"
           title="逗号分隔的文件名或路径通配（*.test.ts、dist/**）"
-          className={`${FIELD_BASE} border-line-soft`}
-          onChange={(event) => setExclude(event.target.value)}
+          className={FIELD_BASE}
+          onChange={setExclude}
         />
       </div>
       {matchCount > 0 && (
@@ -365,18 +364,19 @@ function RowTrailing({ status, code, additions, deletions, uncommitted, uncommit
 /** 行内悬浮操作按钮：文件行与分组表头共用同一尺寸和悬浮底色（VS Code 的 20px 方形按钮）。 */
 function RowActionButton({ label, Icon, run }) {
   return (
-    <button
+    <ArcoAction
+      iconOnly
       type="button"
       title={label}
       aria-label={label}
-      className="grid size-5 shrink-0 place-items-center rounded-sm text-fg-soft hover:bg-overlay-strong hover:text-fg-max"
+      className="grid size-5 shrink-0 place-items-center"
       onClick={(event) => {
         event.stopPropagation()
         run()
       }}
     >
       <Icon size={14} />
-    </button>
+    </ArcoAction>
   )
 }
 
@@ -513,7 +513,8 @@ export function GitPanel({
       <header className={PANEL_HEADER}>
         <span className={PANEL_TITLE}>源代码管理</span>
         {loading && <Spinner />}
-        <button
+        <ArcoAction
+          iconOnly
           type="button"
           title="刷新"
           aria-label="刷新"
@@ -521,7 +522,7 @@ export function GitPanel({
           onClick={() => onRefresh?.()}
         >
           <IconRefresh size={15} />
-        </button>
+        </ArcoAction>
       </header>
       <div className="min-h-0 flex-1 overflow-auto px-1.5 pb-3">
         {!repository && (

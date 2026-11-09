@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Trash2, X } from 'lucide-react';
-import { Alert, Button, DateField, Tag } from '@mica-config-ui/web';
+import { Alert, Button, DateField, Input, Tag } from '@mica-config-ui/web';
 import { addDays, daysBetween } from './dates.js';
 import { COLOR_KEYS, COLOR_META } from './palette.js';
 import { NoteEditor } from './NoteEditor.jsx';
@@ -101,13 +101,13 @@ export function TaskDialog({ task, draft, onSave, onDelete, onClose }) {
         <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-4">
           <label className="block">
             <span className="mb-1 block text-[11px] text-fg-soft">任务名称</span>
-            <input
+            <Input
               // eslint-disable-next-line jsx-a11y/no-autofocus
               autoFocus
               ref={nameRef}
               value={name}
-              onChange={(event) => {
-                setName(event.target.value);
+              onChange={(value) => {
+                setName(value);
                 if (error) setError('');
               }}
               onKeyDown={(event) => {

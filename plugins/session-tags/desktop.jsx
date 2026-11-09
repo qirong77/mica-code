@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Check, Pencil, Plus, Tags, Trash2 } from 'lucide-react';
-import { Alert, Button, Empty } from '@mica-config-ui/web';
+import { Alert, Button, Empty, Input } from '@mica-config-ui/web';
 import {
   DEFAULT_TAG_COLOR,
   MAX_TAGS,
@@ -175,13 +175,13 @@ export default function TagsPage({ api }) {
             {options.map((option) =>
               editing?.id === option.id ? (
                 <li key={option.id} className="flex flex-wrap items-center gap-2 bg-panel px-4 py-2.5">
-                  <input
+                  <Input
                     className="text-input is-compact w-56"
                     value={editing.label}
                     autoFocus
                     maxLength={24}
                     aria-label="标签名"
-                    onChange={(event) => setEditing({ ...editing, label: event.target.value })}
+                    onChange={(value) => setEditing({ ...editing, label: value })}
                     onKeyDown={(event) => {
                       if (event.key === 'Enter') void submitEdit();
                       if (event.key === 'Escape') setEditing(null);
@@ -259,16 +259,16 @@ export default function TagsPage({ api }) {
 
       <div className="border-t border-line bg-panel px-4 py-3">
         <div className="flex flex-wrap items-center gap-2">
-          <input
+          <Input
             className="text-input is-compact w-56"
             placeholder="新标签，例如 待 review"
             value={draftLabel}
             maxLength={24}
             aria-label="新标签名字"
             disabled={!supported || busy}
-            onChange={(event) => {
+            onChange={(value) => {
               setError('');
-              setDraftLabel(event.target.value);
+              setDraftLabel(value);
             }}
             onKeyDown={(event) => {
               if (event.key === 'Enter') void submitDraft();

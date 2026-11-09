@@ -1,5 +1,6 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { ArcoAction, Input } from '@mica-config-ui/web'
 import {
   IconCheck,
   IconFileDiff,
@@ -171,20 +172,20 @@ export function GitComparePicker({ cwd, current, mode = 'base', onPick, onClose 
           <span id={`${id}-title`} className="flex-1 text-[12px] font-semibold">
             {title}
           </span>
-          <button
+          <ArcoAction
+            iconOnly
             type="button"
             title="关闭"
             aria-label={target ? '关闭当前分支选择器' : '关闭目标分支选择器'}
             onClick={onClose}
-            className="grid size-6 place-items-center rounded-sm text-fg-muted hover:bg-overlay-strong hover:text-fg-max"
+            style={{ width: 24, height: 24, padding: 0 }}
           >
             <IconX size={15} />
-          </button>
+          </ArcoAction>
         </div>
-        <div className="mx-2 mb-2 flex h-8 shrink-0 items-center gap-2 rounded-sm border border-accent/70 bg-overlay-subtle px-2">
-          <IconSearch size={15} className="shrink-0 text-fg-muted" />
-          <input
-            ref={inputRef}
+        <div className="mx-2 mb-2 flex h-8 shrink-0 items-center gap-2">
+          <Input
+            ref={(instance) => { inputRef.current = instance?.dom ?? null }}
             role="combobox"
             aria-label="搜索分支、标签或输入提交"
             aria-autocomplete="list"
@@ -196,9 +197,12 @@ export function GitComparePicker({ cwd, current, mode = 'base', onPick, onClose 
             spellCheck={false}
             value={query}
             disabled={resolving}
-            className="min-w-0 flex-1 bg-transparent text-[13px] outline-none placeholder:text-fg-dim"
-            onChange={(event) => {
-              setQuery(event.target.value)
+            className="min-w-0 flex-1"
+            height={32}
+            style={{ fontSize: 13 }}
+            prefix={<IconSearch size={15} />}
+            onChange={(value) => {
+              setQuery(value)
               setActive(0)
               setError('')
             }}
@@ -213,13 +217,13 @@ export function GitComparePicker({ cwd, current, mode = 'base', onPick, onClose 
           <div role="alert" className="mx-3 mb-2 text-[12px] text-danger-soft">
             {error}
             {!refs && !loading && (
-              <button
+              <ArcoAction
                 type="button"
                 onClick={() => setRetry((value) => value + 1)}
-                className="ml-2 text-info-soft underline"
+                className="ml-2"
               >
                 重新读取
-              </button>
+              </ArcoAction>
             )}
           </div>
         )}

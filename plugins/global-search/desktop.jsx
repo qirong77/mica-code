@@ -1,13 +1,6 @@
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
-import {
-  AlertCircle,
-  File,
-  Folder,
-  Loader2,
-  Search,
-  Settings2,
-  X,
-} from 'lucide-react';
+import { AlertCircle, File, Folder, Loader2, Search, Settings2, X } from 'lucide-react';
+import { ArcoAction, Input } from '@mica-config-ui/web';
 import './desktop.css';
 
 export const card = { width: 640 };
@@ -60,7 +53,7 @@ export function Launcher({ api, onClose }) {
   const focusInput = useCallback(() => {
     if (openingRef.current) return;
     inputRef.current?.focus();
-    inputRef.current?.select();
+    inputRef.current?.dom?.select();
   }, []);
 
   const readStatus = useCallback(async () => {
@@ -202,7 +195,7 @@ export function Launcher({ api, onClose }) {
     // Preserve ordinary text-selection shortcuts in the search field.
     if (event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return;
     // Toolbar and result buttons retain their own native Enter activation.
-    if (event.key === 'Enter' && event.target !== inputRef.current) return;
+    if (event.key === 'Enter' && event.target !== inputRef.current?.dom) return;
     event.preventDefault();
     event.stopPropagation();
     if (blocked || !items.length) return;
@@ -225,7 +218,7 @@ export function Launcher({ api, onClose }) {
     <section className="mica-config-ui global-search" aria-label="全局文件搜索" onKeyDown={handleKeyDown}>
       <header className="global-search-head">
         <Search size={15} aria-hidden="true" />
-        <input
+        <Input
           ref={inputRef}
           className="global-search-input"
           autoFocus
@@ -246,38 +239,36 @@ export function Launcher({ api, onClose }) {
           onCompositionEnd={() => {
             composing.current = false;
           }}
-          onChange={(event) => {
+          onChange={(value) => {
             sequence.current += 1;
-            setQuery(event.target.value);
+            setQuery(value);
             setResult(null);
             setLoading(true);
             setError('');
             setActive(0);
           }}
         />
-        {loading || opening ? (
-          <Loader2 size={14} className="global-search-spin" aria-hidden="true" />
-        ) : null}
-        <button
-          type="button"
-          className="global-search-icon"
+        {loading || opening ? <Loader2 size={14} className="global-search-spin" aria-hidden="true" /> : null}
+        <ArcoAction
+          iconOnly
+          className="size-[22px] shrink-0 p-0"
           title="设置搜索目录"
           aria-label="设置搜索目录"
           disabled={opening}
           onClick={() => void configure()}
         >
           <Settings2 size={15} aria-hidden="true" />
-        </button>
-        <button
-          type="button"
-          className="global-search-icon"
+        </ArcoAction>
+        <ArcoAction
+          iconOnly
+          className="size-[22px] shrink-0 p-0"
           title="关闭（Esc）"
           aria-label="关闭"
           disabled={opening}
           onClick={() => void close()}
         >
           <X size={15} aria-hidden="true" />
-        </button>
+        </ArcoAction>
       </header>
 
       {statusMessage ? (
@@ -285,9 +276,8 @@ export function Launcher({ api, onClose }) {
           <AlertCircle size={13} aria-hidden="true" />
           <span>{statusMessage}</span>
           {status?.native && !status.registered ? (
-            <button
-              type="button"
-              className="global-search-link"
+            <ArcoAction
+              className="shrink-0 whitespace-nowrap p-0"
               disabled={opening}
               onClick={() => {
                 void launcher
@@ -297,16 +287,11 @@ export function Launcher({ api, onClose }) {
               }}
             >
               重试
-            </button>
+            </ArcoAction>
           ) : null}
-          <button
-            type="button"
-            className="global-search-link"
-            disabled={opening}
-            onClick={() => void configure()}
-          >
+          <ArcoAction className="shrink-0 whitespace-nowrap p-0" disabled={opening} onClick={() => void configure()}>
             设置
-          </button>
+          </ArcoAction>
         </div>
       ) : null}
 
@@ -373,14 +358,9 @@ export function Launcher({ api, onClose }) {
                   ? '试试更短的关键词。'
                   : '输入关键词开始搜索。'}
             </span>
-            <button
-              type="button"
-              className="global-search-link"
-              disabled={opening}
-              onClick={() => void configure()}
-            >
+            <ArcoAction className="shrink-0 whitespace-nowrap p-0" disabled={opening} onClick={() => void configure()}>
               设置搜索目录
-            </button>
+            </ArcoAction>
           </div>
         ) : null}
       </div>
@@ -399,11 +379,7 @@ export function Launcher({ api, onClose }) {
         </span>
         <span className="global-search-foot-meta">
           <span className="global-search-count" role="status">
-            {opening
-              ? '正在打开…'
-              : loading
-                ? '搜索中…'
-                : `${items.length} 个${query.trim() ? '结果' : '条目'}`}
+            {opening ? '正在打开…' : loading ? '搜索中…' : `${items.length} 个${query.trim() ? '结果' : '条目'}`}
           </span>
           <span className="global-search-scope" title={roots.join('\n') || scope}>
             {result ? scope : ''}

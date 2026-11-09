@@ -61,7 +61,7 @@ render(<ConfigWebApp />)
 
 ## 约定
 
-- Arco Design React 试验仅覆盖设置的「配置」页：`ConfigPage` / `ProviderEditor` 通过 `web/components/ArcoSettings.tsx` 使用 Arco 的按钮、输入、协议单选、模型标签与下拉。保留原有 `PageFrame` / `SettingsGroup` / `SettingRow` 布局与数据流；局部主题和弹层范围由 `web/arco-settings.css` 管理，不改其它页面与共享控件。
+- Web 基础控件统一基于 Arco Design React：共享 `Button` / `Switch` / `Checkbox` / `Tag` / `Alert` / `Empty` / `Segmented` 保留业务接口；`SelectMenu` / `DateField` / `Modal` / `DataTable` 分别适配 Arco 的下拉、日期、弹窗、表格，普通输入从共享入口导入 `Input` / `InputNumber` / `Select`（`onChange` 接收值而非 DOM event）。设置页、桌面内嵌界面和插件复用这一套；保留 `PageFrame` / `SettingsGroup` / `SettingRow` 与原有布局。完整 App 使用 `ArcoProvider`，普通工具栏动作用透传原生属性与 ref 的 `ArcoAction`（`appearance` / `tone` 控制 Arco 类型与状态，`iconOnly` 使用 Arco 的纯图标尺寸与零内边距，双轴居中；文字动作继承宿主字号和中性色；富内容悬浮卡片使用共享 `ArcoPopover`）。`arco-settings.css` 按需载入样式，将现有主题映射到 `body.mica-arco-theme` 与 `.mica-config-ui`，不引全局 reset；原生开关几何与交互状态由 Arco 自己绘制，Portal 继承同一份主题。
 
 - **样式必须限定在 `.mica-config-ui` 容器内**：`web/styles.css` 把全部规则放进 `@scope (.mica-config-ui) { … }`，自定义属性也定义在容器上而不是 `:root`。桌面端把它当普通视图内嵌渲染，规则不能泄漏到应用其余部分，也不能被应用的同名变量覆盖（应用用 `--color-*`，这里用 `--bg/--panel/--text`）。新增样式沿用这个作用域，不要写裸标签选择器到作用域之外。
   - **页面级的根高度链归宿主**：`html/body/#root { height: 100% }` 这类规则**不要**写在这份共享样式里。宿主的样式表（`apps/desktop/.../app.css`）装在 `@layer base`，而这份是后加载的无层级样式，同优先级下必然把它顶掉——桌面端移动端的根容器高度（`--vvh`，软键盘避让全靠它）会因此静默失效，表现是手机上输入条留在键盘下面。整页托管这份页面的浏览器宿主自己写：`apps/config-web/web/src/host.css`。

@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { appIcons } from '../icons.js';
+import { Button, Input } from './ArcoSettings.js';
 
 /**
  * 密钥输入框：默认密文，带一个眼睛按钮切明文。
@@ -31,10 +32,12 @@ export function SecretInput({
   const HideIcon = appIcons.hide;
   return (
     <span className="config-input-with-action">
-      <input
+      <Input.Password
         id={id}
-        className={`text-input${invalid ? ' is-invalid' : ''}`}
-        type={revealed ? 'text' : 'password'}
+        className="config-secret-input"
+        status={invalid ? 'error' : undefined}
+        visibility={revealed}
+        visibilityToggle={false}
         value={value}
         spellCheck={false}
         autoComplete="off"
@@ -43,10 +46,11 @@ export function SecretInput({
         aria-invalid={invalid || undefined}
         disabled={disabled}
         autoFocus={autoFocus}
-        onChange={(event) => onChange(event.target.value)}
+        onChange={onChange}
       />
-      <button
-        type="button"
+      <Button
+        type="text"
+        htmlType="button"
         className="config-input-action"
         title={revealed ? '隐藏明文' : '显示明文'}
         aria-label={revealed ? '隐藏明文' : '显示明文'}
@@ -55,7 +59,7 @@ export function SecretInput({
         onClick={() => setRevealed((current) => !current)}
       >
         {revealed ? <HideIcon size={14} /> : <ShowIcon size={14} />}
-      </button>
+      </Button>
     </span>
   );
 }

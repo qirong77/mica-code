@@ -1,3 +1,4 @@
+import { ArcoAction } from '@mica-config-ui/web'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { PluginIcon } from '@mica-config-ui/plugin-icons'
@@ -108,20 +109,17 @@ function PluginHeaderEntry({ entry, onOpenPage, session }) {
   return (
     <>
       <div ref={anchorRef} className="shrink-0">
-        <button
+        <ArcoAction
           type="button"
+          iconOnly
           aria-expanded={open}
           title={`${entry.label}（${entry.id} 插件）`}
           aria-label={entry.label}
-          className={`grid size-6 place-items-center rounded-md transition-colors ${
-            open
-              ? 'bg-overlay-strong text-fg-max hover:bg-overlay-heavy'
-              : 'text-fg-soft hover:bg-overlay hover:text-fg-max'
-          }`}
+          className="grid size-6 place-items-center transition-colors"
           onClick={isPage ? () => onOpenPage(entry) : () => setOpen((value) => !value)}
         >
           <PluginIcon name={entry.icon} size={14} />
-        </button>
+        </ArcoAction>
       </div>
       {open && card && (
         <EntryPopover anchorRef={anchorRef} placement="below">
@@ -186,13 +184,11 @@ function PluginEntryRow({ entry, onOpenPage, session }) {
         onMouseEnter={hoverOpens ? openRow : undefined}
         onMouseLeave={hoverOpens ? scheduleClose : undefined}
       >
-        <button
+        <ArcoAction
           type="button"
           aria-expanded={open}
           title={`${entry.label}（${entry.id} 插件）`}
-          className={`flex h-7 w-full items-center gap-2 rounded-md px-2.5 text-left text-[13px] transition-colors hover:bg-overlay hover:text-fg-max ${
-            open ? 'bg-overlay text-fg-max' : 'text-fg-soft'
-          }`}
+          className="flex h-7 w-full items-center gap-2 px-2.5 text-left text-[13px] transition-colors"
           onClick={
             isPage
               ? () => onOpenPage(entry)
@@ -206,7 +202,7 @@ function PluginEntryRow({ entry, onOpenPage, session }) {
           {summary && (
             <span className="ml-auto min-w-0 truncate text-[11px] text-fg-dim">{summary}</span>
           )}
-        </button>
+        </ArcoAction>
         {/* 手机上卡片跟着行走：抽屉里没有「浮在右边」的位置 */}
         {open && isMobile && card && <div className="mt-1">{card}</div>}
       </div>

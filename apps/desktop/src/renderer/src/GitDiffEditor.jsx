@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { ArcoAction } from '@mica-config-ui/web'
 import {
   IconArrowDown,
   IconArrowUp,
@@ -23,13 +24,13 @@ import { useSharedState } from './ui-state'
 configureBlame((meta, options) => window.mica.git.blame(meta.cwd, meta.path, options))
 
 const ACTION =
-  'inline-flex h-6 shrink-0 items-center justify-center gap-1 rounded-sm px-1.5 text-fg-muted hover:bg-panel-hi hover:text-fg-strong disabled:pointer-events-none disabled:opacity-40 focus-visible:outline focus-visible:outline-1 focus-visible:outline-accent'
+  'inline-flex h-6 shrink-0 items-center justify-center gap-1 px-1.5'
 
 function Action({ title, children, ...props }) {
   return (
-    <button type="button" title={title} aria-label={title} className={ACTION} {...props}>
+    <ArcoAction title={title} aria-label={title} className={ACTION} {...props}>
       {children}
-    </button>
+    </ArcoAction>
   )
 }
 
@@ -191,24 +192,26 @@ export function GitDiffEditor({
               {file.path}
             </span>
             {onClose && (
-              <Action title="关闭比较" onClick={onClose}>
+              <Action iconOnly title="关闭比较" onClick={onClose}>
                 <IconX size={14} />
               </Action>
             )}
           </header>
           <div className="flex min-h-8 shrink-0 flex-wrap items-center gap-0.5 border-b border-line px-2 text-[11px]">
             <Action
+              iconOnly
               title="上一个文件"
               disabled={!hasPreviousFile || !onPreviousFile}
               onClick={onPreviousFile}
             >
               <IconChevronLeft size={14} />
             </Action>
-            <Action title="下一个文件" disabled={!hasNextFile || !onNextFile} onClick={onNextFile}>
+            <Action iconOnly title="下一个文件" disabled={!hasNextFile || !onNextFile} onClick={onNextFile}>
               <IconChevronRight size={14} />
             </Action>
             <span className="mx-1 h-3.5 border-l border-line" aria-hidden="true" />
             <Action
+              iconOnly
               title="上一处差异"
               disabled={!ready || !diffCount}
               onClick={() => navigateDiff('previous')}
@@ -216,6 +219,7 @@ export function GitDiffEditor({
               <IconArrowUp size={14} />
             </Action>
             <Action
+              iconOnly
               title="下一处差异"
               disabled={!ready || !diffCount}
               onClick={() => navigateDiff('next')}
@@ -241,7 +245,7 @@ export function GitDiffEditor({
             >
               {comparisonLabel}
             </span>
-            <Action title="刷新差异" disabled={busy} onClick={() => setRetry((value) => value + 1)}>
+            <Action iconOnly title="刷新差异" disabled={busy} onClick={() => setRetry((value) => value + 1)}>
               <IconRefresh size={14} />
             </Action>
             {onToggleReviewed && (
@@ -257,6 +261,7 @@ export function GitDiffEditor({
             )}
             {onOpenFile && (
               <Action
+                iconOnly
                 title="打开工作区文件"
                 onClick={openFile}
                 disabled={file.status === 'deleted'}
@@ -265,6 +270,7 @@ export function GitDiffEditor({
               </Action>
             )}
             <Action
+              iconOnly
               title={layout === 'inline' ? '切换为双列比较' : '切换为内联比较'}
               aria-pressed={layout === 'inline'}
               onClick={() => setLayout(layout === 'inline' ? 'side' : 'inline')}

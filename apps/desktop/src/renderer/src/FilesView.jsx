@@ -1,3 +1,4 @@
+import { ArcoAction } from '@mica-config-ui/web'
 import { confirmAction } from './desktop-dialog'
 import { lazyView } from './lazy-view'
 import {
@@ -1776,70 +1777,76 @@ export const FilesView = forwardRef(function FilesView(
                 {tree.root ? fileName(tree.root) : '资源管理器'}
               </div>
               {overrideRoot ? (
-                <button
+                <ArcoAction
+                  iconOnly
                   type="button"
                   title={root ? `返回工作区：${root}` : '返回工作区'}
                   aria-label="返回工作区"
-                  className="grid size-6 shrink-0 place-items-center rounded-sm text-fg-muted hover:bg-overlay hover:text-fg-max"
+                  className="grid size-6 shrink-0 place-items-center "
                   onClick={() => setRootOverride(null)}
                 >
                   <IconArrowBackUp size={16} />
-                </button>
+                </ArcoAction>
               ) : null}
-              <button
+              <ArcoAction
+                iconOnly
                 type="button"
                 disabled={!tree.root}
                 title="新建文件"
                 aria-label="新建文件"
-                className="grid size-6 shrink-0 place-items-center rounded-sm text-fg-muted hover:bg-overlay hover:text-fg-max disabled:opacity-30"
+                className="grid size-6 shrink-0 place-items-center disabled:opacity-30"
                 onClick={() => newEntryInSelection('new-file')}
               >
                 <IconFilePlus size={16} />
-              </button>
-              <button
+              </ArcoAction>
+              <ArcoAction
+                iconOnly
                 type="button"
                 disabled={!tree.root}
                 title="新建文件夹"
                 aria-label="新建文件夹"
-                className="grid size-6 shrink-0 place-items-center rounded-sm text-fg-muted hover:bg-overlay hover:text-fg-max disabled:opacity-30"
+                className="grid size-6 shrink-0 place-items-center disabled:opacity-30"
                 onClick={() => newEntryInSelection('new-directory')}
               >
                 <IconFolderPlus size={16} />
-              </button>
-              <button
+              </ArcoAction>
+              <ArcoAction
+                iconOnly
                 type="button"
                 disabled={!tree.root}
                 title="刷新"
                 aria-label="刷新"
-                className="grid size-6 shrink-0 place-items-center rounded-sm text-fg-muted hover:bg-overlay hover:text-fg-max disabled:opacity-30"
+                className="grid size-6 shrink-0 place-items-center disabled:opacity-30"
                 onClick={refresh}
               >
                 <IconRefresh size={16} className={tree.refreshing ? 'animate-spin' : undefined} />
-              </button>
-              <button
+              </ArcoAction>
+              <ArcoAction
+                iconOnly
                 type="button"
                 disabled={!tree.root}
                 title="折叠所有文件夹"
                 aria-label="折叠所有文件夹"
-                className="grid size-6 shrink-0 place-items-center rounded-sm text-fg-muted hover:bg-overlay hover:text-fg-max disabled:opacity-30"
+                className="grid size-6 shrink-0 place-items-center disabled:opacity-30"
                 onClick={collapseAll}
               >
                 <IconSquareMinus size={16} />
-              </button>
-              <button
+              </ArcoAction>
+              <ArcoAction
+                iconOnly
                 type="button"
                 title="更多操作"
                 aria-label="更多操作"
                 aria-haspopup="menu"
                 data-menu-anchor="explorer"
                 aria-expanded={explorerMenu ? 'true' : 'false'}
-                className={`grid size-6 shrink-0 place-items-center rounded-sm hover:bg-overlay hover:text-fg-max ${
-                  explorerMenu ? 'bg-overlay text-fg-max' : 'text-fg-muted'
+                className={`grid size-6 shrink-0 place-items-center ${
+                  explorerMenu ? ' ' : ''
                 }`}
                 onClick={openExplorerMenu}
               >
                 <IconDots size={16} />
-              </button>
+              </ArcoAction>
             </header>
             <div className="relative min-h-0 flex-1">
               <FileExplorerTree
@@ -1956,13 +1963,13 @@ export const FilesView = forwardRef(function FilesView(
               />
             )}
             {!isGitTree && isMobile && (
-              <button
+              <ArcoAction
                 type="button"
-                className="h-8 shrink-0 text-fg-soft"
+                className="h-8 shrink-0 "
                 onClick={() => setMobileTreeVisible(true)}
               >
                 返回更改列表
-              </button>
+              </ArcoAction>
             )}
             <Suspense
               fallback={
@@ -2033,28 +2040,30 @@ export const FilesView = forwardRef(function FilesView(
             aria-label="打开的文件"
           >
             {isMobile && (
-              <button
+              <ArcoAction
+                iconOnly
                 type="button"
                 title="返回文件列表"
                 aria-label="返回文件列表"
-                className={`sticky left-0 z-10 grid h-8 w-9 shrink-0 place-items-center border-r border-line bg-tabstrip text-fg-soft ${TAB_UNDERLINE}`}
+                className={`sticky left-0 z-10 grid h-8 w-9 shrink-0 place-items-center ${TAB_UNDERLINE}`}
                 onClick={() => setMobileTreeVisible(true)}
               >
                 <IconArrowLeft size={15} />
-              </button>
+              </ArcoAction>
             )}
             {/* 只开编辑器时侧栏是收起的，这里是把它放回来的唯一入口（否则用户只能退回
                 对话再从别处进文件视图）。 */}
             {focusMode && !isMobile && (
-              <button
+              <ArcoAction
+                iconOnly
                 type="button"
                 title="显示文件目录与 Git"
                 aria-label="显示文件目录与 Git"
-                className={`grid h-8 w-9 shrink-0 place-items-center border-r border-line bg-tabstrip text-fg-soft hover:text-fg-strong ${TAB_UNDERLINE}`}
+                className={`grid h-8 w-9 shrink-0 place-items-center ${TAB_UNDERLINE}`}
                 onClick={() => setFocusMode(false)}
               >
                 <IconArrowLeft size={15} />
-              </button>
+              </ArcoAction>
             )}
             {tabs.map((tab) => (
               <div
@@ -2103,7 +2112,8 @@ export const FilesView = forwardRef(function FilesView(
                     />
                   )}
                   {!tab.loading && !tab.saving && (
-                    <button
+                    <ArcoAction
+                      iconOnly
                       type="button"
                       tabIndex={tab.path === activePath ? 0 : -1}
                       title={`关闭 ${tab.name}`}
@@ -2114,14 +2124,14 @@ export const FilesView = forwardRef(function FilesView(
                             ? 'opacity-70'
                             : 'pointer-events-none opacity-0 group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100'
                           : ''
-                      } absolute inset-0 grid place-items-center rounded-sm text-fg-muted hover:bg-overlay-strong hover:text-fg-max`}
+                      } absolute inset-0 grid place-items-center `}
                       onClick={(event) => {
                         event.stopPropagation()
                         closeFile(tab.path)
                       }}
                     >
                       <IconX size={12} />
-                    </button>
+                    </ArcoAction>
                   )}
                 </span>
               </div>

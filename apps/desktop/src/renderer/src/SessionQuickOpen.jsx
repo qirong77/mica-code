@@ -1,4 +1,5 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react'
+import { ArcoAction, Input } from '@mica-config-ui/web'
 import { IconSearch, IconX } from '@tabler/icons-react'
 import { Highlighted } from './SessionTree'
 import { relativeTimeShort } from './relative-time'
@@ -160,9 +161,8 @@ export function SessionQuickOpen({
         onKeyDown={handleKey}
       >
         <div className="flex h-10 shrink-0 items-center gap-2 border-b border-line-soft px-3">
-          <IconSearch size={15} className="shrink-0 text-fg-muted" />
-          <input
-            ref={inputRef}
+          <Input
+            ref={(instance) => { inputRef.current = instance?.dom ?? null }}
             role="combobox"
             aria-label="按标题、路径或分组搜索会话"
             aria-autocomplete="list"
@@ -173,18 +173,23 @@ export function SessionQuickOpen({
             autoComplete="off"
             spellCheck={false}
             value={query}
-            className="min-w-0 flex-1 bg-transparent text-[13px] text-fg-max outline-none placeholder:text-fg-dim"
-            onChange={(event) => {
-              setQuery(event.target.value)
+            className="min-w-0 flex-1"
+            height={28}
+            style={{ fontSize: 13 }}
+            prefix={<IconSearch size={15} />}
+            onChange={(value) => {
+              setQuery(value)
               setActive(0)
             }}
           />
           {query && (
-            <button
+            <ArcoAction
+              iconOnly
               type="button"
               title="清除搜索"
               aria-label="清除搜索"
-              className="grid size-5 shrink-0 place-items-center rounded text-fg-muted hover:bg-overlay-strong hover:text-fg-max"
+              className="shrink-0"
+              style={{ width: 20, height: 20, padding: 0 }}
               onClick={() => {
                 setQuery('')
                 setActive(0)
@@ -192,7 +197,7 @@ export function SessionQuickOpen({
               }}
             >
               <IconX size={14} />
-            </button>
+            </ArcoAction>
           )}
         </div>
 

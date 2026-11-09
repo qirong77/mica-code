@@ -45,48 +45,13 @@
   flex: 1 1 auto;
   height: 100%;
   padding: 0;
-  border: 0;
-  background: transparent;
-  color: var(--color-fg-max, var(--text));
-  font: inherit;
-  font-size: 13px;
-  outline: none;
 }
 
 /* 整个浮窗就是一个搜索框，输入框不再单独描边。配置页样式里的全局 `:focus-visible`
    会给它套一圈 1px 外框（outline-offset: 1px），权重与上面的单类名相同，只靠加载
    顺序是压不住的——这里带上 :focus-visible 把权重提到两档。 */
-.global-search-input:focus-visible {
-  outline: none;
-}
-
-.global-search-input::placeholder {
-  color: var(--color-fg-faint, var(--text-faint));
-}
 
 /* 图标按钮：常态无框，悬停才浮出一层底，跟应用里的一排图标按钮一致。 */
-.global-search-icon {
-  display: grid;
-  width: 22px;
-  height: 22px;
-  flex: none;
-  place-items: center;
-  border: 0;
-  border-radius: 4px;
-  background: transparent;
-  color: var(--color-fg-muted, var(--text-soft));
-  cursor: pointer;
-}
-
-.global-search-icon:hover:not(:disabled) {
-  background: var(--color-overlay-strong, var(--overlay-strong));
-  color: var(--color-fg-max, var(--text));
-}
-
-.global-search-icon:disabled {
-  cursor: default;
-  opacity: 0.5;
-}
 
 /* 快捷键未注册 / 打开失败：一条细提示，不另起卡片。 */
 .global-search-notice {
@@ -111,21 +76,6 @@
 }
 
 /* 行内文字动作（重试、设置、打开设置）：应用里这类动作用蓝色文字，不画按钮框。 */
-.global-search-link {
-  flex: none;
-  padding: 0;
-  border: 0;
-  background: none;
-  color: var(--color-info, var(--blue));
-  font: inherit;
-  white-space: nowrap;
-  cursor: pointer;
-}
-
-.global-search-link:disabled {
-  cursor: default;
-  opacity: 0.55;
-}
 
 .global-search-body {
   min-height: 0;

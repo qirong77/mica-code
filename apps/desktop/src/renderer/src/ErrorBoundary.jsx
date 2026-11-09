@@ -1,4 +1,5 @@
 import { Component } from 'react'
+import { ArcoAction } from '@mica-config-ui/web'
 
 /**
  * 渲染兜底。
@@ -54,20 +55,12 @@ export function AppCrashNotice({ error }) {
         {details}
       </pre>
       <div className="flex items-center gap-2">
-        <button
-          type="button"
-          className="rounded-md border border-line px-3 py-1 text-xs text-fg-strong transition-colors hover:bg-overlay"
-          onClick={reload}
-        >
+        <ArcoAction className="px-3 py-1 text-xs" onClick={reload}>
           重新加载
-        </button>
-        <button
-          type="button"
-          className="rounded-md border border-line px-3 py-1 text-xs text-fg-soft transition-colors hover:bg-overlay"
-          onClick={copy}
-        >
+        </ArcoAction>
+        <ArcoAction className="px-3 py-1 text-xs" onClick={copy}>
           复制详情
-        </button>
+        </ArcoAction>
       </div>
     </div>
   )

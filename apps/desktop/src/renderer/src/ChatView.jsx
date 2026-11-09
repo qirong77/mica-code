@@ -58,7 +58,7 @@ import {
   summarizeTodoProgress,
   todoItemLabel
 } from '@packages/mica-common/todoState.js'
-import { Button, PluginIcon, QrCode, SessionDetailView, resolvePluginIcon } from '@mica-config-ui/web'
+import { ArcoAction, Button, Checkbox, Input, PluginIcon, QrCode, SessionDetailView, resolvePluginIcon } from '@mica-config-ui/web'
 import { ChatLink, ChatPathContext, PathText, PathToken } from './PathToken'
 import { ChatFind } from './ChatFind'
 import { readRestoreTranscript, takeCachedTranscript, writeCachedTranscript } from './chat-cache'
@@ -314,10 +314,10 @@ function CodeBlock({ children }) {
     <div className="chat-code-block">
       <div className="chat-code-header">
         <span>{language}</span>
-        <button type="button" onClick={() => copy(code)} aria-label="复制代码">
+        <ArcoAction type="button" onClick={() => copy(code)} aria-label="复制代码">
           {copied ? <IconCheck size={11} /> : <IconCopy size={11} />}
           <span>{copied ? '已复制' : '复制'}</span>
-        </button>
+        </ArcoAction>
       </div>
       <CodeView text={code} language={language} />
     </div>
@@ -354,7 +354,7 @@ function ComposerQuoteStrip({ text, onRemove }) {
           <span className="chat-composer-quote-label">{block.label}</span>
           <span className="chat-composer-quote-text">{quoteSummary(block.text)}</span>
           <span className="chat-composer-quote-size">{`${block.text.split('\n').length} 行`}</span>
-          <button
+          <ArcoAction iconOnly
             type="button"
             className="chat-composer-quote-remove"
             title="移除引用"
@@ -362,7 +362,7 @@ function ComposerQuoteStrip({ text, onRemove }) {
             onClick={() => onRemove(block)}
           >
             <IconX size={11} />
-          </button>
+          </ArcoAction>
         </div>
       ))}
     </div>
@@ -530,14 +530,14 @@ function UserMessageBody({ text }) {
       </div>
       {tooltip}
       {collapsed && (
-        <button
+        <ArcoAction
           type="button"
           className="chat-message-collapse-toggle"
           aria-expanded={expanded}
           onClick={() => setExpanded((value) => !value)}
         >
           {expanded ? '收起' : `展开全部（共 ${totalLines} 行）`}
-        </button>
+        </ArcoAction>
       )}
     </>
   )
@@ -575,7 +575,7 @@ function QueueDock({ items, onRecall, recallingId, running }) {
             <span className="chat-queue-dock-state">排队中</span>
             <span className="chat-queue-dock-when">{timing}</span>
             <span className="chat-queue-dock-spacer" aria-hidden="true" />
-            <button
+            <ArcoAction
               type="button"
               className="chat-queue-dock-recall"
               // pending 只是「确认通知还没回来」的乐观行，同样要能撤回：否则
@@ -592,7 +592,7 @@ function QueueDock({ items, onRecall, recallingId, running }) {
               )}
               <span>撤回并编辑</span>
               <kbd className="chat-queue-dock-keys">⇧←</kbd>
-            </button>
+            </ArcoAction>
           </div>
           <div className="chat-queue-dock-body" title={item.text}>
             {item.text}
@@ -700,7 +700,7 @@ function AskDock({ ask, submitting, onSubmit, onCancel }) {
         ) : null}
         <span className="chat-ask-spacer" aria-hidden="true" />
         {display.dismiss ? (
-          <button
+          <ArcoAction iconOnly
             type="button"
             className="chat-ask-close"
             title="不用了（Esc）"
@@ -709,7 +709,7 @@ function AskDock({ ask, submitting, onSubmit, onCancel }) {
             onClick={cancel}
           >
             <IconX size={11} />
-          </button>
+          </ArcoAction>
         ) : null}
       </div>
       {display.detail && ask.detail ? <div className="chat-ask-detail">{ask.detail}</div> : null}
@@ -742,12 +742,12 @@ function AskDock({ ask, submitting, onSubmit, onCancel }) {
       ) : null}
       {display.input ? (
         <div className="chat-ask-input-row">
-          <input
+          <Input
             className="chat-ask-input"
             value={custom}
             placeholder={display.options ? '或者直接说你的想法…' : '写下来…'}
             disabled={submitting}
-            onChange={(event) => setCustom(event.target.value)}
+            onChange={setCustom}
             onKeyDown={(event) => {
               if (event.key !== 'Enter' || event.nativeEvent.isComposing) return
               if (!canSubmit) return
@@ -772,15 +772,16 @@ function AskDock({ ask, submitting, onSubmit, onCancel }) {
           {showConfirm ? (
             <>
               <kbd className="chat-ask-keycap">↵</kbd>
-              <button
+              <ArcoAction
                 type="button"
                 className="chat-ask-submit"
+                appearance="primary"
                 disabled={submitting || !canSubmit}
                 onClick={() => submit()}
               >
                 {submitting ? <IconLoader2 size={11} className="animate-spin" /> : null}
                 <span>{submitting ? '提交中' : '确定'}</span>
-              </button>
+              </ArcoAction>
             </>
           ) : null}
         </div>
@@ -843,20 +844,20 @@ function ImagePreviewModal({ source, alt, onClose, onReveal, onOpenFile }) {
               <span className="chat-image-preview-path" title={source}>
                 {source}
               </span>
-              <button type="button" onClick={() => onOpenFile?.(source)}>
+              <ArcoAction type="button" onClick={() => onOpenFile?.(source)}>
                 在编辑器中打开
-              </button>
-              <button type="button" onClick={() => void onReveal?.(source)}>
+              </ArcoAction>
+              <ArcoAction type="button" onClick={() => void onReveal?.(source)}>
                 在 Finder 中显示
-              </button>
+              </ArcoAction>
             </>
           )}
-          <button type="button" onClick={() => void copyText(source)}>
+          <ArcoAction type="button" onClick={() => void copyText(source)}>
             复制路径
-          </button>
-          <button type="button" onClick={onClose} aria-label="关闭图片预览">
+          </ArcoAction>
+          <ArcoAction type="button" onClick={onClose} aria-label="关闭图片预览">
             关闭
-          </button>
+          </ArcoAction>
         </div>
       </div>
     </div>
@@ -1023,7 +1024,7 @@ function MarkdownView({ text, muted = false, onOpenFile, streaming = false }) {
           <table>{children}</table>
         </div>
       ),
-      input: (props) => <input {...props} disabled />,
+      input: ({ checked }) => <Checkbox checked={Boolean(checked)} label="任务状态" disabled onChange={() => {}} />,
       // markdown 图片同样不内联渲染：`![alt](src)` 降级成链接文本（见 ImageLink）
       img: ({ alt, src }) => <ImageLink source={src} alt={alt} />
     }),
@@ -1186,7 +1187,7 @@ function BackgroundTasksDock({ tasks, now = Date.now(), onOpen, onKill, killingI
               <span className="chat-task-type">{task.id}</span>
               <span className="chat-task-description">{compactLine(task.command, 180)}</span>
             </button>
-            <button
+            <ArcoAction iconOnly
               type="button"
               className="chat-task-action"
               title="终止后台任务"
@@ -1195,7 +1196,7 @@ function BackgroundTasksDock({ tasks, now = Date.now(), onOpen, onKill, killingI
               onClick={() => onKill(task)}
             >
               ✕
-            </button>
+            </ArcoAction>
           </div>
         )
       })}
@@ -1383,11 +1384,11 @@ function PluginTaskDialog({ task, onChange, onConfirm, onClose }) {
         </>
       }
     >
-      <textarea
+      <Input.TextArea
         className="chat-modal-textarea"
         value={task.prompt}
         spellCheck={false}
-        onChange={(event) => onChange(event.target.value)}
+        onChange={onChange}
       />
     </ModalShell>
   )
@@ -1550,9 +1551,9 @@ function SubagentTranscript({ steps, running, onOpenTool }) {
   return (
     <div className="chat-timeline">
       {hidden > 0 ? (
-        <button type="button" className="chat-timeline-earlier" onClick={() => setShowAll(true)}>
+        <ArcoAction type="button" className="chat-timeline-earlier" onClick={() => setShowAll(true)}>
           显示更早的 {hidden} 步
-        </button>
+        </ArcoAction>
       ) : null}
       {visible.map((step) => {
         if (step.kind === 'text') {
@@ -1889,7 +1890,7 @@ function MessageActions({ text, role, onQuote }) {
   const [copied, copy] = useCopied()
   return (
     <>
-      <button
+      <ArcoAction iconOnly
         type="button"
         className="chat-message-quote"
         aria-label="引用这条消息"
@@ -1897,8 +1898,8 @@ function MessageActions({ text, role, onQuote }) {
         onClick={() => onQuote?.({ role, text })}
       >
         <IconQuote size={12} />
-      </button>
-      <button
+      </ArcoAction>
+      <ArcoAction iconOnly
         type="button"
         className="chat-message-copy"
         aria-label="复制消息"
@@ -1906,7 +1907,7 @@ function MessageActions({ text, role, onQuote }) {
         onClick={() => copy(text)}
       >
         {copied ? <IconCheck size={12} /> : <IconCopy size={12} />}
-      </button>
+      </ArcoAction>
     </>
   )
 }
@@ -1968,13 +1969,13 @@ function UserMessageEditor({ text, busy, canSubmit, onChange, onCancel, onSubmit
   }, [])
   return (
     <div className="chat-message-edit" data-no-chat-focus>
-      <textarea
-        ref={ref}
+      <Input.TextArea
+        ref={(instance) => { ref.current = instance?.dom ?? null }}
         className="chat-message-edit-input"
         value={text}
         spellCheck={false}
         aria-label="编辑消息"
-        onChange={(event) => onChange(event.target.value)}
+        onChange={onChange}
         onKeyDown={(event) => {
           if (event.nativeEvent.isComposing) return
           if (event.key === 'Escape') {
@@ -1990,10 +1991,10 @@ function UserMessageEditor({ text, busy, canSubmit, onChange, onCancel, onSubmit
       />
       <div className="chat-message-edit-actions">
         {busy && <span className="chat-message-edit-hint">Mica 正在运行，空闲后才能确认</span>}
-        <button type="button" className="chat-message-edit-cancel" onClick={onCancel}>
+        <ArcoAction type="button" className="chat-message-edit-cancel" onClick={onCancel}>
           取消
-        </button>
-        <button
+        </ArcoAction>
+        <ArcoAction
           type="button"
           className="chat-message-edit-confirm"
           disabled={!canSubmit}
@@ -2001,7 +2002,7 @@ function UserMessageEditor({ text, busy, canSubmit, onChange, onCancel, onSubmit
           onClick={onSubmit}
         >
           确认
-        </button>
+        </ArcoAction>
       </div>
     </div>
   )
@@ -2109,11 +2110,11 @@ function CommandRow({ message, onCommandAction }) {
         )}
       </div>
       {message.action && (
-        <button type="button" onClick={() => onCommandAction?.(message)}>
+        <ArcoAction type="button" onClick={() => onCommandAction?.(message)}>
           {message.action === 'terminal' && <IconTerminal size={12} />}
           {message.actionLabel || '打开'}
           <IconExternalLink size={10} />
-        </button>
+        </ArcoAction>
       )}
     </div>
   )
@@ -2372,7 +2373,7 @@ function TurnLogDock({
         }
       >
         {(!sidebar || interrupted) && (
-          <button
+          <ArcoAction iconOnly
             type="button"
             className="chat-turn-log-toggle"
             aria-expanded={!contentCollapsed}
@@ -2385,7 +2386,7 @@ function TurnLogDock({
             onDoubleClick={(event) => event.stopPropagation()}
           >
             {contentCollapsed ? <IconChevronRight size={12} /> : <IconChevronDown size={12} />}
-          </button>
+          </ArcoAction>
         )}
         <span className="chat-turn-log-head-label">
           {sidebar || !running ? '本轮过程' : '模型思考中'}
@@ -2539,17 +2540,17 @@ function ChatSelectionBar({ bar, onQuote, onAskBtw, canAskBtw = true, onCopy, co
         top: pos.top
       }}
     >
-      <button
+      <ArcoAction
         type="button"
         className="chat-selection-bar-btn"
         onMouseDown={(event) => event.preventDefault()}
         onClick={onQuote}
       >
         引用
-      </button>
+      </ArcoAction>
       {/* 选中的这段字正好想问一句时，不必先引用到主输入框再回头开抽屉：直接开抽屉、
           把这段字作为引用块带进去。btw 的意义就是「顺手问一句」。 */}
-      <button
+      <ArcoAction
         type="button"
         className="chat-selection-bar-btn"
         title="用选中的这段字向 By The Way 提问"
@@ -2558,15 +2559,15 @@ function ChatSelectionBar({ bar, onQuote, onAskBtw, canAskBtw = true, onCopy, co
         onClick={onAskBtw}
       >
         问 btw
-      </button>
-      <button
+      </ArcoAction>
+      <ArcoAction
         type="button"
         className="chat-selection-bar-btn"
         onMouseDown={(event) => event.preventDefault()}
         onClick={onCopy}
       >
         {copied ? '已复制' : '复制'}
-      </button>
+      </ArcoAction>
     </div>
   )
 }
@@ -2676,20 +2677,20 @@ function ChatContextMenu({ menu, onAction, onClose, commitRunning = false, plugi
         item.separator ? (
           <div key={`separator-${index}`} className="mx-1 my-1 h-px bg-overlay-strong" />
         ) : (
-          <button
+          <ArcoAction
             key={item.id}
             type="button"
             role="menuitem"
             disabled={item.disabled}
             title={item.title}
-            className={`flex h-7 w-full items-center gap-2 rounded px-2 text-left text-[13px] enabled:hover:bg-overlay-strong disabled:opacity-35 ${item.danger ? 'text-danger-soft' : 'text-fg-strong enabled:hover:text-fg-max'}`}
+            className={`flex h-7 w-full items-center gap-2 px-2 text-left text-[13px] disabled:opacity-35 ${item.danger ? '' : ' '}`}
             onClick={() => onAction(item.id)}
           >
             <span className="grid w-4 shrink-0 place-items-center">
               <item.icon size={14} className="shrink-0 opacity-75" />
             </span>
             <span className="flex-1">{item.label}</span>
-          </button>
+          </ArcoAction>
         )
       )}
     </div>
@@ -7614,7 +7615,7 @@ export function ChatView({
         <div ref={composerDockRef} className="chat-composer-dock">
           {showJump && (
             <div className="chat-jump">
-              <button
+              <ArcoAction
                 type="button"
                 onClick={() => jumpConversation('previous')}
                 disabled={!canPrevConversation}
@@ -7622,53 +7623,16 @@ export function ChatView({
                 aria-label="上一个对话"
               >
                 <IconArrowUp size={13} /> 上一个对话
-              </button>
-              <button
+              </ArcoAction>
+              <ArcoAction
                 type="button"
                 onClick={() => jumpConversation('next')}
                 title="跳到下一轮对话，已经在最后一轮时回到最新消息"
                 aria-label="下一个对话"
               >
                 <IconArrowDown size={13} /> 下一个对话
-              </button>
+              </ArcoAction>
             </div>
-          )}
-          {picker && (
-            <SelectPalette
-              kind={picker.kind}
-              title={picker.title}
-              options={picker.options || []}
-              activeIndex={Math.min(pickerIndex, Math.max(0, (picker.options?.length || 1) - 1))}
-              onActiveIndex={setPickerIndex}
-              onSelect={selectPickerOption}
-              selectedValue={
-                (overridesRef.current.get(nodeId) || {})[picker.kind] ||
-                (picker.kind === 'variant'
-                  ? activeEffortLabel
-                  : picker.kind === 'role'
-                    ? meta?.role || 'default'
-                    : meta?.model) ||
-                ''
-              }
-              loading={picker.loading}
-              error={picker.error}
-              onClose={closePicker}
-            />
-          )}
-          {completion && !picker && (
-            <ComposerCompletionPalette
-              title={completion.kind === 'skill' ? '选择能力' : '引用文件'}
-              options={visibleCompletionItems}
-              activeIndex={Math.min(completionIndex, Math.max(0, visibleCompletionItems.length - 1))}
-              onActiveIndex={setCompletionIndex}
-              onSelect={selectCompletion}
-              filter={completionFilter}
-              onFilter={completion.kind === 'skill' ? (kind) => {
-                setCompletionFilter(kind)
-                setCompletionIndex(0)
-              } : undefined}
-              emptyText={completionEmptyText(completion.kind, completionLoading, completionFailed)}
-            />
           )}
           {!processSidebar && <TodoDock panel={todoPanel} />}
           <SubagentStatusDock
@@ -7788,7 +7752,7 @@ export function ChatView({
                 Enter/Tab 在下一个工具调用迭代后发送
               </span>
             ) : null}
-            <button
+            <ArcoAction
               type="button"
               className={`chat-prompt-mark ${activeLoop ? 'is-loop' : ''}`}
               title={`${promptMarkText}（点击切换）`}
@@ -7797,7 +7761,44 @@ export function ChatView({
               onClick={() => openPicker('role')}
             >
               {promptMarkContent}
-            </button>
+            </ArcoAction>
+            {picker && (
+              <SelectPalette
+                kind={picker.kind}
+                title={picker.title}
+                options={picker.options || []}
+                activeIndex={Math.min(pickerIndex, Math.max(0, (picker.options?.length || 1) - 1))}
+                onActiveIndex={setPickerIndex}
+                onSelect={selectPickerOption}
+                selectedValue={
+                  (overridesRef.current.get(nodeId) || {})[picker.kind] ||
+                  (picker.kind === 'variant'
+                    ? activeEffortLabel
+                    : picker.kind === 'role'
+                      ? meta?.role || 'default'
+                      : meta?.model) ||
+                  ''
+                }
+                loading={picker.loading}
+                error={picker.error}
+                onClose={closePicker}
+              />
+            )}
+            {completion && !picker && (
+              <ComposerCompletionPalette
+                title={completion.kind === 'skill' ? '选择能力' : '引用文件'}
+                options={visibleCompletionItems}
+                activeIndex={Math.min(completionIndex, Math.max(0, visibleCompletionItems.length - 1))}
+                onActiveIndex={setCompletionIndex}
+                onSelect={selectCompletion}
+                filter={completionFilter}
+                onFilter={completion.kind === 'skill' ? (kind) => {
+                  setCompletionFilter(kind)
+                  setCompletionIndex(0)
+                } : undefined}
+                emptyText={completionEmptyText(completion.kind, completionLoading, completionFailed)}
+              />
+            )}
             {/* 相册/拍照：手机上没有系统剪贴板粘贴，只能靠文件选择器（accept 限定成
               CLI 认识的格式，iOS 会据此把 HEIC 转成 JPEG）。 */}
             <input
@@ -7988,8 +7989,9 @@ export function ChatView({
                   }, 180)
                 }}
               >
-                <button
+                <ArcoAction
                   type="button"
+                  iconOnly
                   className={`chat-composer-more-trigger${moreOpen ? ' is-active' : ''}${
                     btwUnread && !btwOpen ? ' has-unread' : ''
                   }`}
@@ -8015,10 +8017,10 @@ export function ChatView({
                   {btwUnread && !btwOpen ? (
                     <span className="chat-composer-more-dot" aria-hidden="true" />
                   ) : null}
-                </button>
+                </ArcoAction>
                 {moreOpen ? (
                   <div className="chat-composer-more-menu" role="menu">
-                    <button
+                    <ArcoAction
                       type="button"
                       role="menuitem"
                       onClick={() => {
@@ -8028,8 +8030,8 @@ export function ChatView({
                     >
                       <IconPaperclip size={13} />
                       <span>添加附件</span>
-                    </button>
-                    <button
+                    </ArcoAction>
+                    <ArcoAction
                       type="button"
                       role="menuitem"
                       title={btwEntryTitle}
@@ -8042,8 +8044,8 @@ export function ChatView({
                     >
                       <IconMessageChatbot size={13} />
                       <span>By The Way</span>
-                    </button>
-                    <button
+                    </ArcoAction>
+                    <ArcoAction
                       type="button"
                       role="menuitem"
                       onClick={() => {
@@ -8053,12 +8055,12 @@ export function ChatView({
                     >
                       <IconClock size={13} />
                       <span>定时任务</span>
-                    </button>
+                    </ArcoAction>
                     {/* 插件面板的入口在这里也要有：输入框上方那排胶囊只在插件给了快捷按钮
                         时才出现，而「配置」这类常见用途不一定需要一个常驻按钮。入口来自清单
                         （`desktop.panel`），宿主不认识任何具体插件。 */}
                     {pluginPanels.map((panel) => (
-                      <button
+                      <ArcoAction
                         key={`panel-${panel.id}`}
                         type="button"
                         role="menuitem"
@@ -8077,7 +8079,7 @@ export function ChatView({
                             「SSH」在菜单里就只剩文字能区分。 */}
                         <PluginIcon name={panel.icon} size={13} />
                         <span>{panel.label}</span>
-                      </button>
+                      </ArcoAction>
                     ))}
                   </div>
                 ) : null}
@@ -8090,18 +8092,20 @@ export function ChatView({
               {running ? (
                 <>
                   {isMobile && queueReady && (
-                    <button
+                    <ArcoAction
                       type="button"
+                      iconOnly
                       className="chat-composer-queue-send"
                       title="加入发送队列"
                       aria-label="加入发送队列"
                       onClick={send}
                     >
                       <IconSend size={13} />
-                    </button>
+                    </ArcoAction>
                   )}
-                  <button
+                  <ArcoAction
                     type="button"
+                    iconOnly
                     className="chat-composer-stop"
                     title="停止生成"
                     aria-label="停止生成"
@@ -8112,23 +8116,25 @@ export function ChatView({
                     ) : (
                       <IconSquareFilled size={12} />
                     )}
-                  </button>
+                  </ArcoAction>
                 </>
               ) : isMobile && input.trim() ? (
-                <button
+                <ArcoAction
                   type="button"
+                  iconOnly
                   title={remoteRunning ? '该会话正在另一个进程里运行' : '发送'}
                   aria-label="发送"
                   disabled={!input.trim() || remoteRunning}
                   onClick={send}
                 >
                   <IconSend size={13} />
-                </button>
+                </ArcoAction>
               ) : null}
               {/* 会话设置固定排在动作区最右：它是常驻入口，不该跟着运行态（停止/发送）
                   在两端浮动。 */}
-              <button
+              <ArcoAction
                 type="button"
+                iconOnly
                 className={`chat-composer-capabilities${settingsSection ? ' is-active' : ''}`}
                 title="会话设置：能力、自动压缩、定时任务（只影响当前会话）"
                 aria-label="会话设置"
@@ -8137,7 +8143,7 @@ export function ChatView({
                 onClick={() => setSettingsSection((current) => (current ? null : 'capabilities'))}
               >
                 <IconAdjustments size={13} />
-              </button>
+              </ArcoAction>
             </div>
           </div>
           {imagePreview && (

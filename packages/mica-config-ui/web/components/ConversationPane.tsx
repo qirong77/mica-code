@@ -16,6 +16,7 @@ import {
   splitConversationRuns,
 } from '../conversationView.js';
 import { Button, Segmented } from './Ui.js';
+import { Input } from './ArcoSettings.js';
 import { Modal } from './Modal.js';
 import { appIcons } from '../icons.js';
 import { formatCharCount } from '../format.js';
@@ -220,12 +221,12 @@ export function ConversationPane({ sessionId, refreshToken }: { sessionId: strin
           />
           <label className="conversation-search">
             <SearchIcon size={13} aria-hidden="true" />
-            <input
+            <Input
               type="search"
               value={query}
               aria-label="筛选对话记录内容"
               placeholder="筛选内容…"
-              onChange={(event) => setQuery(event.target.value)}
+              onChange={setQuery}
             />
           </label>
         </div>

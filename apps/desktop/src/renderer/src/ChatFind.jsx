@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { ArcoAction, Input } from '@mica-config-ui/web'
 import { IconArrowDown, IconArrowUp, IconX } from '@tabler/icons-react'
 import {
   FIND_MATCH_LIMIT,
@@ -271,16 +272,19 @@ export function ChatFind({
   const keepFocus = (event) => event.preventDefault()
 
   const toggle = (active, title, text, onToggle) => (
-    <button
+    <ArcoAction
       type="button"
-      className={`chat-find-toggle ${active ? 'is-on' : ''}`}
+      style={{
+        width: 18, height: 18, padding: 0, fontSize: 10,
+        ...(active ? { color: 'rgb(var(--primary-6))', background: 'var(--color-primary-light-1)' } : {})
+      }}
       aria-pressed={active}
       title={title}
       onMouseDown={keepFocus}
       onClick={onToggle}
     >
       {text}
-    </button>
+    </ArcoAction>
   )
 
   return (
@@ -302,17 +306,19 @@ export function ChatFind({
         }
       }}
     >
-      <div className="chat-find-field">
-        <input
-          ref={inputRef}
-          className="chat-find-input"
+      <div className="flex h-[26px] min-w-0 flex-1 items-center gap-0.5 md:h-[22px] md:min-w-[240px]">
+        <Input
+          ref={(instance) => { inputRef.current = instance?.dom ?? null }}
+          className="min-w-0 flex-1"
+          height="100%"
+          style={{ fontSize: 11.5 }}
           type="text"
           value={query}
           placeholder="查找"
           spellCheck={false}
           autoComplete="off"
           aria-label="在对话中查找"
-          onChange={(event) => setQuery(event.target.value)}
+          onChange={setQuery}
         />
         {toggle(caseSensitive, '区分大小写', 'Aa', () => setCaseSensitive((value) => !value))}
         {toggle(wholeWord, '全字匹配', 'ab', () => setWholeWord((value) => !value))}
@@ -321,9 +327,10 @@ export function ChatFind({
       <span className={`chat-find-count ${tone}`} aria-live="polite">
         {label}
       </span>
-      <button
+      <ArcoAction
+        iconOnly
         type="button"
-        className="chat-find-icon"
+        style={{ width: 22, height: 22, padding: 0 }}
         title="上一个匹配（Shift+Enter）"
         aria-label="上一个匹配"
         disabled={count === 0}
@@ -331,10 +338,11 @@ export function ChatFind({
         onClick={() => step(-1)}
       >
         <IconArrowUp size={13} />
-      </button>
-      <button
+      </ArcoAction>
+      <ArcoAction
+        iconOnly
         type="button"
-        className="chat-find-icon"
+        style={{ width: 22, height: 22, padding: 0 }}
         title="下一个匹配（Enter）"
         aria-label="下一个匹配"
         disabled={count === 0}
@@ -342,17 +350,18 @@ export function ChatFind({
         onClick={() => step(1)}
       >
         <IconArrowDown size={13} />
-      </button>
-      <button
+      </ArcoAction>
+      <ArcoAction
+        iconOnly
         type="button"
-        className="chat-find-icon"
+        style={{ width: 22, height: 22, padding: 0 }}
         title="关闭（Esc）"
         aria-label="关闭查找"
         onMouseDown={keepFocus}
         onClick={() => onClose?.()}
       >
         <IconX size={13} />
-      </button>
+      </ArcoAction>
     </div>
   )
 }

@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { ArcoAction, ArcoPopover } from '@mica-config-ui/web'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Check,
   ExternalLink,
@@ -21,6 +22,7 @@ import {
   CollapsiblePanel,
   ConfigSwitch,
   Empty,
+  Input,
   PluginIcon,
   SecretInput,
   Segmented,
@@ -31,6 +33,7 @@ import {
 import { ModalShell } from './chat-modal'
 import '../assets/plugin-cards.css'
 import { FloatingMenu } from './FloatingMenu'
+import { ShortcutButton } from './ShortcutButton'
 import { notify } from './notify'
 import { createReadQueue } from './read-queue'
 import { pageIsActive, usePageVisible } from './use-page-visible'
@@ -55,7 +58,6 @@ import {
   pluginPanelCards,
   pluginPanelTabs,
   pluginQuickbarItems,
-  quickbarButtonLook,
   quickbarMenuItems,
   quickbarMenuTable,
   readMenuCache,
@@ -133,8 +135,6 @@ export function QuickbarPreview({
   onPointerEnter,
   onPointerLeave
 }) {
-  const ref = useRef(null)
-  const [position, setPosition] = useState({ left: anchor.left, top: anchor.top, above: true })
   const markdown = typeof preview?.markdown === 'string' ? preview.markdown : ''
   const text = typeof preview?.text === 'string' ? preview.text : ''
   const columns = Array.isArray(preview?.columns) ? preview.columns : []
@@ -155,7 +155,10 @@ export function QuickbarPreview({
       if (event.target?.closest?.('.chat-plugin-quickbar-group, .chat-plugin-quickbar-preview')) return
       onClose()
     }
-    const viewport = () => onClose()
+    const viewport = (event) => {
+      if (event.target?.closest?.('.chat-plugin-quickbar-preview')) return
+      onClose()
+    }
     window.addEventListener('pointerdown', close)
     window.addEventListener('keydown', keydown)
     window.addEventListener('focusin', focus)
@@ -170,29 +173,11 @@ export function QuickbarPreview({
     }
   }, [onClose])
 
-  useLayoutEffect(() => {
-    if (!ref.current) return
-    const width = ref.current.offsetWidth
-    const height = ref.current.offsetHeight
-    let left = Math.min(anchor.left, window.innerWidth - width - 8)
-    let top = anchor.top - height - 8
-    let above = true
-    if (top < 8) {
-      top = anchor.bottom + 8
-      above = false
-    }
-    if (top + height > window.innerHeight - 8) top = Math.max(8, window.innerHeight - height - 8)
-    left = Math.max(8, left)
-    setPosition({ left, top, above })
-  }, [anchor, columns.length, markdown, preview, rows.length, text])
-
-  return createPortal(
+  const content = (
     <div
-      ref={ref}
-      className={`chat-plugin-quickbar-preview${position.above ? '' : ' is-below'}`}
+      className="chat-plugin-quickbar-preview-content"
       role="dialog"
       aria-label={preview?.title || '快捷按钮预览'}
-      style={{ left: position.left, top: position.top }}
       onPointerDown={(event) => event.stopPropagation()}
       onPointerEnter={onPointerEnter}
       onPointerLeave={onPointerLeave}
@@ -234,32 +219,50 @@ export function QuickbarPreview({
         <footer className="chat-plugin-quickbar-preview-foot">
           {preview?.note && <p className="chat-plugin-quickbar-preview-note">{preview.note}</p>}
           {actions.length > 0 && (
-            /* `Button` 的样式限定在 `.mica-config-ui` 作用域内（见 packages/mica-config-ui），
-               而这张卡片是 Portal 到 body 的，外面没有那层壳——不套 `is-embed` 的话动作会退化成
-               裸文字。只套动作区：整卡套会把卡片颜色切成 Darcula 一套，暗色/亮色都对不上。 */
             <div
-              className="chat-plugin-quickbar-preview-actions mica-config-ui is-embed"
+              className="chat-plugin-quickbar-preview-actions"
               role="group"
               aria-label="预览操作"
             >
               {actions.map((action) => (
-                <Button
+                <ArcoAction
                   key={`${previewActionId(action)}:${action.key || ''}`}
-                  size="compact"
-                  variant={CARD_BUTTON_VARIANTS[action.tone] || 'default'}
+                  appearance={action.tone === 'primary' ? 'primary' : 'secondary'}
+                  tone={action.tone === 'danger' ? 'danger' : action.tone === 'primary' ? 'accent' : undefined}
                   onClick={() => {
                     onClose()
                     onRun(action)
                   }}
                 >
                   {action.label}
-                </Button>
+                </ArcoAction>
               ))}
             </div>
           )}
         </footer>
       )}
-    </div>,
+    </div>
+  )
+
+  return createPortal(
+    <ArcoPopover
+      className="chat-plugin-quickbar-preview"
+      content={content}
+      popupVisible
+      trigger={[]}
+      position="tl"
+      getPopupContainer={() => document.body}
+      style={{ maxWidth: 'min(400px, calc(100vw - 16px))', zIndex: 10000 }}
+      triggerProps={{ showArrow: false, popupAlign: { top: 8, bottom: 8 } }}
+    >
+      <span
+        aria-hidden="true"
+        style={{
+          position: 'fixed', pointerEvents: 'none', left: anchor.left, top: anchor.top,
+          width: anchor.right - anchor.left, height: anchor.bottom - anchor.top
+        }}
+      />
+    </ArcoPopover>,
     document.body
   )
 }
@@ -835,8 +838,9 @@ export function PluginQuickBar({
         {/* 状态与快捷键同排：输入框上方已经有附件缩略图、引用条，再为一行状态单开一层，
             三行叠起来就把对话挤没了。它是一颗按钮——点开面板看详情。 */}
         {statusBar && (
-          <button
+          <ArcoAction
             type="button"
+            appearance="outline"
             className={`chat-plugin-quickbar-button chat-plugin-statusbar tone-${statusBar.tone || 'muted'}`}
             title={`${statusBar.label}${statusBar.detail ? ` · ${statusBar.detail}` : ''} · 点开面板`}
             onClick={() => onTogglePanel(statusOwner.id, statusBar.section || '')}
@@ -846,7 +850,7 @@ export function PluginQuickBar({
             {statusBar.detail && (
               <span className="chat-plugin-statusbar-detail">{statusBar.detail}</span>
             )}
-          </button>
+          </ArcoAction>
         )}
         {items.map(({ panel, shortcut, key, first }) => {
           const state = shortcut.id
@@ -864,15 +868,6 @@ export function PluginQuickBar({
             ? (menuViews[key]?.table ?? { columns: [], rows: [] })
             : { columns: [], rows: [] }
           const menuEmpty = menuItems.length === 0 && menuTable.rows.length === 0
-          // 外观规格由插件给（图标 / 强调色 / 形状），画成什么样由宿主决定：色值走主题
-          // 令牌（暗色与亮色各一套），图标走 app 那套 `PluginIcon`——插件不该自带图标库，
-          // 也不该写死颜色。没有规格时就是原来那颗描边胶囊。
-          const look = quickbarButtonLook(shortcut, {
-            active,
-            busy: pending === key,
-            hasMenu: group,
-            panelLabel: panel.label
-          })
           return (
             <div
               key={key}
@@ -888,28 +883,19 @@ export function PluginQuickBar({
                 schedulePreviewClose()
               }}
             >
-              <button
-                type="button"
-                title={state?.disabledReason || look.title}
-                aria-label={look.ariaLabel}
-                aria-pressed={shortcut.section ? active : undefined}
-                aria-haspopup={group ? 'menu' : undefined}
+              <ShortcutButton
+                shortcut={shortcut}
+                panelLabel={panel.label}
+                active={active}
+                loading={pending === key}
+                hasMenu={group}
+                badge={state?.badge}
+                title={state?.disabledReason || undefined}
                 aria-expanded={group ? openMenu === key : undefined}
                 disabled={Boolean(pending) || disabled}
-                className={look.className}
                 onFocus={(event) => showPreview(event, panel, shortcut, key)}
                 onClick={(event) => void runShortcut(event, panel, shortcut, key)}
-              >
-                {look.icon && <PluginIcon name={look.icon} size={13} />}
-                {!look.iconOnly && shortcut.label}
-                {pending === key && <span aria-label="执行中">…</span>}
-                {state?.badge && <span className="chat-plugin-quickbar-badge">{state.badge}</span>}
-                {group && (
-                  <span className="chat-plugin-quickbar-caret" aria-hidden="true">
-                    ▾
-                  </span>
-                )}
-              </button>
+              />
               {group &&
                 !disabled &&
                 openMenu === key &&
@@ -937,12 +923,12 @@ export function PluginQuickBar({
                           <span className="plugin-menu-loading">
                             {menuViews[key]?.note || '暂时没有可选项'}
                             {menuViews[key]?.failed && (
-                              <button
+                              <ArcoAction
                                 type="button"
                                 onClick={() => void loadMenu(panel, shortcut, key, { force: true })}
                               >
                                 重试
-                              </button>
+                              </ArcoAction>
                             )}
                           </span>
                         )
@@ -958,7 +944,7 @@ export function PluginQuickBar({
                             />
                           )}
                           {menuItems.map((item) => (
-                            <button
+                            <ArcoAction
                               key={`${item.label}:${item.action || item.section}`}
                               type="button"
                               role="menuitem"
@@ -972,7 +958,7 @@ export function PluginQuickBar({
                               {item.detail && (
                                 <span className="plugin-menu-hint">{item.detail}</span>
                               )}
-                            </button>
+                            </ArcoAction>
                           ))}
                         </>
                       )}
@@ -1403,9 +1389,9 @@ function PluginPanelDock({
           <span>{view?.title || label}</span>
           {view?.status && <Tag tone={tagTone(statusTone)}>{view.status.label}</Tag>}
         </div>
-        <button type="button" className="chat-plugin-close" title="收起" onClick={onClose}>
+        <ArcoAction type="button" iconOnly className="chat-plugin-close" title="收起" aria-label="收起" onClick={onClose}>
           <X size={13} />
-        </button>
+        </ArcoAction>
       </header>
       {view?.subtitle && <p className="chat-plugin-dock-subtitle">{view.subtitle}</p>}
       {feedback && (
@@ -1511,14 +1497,14 @@ function PluginPanelRows({ section, drafts, draftScope = 0, changeDraft, busy, r
             title={row.value || undefined}
           >
             {row.link && isOpenableLink(row.link) ? (
-              <button
+              <ArcoAction
                 type="button"
                 className="chat-plugin-link"
                 title={row.value || row.link}
                 onClick={() => window.mica.terminal.openExternal(row.link).catch(() => {})}
               >
                 {row.value || row.link}
-              </button>
+              </ArcoAction>
             ) : (
               (row.value ?? '—')
             )}
@@ -1562,7 +1548,7 @@ function PluginPanelRows({ section, drafts, draftScope = 0, changeDraft, busy, r
           // 「填一项，加一条」：输入与提交是同一个动作，所以同一行。写成「上面一个带标签的
           // 输入行 + 下面一个按钮」，读起来像两件事，中间还隔着一列标签的空白。
           <div className="chat-plugin-add-row" key={field.key}>
-            <input
+            <Input
               id={`chat-plugin-field-${field.key}`}
               className="text-input"
               type="text"
@@ -1570,7 +1556,7 @@ function PluginPanelRows({ section, drafts, draftScope = 0, changeDraft, busy, r
               title={field.hint || field.label}
               placeholder={field.placeholder || field.label}
               value={draftOf(field.key) ?? ''}
-              onChange={(event) => changeField(field.key, event.target.value)}
+              onChange={(value) => changeField(field.key, value)}
               onKeyDown={(event) => {
                 if (event.key !== 'Enter') return
                 event.preventDefault()
@@ -1618,14 +1604,14 @@ function PluginPanelRows({ section, drafts, draftScope = 0, changeDraft, busy, r
                 onChange={(next) => changeField(field.key, next)}
               />
             ) : (
-              <input
+              <Input
                 id={`chat-plugin-field-${field.key}`}
                 className="text-input"
                 type="text"
                 inputMode={field.type === 'number' ? 'numeric' : undefined}
                 value={draftOf(field.key) ?? ''}
                 placeholder={field.placeholder || ''}
-                onChange={(event) => changeField(field.key, event.target.value)}
+                onChange={(value) => changeField(field.key, value)}
               />
             )}
           </SettingRow>
@@ -1687,13 +1673,13 @@ function PluginPanelEditor({ editor, busy, runAction }) {
     return (
       <div className="chat-plugin-editor">
         {error && <Alert message={error} />}
-        <textarea
+        <Input.TextArea
           className="chat-plugin-editor-input"
           aria-label={editor.editLabel || '编辑正文'}
           value={draft}
           spellCheck={false}
           placeholder={editor.placeholder || ''}
-          onChange={(event) => setDraft(event.target.value)}
+          onChange={setDraft}
           onKeyDown={(event) => {
             if (event.key !== 'Enter' || !(event.metaKey || event.ctrlKey)) return
             event.preventDefault()
@@ -1924,14 +1910,14 @@ function PluginPanelTableCell({ cell, rowKey, columnKey, label, busy, runAction 
   const body = cell.text || cell.link || '—'
   const primary =
     cell.link && isOpenableLink(cell.link) ? (
-      <button
+      <ArcoAction
         type="button"
         className={`chat-plugin-link${cell.tone ? ` tone-${cell.tone}` : ''}`}
         title={body}
         onClick={() => window.mica.terminal.openExternal(cell.link).catch(() => {})}
       >
         {body}
-      </button>
+      </ArcoAction>
     ) : (
       <span
         className={`chat-plugin-cell${cell.tone ? ` tone-${cell.tone}` : ''}`}

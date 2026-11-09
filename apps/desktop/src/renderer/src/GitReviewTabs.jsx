@@ -1,3 +1,4 @@
+import { ArcoAction } from '@mica-config-ui/web'
 import { IconArrowLeft, IconCheck, IconFileDiff, IconX } from '@tabler/icons-react'
 import { useEffect, useRef } from 'react'
 import { FileIcon } from './FileIcon'
@@ -30,15 +31,16 @@ export function GitReviewTabs({
       className="flex h-8 shrink-0 overflow-x-auto bg-tabstrip"
     >
       {mobile && (
-        <button
+        <ArcoAction
+          iconOnly
           type="button"
           title="返回变更列表"
           aria-label="返回变更列表"
-          className="sticky left-0 z-10 grid w-9 shrink-0 place-items-center bg-tabstrip text-fg"
+          className="sticky left-0 z-10 grid w-9 shrink-0 place-items-center "
           onClick={onBack}
         >
           <IconArrowLeft size={15} />
-        </button>
+        </ArcoAction>
       )}
       {tabs.map((tab, index) => (
         <div
@@ -90,15 +92,16 @@ export function GitReviewTabs({
               <IconCheck size={12} className="shrink-0 text-git-added" />
             )}
           </button>
-          <button
+          <ArcoAction
+            iconOnly
             type="button"
             title={`关闭比较 ${fileName(tab.path)}`}
             aria-label={`关闭比较 ${fileName(tab.path)}`}
-            className="grid size-5 shrink-0 place-items-center rounded-sm text-fg-muted hover:bg-panel-hi hover:text-fg"
+            className="grid size-5 shrink-0 place-items-center "
             onClick={() => onClose(tab.path)}
           >
             <IconX size={12} />
-          </button>
+          </ArcoAction>
         </div>
       ))}
     </div>
@@ -125,13 +128,13 @@ export function GitCompareWelcome({ repository, branch, reviewed, onOpen, loadin
             <p className="mt-3">
               {files.length} 个文件 · {files.length - remaining.length} 个已阅
             </p>
-            <button
+            <ArcoAction
               type="button"
-              className="mt-4 rounded-sm border border-line-strong bg-panel px-4 py-1.5 text-fg hover:bg-panel-hi"
+              className="mt-4 px-4 py-1.5 "
               onClick={() => onOpen(remaining[0] || files[0])}
             >
               {remaining.length ? '查看下一项未阅更改' : '重新查看更改'}
-            </button>
+            </ArcoAction>
             <p className="mt-4 text-[11px]">↑ ↓ 选择文件 · Enter 打开差异 · 空格标记已阅</p>
           </>
         )}

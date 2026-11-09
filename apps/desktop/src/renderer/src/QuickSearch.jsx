@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Input } from '@mica-config-ui/web'
 import { FileIcon } from './FileIcon'
 import { createSearchRequestId } from './search-request'
 
@@ -289,8 +290,8 @@ export function QuickSearch({ getRoot, openFile, closeActiveFile, disabled = fal
         className="quick-pick-panel"
       >
         <div className="quick-pick-head">
-          <input
-            ref={inputRef}
+          <Input
+            ref={(instance) => { inputRef.current = instance?.dom ?? null }}
             value={query}
             placeholder={config.placeholder}
             aria-label={config.placeholder}
@@ -299,8 +300,9 @@ export function QuickSearch({ getRoot, openFile, closeActiveFile, disabled = fal
             aria-activedescendant={selected >= 0 ? `quick-result-${selected}` : ''}
             autoComplete="off"
             spellCheck={false}
-            className="quick-pick-input"
-            onChange={(event) => setQuery(event.target.value)}
+            height={28}
+            style={{ fontSize: 13 }}
+            onChange={setQuery}
             onKeyDown={(event) => {
               if (event.nativeEvent.isComposing) return
               if (event.key === 'Escape') {

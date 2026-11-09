@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { PageFrame } from '../components/PageFrame.js';
 import { PluginSettingInput } from '../components/PluginSettingInput.js';
 import { Alert, Button, SaveStatus, SettingRow, SettingsGroup, Switch, Tag } from '../components/Ui.js';
+import { Input } from '../components/ArcoSettings.js';
 import { LlmSettingsSection } from '../components/LlmSettingsSection.js';
 import { PathLink } from '../components/PathLink.js';
 import { PluginIcon } from '../pluginIcons.js';
@@ -163,7 +164,13 @@ type PluginCategory = 'all' | 'desktop' | 'configurable' | 'tools' | 'user';
 
 export function pluginCategory(plugin: ConfigWebPlugin): PluginCategory {
   if (plugin.source === 'user') return 'user';
-  if (plugin.desktopEntry || plugin.desktopPage || plugin.desktopLauncher || plugin.desktopPanel || plugin.desktopSessionMenu.length > 0)
+  if (
+    plugin.desktopEntry ||
+    plugin.desktopPage ||
+    plugin.desktopLauncher ||
+    plugin.desktopPanel ||
+    plugin.desktopSessionMenu.length > 0
+  )
     return 'desktop';
   if (plugin.settings.fields.length > 0 || plugin.llm || plugin.desktopChecks.length > 0 || plugin.actions.length > 0)
     return 'configurable';
@@ -215,7 +222,8 @@ function PluginCatalog({
   const enabledCount = plugins.filter((plugin) => plugin.state === 'enabled').length;
   const matching = filterPlugins(plugins, filter);
   const selected = PLUGIN_CATEGORIES.find((item) => item.id === category)!;
-  const categoryPlugins = category === 'all' ? plugins : plugins.filter((plugin) => pluginCategory(plugin) === category);
+  const categoryPlugins =
+    category === 'all' ? plugins : plugins.filter((plugin) => pluginCategory(plugin) === category);
   const visible = category === 'all' ? matching : matching.filter((plugin) => pluginCategory(plugin) === category);
 
   return (
@@ -241,12 +249,12 @@ function PluginCatalog({
             </div>
             <label className="plugin-catalog-filter">
               <SearchIcon size={14} aria-hidden="true" />
-              <input
+              <Input
                 value={filter}
                 type="search"
                 aria-label="搜索插件"
                 placeholder="搜索插件"
-                onChange={(event) => onFilterChange(event.target.value)}
+                onChange={onFilterChange}
               />
             </label>
           </div>
@@ -261,7 +269,9 @@ function PluginCatalog({
               >
                 {item.label}{' '}
                 <span className="plugin-tab-count">
-                  {item.id === 'all' ? matching.length : matching.filter((plugin) => pluginCategory(plugin) === item.id).length}
+                  {item.id === 'all'
+                    ? matching.length
+                    : matching.filter((plugin) => pluginCategory(plugin) === item.id).length}
                 </span>
               </button>
             ))}
@@ -982,9 +992,7 @@ function PluginChecksGroup({ plugin }: { plugin: ConfigWebPlugin }) {
   }
 
   // 只在真有未开启的项时提这件事：全部开启时这行只是噪音
-  const hasMissing = plugin.desktopChecks.some(
-    (check) => (statuses[check.id]?.status ?? 'unknown') !== 'granted',
-  );
+  const hasMissing = plugin.desktopChecks.some((check) => (statuses[check.id]?.status ?? 'unknown') !== 'granted');
 
   return (
     <SettingsGroup

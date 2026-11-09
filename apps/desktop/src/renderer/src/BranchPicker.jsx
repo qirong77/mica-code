@@ -1,4 +1,5 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Input } from '@mica-config-ui/web'
 import { IconCheck, IconGitBranch, IconPlus, IconTag } from '@tabler/icons-react'
 import { formatTracking, relativeDateZh } from './git-refs'
 import { useQuickPickAnchor } from './quick-pick-anchor'
@@ -167,15 +168,16 @@ export function BranchPicker({ cwd, askText, canOperate, onChanged, onClose, anc
         style={anchorStyle || undefined}
       >
         <div className="quick-pick-head">
-          <input
-            ref={inputRef}
+          <Input
+            ref={(instance) => { inputRef.current = instance?.dom ?? null }}
             value={query}
             disabled={busy}
             aria-label={title}
             placeholder={title}
             spellCheck={false}
-            className="quick-pick-input"
-            onChange={(event) => setQuery(event.target.value)}
+            height={28}
+            style={{ fontSize: 13 }}
+            onChange={setQuery}
             onKeyDown={(event) => {
               if (event.nativeEvent.isComposing) return
               if ((event.metaKey || event.ctrlKey) && event.key.toLocaleLowerCase() === 'w') {

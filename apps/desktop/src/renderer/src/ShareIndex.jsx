@@ -1,5 +1,6 @@
 import { confirmAction, alertAction } from './desktop-dialog'
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { ArcoAction } from '@mica-config-ui/web'
 import { IconCopy, IconExternalLink, IconLink, IconRefresh, IconTrash } from '@tabler/icons-react'
 import { copyText } from './transport'
 import { buildShareRows, shareRowTime } from './share-index'
@@ -85,15 +86,17 @@ export default function ShareIndex() {
         <IconLink size={15} className="shrink-0 text-fg-muted" />
         <h1 className="text-[13px] font-semibold text-fg-strong">分享链接</h1>
         <span className="min-w-0 truncate text-[11px] text-fg-dim">{subtitle}</span>
-        <button
+        <ArcoAction
+          iconOnly
           type="button"
           title="刷新"
           aria-label="刷新"
-          className="ml-auto grid size-7 shrink-0 place-items-center rounded-md text-fg-muted hover:bg-overlay hover:text-fg-max"
+          className="ml-auto shrink-0"
+          style={{ width: 28, height: 28, padding: 0 }}
           onClick={() => void load()}
         >
           <IconRefresh size={14} />
-        </button>
+        </ArcoAction>
       </header>
 
       <div className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-2 p-4">
@@ -127,21 +130,23 @@ export default function ShareIndex() {
                 {copied.startsWith(`${row.sessionId}:copied`) ? '已复制' : ''}
                 {copied.startsWith(`${row.sessionId}:failed`) ? '复制失败' : ''}
               </span>
-              <button
+              <ArcoAction
+                iconOnly
                 type="button"
                 title={row.url ? '复制分享链接' : '这台机器没有可用的分享地址'}
                 aria-label="复制分享链接"
                 disabled={!row.url}
-                className="grid size-7 place-items-center rounded-md text-fg-muted hover:bg-overlay hover:text-fg-max disabled:text-fg-ghost disabled:hover:bg-transparent"
+                style={{ width: 28, height: 28, padding: 0 }}
                 onClick={() => void copy(row)}
               >
                 <IconCopy size={14} />
-              </button>
-              <button
+              </ArcoAction>
+              <ArcoAction
+                iconOnly
                 type="button"
                 title="在本页打开这条对话"
                 aria-label="打开"
-                className="grid size-7 place-items-center rounded-md text-fg-muted hover:bg-overlay hover:text-fg-max"
+                style={{ width: 28, height: 28, padding: 0 }}
                 onClick={() =>
                   window.location.assign(
                     `${window.location.pathname}?session=${encodeURIComponent(row.sessionId)}`
@@ -149,16 +154,17 @@ export default function ShareIndex() {
                 }
               >
                 <IconExternalLink size={14} />
-              </button>
-              <button
+              </ArcoAction>
+              <ArcoAction
+                iconOnly
                 type="button"
                 title="从分享列表中移除"
                 aria-label="移除"
-                className="grid size-7 place-items-center rounded-md text-fg-muted hover:bg-overlay hover:text-fg-max"
+                style={{ width: 28, height: 28, padding: 0 }}
                 onClick={() => void remove(row)}
               >
                 <IconTrash size={14} />
-              </button>
+              </ArcoAction>
             </div>
           </section>
         ))}

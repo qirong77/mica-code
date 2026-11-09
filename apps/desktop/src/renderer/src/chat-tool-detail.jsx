@@ -1,3 +1,4 @@
+import { ArcoAction } from '@mica-config-ui/web'
 import { IconCopy, IconLayoutColumns } from '@tabler/icons-react'
 import { toolIcon } from '@packages/mica-web-shared'
 import { copyText } from './transport'
@@ -65,7 +66,7 @@ function SectionActions({ text, language, onOpenInEditor, onClose, documentId, t
   return (
     <>
       {onOpenInEditor && text ? (
-        <button
+        <ArcoAction
           type="button"
           title="在编辑器中打开"
           aria-label="在编辑器中打开"
@@ -80,12 +81,12 @@ function SectionActions({ text, language, onOpenInEditor, onClose, documentId, t
           }}
         >
           <IconLayoutColumns size={12} /> 编辑器
-        </button>
+        </ArcoAction>
       ) : null}
       {text ? (
-        <button type="button" onClick={() => void copyText(text)} title={copyTitle}>
+        <ArcoAction type="button" onClick={() => void copyText(text)} title={copyTitle}>
           <IconCopy size={12} /> 复制
-        </button>
+        </ArcoAction>
       ) : null}
     </>
   )

@@ -2,7 +2,14 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { MIGRATIONS, dropRawUsage, generationTimingV2, usageOccurredAt, usageSourceOwner } from './migrations.js';
+import {
+  MIGRATIONS,
+  dropRawUsage,
+  generationTimingV2,
+  quickButtonsAccentColor,
+  usageOccurredAt,
+  usageSourceOwner,
+} from './migrations.js';
 import { runEvolution } from './run.js';
 
 const homes: string[] = [];
@@ -144,6 +151,86 @@ describe('generation-timing-v2 migration', () => {
   });
 });
 
+describe('quick-buttons-accent-color migration', () => {
+  it('only fills missing colors and preserves every other field and button order', () => {
+    const buttons = [
+      { id: 'ask', label: 'Ask', kind: 'compose', text: 'Continue', source: 'model', createdAt: 1, updatedAt: 2 },
+      {
+        id: 'file',
+        label: 'File',
+        kind: 'path',
+        path: '/tmp/report.md',
+        style: { icon: 'file-text', shape: 'soft', iconOnly: true },
+      },
+      { id: 'open', label: 'Open', kind: 'open', url: 'https://example.com', target: 'external', style: {} },
+      {
+        id: 'pick',
+        label: 'Pick',
+        kind: 'dialog',
+        style: { shape: 'plain', iconOnly: false },
+        dialog: {
+          title: 'Options',
+          text: 'Choose',
+          actions: [
+            { label: 'B', kind: 'compose', text: 'B' },
+            { label: 'A', kind: 'compose', text: 'A' },
+          ],
+        },
+      },
+      ...['accent', 'danger', 'success', 'warn'].map((color) => ({
+        id: color,
+        label: color,
+        kind: 'compose',
+        text: color,
+        style: { color, shape: 'soft', icon: 'globe', iconOnly: true },
+      })),
+    ];
+    const expected = buttons.map((button) => ({
+      ...button,
+      style: { color: 'accent', ...button.style },
+    }));
+    const otherPlugin = { shortcuts: [{ id: 'static', label: 'Static', action: 'open' }] };
+    const document = {
+      snapshot: {
+        pluginState: {
+          'quick-buttons': { version: 1, buttons },
+          other: structuredClone(otherPlugin),
+        },
+      },
+    };
+    expect(MIGRATIONS).toContain(quickButtonsAccentColor);
+    expect(quickButtonsAccentColor.apply(document)).toBe(4);
+    expect(document.snapshot.pluginState['quick-buttons']).toEqual({ version: 1, buttons: expected });
+    expect(document.snapshot.pluginState.other).toEqual(otherPlugin);
+    expect(quickButtonsAccentColor.apply(document)).toBe(0);
+  });
+
+  it('leaves malformed and explicit unknown values untouched instead of normalizing user data', () => {
+    const documents = [
+      {},
+      { pluginState: { 'quick-buttons': { buttons: [{ id: 'top-level' }] } } },
+      { snapshot: { pluginState: { 'quick-buttons': { buttons: 'invalid' } } } },
+      {
+        snapshot: {
+          pluginState: {
+            'quick-buttons': {
+              buttons: [
+                null, 3, 'invalid', { style: null }, { style: [] },
+                { style: { color: 'custom' } }, { style: { color: null } },
+              ],
+            },
+          },
+        },
+      },
+    ];
+    for (const document of documents) {
+      const before = structuredClone(document);
+      expect(quickButtonsAccentColor.apply(document)).toBe(0);
+      expect(document).toEqual(before);
+    }
+  });
+});
+
 describe('usage-source-owner 迁移', () => {
   function withRecords(records: unknown[]) {
     return { snapshot: { subagentUsageHistory: records } } as Record<string, any>;
@@ -213,6 +300,31 @@ describe('usage-source-owner 迁移', () => {
 });
 
 describe('runEvolution', () => {
+  it('migrates stored quick-buttons through the session runner without reordering actions', async () => {
+    const home = createHome();
+    const button = {
+      id: 'ask',
+      label: 'Ask',
+      kind: 'compose',
+      text: 'Continue',
+      style: { icon: 'sparkles', shape: 'plain', iconOnly: true },
+    };
+    const document = {
+      version: 1,
+      snapshot: { pluginState: { 'quick-buttons': { version: 1, buttons: [button] } } },
+    };
+    const path = writeSession(home, 'quick-buttons', document);
+    const first = await runEvolution({ home, lockSession: () => ({ release() {} }) });
+    expect(first.migratedFiles).toBe(1);
+    expect(first.migratedRecords).toBe(1);
+    expect(readSession(path).snapshot.pluginState['quick-buttons'].buttons).toEqual([
+      { ...button, style: { ...button.style, color: 'accent' } },
+    ]);
+    const second = await runEvolution({ home, lockSession: () => ({ release() {} }) });
+    expect(second.evaluated).toBe(0);
+    expect(second.migratedRecords).toBe(0);
+  });
+
   it('把旧数据就地改写成当前形态，并记账跳过没变过的文件', async () => {
     const home = createHome();
     const path = writeSession(home, 'session-1', legacySession());

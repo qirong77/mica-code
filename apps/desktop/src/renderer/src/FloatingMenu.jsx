@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { ArcoAction } from '@mica-config-ui/web'
 
 /**
  * 悬浮菜单的壳与行。资源管理器、源代码管理、Git 变更树都用它，样式因此天然一致
@@ -63,14 +64,13 @@ export function MenuSeparator() {
 
 export function MenuItem({ icon: Icon, label, hint, title, danger, disabled, onClick }) {
   return (
-    <button
+    <ArcoAction
       type="button"
       role="menuitem"
       disabled={disabled}
       title={title}
-      className={`flex h-7 w-full items-center gap-2 rounded px-2 text-left text-[13px] hover:bg-overlay-strong disabled:opacity-40 disabled:hover:bg-transparent ${
-        danger ? 'text-danger-soft' : 'text-fg-strong hover:text-fg-max'
-      }`}
+      tone={danger ? 'danger' : undefined}
+      className="flex h-7 w-full items-center gap-2 px-2 text-left text-[13px]"
       onClick={onClick}
     >
       {/* 图标槽固定占位：插件给的条目没有图标名，少一个图标不该让行高或缩进变样，
@@ -80,6 +80,6 @@ export function MenuItem({ icon: Icon, label, hint, title, danger, disabled, onC
       </span>
       <span className="flex-1 truncate">{label}</span>
       {hint && <span className="shrink-0 text-[11px] text-fg-dim">{hint}</span>}
-    </button>
+    </ArcoAction>
   )
 }

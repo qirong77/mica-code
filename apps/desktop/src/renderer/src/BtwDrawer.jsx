@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { ArcoAction } from '@mica-config-ui/web'
 import {
   IconAlertCircle,
   IconArrowDown,
@@ -524,15 +525,17 @@ export function BtwDrawer({
           {runningEntry ? <span className="chat-btw-live" aria-hidden="true" /> : null}
           {statusText}
         </span>
-        <button
+        <ArcoAction
+          iconOnly
           type="button"
-          className="chat-btw-close"
+          className="shrink-0"
+          style={{ width: 24, height: 24, padding: 0 }}
           aria-label="关闭"
           title="关闭（Esc）"
           onClick={() => onClose?.()}
         >
           <IconX size={14} />
-        </button>
+        </ArcoAction>
       </header>
       {/* tab 条：一个 tab 就是 host 里的一条独立线程（自己的子代理与上下文）。
           可以并排问几件不相干的事，这也是「新话题」在桌面端的样子。 */}
@@ -559,22 +562,26 @@ export function BtwDrawer({
                 ) : null}
                 {tabTitle(tab)}
               </button>
-              <button
+              <ArcoAction
+                iconOnly
                 type="button"
-                className="chat-btw-tab-close"
+                className="shrink-0"
+                style={{ width: 14, height: 14, padding: 0 }}
                 aria-label="关闭这个线程"
                 title={mark === 'running' ? '正在回答中，答完才能关' : '关闭这个线程'}
                 disabled={mark === 'running'}
                 onClick={() => onCloseThread?.(tab.id)}
               >
                 <IconX size={10} />
-              </button>
+              </ArcoAction>
             </div>
           )
         })}
-        <button
+        <ArcoAction
+          iconOnly
           type="button"
-          className="chat-btw-tab-add"
+          className="shrink-0"
+          style={{ width: 20, height: 20, padding: 0 }}
           aria-label="新建线程"
           title={
             atThreadLimit
@@ -585,7 +592,7 @@ export function BtwDrawer({
           onClick={() => onNewThread?.()}
         >
           <IconPlus size={11} />
-        </button>
+        </ArcoAction>
       </div>
       {/* 提示条固定在 tab 与正文之间：失败原因不该落在抽屉背后的主对话里，也不该随
           正文滚走（它解释的正是「刚才那一下为什么没成」）。 */}
@@ -597,15 +604,17 @@ export function BtwDrawer({
             <IconAlertCircle size={12} className="chat-btw-notice-icon" aria-hidden="true" />
           )}
           <span className="chat-btw-notice-text">{activeNotice.text}</span>
-          <button
+          <ArcoAction
+            iconOnly
             type="button"
-            className="chat-btw-notice-close"
+            className="shrink-0"
+            style={{ width: 16, height: 16, padding: 0 }}
             aria-label="关闭提示"
             title="关闭提示"
             onClick={dismissNotice}
           >
             <IconX size={11} />
-          </button>
+          </ArcoAction>
         </div>
       ) : null}
       {/* 整个抽屉里唯一滚动的地方，所以「滚到底」打在这个元素上 */}
@@ -696,15 +705,16 @@ export function BtwDrawer({
                     ) : null}
                     {/* 失败或被停止：原问题就在手边，重问一次比重新打一遍顺手 */}
                     {btwEntryRetryable(entry) && onAsk ? (
-                      <button
+                      <ArcoAction
                         type="button"
-                        className="chat-btw-retry"
+                        className="mt-1.5 gap-1"
+                        style={{ height: 21, paddingInline: 6, fontSize: 10 }}
                         title="用同一个问题再问一次"
                         onClick={() => onAsk(entry.question, { queue: running })}
                       >
                         <IconRefresh size={11} />
                         重试
-                      </button>
+                      </ArcoAction>
                     ) : null}
                   </div>
                 </div>
@@ -716,15 +726,16 @@ export function BtwDrawer({
       {/* 上翻读旧答案时新内容照常到达、也不会把人拽下去；但长线程手动滑回底部很费劲，
           所以离开底部就给一个明确的出口（同时也是「继续跟随」的开关）。 */}
       {!atBottom && entries.length > 0 ? (
-        <button
+        <ArcoAction
           type="button"
-          className="chat-btw-jump"
+          className="gap-[3px]"
+          style={{ position: 'absolute', right: 14, bottom: 96, zIndex: 4, height: 24, paddingInline: 8, fontSize: 10.5 }}
           title="回到最新（恢复自动跟随）"
           onClick={scrollToLatest}
         >
           <IconArrowDown size={12} />
           最新
-        </button>
+        </ArcoAction>
       ) : null}
       {/* 这条线程自己的模型与上下文占用（+ 本地快速压缩）：btw 是一次独立运行，
           主状态栏那份与它无关。放在输入条上方——和主对话「状态行贴着输入条」同一位置。 */}
@@ -733,16 +744,17 @@ export function BtwDrawer({
           {contextLabel || '上下文计入这条线程，不占用主对话'}
         </span>
         {onCompact ? (
-          <button
+          <ArcoAction
             type="button"
-            className="chat-btw-compact"
+            className="shrink-0 gap-[3px] whitespace-nowrap"
+            style={{ height: 16, paddingInline: 4, fontSize: 10.5 }}
             title="快速压缩这条线程的上下文（本地，不调用模型、不丢轮次）"
             disabled={running || compacting || entries.length === 0}
             onClick={() => onCompact()}
           >
             {compacting ? <IconLoader2 size={10} className="animate-spin" /> : null}
             快速压缩
-          </button>
+          </ArcoAction>
         ) : null}
       </div>
       <div className="chat-btw-foot">
@@ -755,15 +767,17 @@ export function BtwDrawer({
               ⏳
             </span>
             <span className="chat-btw-queued-text">{thread.pendingQuestion}</span>
-            <button
+            <ArcoAction
+              iconOnly
               type="button"
-              className="chat-btw-queued-recall"
+              className="shrink-0"
+              style={{ width: 16, height: 16, padding: 0 }}
               title="撤回这条排队的问题"
               aria-label="撤回排队的问题"
               onClick={() => onRecall?.()}
             >
               <IconX size={11} />
-            </button>
+            </ArcoAction>
           </div>
         ) : null}
         <div className="chat-composer chat-btw-composer">

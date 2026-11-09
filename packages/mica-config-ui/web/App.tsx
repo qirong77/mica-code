@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { DialogHost } from './components/DialogHost.js';
+import { ArcoSettings } from './components/ArcoSettings.js';
 import { Sidebar, type ConfigWebAppSection } from './layout/Sidebar.js';
 import { CapabilitiesPage } from './pages/CapabilitiesPage.js';
 import { AppearancePage } from './pages/AppearancePage.js';
@@ -75,35 +76,37 @@ export function App({
 
   return (
     <div className="mica-config-ui">
-      <main className="app-shell">
-        <Sidebar
-          section={section}
-          onChange={(next) => void changeSection(next)}
-          onClose={onClose}
-          closeLabel={closeLabel}
-        />
-        <div className="content-shell">
-          {section === 'config' ? <ConfigPage /> : null}
-          {section === 'appearance' ? <AppearancePage /> : null}
-          {section === 'browserControl' ? <BrowserControlPage /> : null}
-          {section === 'terminalControl' ? <TerminalControlPage /> : null}
-          {section === 'performance' ? <PerformancePage /> : null}
-          {section === 'sessions' ? <SessionsPage /> : null}
-          {section === 'roles' ? <RolesPage /> : null}
-          {section === 'mcp' ? <McpPage /> : null}
-          {section === 'skills' ? <SkillsPage /> : null}
-          {section === 'capabilities' ? <CapabilitiesPage /> : null}
-          {section === 'plugins' ? (
-            <PluginsPage
-              pluginId={pluginId}
-              onSelectPlugin={selectPlugin}
-              onNewSession={onNewSession}
-              onOpenPluginPage={onOpenPluginPage}
-            />
-          ) : null}
-        </div>
-      </main>
-      <DialogHost />
+      <ArcoSettings>
+        <main className="app-shell">
+          <Sidebar
+            section={section}
+            onChange={(next) => void changeSection(next)}
+            onClose={onClose}
+            closeLabel={closeLabel}
+          />
+          <div className="content-shell">
+            {section === 'config' ? <ConfigPage /> : null}
+            {section === 'appearance' ? <AppearancePage /> : null}
+            {section === 'browserControl' ? <BrowserControlPage /> : null}
+            {section === 'terminalControl' ? <TerminalControlPage /> : null}
+            {section === 'performance' ? <PerformancePage /> : null}
+            {section === 'sessions' ? <SessionsPage /> : null}
+            {section === 'roles' ? <RolesPage /> : null}
+            {section === 'mcp' ? <McpPage /> : null}
+            {section === 'skills' ? <SkillsPage /> : null}
+            {section === 'capabilities' ? <CapabilitiesPage /> : null}
+            {section === 'plugins' ? (
+              <PluginsPage
+                pluginId={pluginId}
+                onSelectPlugin={selectPlugin}
+                onNewSession={onNewSession}
+                onOpenPluginPage={onOpenPluginPage}
+              />
+            ) : null}
+          </div>
+        </main>
+        <DialogHost />
+      </ArcoSettings>
     </div>
   );
 }

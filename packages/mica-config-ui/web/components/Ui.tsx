@@ -1,8 +1,17 @@
-import { useEffect, useRef } from 'react';
-import type { ReactNode } from 'react';
+import { useEffect, useId, useRef } from 'react';
+import type { ButtonHTMLAttributes, ReactNode } from 'react';
+import ArcoAlert from '@arco-design/web-react/es/Alert';
+import ArcoButton from '@arco-design/web-react/es/Button';
+import ArcoCheckbox from '@arco-design/web-react/es/Checkbox';
+import Collapse from '@arco-design/web-react/es/Collapse';
+import ArcoEmpty from '@arco-design/web-react/es/Empty';
+import Radio from '@arco-design/web-react/es/Radio';
+import ArcoSwitch from '@arco-design/web-react/es/Switch';
+import ArcoTag from '@arco-design/web-react/es/Tag';
 import { appIcons } from '../icons.js';
+import '../arco-settings.css';
 
-type ButtonProps = {
+type ButtonProps = Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'onClick' | 'onMouseDown' | 'children'> & {
   children?: ReactNode;
   icon?: ReactNode;
   loading?: boolean;
@@ -41,50 +50,49 @@ export function Button({
   ariaLabel,
   onMouseDown,
   onClick,
+  className,
+  type = 'button',
+  ...props
 }: ButtonProps) {
-  const variantClass = BUTTON_VARIANTS[variant];
   return (
-    <button
-      className={`ui-button ${variantClass}${children ? '' : ' ui-button-icon-only'}${
+    <ArcoButton
+      {...props}
+      className={`ui-button${children ? '' : ' ui-button-icon-only'}${
         loading ? ' ui-button-loading' : ''
-      }${size === 'compact' ? ' ui-button-compact' : ''}${fullWidth ? ' ui-button-full' : ''}`}
-      type="button"
+      }${size === 'compact' ? ' ui-button-compact' : ''}${fullWidth ? ' ui-button-full' : ''}${className ? ` ${className}` : ''}`}
+      htmlType={type}
+      type={variant === 'accent' ? 'primary' : variant === 'ghost' || variant === 'danger-ghost' ? 'text' : 'secondary'}
+      status={variant === 'danger' || variant === 'danger-ghost' ? 'danger' : 'default'}
+      size={size === 'compact' ? 'mini' : 'small'}
+      long={fullWidth}
+      loading={loading}
+      icon={
+        icon ? (
+          <span className="ui-button-icon" aria-hidden="true">
+            {icon}
+          </span>
+        ) : undefined
+      }
       title={title}
-      aria-label={ariaLabel ?? (!children ? title : undefined)}
-      aria-busy={loading || undefined}
+      aria-label={ariaLabel ?? props['aria-label'] ?? (!children ? title : undefined)}
+      aria-busy={loading || props['aria-busy']}
       disabled={loading || disabled}
-      aria-pressed={pressed}
+      aria-pressed={pressed ?? props['aria-pressed']}
       autoFocus={autoFocus}
       onMouseDown={onMouseDown}
       onClick={onClick}
     >
-      {/* 没有图标时不渲染占位：空的 14px 图标格加 gap 会把文字挤偏中心 10px，
-          纯文字按钮（对话框的取消 / 确定）看起来就像没居中。 */}
-      {loading || icon ? (
-        <span className="ui-button-icon" aria-hidden="true">
-          {loading ? <span className="ui-button-spinner" aria-hidden="true" /> : icon}
-        </span>
-      ) : null}
-      {children ? <span>{children}</span> : null}
-    </button>
+      {children}
+    </ArcoButton>
   );
 }
-
-const BUTTON_VARIANTS: Record<NonNullable<ButtonProps['variant']>, string> = {
-  primary: 'ui-button-primary',
-  accent: 'ui-button-accent',
-  danger: 'ui-button-danger',
-  default: '',
-  ghost: 'ui-button-ghost',
-  'danger-ghost': 'ui-button-ghost ui-button-danger',
-};
 
 /**
  * 分段选择：一组互斥选项（认证方式、协议这类），视觉上就是一条 TAB。
  *
  * 为什么不用原生 `<select>`：它的字体与内边距跟旁边的输入框对不齐，一行里会矮一截；
  * 选项少（2–4 个）时把所有取值摆在明面上点一次就到，比展开再选少一次交互。
- * 样式沿用配置页的 `.config-segmented`，插件面板与设置页因此长得一样。
+ * 插件面板与设置页共用 Arco Radio.Group。
  */
 export function Segmented({
   value,
@@ -104,6 +112,7 @@ export function Segmented({
   /** `compact` 与 `Button` / `SelectMenu` / `DateField` 的紧凑尺寸等高（24px）。 */
   size?: 'default' | 'compact';
 }) {
+  const name = useId();
   return (
     <div
       className={`config-segmented${size === 'compact' ? ' is-compact' : ''}`}
@@ -111,24 +120,21 @@ export function Segmented({
       aria-label={ariaLabel}
       id={id}
     >
-      {options.map((option) => (
-        <button
-          key={option.value}
-          type="button"
-          className={`config-segment${value === option.value ? ' is-active' : ''}`}
-          aria-pressed={value === option.value}
-          disabled={disabled}
-          onClick={() => onChange(option.value)}
-        >
-          {option.label}
-        </button>
-      ))}
+      <Radio.Group
+        type="button"
+        size={size === 'compact' ? 'mini' : 'small'}
+        name={name}
+        value={value}
+        options={options}
+        disabled={disabled}
+        onChange={onChange}
+      />
     </div>
   );
 }
 
 export function Alert({ message }: { message: string }) {
-  return <div className="ui-alert">{message}</div>;
+  return <ArcoAlert className="ui-alert" type="error" content={message} role="alert" />;
 }
 
 /** 自动保存的状态角标：只在写盘中和刚写完这两个瞬间出现，平时不占位。 */
@@ -146,22 +152,18 @@ type SwitchProps = {
   onChange(checked: boolean): void;
 };
 
-/** 只有轨道和隐藏的 checkbox，标签由调用方的 <label> 提供。 */
+/** 标签由调用方提供，控件使用 Arco 默认的小尺寸。 */
 export function Switch({ checked, id, label, onChange, disabled = false }: SwitchProps) {
   return (
-    <span className={`ui-switch${disabled ? ' is-disabled' : ''}`}>
-      <input
-        id={id}
-        type="checkbox"
-        checked={checked}
-        disabled={disabled}
-        aria-label={label}
-        onChange={(event) => onChange(event.target.checked)}
-      />
-      <span className="ui-switch-track" aria-hidden="true">
-        <span className="ui-switch-knob" />
-      </span>
-    </span>
+    <ArcoSwitch
+      className="ui-switch"
+      id={id}
+      size="small"
+      checked={checked}
+      disabled={disabled}
+      aria-label={label}
+      onChange={onChange}
+    />
   );
 }
 
@@ -178,12 +180,17 @@ type EmptyProps = {
 export function Empty({ title, description, hint, children }: EmptyProps) {
   return (
     <div className="ui-empty-wrap">
-      <div className="ui-empty">
-        {title ? <p className="ui-empty-title">{title}</p> : null}
-        <p className="ui-empty-description">{description}</p>
-        {hint ? <p className="ui-empty-hint">{hint}</p> : null}
-        {children ? <div className="ui-empty-actions">{children}</div> : null}
-      </div>
+      <ArcoEmpty
+        className="ui-empty"
+        description={
+          <>
+            {title ? <p className="ui-empty-title">{title}</p> : null}
+            <p className="ui-empty-description">{description}</p>
+            {hint ? <p className="ui-empty-hint">{hint}</p> : null}
+            {children ? <div className="ui-empty-actions">{children}</div> : null}
+          </>
+        }
+      />
     </div>
   );
 }
@@ -199,12 +206,7 @@ type CheckboxProps = {
   onChange(next: boolean): void;
 };
 
-/**
- * 勾选框：清单里逐条「标记 / 选中」用它，`Switch` 只用于「开 / 关某个能力」。
- *
- * 原生 checkbox 各平台的勾与底色都不一样（macOS 是系统蓝），在深色界面上格格不入；
- * 这里保留原生 input 的可访问性与键盘行为，只把外观换成主题色。
- */
+/** 勾选框用于清单选中，Switch 只用于启停能力。 */
 export function Checkbox({
   checked,
   mixed = false,
@@ -214,21 +216,27 @@ export function Checkbox({
   size = 'default',
   onChange,
 }: CheckboxProps) {
-  const ref = useRef<HTMLInputElement | null>(null);
+  const ref = useRef<HTMLLabelElement | null>(null);
   useEffect(() => {
-    if (ref.current) ref.current.indeterminate = mixed;
-  }, [mixed]);
+    // Arco exposes its label ref but does not set the native mixed state or input label.
+    const input = ref.current?.querySelector('input');
+    if (input) {
+      input.indeterminate = mixed;
+      input.setAttribute('aria-label', label);
+    }
+  }, [mixed, label]);
   return (
-    <input
+    <ArcoCheckbox
       ref={ref}
-      type="checkbox"
       className={`ui-checkbox${size === 'compact' ? ' is-compact' : ''}`}
       checked={checked}
+      indeterminate={mixed}
       disabled={disabled}
-      aria-label={label}
       title={title ?? label}
-      onChange={(event) => onChange(event.target.checked)}
-    />
+      onChange={onChange}
+    >
+      <span className="ui-checkbox-label">{label}</span>
+    </ArcoCheckbox>
   );
 }
 
@@ -258,10 +266,14 @@ export function Tag({
   dot?: boolean;
 }) {
   return (
-    <span className={`ui-tag ui-tag-${tone}`}>
-      {dot ? <span className="ui-tag-dot" aria-hidden="true" /> : null}
+    <ArcoTag
+      className="ui-tag"
+      size="small"
+      color={tone === 'default' ? undefined : tone === 'amber' ? 'gold' : tone}
+      icon={dot ? <span className="ui-tag-dot" aria-hidden="true" /> : undefined}
+    >
       {children}
-    </span>
+    </ArcoTag>
   );
 }
 
@@ -276,19 +288,26 @@ type CollapsiblePanelProps = {
 export function CollapsiblePanel({ title, subtitle, meta, children, defaultOpen = false }: CollapsiblePanelProps) {
   const ChevronIcon = appIcons.chevronRight;
   return (
-    <details className="simple-card collapsible-card" open={defaultOpen}>
-      <summary className="collapsible-summary">
-        <div className="table-panel-title">
-          <strong>{title}</strong>
-          {subtitle ? <span>{subtitle}</span> : null}
-        </div>
-        <div className="collapsible-trailing">
-          {meta ? <div className="table-panel-tags">{meta}</div> : null}
-          <ChevronIcon className="collapsible-chevron" size={15} aria-hidden="true" />
-        </div>
-      </summary>
-      <div className="collapsible-body">{children}</div>
-    </details>
+    <Collapse className="collapsible-card" defaultActiveKey={defaultOpen ? ['panel'] : []} lazyload={false}>
+      <Collapse.Item
+        name="panel"
+        showExpandIcon={false}
+        header={
+          <div className="collapsible-summary">
+            <div className="table-panel-title">
+              <strong>{title}</strong>
+              {subtitle ? <span>{subtitle}</span> : null}
+            </div>
+            <div className="collapsible-trailing">
+              {meta ? <div className="table-panel-tags">{meta}</div> : null}
+              <ChevronIcon className="collapsible-chevron" size={15} aria-hidden="true" />
+            </div>
+          </div>
+        }
+      >
+        <div className="collapsible-body">{children}</div>
+      </Collapse.Item>
+    </Collapse>
   );
 }
 

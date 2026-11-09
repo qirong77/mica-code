@@ -270,9 +270,6 @@ html[data-theme='tokyo-night-light'] .mica-config-ui {
     height: 100%;
     min-height: 120px;
     padding: 14px;
-    border: 1px solid var(--line);
-    background: var(--panel);
-    color: var(--text);
     font-family: var(--font-mono);
     font-size: var(--text-aux);
     resize: none;
@@ -290,41 +287,39 @@ html[data-theme='tokyo-night-light'] .mica-config-ui {
     color: inherit;
   }
 
-  :focus-visible {
+  :focus-visible:not(:where([class^='arco-'], [class*=' arco-'])):not(:where([class^='arco-'], [class*=' arco-']):not(.arco-settings) *) {
     outline: 1px solid var(--text-faint);
     outline-offset: 1px;
   }
 
-  *::-webkit-scrollbar {
+  :not(:where([class^='arco-'], [class*=' arco-'])):not(:where([class^='arco-'], [class*=' arco-']):not(.arco-settings) *)::-webkit-scrollbar {
     width: 10px;
     height: 10px;
   }
 
-  *::-webkit-scrollbar-track {
+  :not(:where([class^='arco-'], [class*=' arco-'])):not(:where([class^='arco-'], [class*=' arco-']):not(.arco-settings) *)::-webkit-scrollbar-track {
     background: transparent;
   }
 
-  *::-webkit-scrollbar-thumb {
+  :not(:where([class^='arco-'], [class*=' arco-'])):not(:where([class^='arco-'], [class*=' arco-']):not(.arco-settings) *)::-webkit-scrollbar-thumb {
     border: 2px solid transparent;
     border-radius: 5px;
     background: var(--panel-muted);
     background-clip: content-box;
   }
 
-  *::-webkit-scrollbar-thumb:hover {
+  :not(:where([class^='arco-'], [class*=' arco-'])):not(:where([class^='arco-'], [class*=' arco-']):not(.arco-settings) *)::-webkit-scrollbar-thumb:hover {
     background: var(--panel-muted);
     background-clip: content-box;
   }
 
-  *,
-  *::before,
-  *::after {
+  :not(:where([class^='arco-'], [class*=' arco-'])):not(:where([class^='arco-'], [class*=' arco-']):not(.arco-settings) *),
+  :not(:where([class^='arco-'], [class*=' arco-'])):not(:where([class^='arco-'], [class*=' arco-']):not(.arco-settings) *)::before,
+  :not(:where([class^='arco-'], [class*=' arco-'])):not(:where([class^='arco-'], [class*=' arco-']):not(.arco-settings) *)::after {
     box-sizing: border-box;
   }
 
-  button,
-  input,
-  textarea {
+  :is(button, input, textarea):not(:where([class^='arco-'], [class*=' arco-'])):not(:where([class^='arco-'], [class*=' arco-']):not(.arco-settings) *) {
     font: inherit;
   }
 
@@ -630,256 +625,6 @@ html[data-theme='tokyo-night-light'] .mica-config-ui {
     container-name: page;
   }
 
-  .ui-button {
-    min-width: 32px;
-    height: var(--control-h);
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    gap: 6px;
-    padding: 0 11px;
-    border: 1px solid var(--line);
-    border-radius: var(--radius-md);
-    background: var(--panel);
-    color: var(--text-soft);
-    cursor: pointer;
-    font-size: var(--text-body);
-    font-weight: 500;
-    transition:
-      background 100ms ease,
-      border-color 100ms ease,
-      color 100ms ease;
-  }
-
-  .ui-button:hover:not(:disabled) {
-    border-color: var(--line);
-    background: var(--panel-hover);
-    color: var(--text);
-  }
-
-  .ui-button:disabled {
-    cursor: not-allowed;
-    opacity: 0.55;
-  }
-
-  .ui-button-loading:disabled {
-    cursor: wait;
-  }
-
-  .ui-button[aria-pressed='true'] {
-    border-color: var(--line);
-    background: var(--panel-hover);
-    color: var(--text);
-  }
-
-  .ui-button-primary {
-    border-color: var(--line);
-    background: var(--panel-muted);
-    color: var(--text);
-    font-weight: 600;
-  }
-
-  .ui-button-primary:hover:not(:disabled) {
-    border-color: var(--line-strong);
-    background: var(--panel-muted);
-  }
-
-  /* 实心强调：对话框的主操作（确定 / 开始 / 保存）。底色用主题自己的强调色，字色跟着
-     `--accent-contrast` 翻转——暗色的橙底配深字、亮色的蓝底配白字，两边都不用写死 #fff。 */
-  .ui-button-accent {
-    border-color: transparent;
-    background: var(--accent);
-    color: var(--accent-contrast);
-  }
-
-  .ui-button-accent:hover:not(:disabled) {
-    border-color: transparent;
-    background: var(--accent-hover);
-    color: var(--accent-contrast);
-  }
-
-  .ui-button-danger {
-    border-color: color-mix(in srgb, var(--red) 40%, transparent);
-    color: var(--red);
-  }
-
-  .ui-button-danger:hover:not(:disabled) {
-    border-color: color-mix(in srgb, var(--red) 60%, transparent);
-    background: color-mix(in srgb, var(--red) 10%, transparent);
-  }
-
-  /* 幽灵按钮：行内动作（删除服务商、跳到别的页面）用它，避免每行都挂一个带边框的方块，
-     整页看起来像一排按钮墙。尺寸与可用态完全不动，只去掉常态的边框与底色。 */
-  .ui-button-ghost {
-    border-color: transparent;
-    background: transparent;
-    /* 用次级前景而不是 faint：faint 太接近禁用态，看起来像点不了 */
-    color: var(--text-soft);
-  }
-
-  .ui-button-ghost:hover:not(:disabled) {
-    border-color: var(--line);
-    background: var(--panel-hover);
-    color: var(--text);
-  }
-
-  /* 幽灵 + 危险：行内的破坏性动作。常态只有红字、不占一块红框，悬停才浮出底色；
-     破坏性靠颜色与二次确认表达，不靠边框喊。 */
-  .ui-button-ghost.ui-button-danger {
-    color: var(--red);
-  }
-
-  .ui-button-ghost.ui-button-danger:hover:not(:disabled) {
-    border-color: color-mix(in srgb, var(--red) 45%, transparent);
-    background: color-mix(in srgb, var(--red) 12%, transparent);
-    color: var(--red);
-  }
-
-  .ui-button-icon {
-    width: 14px;
-    height: 14px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    color: currentColor;
-  }
-
-  .ui-button-icon svg {
-    display: block;
-    stroke: currentColor;
-  }
-
-  .ui-button-icon-only {
-    width: 32px;
-    padding: 0;
-  }
-
-  .ui-button-spinner {
-    width: 12px;
-    height: 12px;
-    border: 1.5px solid currentColor;
-    border-right-color: transparent;
-    border-radius: 999px;
-    animation: ui-spin 900ms linear infinite;
-  }
-
-  /* 密集工具栏里的输入框：与 24px 的下拉、日期字段、compact 按钮等高。 */
-  .text-input.is-compact {
-    height: 24px;
-    padding: 0 7px;
-    font-size: var(--text-aux);
-  }
-
-  /* 左侧叠一枚图标（放大镜）：给图标让出位置。
-     这条规则必须在 .text-input 里写——它不在 @layer 中，插件 / 渲染层套的
-     Tailwind pl-* 打不过它，写在调用处会被这里的 padding 覆盖掉，图标就压在占位文字上。 */
-  .text-input.text-input-with-icon {
-    padding-left: 24px;
-  }
-
-  /* 密集工具栏 / 插件页面顶栏里的尺寸：与 24px 的下拉、日期字段等高。 */
-  .ui-button.ui-button-compact {
-    min-width: 24px;
-    height: 24px;
-    gap: 4px;
-    padding: 0 8px;
-    border-radius: var(--radius-sm);
-    font-size: var(--text-aux);
-  }
-
-  .ui-button.ui-button-compact.ui-button-icon-only {
-    width: 24px;
-    padding: 0;
-  }
-
-  .ui-button.ui-button-compact .ui-button-icon {
-    width: 12px;
-    height: 12px;
-  }
-
-  /* 整行按钮：列表里「加载更早」这类动作撑满一行，仍用同一套外观。 */
-  .ui-button.ui-button-full {
-    width: 100%;
-  }
-
-  /* 勾选框：外观跟主题走，键盘与可访问性仍用原生 input。 */
-  .ui-checkbox {
-    position: relative;
-    width: 14px;
-    height: 14px;
-    margin: 0;
-    flex: none;
-    appearance: none;
-    border: 1px solid var(--line-strong);
-    border-radius: 3px;
-    background: var(--bg);
-    cursor: pointer;
-    transition:
-      background 100ms ease,
-      border-color 100ms ease;
-  }
-
-  .ui-checkbox:hover:not(:disabled) {
-    border-color: var(--accent-line);
-  }
-
-  .ui-checkbox:checked,
-  .ui-checkbox:indeterminate {
-    border-color: var(--accent);
-    background: var(--accent);
-  }
-
-  /* 勾与横线自绘：不再依赖各平台的系统字形（macOS 是系统蓝，深色界面上很扎眼）。
-     勾是旋转过的图形，必须绝对定位居中：按块级流式布局（margin auto）排会整体偏高，
-     旋转后的墨迹又偏下，所以再补一点向上的光学校正。 */
-  .ui-checkbox:checked::after {
-    content: '';
-    position: absolute;
-    top: 50%;
-    left: 50%;
-    width: 4px;
-    height: 8px;
-    border: solid #fff;
-    border-width: 0 2px 2px 0;
-    transform: translate(-50%, calc(-50% - 1.5px)) rotate(45deg);
-  }
-
-  .ui-checkbox:indeterminate::after {
-    content: '';
-    position: absolute;
-    top: 50%;
-    left: 50%;
-    width: 8px;
-    height: 2px;
-    border-radius: 1px;
-    background: #fff;
-    transform: translate(-50%, -50%);
-  }
-
-  .ui-checkbox:disabled {
-    /* 禁用态只掉颜色，尺寸与位置不变 */
-    opacity: 0.45;
-    cursor: not-allowed;
-  }
-
-  .ui-checkbox.is-compact {
-    width: 12px;
-    height: 12px;
-    border-radius: 2px;
-  }
-
-  .ui-checkbox.is-compact:checked::after {
-    width: 3px;
-    height: 6px;
-    border-width: 0 1.5px 1.5px 0;
-    transform: translate(-50%, calc(-50% - 1px)) rotate(45deg);
-  }
-
-  .ui-checkbox.is-compact:indeterminate::after {
-    width: 6px;
-    height: 2px;
-  }
-
   .save-status {
     color: var(--green);
     font-size: var(--text-aux);
@@ -892,12 +637,6 @@ html[data-theme='tokyo-night-light'] .mica-config-ui {
 
   .ui-alert {
     margin-bottom: 16px;
-    padding: 10px 13px;
-    border: 1px solid color-mix(in srgb, var(--red) 35%, transparent);
-    border-radius: var(--radius-md);
-    background: color-mix(in srgb, var(--red) 10%, transparent);
-    color: var(--red);
-    font-size: var(--text-body);
     /* 服务端校验错误是分行的（[error] 路径 / 说明 / 建议），保留换行才读得懂 */
     white-space: pre-line;
   }
@@ -978,11 +717,6 @@ html[data-theme='tokyo-night-light'] .mica-config-ui {
 
   .collapsible-card {
     overflow: hidden;
-    transition: border-color 120ms ease;
-  }
-
-  .collapsible-card:hover {
-    border-color: var(--line);
   }
 
   .collapsible-summary {
@@ -991,17 +725,6 @@ html[data-theme='tokyo-night-light'] .mica-config-ui {
     justify-content: space-between;
     gap: 12px;
     padding: 14px 16px;
-    cursor: pointer;
-    list-style: none;
-    transition: background 100ms ease;
-  }
-
-  .collapsible-summary:hover {
-    background: var(--overlay-subtle);
-  }
-
-  .collapsible-summary::-webkit-details-marker {
-    display: none;
   }
 
   .collapsible-trailing {
@@ -1018,17 +741,8 @@ html[data-theme='tokyo-night-light'] .mica-config-ui {
       transform 140ms ease;
   }
 
-  .collapsible-card[open] .collapsible-chevron {
-    color: var(--text-soft);
-    transform: rotate(90deg);
-  }
-
   .collapsible-body {
     padding: 16px;
-  }
-
-  .collapsible-body {
-    border-top: 1px solid var(--line);
   }
 
   .table-panel-title {
@@ -1162,12 +876,9 @@ html[data-theme='tokyo-night-light'] .mica-config-ui {
 
   /* 行内的单行输入不收满整行：分组有一千像素宽时，一个地址框铺到底会读成搜索栏。
      多行文本要占满，数字框按内容长度收窄。 */
-  .setting-row-control .text-input:not(.text-input-multiline) {
+  .setting-row-control > .arco-input,
+  .setting-row-control > .arco-input-group-wrapper {
     max-width: 420px;
-  }
-
-  .setting-row-control .text-input[type='number'] {
-    max-width: 140px;
   }
 
   .setting-row-error {
@@ -1416,26 +1127,12 @@ html[data-theme='tokyo-night-light'] .mica-config-ui {
     left: 8px;
     color: var(--text-faint);
     pointer-events: none;
+    z-index: 1;
   }
 
-  .split-rail-filter input {
+  .split-rail-filter .arco-input {
     width: 100%;
-    height: var(--control-h);
-    padding: 0 8px 0 27px;
-    border: 1px solid var(--line);
-    border-radius: var(--radius-md);
-    background: var(--panel);
-    color: var(--text);
-    font-size: var(--text-aux);
-  }
-
-  .split-rail-filter input::placeholder {
-    color: var(--text-faint);
-  }
-
-  .split-rail-filter input:focus-visible {
-    border-color: var(--line-strong);
-    outline: none;
+    padding-left: 27px;
   }
 
   .split-rail-group {
@@ -1585,54 +1282,6 @@ html[data-theme='tokyo-night-light'] .mica-config-ui {
     color: var(--text-soft);
     font-size: var(--text-body);
     line-height: 1.5;
-  }
-
-  .ui-tag {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    min-height: 24px;
-    padding: 0 9px;
-    border: 1px solid var(--line);
-    border-radius: 999px;
-    background: var(--panel-muted);
-    color: var(--text-soft);
-    font-size: var(--text-aux);
-    font-weight: 500;
-    white-space: nowrap;
-  }
-
-  .ui-tag-dot {
-    width: 6px;
-    height: 6px;
-    flex: 0 0 auto;
-    border-radius: 999px;
-    background: currentColor;
-    opacity: 0.85;
-  }
-
-  .ui-tag-green {
-    color: var(--green);
-    border-color: color-mix(in srgb, var(--green) 30%, transparent);
-    background: color-mix(in srgb, var(--green) 9%, transparent);
-  }
-
-  .ui-tag-red {
-    color: var(--red);
-    border-color: color-mix(in srgb, var(--red) 30%, transparent);
-    background: color-mix(in srgb, var(--red) 9%, transparent);
-  }
-
-  .ui-tag-blue {
-    color: var(--blue);
-    border-color: color-mix(in srgb, var(--blue) 30%, transparent);
-    background: color-mix(in srgb, var(--blue) 9%, transparent);
-  }
-
-  .ui-tag-amber {
-    color: var(--amber);
-    border-color: color-mix(in srgb, var(--amber) 30%, transparent);
-    background: color-mix(in srgb, var(--amber) 9%, transparent);
   }
 
   .tool-item p,
@@ -1987,7 +1636,7 @@ html[data-theme='tokyo-night-light'] .mica-config-ui {
   }
 
   /* 设置行默认把单行输入收在 420px，键值行的两列得铺满自己的网格。 */
-  .setting-row-control .mcp-kv-row .text-input {
+  .setting-row-control .mcp-kv-row .arco-input {
     min-width: 0;
     max-width: none;
   }
@@ -2358,12 +2007,6 @@ html[data-theme='tokyo-night-light'] .mica-config-ui {
 
     .conversation-size {
       display: none;
-    }
-  }
-
-  @keyframes ui-spin {
-    to {
-      transform: rotate(360deg);
     }
   }
 
@@ -3035,60 +2678,6 @@ html[data-theme='tokyo-night-light'] .mica-config-ui {
     margin: 10px 18px 0;
   }
 
-  .text-input {
-    width: 100%;
-    /* 输入框是「凹进去」的控件：底色比所在分组暗一档，描边只做边界。
-       之前用 panel-muted（比卡片亮），整行读起来像一块浮起来的亮斑。 */
-    height: var(--control-h);
-    box-sizing: border-box;
-    background: var(--bg);
-    border: 1px solid var(--line);
-    border-radius: var(--radius-md);
-    color: var(--text);
-    padding: 0 9px;
-    font-size: var(--text-body);
-    font-family: inherit;
-    line-height: normal;
-    outline: none;
-    transition:
-      border-color 100ms ease,
-      background 100ms ease,
-      box-shadow 100ms ease;
-  }
-
-  .text-input:hover:not(:disabled) {
-    border-color: var(--line-strong);
-  }
-
-  .text-input:disabled {
-    color: var(--text-faint);
-    cursor: default;
-  }
-
-  .text-input::placeholder {
-    color: var(--text-faint);
-  }
-
-  .text-input:focus {
-    border-color: color-mix(in srgb, var(--accent) 55%, var(--line));
-    box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 16%, transparent);
-  }
-
-  /* 多行文本：高度交给内容，行距放宽，横向不拉伸。
-     没有这条规则时 textarea 会继承 .text-input 的 height: 38px 与 padding: 0 9px，
-     四行内容挤在一条 38px 的缝里溢出，右下角还露着浏览器默认的拖拽三角。 */
-  .text-input-multiline {
-    height: auto;
-    min-height: 84px;
-    max-height: 260px;
-    padding: 7px 9px;
-    line-height: 1.6;
-    /* 高度跟着内容长：深色主题下浏览器原生的拖拽三角是一块白，看着像渲染错误；
-       换成 field-sizing 之后不需要手柄（不支持的浏览器退回 rows 给出的高度）。 */
-    field-sizing: content;
-    resize: none;
-  }
-
   /* Online/offline status lamp (code-by-wire parity) */
   .status-lamp {
     width: 7px;
@@ -3250,27 +2839,13 @@ html[data-theme='tokyo-night-light'] .mica-config-ui {
     left: 8px;
     color: var(--text-faint);
     pointer-events: none;
+    z-index: 1;
   }
 
-  .conversation-search input {
+  .conversation-search .arco-input {
     width: 100%;
     height: 24px;
-    padding: 0 8px 0 25px;
-    border: 1px solid var(--line);
-    border-radius: var(--radius-md);
-    background: var(--bg);
-    color: var(--text);
-    /* 与筛选条的字号一致：一行里两种字号，光标和基线都会看起来是歪的。 */
-    font-size: var(--text-aux);
-  }
-
-  .conversation-search input::placeholder {
-    color: var(--text-faint);
-  }
-
-  .conversation-search input:focus-visible {
-    border-color: var(--line-strong);
-    outline: none;
+    padding-left: 25px;
   }
 
   .conversation-scroll {
@@ -3937,48 +3512,16 @@ html[data-theme='tokyo-night-light'] .mica-config-ui {
     background: transparent;
   }
 
-  .modal-backdrop {
-    position: fixed;
-    z-index: 100;
-    inset: 0;
-    display: grid;
-    place-items: center;
-    padding: 24px;
-    background: rgb(0 0 0 / 55%);
-  }
-
   .modal-card {
     display: flex;
     flex-direction: column;
     width: min(680px, 100%);
     max-height: min(82dvh, 900px);
     overflow: hidden;
-    border: 1px solid var(--line);
-    border-radius: var(--radius-xl);
-    background: var(--panel);
-    box-shadow: var(--shadow-modal);
   }
 
   .modal-card-wide {
     width: min(880px, 100%);
-  }
-
-  .modal-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    padding: 11px 16px;
-    border-bottom: 1px solid var(--line);
-    background: var(--panel-muted);
-  }
-
-  .modal-title {
-    display: flex;
-    align-items: baseline;
-    gap: 10px;
-    font-size: var(--text-subhead);
-    font-weight: 650;
   }
 
   .modal-title-sub {
@@ -4213,77 +3756,6 @@ html[data-theme='tokyo-night-light'] .mica-config-ui {
     line-height: 1.55;
   }
 
-  .ui-switch {
-    position: relative;
-    display: inline-flex;
-    flex: none;
-  }
-
-  /* 命中区比 30×17 的轨道四周各外扩 7px：轨道本身只有 17px 高，直接点很难点中，
-     表现为「点一下没反应」。外扩量仍落在行内 30px 开关列与 12px 列间距里，不抢相邻控件。
-     轨道尺寸、位置与视觉都不受影响，`inset` 让 input 撑满 containment 块，不能再写死宽高。 */
-  .ui-switch input {
-    position: absolute;
-    inset: -7px;
-    width: auto;
-    height: auto;
-    margin: 0;
-    opacity: 0;
-    cursor: pointer;
-  }
-
-  .ui-switch-track {
-    display: inline-flex;
-    align-items: center;
-    width: 30px;
-    height: 17px;
-    padding: 2px;
-    border: 1px solid var(--line);
-    border-radius: 999px;
-    background: var(--panel-muted);
-    transition:
-      background 120ms ease,
-      border-color 120ms ease;
-  }
-
-  .ui-switch-knob {
-    width: 11px;
-    height: 11px;
-    border-radius: 999px;
-    background: var(--text-faint);
-    transition:
-      transform 130ms ease,
-      background 120ms ease;
-  }
-
-  .ui-switch input:checked + .ui-switch-track {
-    border-color: color-mix(in srgb, var(--green) 45%, transparent);
-    background: color-mix(in srgb, var(--green) 22%, transparent);
-  }
-
-  .ui-switch input:checked + .ui-switch-track .ui-switch-knob {
-    transform: translateX(13px);
-    background: var(--green);
-  }
-
-  /* 禁用只掉颜色与指针，轨道尺寸与位置不变 */
-  .ui-switch.is-disabled {
-    cursor: default;
-  }
-
-  .ui-switch.is-disabled input {
-    cursor: default;
-  }
-
-  .ui-switch.is-disabled .ui-switch-track {
-    opacity: 0.45;
-  }
-
-  .ui-switch input:focus-visible + .ui-switch-track {
-    outline: 1px solid var(--text-faint);
-    outline-offset: 2px;
-  }
-
   .control-steps {
     display: grid;
     gap: 4px;
@@ -4500,16 +3972,12 @@ html[data-theme='tokyo-night-light'] .mica-config-ui {
     color: var(--red);
   }
 
-  /* 输入框右侧叠一个图标按钮（API Key 的明文开关）：外框高度由 text-input 决定 */
+  /* 输入框右侧叠一个图标按钮（API Key 的明文开关）。 */
   .config-input-with-action {
     position: relative;
     display: block;
     /* 跟着行内输入框一起收窄，否则明文按钮会跑到分组最右边、离输入框半个屏幕。 */
     max-width: 420px;
-  }
-
-  .config-input-with-action > .text-input {
-    padding-right: 38px;
   }
 
   .config-input-action {
@@ -4521,20 +3989,7 @@ html[data-theme='tokyo-night-light'] .mica-config-ui {
     width: 22px;
     height: 22px;
     padding: 0;
-    border: 0;
-    border-radius: var(--radius-sm);
-    background: transparent;
-    color: var(--text-faint);
-    cursor: pointer;
     transform: translateY(-50%);
-    transition:
-      background 100ms ease,
-      color 100ms ease;
-  }
-
-  .config-input-action:hover {
-    background: var(--panel-hover);
-    color: var(--text);
   }
 
   /* 目录列表字段（插件设置里的「搜索目录」这类）：一行一个目录，右侧是移除。
@@ -4566,538 +4021,35 @@ html[data-theme='tokyo-night-light'] .mica-config-ui {
     gap: 6px;
   }
 
-  /* 自绘下拉：触发器外观就是 .text-input，弹层用页面自己的配色画。
-     原生 select 的弹层由系统窗口绘制，圆角、勾选、位置都不受页面控制。 */
   .ui-select {
     position: relative;
     display: block;
     max-width: 420px;
-  }
-
-  .ui-select-trigger {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    width: 100%;
-    max-width: none;
-    padding-right: 6px;
-    text-align: left;
-    cursor: pointer;
-  }
-
-  .ui-select-trigger:disabled {
-    cursor: default;
-  }
-
-  .ui-select-value {
-    flex: 1;
     min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
   }
 
-  .ui-select-value.is-placeholder {
-    color: var(--text-faint);
-  }
-
-  .ui-select-chevron {
-    flex: 0 0 auto;
-    color: var(--text-faint);
-    transition: transform 120ms ease;
-  }
-
-  .ui-select.is-open .ui-select-chevron {
-    transform: rotate(180deg);
-  }
-
-  .ui-select-menu {
-    position: absolute;
-    z-index: 40;
-    top: calc(100% + 4px);
-    left: 0;
-    width: 100%;
-    box-sizing: border-box;
-    /* 几百个分支也不能铺满整屏：弹层自己限高，选项在里面滚动。 */
-    max-height: 264px;
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-    padding: 4px;
-    border: 1px solid var(--line-strong);
-    border-radius: var(--radius-lg);
-    background: var(--panel);
-    box-shadow: 0 12px 28px rgb(0 0 0 / 45%);
-  }
-
-  .ui-select-list {
-    min-height: 0;
-    overflow-y: auto;
-  }
-
-  .ui-select-filter {
-    flex: 0 0 auto;
-    padding: 0 0 4px;
-  }
-
-  .ui-select-filter-input {
-    width: 100%;
-    height: 26px;
-    box-sizing: border-box;
-    padding: 0 8px;
-    border: 1px solid var(--line);
-    border-radius: var(--radius-sm);
-    background: var(--bg);
-    color: var(--text);
-    font-size: var(--text-aux);
-    font-family: inherit;
-  }
-
-  .ui-select-filter-input:focus-visible {
-    outline: 1px solid var(--accent);
-    outline-offset: -1px;
-  }
-
-  .ui-select-group {
-    padding: 6px 8px 2px;
-    color: var(--text-faint);
-    font-size: var(--text-aux);
-  }
-
-  .ui-select-empty {
-    padding: 8px;
-    color: var(--text-faint);
-    font-size: var(--text-aux);
-  }
-
-  /* 密集工具栏里的尺寸：与旁边 24px 的输入框等高，行内不会一高一低。 */
   .ui-select.is-compact {
-    display: inline-flex;
     max-width: none;
-    /* 作为 flex 项放进工具栏时允许被压缩，长标签才会走省略号而不是把一行撑开。 */
-    min-width: 0;
-  }
-
-  .ui-select.is-compact .ui-select-trigger {
-    height: 24px;
-    padding: 0 5px;
-    border-radius: var(--radius-sm);
     font-size: var(--text-aux);
   }
 
-  .ui-select.is-compact .ui-select-menu {
-    max-height: 248px;
-    border-radius: var(--radius-md);
-  }
-
-  .ui-select.is-compact .ui-select-option {
-    height: 24px;
-    font-size: var(--text-aux);
-  }
-
-  .ui-select.is-compact .ui-select-group,
-  .ui-select.is-compact .ui-select-empty {
-    font-size: calc(var(--text-aux) - 1px);
-  }
-
-  .ui-select-option {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    height: 28px;
-    padding: 0 8px;
-    border-radius: var(--radius-sm);
-    color: var(--text);
-    font-size: var(--text-body);
-    cursor: pointer;
-    white-space: nowrap;
-  }
-
-  .ui-select-option.is-active {
-    background: var(--panel-hover);
-  }
-
-  .ui-select-option.is-selected {
-    color: var(--text);
-    font-weight: 500;
-  }
-
-  .ui-select-option.is-disabled {
-    color: var(--text-faint);
-    cursor: default;
-  }
-
-  .ui-select-option-text {
-    flex: 1;
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-
-  .ui-select-check {
-    flex: 0 0 auto;
-    color: var(--accent);
-    font-size: var(--text-aux);
-  }
-
-  /* 日期字段：文本输入 + 自绘月历。原生 `type="date"` 的弹层由系统绘制，
-     位置与配色都不受页面控制，内嵌视图里会飘到控件外。 */
   .ui-date {
-    position: relative;
     display: inline-flex;
-    box-sizing: border-box;
-    align-items: center;
     width: 100%;
     min-width: 0;
   }
 
-  .ui-date-input {
-    /* 右侧让出一条给日历按钮，文字不会压在图标下面。 */
-    padding-right: 30px;
-    font-variant-numeric: tabular-nums;
-  }
-
-  .ui-date-trigger {
-    position: absolute;
-    right: 1px;
-    display: grid;
-    place-items: center;
-    width: 26px;
-    height: calc(var(--control-h) - 4px);
-    padding: 0;
-    border: 0;
-    border-radius: var(--radius-sm);
-    background: transparent;
-    color: var(--text-soft);
-    cursor: pointer;
-  }
-
-  .ui-date-trigger:hover:not(:disabled) {
-    background: var(--panel-muted);
-    color: var(--text);
-  }
-
-  .ui-date-panel {
-    position: absolute;
-    top: calc(100% + 4px);
-    left: 0;
-    z-index: 40;
-    width: 232px;
-    padding: 6px;
-    border: 1px solid var(--line-strong);
-    border-radius: var(--radius-md);
-    background: var(--panel);
-    box-shadow: 0 12px 30px rgb(0 0 0 / 32%);
-  }
-
-  .ui-date-head {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 4px;
-    margin-bottom: 4px;
-  }
-
-  .ui-date-title {
-    color: var(--text);
-    font-size: var(--text-body);
-    font-weight: 600;
-  }
-
-  .ui-date-nav {
-    display: grid;
-    place-items: center;
-    width: 22px;
-    height: 22px;
-    padding: 0;
-    border: 0;
-    border-radius: var(--radius-sm);
-    background: transparent;
-    color: var(--text-soft);
-    cursor: pointer;
-  }
-
-  .ui-date-nav:hover {
-    background: var(--panel-hover);
-    color: var(--text);
-  }
-
-  .ui-date-weekdays,
-  .ui-date-grid {
-    display: grid;
-    grid-template-columns: repeat(7, 1fr);
-    gap: 1px;
-  }
-
-  .ui-date-weekdays {
-    margin-bottom: 2px;
-    color: var(--text-faint);
-    font-size: calc(var(--text-aux) - 1px);
-    text-align: center;
-  }
-
-  .ui-date-day {
-    height: 26px;
-    padding: 0;
-    border: 0;
-    border-radius: var(--radius-sm);
-    background: transparent;
-    color: var(--text);
-    font-family: inherit;
-    font-size: var(--text-aux);
-    font-variant-numeric: tabular-nums;
-    cursor: pointer;
-  }
-
-  .ui-date-day.is-outside {
-    color: var(--text-faint);
-  }
-
-  .ui-date-day.is-active {
-    background: var(--panel-hover);
-  }
-
-  .ui-date-day.is-today {
-    box-shadow: inset 0 0 0 1px var(--line-strong);
-  }
-
-  .ui-date-day.is-selected {
-    background: var(--accent);
-    color: #fff;
-    font-weight: 600;
-  }
-
-  .ui-date-day:disabled {
-    /* 禁用态只掉颜色，尺寸与位置不动 */
-    color: var(--text-faint);
-    opacity: 0.45;
-    cursor: not-allowed;
-  }
-
-  .ui-date-foot {
-    display: flex;
-    justify-content: flex-end;
-    gap: 6px;
-    margin-top: 4px;
-    padding-top: 4px;
-    border-top: 1px solid var(--line);
-  }
-
-  .ui-date-foot-button {
-    height: 22px;
-    padding: 0 7px;
-    border: 1px solid transparent;
-    border-radius: var(--radius-sm);
-    background: transparent;
-    color: var(--text-soft);
-    font-family: inherit;
-    font-size: var(--text-aux);
-    cursor: pointer;
-  }
-
-  .ui-date-foot-button:hover {
-    border-color: var(--line);
-    background: var(--panel-hover);
-    color: var(--text);
-  }
-
-  .ui-date.is-compact .ui-date-input {
-    height: 24px;
-    padding: 0 24px 0 6px;
-    font-size: var(--text-aux);
-  }
-
-  .ui-date.is-compact .ui-date-trigger {
-    width: 22px;
-    height: 20px;
-  }
-
-  /* 协议二选一：原生 select 的字体与内边距跟旁边的输入框对不齐，所以自绘一组按钮 */
   .config-segmented {
     display: inline-flex;
-    box-sizing: border-box;
-    gap: 2px;
     justify-self: start;
-    /* 与设置行里的 text-input 等高，同一行里才不会有落差 */
-    height: var(--control-h);
-    padding: 2px;
-    border: 1px solid var(--line);
-    border-radius: var(--radius-md);
-    background: var(--bg);
-  }
-
-  /* 密集工具栏：与 24px 的下拉、日期字段、compact 按钮等高。 */
-  .config-segmented.is-compact {
-    height: 24px;
-    padding: 1px;
-    border-radius: var(--radius-sm);
-  }
-
-  /* 数字项：− / 输入 / + 落在同一条边框里，单位跟在后面。
-     三段的字号与内边距各自一套，只有共用高度 + 一条外框才对得齐。 */
-  .config-stepper {
-    display: inline-flex;
-    box-sizing: border-box;
-    align-items: center;
-    justify-self: start;
-    gap: 0;
-    height: var(--control-h);
-    padding: 0 2px;
-    border: 1px solid var(--line);
-    border-radius: var(--radius-md);
-    background: var(--bg);
-  }
-
-  .config-stepper:focus-within {
-    border-color: var(--accent-line);
-  }
-
-  .config-stepper.is-invalid {
-    border-color: var(--danger);
-  }
-
-  .config-stepper-btn {
-    display: grid;
-    place-items: center;
-    width: 24px;
-    height: calc(var(--control-h) - 8px);
-    padding: 0;
-    border: 0;
-    border-radius: var(--radius-sm);
-    background: transparent;
-    color: var(--text-soft);
-    font-family: inherit;
-    font-size: 15px;
-    line-height: 1;
-    cursor: pointer;
-  }
-
-  .config-stepper-btn:hover:not(:disabled) {
-    background: var(--panel-muted);
-    color: var(--text);
-  }
-
-  .config-stepper-btn:disabled {
-    color: var(--text-muted);
-    cursor: default;
-  }
-
-  .config-stepper .config-stepper-input,
-  .config-stepper .text-input {
-    width: 64px;
-    height: calc(var(--control-h) - 8px);
-    padding: 0;
-    border: 0;
-    background: transparent;
-    text-align: center;
-    font-variant-numeric: tabular-nums;
-  }
-
-  .config-stepper .text-input:focus {
-    outline: none;
-    box-shadow: none;
-  }
-
-  .config-stepper-unit {
-    /* 单位定宽：`k tokens` / `分钟` / `次` 长短不一时，右边这组不会左右跳。 */
-    min-width: 56px;
-    padding-right: 6px;
-    padding-left: 2px;
-    color: var(--text-muted);
-    font-size: var(--text-aux);
-    white-space: nowrap;
-  }
-
-  /* 原生 spinner 与自己的 −/+ 重复，还占掉 16px 宽度。 */
-  .config-stepper-input::-webkit-outer-spin-button,
-  .config-stepper-input::-webkit-inner-spin-button {
-    margin: 0;
-    -webkit-appearance: none;
-  }
-
-  .config-stepper-input {
-    appearance: textfield;
-    -moz-appearance: textfield;
-  }
-
-  .config-segment {
-    /* 填满外框的内容区，而不是按 --control-h 反推：compact 外框只有 24px，
-       减完边框与内边距只剩 20px，写死 24px 的选项会从框里冒出来 4px。 */
-    height: 100%;
-    padding: 0 12px;
-    border: 0;
-    border-radius: var(--radius-sm);
-    background: transparent;
-    color: var(--text-soft);
-    font-family: inherit;
-    font-size: var(--text-aux);
-    white-space: nowrap;
-    cursor: pointer;
-    transition:
-      background 100ms ease,
-      color 100ms ease;
-  }
-
-  .config-segment:hover:not(:disabled) {
-    color: var(--text);
-  }
-
-  .config-segment.is-active {
-    background: var(--panel-muted);
-    color: var(--text);
-  }
-
-  .config-segment:disabled {
-    opacity: 0.55;
-    cursor: default;
+    max-width: 100%;
+    min-width: 0;
   }
 
   .config-chip-list {
     display: flex;
     flex-wrap: wrap;
     gap: 6px;
-  }
-
-  .config-chip {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    max-width: 100%;
-    height: 24px;
-    padding: 0 4px 0 8px;
-    border: 1px solid var(--line);
-    border-radius: var(--radius-sm);
-    background: var(--panel-muted);
-    font-family: var(--font-mono);
-    font-size: var(--text-label);
-  }
-
-  .config-chip-label {
-    min-width: 0;
-    overflow: hidden;
-    color: var(--text);
-    white-space: nowrap;
-    text-overflow: ellipsis;
-  }
-
-  .config-chip-remove {
-    display: grid;
-    place-items: center;
-    width: 16px;
-    height: 16px;
-    padding: 0;
-    border: 0;
-    border-radius: var(--radius-sm);
-    background: transparent;
-    color: var(--text-faint);
-    font-size: 13px;
-    line-height: 1;
-    cursor: pointer;
-  }
-
-  .config-chip-remove:hover:not(:disabled) {
-    background: color-mix(in srgb, var(--red) 22%, transparent);
-    color: var(--red);
   }
 
   /* 添加模型：输入框与按钮同一行且等高，按钮不参与收缩 */
@@ -5117,7 +4069,7 @@ html[data-theme='tokyo-night-light'] .mica-config-ui {
   }
 
   /* input 的 intrinsic 宽度会把这一行撑出分组，靠 min-width: 0 才真的能收缩 */
-  .config-chip-add > .text-input {
+  .config-chip-add > .arco-input {
     min-width: 0;
     flex: 1 1 auto;
   }
@@ -5149,12 +4101,6 @@ html[data-theme='tokyo-night-light'] .mica-config-ui {
     .entry-row-name {
       max-width: none;
     }
-  }
-
-  .text-input-invalid,
-  .text-input-invalid:focus {
-    border-color: color-mix(in srgb, var(--red) 55%, var(--line));
-    background: color-mix(in srgb, var(--red) 8%, var(--panel-muted));
   }
 
   /* Browser Control / Terminal Control：服务状态 · 技能文档 · 接口文档（实例活在应用里，agent 经 HTTP 操控） */
@@ -5450,26 +4396,12 @@ html[data-theme='tokyo-night-light'] .mica-config-ui {
     left: 9px;
     color: var(--text-faint);
     pointer-events: none;
+    z-index: 1;
   }
 
-  .plugin-catalog-filter input {
+  .plugin-catalog-filter .arco-input {
     width: 100%;
-    height: var(--control-h);
-    padding: 0 9px 0 28px;
-    border: 1px solid var(--line);
-    border-radius: var(--radius-md);
-    background: var(--panel);
-    color: var(--text);
-    font-size: var(--text-aux);
-  }
-
-  .plugin-catalog-filter input::placeholder {
-    color: var(--text-faint);
-  }
-
-  .plugin-catalog-filter input:focus-visible {
-    border-color: var(--line-strong);
-    outline: none;
+    padding-left: 28px;
   }
 
   .plugin-section {
@@ -6523,6 +5455,8 @@ html[data-theme='tokyo-night-light'] .mica-config-ui {
 
   /* 自动刷新是个开关：圆点表示当前是否在自动拉数据，标签保持稳定（不写「开/关」） */
   .perf-auto-dot {
+    display: block;
+    flex: none;
     width: 7px;
     height: 7px;
     border-radius: 999px;
@@ -6750,8 +5684,10 @@ html[data-theme='tokyo-night-light'] .mica-config-ui {
       display: none;
     }
   }
+
 }
 
+@scope (.mica-config-ui) {
 /* Capabilities：新会话默认能力 */
 .capability-page {
   display: grid;
@@ -7411,132 +6347,98 @@ html[data-theme='tokyo-night-light'] .mica-config-ui {
   line-height: 1.5;
 }
 
-  /* 数据表：统计页（By source / By session）与会话详情共用的那一份形态。
+/* 数据表：统计页（By source / By session）与会话详情共用的那一份形态。
      只提供骨架——表头、列宽、行分隔、翻页；单元格内容由调用方渲染，所以同一个组件
      能画进度条、按钮或纯文本，而边框与行高在整页保持一致。
      窄容器里不横向滚动：先把次要列退场（见下面的 @container），而不是让整张表左右滑。 */
-  .data-table-scope {
-    container-type: inline-size;
-  }
+.data-table-scope {
+  container-type: inline-size;
+}
 
-  .data-table {
-    width: 100%;
-    border-collapse: collapse;
-    table-layout: fixed;
-    font-size: var(--text-label);
-  }
+/* 排序入口就是表头本身：只有声明显式 `sortable` 的列才可点，其余列不假装能点。 */
+.data-table-sort {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  cursor: pointer;
+  transition: color 120ms ease;
+}
 
-  .data-table th {
-    padding: 0 12px 6px 0;
-    color: var(--text-faint);
-    font-size: var(--text-micro);
-    font-weight: 500;
-    letter-spacing: 0.06em;
-    text-align: left;
-    text-transform: uppercase;
-    white-space: nowrap;
-  }
+.data-table-sort:hover {
+  color: var(--text-soft);
+}
 
-  .data-table th:last-child,
-  .data-table td:last-child {
-    padding-right: 0;
-  }
+.data-table-sort.is-active {
+  color: var(--text);
+}
 
-  .data-table th.is-num,
-  .data-table td.is-num {
-    text-align: right;
-  }
+.data-table-arrow {
+  font-size: 8px;
+  line-height: 1;
+}
 
-  .data-table td {
-    padding: 7px 12px 7px 0;
-    border-top: 1px solid var(--line-soft);
-    color: var(--text);
-    vertical-align: middle;
-  }
+.data-table-label-narrow {
+  display: none;
+}
 
-  /* 排序入口就是表头本身：只有声明显式 `sortable` 的列才可点，其余列不假装能点。 */
-  .data-table-sort {
-    display: inline-flex;
-    align-items: center;
-    gap: 3px;
-    margin: 0;
-    padding: 0;
-    border: 0;
-    background: none;
-    color: inherit;
-    font: inherit;
-    letter-spacing: inherit;
-    text-transform: inherit;
-    cursor: pointer;
-    transition: color 120ms ease;
-  }
+.data-table-empty {
+  padding: 14px 0 2px;
+  color: var(--text-faint);
+  font-size: var(--text-micro);
+}
 
-  .data-table-sort:hover {
-    color: var(--text-soft);
-  }
+.data-table-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line-soft);
+  color: var(--text-faint);
+  font-size: var(--text-micro);
+  font-variant-numeric: tabular-nums;
+}
 
-  .data-table-sort.is-active {
-    color: var(--text);
-  }
+.data-table-pager {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
 
-  .data-table-arrow {
-    font-size: 8px;
-    line-height: 1;
-  }
+.data-table-page {
+  min-width: 44px;
+  text-align: center;
+  color: var(--text-soft);
+  font-variant-numeric: tabular-nums;
+}
 
-  .data-table-label-narrow {
+/* 列退场按**卡片自己的宽度**判断，不看视口：同一张表在弹窗里和整页里都成立。 */
+@container (max-width: 720px) {
+  .data-table-cell.is-narrow-secondary {
     display: none;
   }
 
-  .data-table-empty {
-    padding: 14px 0 2px;
-    color: var(--text-faint);
-    font-size: var(--text-micro);
+  .data-table-label-wide {
+    display: none;
   }
 
-  .data-table-footer {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 8px;
-    margin-top: 8px;
-    padding-top: 8px;
-    border-top: 1px solid var(--line-soft);
-    color: var(--text-faint);
-    font-size: var(--text-micro);
-    font-variant-numeric: tabular-nums;
+  .data-table-label-narrow {
+    display: inline;
   }
+}
 
-  .data-table-pager {
-    display: flex;
-    align-items: center;
-    gap: 4px;
+@container (max-width: 540px) {
+  .data-table-cell.is-narrow-tertiary {
+    display: none;
   }
-
-  .data-table-page {
-    min-width: 44px;
-    text-align: center;
-    color: var(--text-soft);
-    font-variant-numeric: tabular-nums;
-  }
-
-  /* 列退场按**卡片自己的宽度**判断，不看视口：同一张表在弹窗里和整页里都成立。 */
-  @container (max-width: 720px) {
-    .data-table-cell.is-narrow-secondary {
-      display: none;
-    }
-
-    .data-table-label-wide {
-      display: none;
-    }
-
-    .data-table-label-narrow {
-      display: inline;
-    }
-  }
-
-  @container (max-width: 540px) {
-    .data-table-cell.is-narrow-tertiary {
-      display: none;
-    }
-  }
+}
+}

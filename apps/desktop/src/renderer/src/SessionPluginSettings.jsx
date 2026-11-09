@@ -1,3 +1,4 @@
+import { ArcoAction } from '@mica-config-ui/web'
 import { useCallback, useEffect, useState } from 'react'
 import {
   LlmSettingsSection,
@@ -101,13 +102,13 @@ export function PluginSettingsPanel({ plugin, running, savingKey, error, onSave,
             字段时也有地方可点（有面板的插件即使 fields 为空也会出现在这一节）。 */}
         {plugin.panel ? (
           <SettingRow label={plugin.panel.label} hint="在对话右侧打开面板，可随时收起">
-            <button
+            <ArcoAction
               type="button"
               className="session-plugin-open-panel"
               onClick={() => onOpenPanel?.(plugin.id)}
             >
               打开
-            </button>
+            </ArcoAction>
           </SettingRow>
         ) : null}
         {plainFields.map((field) => renderField({ plugin, field, running, savingKey, onSave }))}
@@ -158,14 +159,14 @@ function renderField({ plugin, field, running, savingKey, onSave }) {
           onChange={(next) => void onSave(plugin.id, field.key, next)}
         />
         {overridden ? (
-          <button
+          <ArcoAction
             type="button"
             className="session-plugin-reset"
             disabled={running || saving}
             onClick={() => void onSave(plugin.id, field.key, null)}
           >
             跟随默认
-          </button>
+          </ArcoAction>
         ) : null}
       </div>
     </SettingRow>

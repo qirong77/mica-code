@@ -42,6 +42,7 @@ describe('stale buttons', () => {
     });
     expect(normalizeQuickButton({ ...button, source: 'model', createdAt: -1, updatedAt: 'bad' })).toEqual({
       ...button,
+      style: { color: 'accent' },
       source: 'model',
     });
   });
@@ -55,6 +56,7 @@ describe('normalizeQuickButton', () => {
       kind: 'open',
       url: 'https://example.com/demand/1',
       target: 'browser',
+      style: { color: 'accent' },
     });
     expect(
       normalizeQuickButton({
@@ -70,6 +72,7 @@ describe('normalizeQuickButton', () => {
       label: '追问',
       kind: 'compose',
       text: '再查一下日志',
+      style: { color: 'accent' },
     });
     expect(
       normalizeQuickButton({ id: 'job', label: '跑测试', kind: 'session', text: '跑一遍单测', role: '需求开发' }),
@@ -79,6 +82,7 @@ describe('normalizeQuickButton', () => {
       label: '看日志',
       kind: 'path',
       path: '/tmp/a.log',
+      style: { color: 'accent' },
     });
   });
 
@@ -227,20 +231,31 @@ describe('formatQuickButtons', () => {
 describe('按钮外观规格（style）', () => {
   const base = { id: 'open', label: '打开', kind: 'open', url: 'https://example.com/1' };
 
+  it('defaults missing colors to the theme accent without changing the other style fields', () => {
+    for (const style of [undefined, {}, { shape: 'soft' }, { icon: 'globe', shape: 'plain', iconOnly: true }]) {
+      expect(normalizeQuickButton({ ...base, style })?.style).toEqual({ ...style, color: 'accent' });
+    }
+  });
+
+  it.each(['accent', 'danger', 'success', 'warn'])('preserves the explicit %s intent', (color) => {
+    const style = { color, icon: 'globe', shape: 'soft', iconOnly: true };
+    expect(normalizeQuickButton({ ...base, style })?.style).toEqual(style);
+  });
+
   it('只保留枚举里的图标 / 颜色 / 形状，其余当没写', () => {
     expect(normalizeQuickButton({ ...base, style: { icon: 'globe', color: 'accent' } })).toMatchObject({
       style: { icon: 'globe', color: 'accent' },
     });
     expect(normalizeQuickButton({ ...base, style: { color: 'purple', shape: 'round' } })).toBeTruthy();
-    // 认不出的值整份丢掉：宁可画默认按钮，也不要画一颗「看着像主操作」的普通按钮
-    expect(normalizeQuickButton({ ...base, style: { color: 'purple' } })?.style).toBeUndefined();
-    expect(normalizeQuickButton({ ...base, style: { shape: 'text' } })?.style).toBeUndefined();
-    expect(normalizeQuickButton({ ...base, style: { iconOnly: false } })?.style).toBeUndefined();
+    expect(normalizeQuickButton({ ...base, style: { color: 'purple' } })?.style).toEqual({ color: 'accent' });
+    expect(normalizeQuickButton({ ...base, style: { shape: 'text' } })?.style).toEqual({ color: 'accent' });
+    expect(normalizeQuickButton({ ...base, style: { iconOnly: false } })?.style).toEqual({ color: 'accent' });
   });
 
   it('keeps iconOnly only when there is an icon to draw', () => {
     expect(normalizeQuickButton({ ...base, style: { icon: 'external', iconOnly: true } })?.style).toEqual({
       icon: 'external',
+      color: 'accent',
       iconOnly: true,
     });
   });

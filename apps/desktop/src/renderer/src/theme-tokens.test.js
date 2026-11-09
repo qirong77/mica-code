@@ -325,7 +325,7 @@ describe('app.css 颜色 token 主题契约', () => {
    * 写死一个近黑在 `light` / `latte` / `tokyo-night-light` 上就读不出来。
    */
   it('提问卡片的识别色是独立的 --color-ask，字色在每个主题上可读', () => {
-    for (const selector of ['.chat-ask-mark', '.chat-ask-submit']) {
+    for (const selector of ['.chat-ask-mark']) {
       const body = ruleBody(selector)
       expect(body, `${selector} 存在`).not.toBeNull()
       expect(body, `${selector} 底色用 --color-ask`).toContain('background: var(--color-ask)')
@@ -333,6 +333,12 @@ describe('app.css 颜色 token 主题契约', () => {
         'color: var(--color-ask-contrast)'
       )
     }
+
+    const submit = ruleBody('.chat-ask-submit')
+    expect(submit).toContain('--primary-6: from var(--color-ask) r g b')
+    expect(submit).toContain('--color-white: var(--color-ask-contrast)')
+    const view = readFileSync(resolve(RENDERER_DIR, 'ChatView.jsx'), 'utf8')
+    expect(view).toMatch(/className="chat-ask-submit"\s+appearance="primary"/)
 
     for (const theme of THEMES) {
       const block = themeBlocks.get(theme.id)
@@ -379,8 +385,6 @@ describe('app.css 颜色 token 主题契约', () => {
       '.chat-command-palette',
       '.chat-popover',
       '.chat-image-preview img',
-      '.chat-modal',
-      '.chat-btw-jump',
       '.quick-pick-panel',
       '.chat-ask-card.is-modal'
     ]
@@ -399,11 +403,15 @@ describe('app.css 颜色 token 主题契约', () => {
     }
   })
 
-  it('亮色主题替换查找条输入框的黑色内凹底', () => {
-    expect(ruleBody('.chat-find-field')).toContain('rgb(0 0 0 / 28%)')
-    expect(ruleBody('.chat-find-field', { light: true })).toContain(
-      'background: var(--color-canvas)'
-    )
+  it('查找输入与弹窗不再绘制旧皮肤，改由 Arco 和共享主题负责', () => {
+    expect(ruleBody('.chat-find-field')).toBeNull()
+    expect(ruleBody('.chat-modal')).not.toContain('box-shadow:')
+    const source = readFileSync(resolve(RENDERER_DIR, 'ChatFind.jsx'), 'utf8')
+    expect(source).toContain('<Input')
+    expect(source).not.toContain('className="chat-find-input"')
+    const arco = readFileSync(resolve(RENDERER_DIR, '../../../../../packages/mica-config-ui/web/arco-settings.css'), 'utf8')
+    expect(arco).toContain('--color-bg-2: var(--mica-arco-panel)')
+    expect(arco).toContain('--color-text-1: var(--mica-arco-text)')
   })
 
   /**
@@ -466,7 +474,7 @@ describe('app.css 颜色 token 主题契约', () => {
   it('亮色过程文字取 label-tertiary，不跟着正文走', () => {
     const body = blockFor(
       cleanCss,
-      /^html\[data-appearance='light'\] \.chat-view,\s*\nhtml\[data-appearance='light'\] \.chat-modal-overlay\s*\{/m
+      /^html\[data-appearance='light'\] \.chat-view,\s*\nhtml\[data-appearance='light'\] \.chat-modal-arco-wrap\s*\{/m
     )
     expect(body).not.toBeNull()
     expect(body).toContain('--chat-muted: var(--color-fg-dim)')

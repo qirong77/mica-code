@@ -1,4 +1,5 @@
 import { Component, forwardRef, lazy } from 'react'
+import { ArcoAction } from '@mica-config-ui/web'
 
 /** Keep a missing named export out of React.lazy's cached resolved state (#306). */
 export async function loadView(loader, name) {
@@ -46,17 +47,13 @@ class ViewBoundary extends Component {
           className={`flex flex-col items-center justify-center gap-2 bg-panel p-4 text-xs text-fg-muted ${this.props.overlay ? 'fixed inset-0 z-[10000]' : ''}`}
         >
           <span>此视图加载失败，请重试。</span>
-          <button
-            type="button"
-            className="rounded-md border border-line px-3 py-1 text-fg-strong hover:bg-overlay"
-            onClick={this.retry}
-          >
+          <ArcoAction className="px-3 py-1" onClick={this.retry}>
             重试加载
-          </button>
+          </ArcoAction>
           {this.props.viewProps.onClose && (
-            <button type="button" onClick={this.props.viewProps.onClose}>
+            <ArcoAction onClick={this.props.viewProps.onClose}>
               关闭
-            </button>
+            </ArcoAction>
           )}
         </div>
       )

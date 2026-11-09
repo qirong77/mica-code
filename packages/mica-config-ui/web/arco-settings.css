@@ -1,54 +1,372 @@
+@layer theme, base, mica-arco, components, utilities;
+
 @import '@arco-design/web-react/es/Button/style/index.css' layer(mica-arco);
 @import '@arco-design/web-react/es/Input/style/index.css' layer(mica-arco);
 @import '@arco-design/web-react/es/Radio/style/index.css' layer(mica-arco);
 @import '@arco-design/web-react/es/Select/style/index.css' layer(mica-arco);
 @import '@arco-design/web-react/es/Trigger/style/index.css' layer(mica-arco);
+@import '@arco-design/web-react/es/Popover/style/index.css' layer(mica-arco);
 @import '@arco-design/web-react/es/Empty/style/index.css' layer(mica-arco);
 @import '@arco-design/web-react/es/Checkbox/style/index.css' layer(mica-arco);
 @import '@arco-design/web-react/es/InputTag/style/index.css' layer(mica-arco);
 @import '@arco-design/web-react/es/Tag/style/index.css' layer(mica-arco);
 @import '@arco-design/web-react/es/_class/OverflowEllipsis/style/index.css' layer(mica-arco);
+@import '@arco-design/web-react/es/InputNumber/style/index.css' layer(mica-arco);
+@import '@arco-design/web-react/es/Switch/style/index.css' layer(mica-arco);
+@import '@arco-design/web-react/es/Alert/style/index.css' layer(mica-arco);
+@import '@arco-design/web-react/es/Collapse/style/index.css' layer(mica-arco);
+@import '@arco-design/web-react/es/DatePicker/style/index.css' layer(mica-arco);
+@import '@arco-design/web-react/es/Modal/style/index.css' layer(mica-arco);
+@import '@arco-design/web-react/es/Table/style/index.css' layer(mica-arco);
+@import '@arco-design/web-react/es/Pagination/style/index.css' layer(mica-arco);
+@import '@arco-design/web-react/es/Spin/style/index.css' layer(mica-arco);
+@import '@arco-design/web-react/es/Calendar/style/index.css' layer(mica-arco);
+
+body.mica-arco-theme {
+  --mica-arco-bg: var(--color-canvas);
+  --mica-arco-panel: var(--color-panel);
+  --mica-arco-raised: var(--color-panel-hi);
+  --mica-arco-active: var(--color-active);
+  --mica-arco-text: var(--color-fg-strong);
+  --mica-arco-text-soft: var(--color-fg-soft);
+  --mica-arco-text-faint: var(--color-fg-faint);
+  --mica-arco-line-soft: var(--color-line-soft);
+  --mica-arco-line: var(--color-line);
+  --mica-arco-line-strong: var(--color-line-strong);
+  --mica-arco-overlay: var(--color-overlay);
+  --mica-arco-overlay-strong: var(--color-overlay-strong);
+  --mica-arco-accent: var(--color-accent);
+  --mica-arco-accent-hover: var(--color-accent-hover);
+  --mica-arco-accent-contrast: var(--color-canvas);
+  --mica-arco-danger: var(--color-danger);
+  --mica-arco-warning: var(--color-warn);
+  --mica-arco-success: var(--color-success);
+  --mica-arco-link: var(--color-info);
+}
+
+.mica-config-ui {
+  --mica-arco-bg: var(--bg);
+  --mica-arco-panel: var(--panel);
+  --mica-arco-raised: var(--panel-muted);
+  --mica-arco-active: var(--panel-hover);
+  --mica-arco-text: var(--text);
+  --mica-arco-text-soft: var(--text-soft);
+  --mica-arco-text-faint: var(--text-faint);
+  --mica-arco-line-soft: var(--line-soft);
+  --mica-arco-line: var(--line);
+  --mica-arco-line-strong: var(--line-strong);
+  --mica-arco-overlay: var(--overlay);
+  --mica-arco-overlay-strong: var(--overlay-strong);
+  --mica-arco-accent: var(--accent);
+  --mica-arco-accent-hover: var(--accent-hover);
+  --mica-arco-accent-contrast: var(--accent-contrast);
+  --mica-arco-danger: var(--red);
+  --mica-arco-warning: var(--amber);
+  --mica-arco-success: var(--green);
+  --mica-arco-link: var(--blue);
+}
+
+/* Arco 2.66 exposes base tokens only with normalize; keep the required tokens without that reset. */
+body.mica-arco-theme,
+.mica-config-ui {
+  --color-white: #fff;
+  --color-black: #000;
+  --color-bg-white: #fff;
+  --color-text-1: var(--mica-arco-text);
+  --color-text-2: var(--mica-arco-text-soft);
+  --color-text-3: var(--mica-arco-text-faint);
+  --color-text-4: var(--mica-arco-text-faint);
+  --color-bg-1: var(--mica-arco-bg);
+  --color-bg-2: var(--mica-arco-panel);
+  --color-bg-3: var(--mica-arco-panel);
+  --color-bg-4: var(--mica-arco-raised);
+  --color-bg-5: var(--mica-arco-active);
+  --color-bg-popup: var(--mica-arco-panel);
+  --color-fill-1: var(--mica-arco-overlay);
+  --color-fill-2: var(--mica-arco-raised);
+  --color-fill-3: var(--mica-arco-active);
+  --color-fill-4: var(--mica-arco-line-strong);
+  --color-border: var(--mica-arco-line);
+  --color-border-1: var(--mica-arco-line-soft);
+  --color-border-2: var(--mica-arco-line);
+  --color-border-3: var(--mica-arco-line-strong);
+  --color-border-4: var(--mica-arco-text-faint);
+  --color-neutral-1: var(--color-fill-1);
+  --color-neutral-2: var(--color-fill-2);
+  --color-neutral-3: var(--color-border-2);
+  --color-neutral-4: var(--color-border-3);
+  --color-neutral-5: var(--mica-arco-text-faint);
+  --color-neutral-6: var(--mica-arco-text-faint);
+  --color-neutral-7: var(--mica-arco-text-soft);
+  --color-neutral-8: var(--mica-arco-text-soft);
+  --color-neutral-9: var(--mica-arco-text);
+  --color-neutral-10: var(--mica-arco-text);
+  --color-secondary: var(--color-fill-2);
+  --color-secondary-hover: var(--color-fill-3);
+  --color-secondary-active: var(--mica-arco-overlay-strong);
+  --color-secondary-disabled: var(--color-fill-1);
+  --color-primary-light-1: color-mix(in srgb, var(--mica-arco-accent) 10%, transparent);
+  --color-primary-light-2: color-mix(in srgb, var(--mica-arco-accent) 18%, transparent);
+  --color-primary-light-3: color-mix(in srgb, var(--mica-arco-accent) 25%, transparent);
+  --color-primary-light-4: color-mix(in srgb, var(--mica-arco-accent) 35%, transparent);
+  --color-danger-light-1: color-mix(in srgb, var(--mica-arco-danger) 10%, transparent);
+  --color-danger-light-2: color-mix(in srgb, var(--mica-arco-danger) 18%, transparent);
+  --color-danger-light-3: color-mix(in srgb, var(--mica-arco-danger) 25%, transparent);
+  --color-danger-light-4: color-mix(in srgb, var(--mica-arco-danger) 35%, transparent);
+  --color-success-light-1: color-mix(in srgb, var(--mica-arco-success) 10%, transparent);
+  --color-success-light-2: color-mix(in srgb, var(--mica-arco-success) 18%, transparent);
+  --color-success-light-3: color-mix(in srgb, var(--mica-arco-success) 25%, transparent);
+  --color-success-light-4: color-mix(in srgb, var(--mica-arco-success) 35%, transparent);
+  --color-warning-light-1: color-mix(in srgb, var(--mica-arco-warning) 10%, transparent);
+  --color-warning-light-2: color-mix(in srgb, var(--mica-arco-warning) 18%, transparent);
+  --color-warning-light-3: color-mix(in srgb, var(--mica-arco-warning) 25%, transparent);
+  --color-warning-light-4: color-mix(in srgb, var(--mica-arco-warning) 35%, transparent);
+  --color-link-light-1: color-mix(in srgb, var(--mica-arco-link) 10%, transparent);
+  --color-link-light-2: color-mix(in srgb, var(--mica-arco-link) 18%, transparent);
+  --color-link-light-3: color-mix(in srgb, var(--mica-arco-link) 25%, transparent);
+  --color-link-light-4: color-mix(in srgb, var(--mica-arco-link) 35%, transparent);
+  --color-tooltip-bg: var(--mica-arco-active);
+  --color-mask-bg: rgb(0 0 0 / 55%);
+  --color-spin-layer-bg: var(--mica-arco-overlay);
+  --border-radius-none: 0;
+  --border-radius-small: 2px;
+  --border-radius-medium: 4px;
+  --border-radius-large: 8px;
+  --border-radius-circle: 50%;
+  /* Component CSS wraps these channel lists in rgb(). */
+  --primary-1: from color-mix(in srgb, var(--mica-arco-accent) 10%, var(--mica-arco-bg)) r g b;
+  --primary-2: from color-mix(in srgb, var(--mica-arco-accent) 18%, var(--mica-arco-bg)) r g b;
+  --primary-3: from color-mix(in srgb, var(--mica-arco-accent) 30%, var(--mica-arco-bg)) r g b;
+  --primary-4: from color-mix(in srgb, var(--mica-arco-accent) 60%, var(--mica-arco-bg)) r g b;
+  --primary-5: from var(--mica-arco-accent-hover) r g b;
+  --primary-6: from var(--mica-arco-accent) r g b;
+  --primary-7: from color-mix(in srgb, var(--mica-arco-accent) 85%, #000) r g b;
+  --red-1: from color-mix(in srgb, var(--mica-arco-danger) 10%, var(--mica-arco-bg)) r g b;
+  --red-2: from color-mix(in srgb, var(--mica-arco-danger) 18%, var(--mica-arco-bg)) r g b;
+  --red-3: from color-mix(in srgb, var(--mica-arco-danger) 30%, var(--mica-arco-bg)) r g b;
+  --red-4: from color-mix(in srgb, var(--mica-arco-danger) 60%, var(--mica-arco-bg)) r g b;
+  --red-5: from color-mix(in srgb, var(--mica-arco-danger) 85%, var(--mica-arco-text)) r g b;
+  --red-6: from var(--mica-arco-danger) r g b;
+  --red-7: from color-mix(in srgb, var(--mica-arco-danger) 85%, #000) r g b;
+  --green-1: from color-mix(in srgb, var(--mica-arco-success) 10%, var(--mica-arco-bg)) r g b;
+  --green-2: from color-mix(in srgb, var(--mica-arco-success) 18%, var(--mica-arco-bg)) r g b;
+  --green-3: from color-mix(in srgb, var(--mica-arco-success) 30%, var(--mica-arco-bg)) r g b;
+  --green-4: from color-mix(in srgb, var(--mica-arco-success) 60%, var(--mica-arco-bg)) r g b;
+  --green-5: from color-mix(in srgb, var(--mica-arco-success) 85%, var(--mica-arco-text)) r g b;
+  --green-6: from var(--mica-arco-success) r g b;
+  --green-7: from color-mix(in srgb, var(--mica-arco-success) 85%, #000) r g b;
+  --gold-1: from color-mix(in srgb, var(--mica-arco-warning) 10%, var(--mica-arco-bg)) r g b;
+  --gold-2: from color-mix(in srgb, var(--mica-arco-warning) 18%, var(--mica-arco-bg)) r g b;
+  --gold-3: from color-mix(in srgb, var(--mica-arco-warning) 30%, var(--mica-arco-bg)) r g b;
+  --gold-4: from color-mix(in srgb, var(--mica-arco-warning) 60%, var(--mica-arco-bg)) r g b;
+  --gold-5: from color-mix(in srgb, var(--mica-arco-warning) 85%, var(--mica-arco-text)) r g b;
+  --gold-6: from var(--mica-arco-warning) r g b;
+  --gold-7: from color-mix(in srgb, var(--mica-arco-warning) 85%, #000) r g b;
+  --blue-1: from color-mix(in srgb, var(--mica-arco-link) 10%, var(--mica-arco-bg)) r g b;
+  --blue-2: from color-mix(in srgb, var(--mica-arco-link) 18%, var(--mica-arco-bg)) r g b;
+  --blue-3: from color-mix(in srgb, var(--mica-arco-link) 30%, var(--mica-arco-bg)) r g b;
+  --blue-4: from color-mix(in srgb, var(--mica-arco-link) 60%, var(--mica-arco-bg)) r g b;
+  --blue-5: from color-mix(in srgb, var(--mica-arco-link) 85%, var(--mica-arco-text)) r g b;
+  --blue-6: from var(--mica-arco-link) r g b;
+  --blue-7: from color-mix(in srgb, var(--mica-arco-link) 85%, #000) r g b;
+  --gray-1: from var(--color-neutral-1) r g b;
+  --gray-2: from var(--color-neutral-2) r g b;
+  --gray-3: from var(--color-neutral-3) r g b;
+  --gray-4: from var(--color-neutral-4) r g b;
+  --gray-5: from var(--color-neutral-5) r g b;
+  --gray-6: from var(--color-neutral-6) r g b;
+  --gray-7: from var(--color-neutral-7) r g b;
+  --gray-8: from var(--color-neutral-8) r g b;
+  --gray-9: from var(--color-neutral-9) r g b;
+  --gray-10: from var(--color-neutral-10) r g b;
+  --danger-1: var(--red-1);
+  --danger-2: var(--red-2);
+  --danger-3: var(--red-3);
+  --danger-4: var(--red-4);
+  --danger-5: var(--red-5);
+  --danger-6: var(--red-6);
+  --danger-7: var(--red-7);
+  --success-1: var(--green-1);
+  --success-2: var(--green-2);
+  --success-3: var(--green-3);
+  --success-4: var(--green-4);
+  --success-5: var(--green-5);
+  --success-6: var(--green-6);
+  --success-7: var(--green-7);
+  --warning-1: var(--gold-1);
+  --warning-2: var(--gold-2);
+  --warning-3: var(--gold-3);
+  --warning-4: var(--gold-4);
+  --warning-5: var(--gold-5);
+  --warning-6: var(--gold-6);
+  --warning-7: var(--gold-7);
+  --link-1: var(--blue-1);
+  --link-2: var(--blue-2);
+  --link-3: var(--blue-3);
+  --link-4: var(--blue-4);
+  --link-5: var(--blue-5);
+  --link-6: var(--blue-6);
+  --link-7: var(--blue-7);
+}
+
+html[data-appearance='dark'] :is(body.mica-arco-theme, .mica-config-ui) {
+  --color-bg-white: #f6f6f6;
+}
+
+html[data-appearance='light'] body.mica-arco-theme {
+  --mica-arco-accent-contrast: #fff;
+}
+
+@layer mica-arco {
+  .mica-arco-action {
+    font: inherit;
+  }
+
+  .mica-arco-action.arco-btn-icon-only {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .mica-arco-action.arco-btn-text:not(.mica-arco-action-accent):not(
+      :is(.arco-btn-status-danger, .arco-btn-status-success, .arco-btn-status-warning, .arco-btn-disabled)
+    ) {
+    color: inherit;
+  }
+
+  .arco-btn.arco-btn-primary:not(:is(.arco-btn-status-danger, .arco-btn-status-success, .arco-btn-status-warning)),
+  .arco-btn.arco-btn-primary:not(
+      :is(.arco-btn-status-danger, .arco-btn-status-success, .arco-btn-status-warning)
+    ):hover,
+  .arco-btn.arco-btn-primary:not(
+      :is(.arco-btn-status-danger, .arco-btn-status-success, .arco-btn-status-warning)
+    ):active {
+    color: var(--mica-arco-accent-contrast);
+  }
+
+  .mica-arco-action:not(.mica-arco-action-accent):is(.arco-btn-text, .arco-btn-outline),
+  .ui-button.arco-btn-text {
+    --primary-5: from var(--color-text-1) r g b;
+    --primary-6: from var(--color-text-1) r g b;
+    --primary-7: from var(--color-text-1) r g b;
+    --color-primary-light-3: var(--color-text-4);
+  }
+
+  .arco-icon {
+    display: inline-block;
+    color: inherit;
+    font-style: normal;
+    width: 1em;
+    height: 1em;
+    vertical-align: -2px;
+    stroke: currentColor;
+  }
+
+  .arco-icon[fill='currentColor'] {
+    fill: currentColor;
+    stroke: none;
+  }
+
+  .arco-icon[stroke='currentColor'] {
+    stroke: currentColor;
+    fill: none;
+  }
+
+  .arco-icon[fill='currentColor'][stroke='currentColor'] {
+    fill: currentColor;
+    stroke: currentColor;
+  }
+
+  .arco-icon-loading {
+    animation: arco-loading-circle 1s linear infinite;
+  }
+
+  .arco-icon-hover {
+    position: relative;
+    display: inline-block;
+    cursor: pointer;
+    line-height: 0;
+  }
+
+  .arco-icon-hover .arco-icon {
+    position: relative;
+    vertical-align: -0.09em;
+  }
+
+  .arco-icon-hover::before {
+    content: '';
+    position: absolute;
+    display: block;
+    top: 50%;
+    left: 50%;
+    width: 24px;
+    height: 24px;
+    border-radius: var(--border-radius-circle);
+    background-color: transparent;
+    box-sizing: border-box;
+    transform: translate(-50%, -50%);
+    transition: background-color 0.1s cubic-bezier(0, 0, 1, 1);
+  }
+
+  .arco-icon-hover:hover::before {
+    background-color: var(--color-fill-2);
+  }
+
+  .arco-icon-hover.arco-icon-hover-disabled::before {
+    opacity: 0;
+  }
+
+  @keyframes arco-loading-circle {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+}
+
+:where(body.mica-arco-theme, .mica-config-ui) :is(.arco-btn, .arco-input, .arco-textarea, .arco-picker input) {
+  font-family: inherit;
+}
+
+:where(body.mica-arco-theme, .mica-config-ui) .ui-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+}
+
+:where(body.mica-arco-theme, .mica-config-ui) .ui-button-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  vertical-align: middle;
+}
+
+:where(body.mica-arco-theme, .mica-config-ui) .ui-button-icon + span {
+  margin-left: 6px;
+}
+
+:where(body.mica-arco-theme, .mica-config-ui) .ui-tag-dot {
+  display: block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+:where(body.mica-arco-theme, .mica-config-ui) .ui-checkbox-label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+:where(body.mica-arco-theme, .mica-config-ui) .ui-checkbox .arco-checkbox-text {
+  margin: 0;
+}
 
 .mica-config-ui .arco-settings {
-  --color-text-1: var(--text);
-  --color-text-2: var(--text-soft);
-  --color-text-3: var(--text-faint);
-  --color-text-4: var(--text-faint);
-  --color-bg-1: var(--bg);
-  --color-bg-2: var(--panel);
-  --color-bg-3: var(--panel);
-  --color-bg-4: var(--panel-muted);
-  --color-bg-5: var(--panel-hover);
-  --color-bg-popup: var(--panel);
-  --color-white: var(--text);
-  /* Arco consumes RGB channels; relative colors preserve the active Mica theme. */
-  --primary-3: from var(--accent) r g b;
-  --primary-5: from var(--accent-hover) r g b;
-  --primary-6: from var(--accent) r g b;
-  --primary-7: from var(--accent) r g b;
-  --danger-6: from var(--red) r g b;
-  --warning-6: from var(--amber) r g b;
-  --color-fill-1: var(--overlay-subtle);
-  --color-fill-2: var(--panel-muted);
-  --color-fill-3: var(--panel-hover);
-  --color-fill-4: var(--overlay-strong);
-  --color-border-1: var(--line-soft);
-  --color-border-2: var(--line);
-  --color-border-3: var(--line-strong);
-  --color-neutral-3: var(--line);
-  --color-neutral-4: var(--line-strong);
-  --color-secondary: var(--panel-muted);
-  --color-secondary-hover: var(--panel-hover);
-  --color-secondary-active: var(--overlay-strong);
-  --color-secondary-disabled: var(--panel-muted);
-  --color-primary-light-1: var(--overlay-subtle);
-  --color-primary-light-2: var(--overlay);
-  --color-primary-light-3: var(--overlay-strong);
-  --color-danger-light-1: color-mix(in srgb, var(--red) 10%, transparent);
-  --color-danger-light-2: color-mix(in srgb, var(--red) 18%, transparent);
-  --color-danger-light-3: color-mix(in srgb, var(--red) 25%, transparent);
-  --border-radius-small: var(--radius-md);
-  --border-radius-medium: var(--radius-md);
   position: relative;
   display: grid;
   grid-template-rows: minmax(0, 1fr);
@@ -56,25 +374,9 @@
   min-height: 0;
 }
 
-@scope (.mica-config-ui .arco-settings) {
-  .arco-btn {
+@scope (.mica-config-ui) {
+  .arco-btn:not(.arco-btn-size-mini) {
     height: var(--control-h);
-    flex: none;
-    font-size: var(--text-body);
-  }
-
-  .arco-btn-text:not(.arco-btn-disabled) {
-    color: var(--text-soft);
-  }
-
-  .arco-btn-status-danger:not(.arco-btn-disabled) {
-    color: var(--red);
-  }
-
-  .arco-input,
-  .arco-input-inner-wrapper,
-  .arco-select-view {
-    border-color: var(--line);
     font-size: var(--text-body);
   }
 
@@ -89,23 +391,11 @@
   .arco-input-inner-wrapper,
   .arco-select-single .arco-select-view {
     height: var(--control-h);
+    font-size: var(--text-body);
   }
 
   .arco-input-inner-wrapper .arco-input {
     height: 100%;
-    border: 0;
-  }
-
-  .arco-input:focus,
-  .arco-input-inner-wrapper-focus,
-  .arco-select-focused .arco-select-view {
-    border-color: var(--accent);
-  }
-
-  .arco-input-error,
-  .arco-input-inner-wrapper-error,
-  .arco-select-error .arco-select-view {
-    border-color: var(--red);
   }
 
   .arco-radio-group {
@@ -120,21 +410,6 @@
     font-size: var(--text-aux);
   }
 
-  .arco-radio-button.arco-radio-checked:not(.arco-radio-disabled) {
-    color: var(--text);
-    background: var(--panel-hover);
-  }
-
-  .arco-select-option-selected {
-    color: var(--text);
-    background: var(--overlay-strong);
-    font-weight: 600;
-  }
-
-  .arco-select-option-hover {
-    background: var(--overlay);
-  }
-
   .arco-select-popup {
     font-size: var(--text-body);
     line-height: 1.5;
@@ -142,15 +417,16 @@
 
   .arco-tag {
     max-width: 100%;
-    height: 24px;
-    font-family: var(--font-mono);
-    font-size: var(--text-label);
   }
 
   .arco-tag-content {
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
+  }
+
+  .config-chip-list .arco-tag {
+    font-family: var(--font-mono);
   }
 
   .config-chip-add > .arco-input {
@@ -164,9 +440,167 @@
     padding: 0;
   }
 
+  .arco-btn.config-input-action {
+    width: 22px;
+    height: 22px;
+    padding: 0;
+  }
+
+  .arco-textarea {
+    font-size: var(--text-body);
+  }
+
+  .arco-input-inner-wrapper,
+  .arco-input-group-wrapper,
+  .arco-input-number,
+  .arco-select {
+    min-width: 0;
+  }
+
+  .ui-select-arco,
+  .ui-select-arco > .arco-select,
+  .ui-date-arco > .arco-picker {
+    width: 100%;
+  }
+
+  .ui-select-arco.is-compact .arco-select-view,
+  .ui-date-arco.is-compact .arco-picker {
+    height: 24px;
+    font-size: var(--text-aux);
+  }
+
+  .arco-picker {
+    height: var(--control-h);
+    font-size: var(--text-body);
+  }
+
+  .arco-alert.ui-alert {
+    font-size: var(--text-body);
+  }
+
+  .arco-empty.ui-empty {
+    padding: 0;
+  }
+
+  .collapsible-card .arco-collapse-item-header {
+    padding: 0;
+  }
+
+  .collapsible-card .arco-collapse-item-header-title {
+    width: 100%;
+  }
+
+  .collapsible-card .arco-collapse-item-content,
+  .collapsible-card .arco-collapse-item-content-box {
+    padding: 0;
+  }
+
+  .collapsible-card .arco-collapse-item-active .collapsible-chevron {
+    transform: rotate(90deg);
+  }
+
+  .config-segmented.is-compact .arco-radio-button {
+    height: 24px;
+    line-height: 22px;
+  }
+
+  .arco-input.config-secret-input {
+    padding-right: 30px;
+  }
+
+  .arco-modal.modal-card .arco-modal-content > .modal-body {
+    padding: 0;
+    overflow: visible;
+  }
+
+  .config-number-input,
+  .setting-row-control > .config-number-input {
+    width: 180px;
+    max-width: 100%;
+  }
+
+  .config-number-unit {
+    min-width: 28px;
+    color: var(--text-faint);
+    text-align: center;
+    font-size: var(--text-aux);
+  }
+
+  .config-directories .arco-input {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .config-setting-multiline {
+    min-height: 96px;
+  }
+
+  .arco-textarea.json-editor-fallback {
+    height: 100%;
+    min-height: 220px;
+    font-family: var(--font-mono);
+    resize: none;
+  }
+
+  .arco-table.data-table {
+    width: 100%;
+    font-size: var(--text-label);
+  }
+
+  .modal-arco-content {
+    display: inline-block;
+    vertical-align: middle;
+    width: min(100%, 928px);
+    white-space: normal;
+  }
+
+  .data-table-arco table {
+    width: 100%;
+    table-layout: fixed;
+    border-collapse: collapse;
+  }
+
+  .arco-modal.modal-card {
+    display: inline-flex;
+    max-width: calc(100vw - 48px);
+    max-height: min(82dvh, 900px);
+    overflow: hidden;
+  }
+
+  .arco-modal.modal-card .arco-modal-header {
+    height: auto;
+    min-height: 44px;
+    padding: 11px 44px 11px 16px;
+    flex: none;
+  }
+
+  .arco-modal.modal-card .arco-modal-title {
+    text-align: left;
+    font-size: var(--text-subhead);
+    font-weight: 650;
+  }
+
+  .arco-modal.modal-card .arco-modal-content {
+    padding: 14px 16px;
+    min-height: 0;
+    overflow-y: auto;
+    font-size: var(--text-body);
+  }
+
+  .arco-modal.modal-card .arco-modal-close-icon {
+    top: 14px;
+    right: 16px;
+  }
+
   @media (max-width: 767px) {
     .arco-input {
       font-size: 16px;
     }
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .arco-icon-loading {
+    animation: none;
   }
 }

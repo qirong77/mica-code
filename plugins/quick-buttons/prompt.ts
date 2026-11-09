@@ -15,7 +15,7 @@ export function renderQuickButtonsPrompt(): string {
     '',
     '**需要先说明再选的时候用 `kind: "dialog"`**：一次点击弹出一个由应用自己渲染的弹窗（标题 + Markdown 正文 + 两列清单 + 最多三颗按钮），适合「这一轮查到的几条候选」「一段结论 + 两种可选做法」。弹窗里的清单项给 `url` 就能点开；弹窗按钮的 `kind` 和普通按钮一样（`open` / `compose` / `session` / `path`），点完就按那件事发生——所以别在弹窗里再套弹窗，也别把五个动作塞进一个弹窗。',
     '',
-    '**外观只声明意图，不写样式**：`style` 可以给 `icon`（应用图标表里的名字，如 `globe` / `external` / `search` / `zap` / `list-checks` / `git-branch`）、`color`（`accent` 表示「点这个」、`danger` 表示会改东西、`success` / `warn` 表示结果）、`shape`（`soft` 去掉描边、`plain` 纯文字）与 `iconOnly`。颜色取的是应用主题令牌，明暗两套各自成立——不要试图表达具体色值。一排里最多一两颗带样式，其余留默认，否则整排都在喊。',
+    '**外观只声明意图，不写样式**：`style` 可以给 `icon`（应用图标表里的名字，如 `globe` / `external` / `search` / `zap` / `list-checks` / `git-branch`）、`color`（`accent` 表示「点这个」、`danger` 表示会改东西、`success` / `warn` 表示结果）、`shape`（`soft` 去掉描边、`plain` 纯文字）与 `iconOnly`。颜色取的是应用主题令牌，明暗两套各自成立——不要试图表达具体色值。默认使用主题强调色，只在需要表达特定意图时改用其它语义色。',
     '',
     '按钮是给用户点的入口，不是你执行动作的通道：不要用它承载删除、提交、发布这类会改东西的操作，也不要写用户读不懂的标题。任务变了就换掉这一排（`operation: "set"`），别让上一轮的按钮一直留在那儿。',
     '工具列表会将超过七天未更新的模型按钮标为「可能过时」；时间不代表内容一定失效。需要清理时可用 `operation: "clear_stale"`，它只清理明确过期的模型按钮，不自动删除，也不清理手动按钮或时间未知的历史按钮。',

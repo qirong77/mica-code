@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { ArcoAction, Input } from '@mica-config-ui/web'
 import { IconArrowUp, IconFolder, IconFolderOpen } from '@tabler/icons-react'
 import { normalizeCwd, rankCwdMatches, splitCwd } from './cwd-recents'
 import { useQuickPickAnchor } from './quick-pick-anchor'
@@ -71,14 +72,15 @@ export function CwdPicker({
         style={anchorStyle || undefined}
       >
         <div className="quick-pick-head">
-          <input
-            ref={inputRef}
+          <Input
+            ref={(instance) => { inputRef.current = instance?.dom ?? null }}
             value={query}
             spellCheck={false}
             aria-label="搜索项目目录"
             placeholder="选择项目目录（输入以筛选）"
-            className="quick-pick-input"
-            onChange={(event) => setQuery(event.target.value)}
+            height={28}
+            style={{ fontSize: 13 }}
+            onChange={setQuery}
             onKeyDown={(event) => {
               if (event.nativeEvent.isComposing) return
               if (event.key === 'ArrowDown') {
@@ -134,13 +136,15 @@ export function CwdPicker({
           {matches.length === 0 && <p className="quick-pick-empty">没有匹配的目录</p>}
         </div>
         <footer className="quick-pick-foot">
-          <input
+          <Input
             value={value}
             spellCheck={false}
             aria-label="工作目录完整路径"
             placeholder="输入完整路径，如 /Users/name/project"
-            className="quick-pick-input"
-            onChange={(event) => setValue(event.target.value)}
+            className="min-w-0 flex-1"
+            height={24}
+            style={{ fontSize: 12 }}
+            onChange={setValue}
             onKeyDown={(event) => {
               if (event.key === 'Enter' && !event.nativeEvent.isComposing) {
                 event.preventDefault()
@@ -148,14 +152,15 @@ export function CwdPicker({
               }
             }}
           />
-          <button
+          <ArcoAction
             type="button"
             disabled={busy || !value.trim()}
-            className="shrink-0 rounded-sm px-2 py-0.5 text-[11px] text-fg-strong hover:bg-overlay-strong hover:text-fg-max disabled:text-fg-faint"
+            className="shrink-0"
+            style={{ height: 24, paddingInline: 8, fontSize: 11 }}
             onClick={submit}
           >
             {busy ? '验证中…' : '应用'}
-          </button>
+          </ArcoAction>
         </footer>
       </section>
       {pickerOpen && (
@@ -219,13 +224,15 @@ function DirectoryPicker({ initialPath, onClose, onPick }) {
       >
         <h2 className="shrink-0 border-b border-line px-3.5 py-2.5 text-sm font-semibold text-fg-max">选择文件夹</h2>
         <div className="flex min-w-0 shrink-0 items-center gap-2 border-b border-line px-3.5 py-2">
-          <button
+          <ArcoAction
+            iconOnly
             type="button" title="上级目录" aria-label="上级目录" disabled={!parent}
-            className="grid size-6 shrink-0 place-items-center rounded-md text-fg-soft hover:bg-overlay-strong hover:text-fg-max disabled:opacity-30"
+            className="shrink-0"
+            style={{ width: 24, height: 24, padding: 0 }}
             onClick={() => void load(parent)}
           >
             <IconArrowUp size={14} />
-          </button>
+          </ArcoAction>
           <span className="min-w-0 flex-1 truncate text-xs text-fg-soft" title={current}>{current || '…'}</span>
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto px-1.5 py-1.5">
@@ -247,16 +254,17 @@ function DirectoryPicker({ initialPath, onClose, onPick }) {
           ))}
         </div>
         <div className="flex shrink-0 items-center gap-2 border-t border-line px-3.5 py-2.5">
-          <button
+          <ArcoAction
             type="button" disabled={!current}
-            className="h-9 flex-1 rounded-sm bg-overlay-strong px-3.5 text-xs text-fg-strong hover:bg-overlay-heavy disabled:text-fg-faint"
+            className="flex-1"
+            style={{ height: 36, paddingInline: 14, fontSize: 12 }}
             onClick={() => current && onPick(current)}
-          >选择此文件夹</button>
-          <button
+          >选择此文件夹</ArcoAction>
+          <ArcoAction
             type="button"
-            className="h-9 rounded-sm border border-line px-3.5 text-xs text-fg-soft hover:bg-overlay hover:text-fg-max"
+            style={{ height: 36, paddingInline: 14, fontSize: 12 }}
             onClick={onClose}
-          >取消</button>
+          >取消</ArcoAction>
         </div>
       </section>
     </div>

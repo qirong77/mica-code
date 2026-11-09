@@ -56,6 +56,8 @@ export { SecretInput } from './components/SecretInput.js';
  * 在该作用域内）。
  */
 export { Alert, Button, Checkbox, CollapsiblePanel, Empty, Segmented, SplitView, Tag } from './components/Ui.js';
+export { Input, InputNumber, Select } from './components/ArcoSettings.js';
+export { ArcoAction, ArcoPopover, ArcoProvider } from './components/ArcoSettings.js';
 
 /**
  * 数据表：统计页的 By source / By session 与会话详情共用一份形态（表头可排序、按列宽

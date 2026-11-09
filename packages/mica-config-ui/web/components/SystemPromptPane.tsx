@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNod
 import { readSessionSystemPrompt } from '../api.js';
 import { JsonEditor } from './JsonEditor.js';
 import { Button, Tag } from './Ui.js';
+import { Input } from './ArcoSettings.js';
 import { formatCharCount } from '../format.js';
 import {
   analyzePrompt,
@@ -87,10 +88,7 @@ export function SystemPromptPane({
 
   const outline = useMemo(() => analyzePrompt(prompt), [prompt]);
   const searching = query.trim().length > 0;
-  const search = useMemo(
-    () => (searching ? searchPrompt(outline.nodes, query) : null),
-    [outline, query, searching],
-  );
+  const search = useMemo(() => (searching ? searchPrompt(outline.nodes, query) : null), [outline, query, searching]);
   const rows = useMemo(() => {
     const base = search ? search.nodes : outline.nodes;
     if (!sortBySize || searching) return base;
@@ -244,31 +242,26 @@ export function SystemPromptPane({
 
       {scopeOpen ? (
         <p className="prompt-scope">
-          这里只算 system prompt 本身：角色提示词、AGENT.md、skills 索引、环境信息与插件段落。
-          工具 schema、消息历史与思考内容不在其中（它们在「Context 分析」页计入未解释的开销）。 tokens
-          按字符粗估（CJK 按 1、其余按 1/4），与状态栏的 ctx 同一口径。
+          这里只算 system prompt 本身：角色提示词、AGENT.md、skills 索引、环境信息与插件段落。 工具
+          schema、消息历史与思考内容不在其中（它们在「Context 分析」页计入未解释的开销）。 tokens 按字符粗估（CJK 按
+          1、其余按 1/4），与状态栏的 ctx 同一口径。
         </p>
       ) : null}
 
       {outline.nodes.length > 0 ? (
-        <PromptShareBar
-          nodes={outline.nodes}
-          total={totalChars}
-          selectedId={selected?.id ?? null}
-          onSelect={select}
-        />
+        <PromptShareBar nodes={outline.nodes} total={totalChars} selectedId={selected?.id ?? null} onSelect={select} />
       ) : null}
 
       <div className="prompt-body">
         <aside className="prompt-rail" aria-label="提示词大纲">
           <div className="prompt-rail-head">
-            <input
+            <Input
               className="prompt-search"
               type="search"
               value={query}
               placeholder="搜索标题与正文…"
               aria-label="搜索系统提示词"
-              onChange={(event) => setQuery(event.target.value)}
+              onChange={setQuery}
             />
             <Button
               variant="ghost"
@@ -287,9 +280,7 @@ export function SystemPromptPane({
             ) : (
               <span>{outline.nodes.length} 个模块</span>
             )}
-            {searching && (search?.total ?? 0) === 0 ? (
-              <span className="muted-text">没有匹配的内容</span>
-            ) : null}
+            {searching && (search?.total ?? 0) === 0 ? <span className="muted-text">没有匹配的内容</span> : null}
           </div>
 
           <div className="prompt-tree" role="tree" aria-label="提示词模块">

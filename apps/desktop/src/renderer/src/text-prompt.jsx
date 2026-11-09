@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from 'react'
-import { Button } from '@mica-config-ui/web'
+import { useCallback, useState } from 'react'
+import { Button, Input } from '@mica-config-ui/web'
 import { ModalShell } from './chat-modal'
 
 /**
@@ -14,10 +14,9 @@ import { ModalShell } from './chat-modal'
  */
 export function TextPrompt({ prompt, onClose }) {
   const [value, setValue] = useState(prompt.initial)
-  const inputRef = useRef(null)
-  useEffect(() => {
-    inputRef.current?.focus()
-    inputRef.current?.select()
+  const focusInput = useCallback((instance) => {
+    instance?.focus()
+    instance?.dom?.select()
   }, [])
   const submit = () => onClose(value.trim())
   return (
@@ -35,24 +34,27 @@ export function TextPrompt({ prompt, onClose }) {
         </>
       }
     >
-      <input
-        ref={inputRef}
-        value={value}
-        spellCheck={false}
-        className="chat-modal-input"
-        onChange={(event) => setValue(event.target.value)}
-        onKeyDown={(event) => {
-          if ((event.metaKey || event.ctrlKey) && event.key.toLocaleLowerCase() === 'w') {
-            event.preventDefault()
-            onClose(null)
-            return
-          }
-          if (event.key === 'Enter') {
-            event.preventDefault()
-            submit()
-          }
-        }}
-      />
+      <div className="mica-config-ui is-embed">
+        <Input
+          ref={focusInput}
+          autoFocus
+          value={value}
+          spellCheck={false}
+          className="chat-modal-input"
+          onChange={setValue}
+          onKeyDown={(event) => {
+            if ((event.metaKey || event.ctrlKey) && event.key.toLocaleLowerCase() === 'w') {
+              event.preventDefault()
+              onClose(null)
+              return
+            }
+            if (event.key === 'Enter') {
+              event.preventDefault()
+              submit()
+            }
+          }}
+        />
+      </div>
     </ModalShell>
   )
 }

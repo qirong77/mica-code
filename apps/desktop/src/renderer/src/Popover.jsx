@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react'
+import { ArcoAction } from '@mica-config-ui/web'
 import { IconX } from '@tabler/icons-react'
 import { isInsidePopover, isPointerDrivenFocusChange } from './popover-dismiss'
 import { useLatest } from './hooks'
@@ -85,9 +86,9 @@ export function Popover({
         {headerExtra}
         {meta ? <span className="chat-popover-sub">{meta}</span> : null}
         {closable && onClose ? (
-          <button type="button" className="chat-popover-close" aria-label="关闭" onClick={onClose}>
+          <ArcoAction iconOnly type="button" className="chat-popover-close" aria-label="关闭" onClick={onClose}>
             <IconX size={14} />
-          </button>
+          </ArcoAction>
         ) : null}
       </header>
       {/* body 是整个面板唯一滚动的地方（head 不动）。 */}

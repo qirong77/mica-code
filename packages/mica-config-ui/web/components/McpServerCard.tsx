@@ -11,6 +11,7 @@ import {
 } from '../mcpDraft.js';
 import type { ConfigWebMcpServer } from '../../src/shared/types.js';
 import { Alert, Button, Segmented, SettingRow, Tag } from './Ui.js';
+import { Input, Tag as ArcoTag } from './ArcoSettings.js';
 
 const TYPE_OPTIONS = [
   { value: 'stdio', label: '本地进程' },
@@ -108,14 +109,15 @@ export function McpServerCard({
             hint="config.json 里 mcpServers 的键；会话里按它给工具加前缀。"
             error={errorFor('name')}
           >
-            <input
+            <Input
               id={`mcp-name-${index}`}
-              className={invalidClass(errorFor('name'))}
+              className="mcp-field-input"
+              status={errorFor('name') ? 'error' : undefined}
               value={entry.name}
               spellCheck={false}
               placeholder="例如 sequential-thinking"
               aria-invalid={Boolean(errorFor('name'))}
-              onChange={(event) => onChange({ ...entry, name: event.target.value })}
+              onChange={(name) => onChange({ ...entry, name })}
             />
           </SettingRow>
 
@@ -143,14 +145,15 @@ export function McpServerCard({
                 hint="可执行文件，例如 npx / uvx / node。"
                 error={errorFor('command')}
               >
-                <input
+                <Input
                   id={`mcp-command-${index}`}
-                  className={invalidClass(errorFor('command'))}
+                  className="mcp-field-input"
+                  status={errorFor('command') ? 'error' : undefined}
                   value={fields.command}
                   spellCheck={false}
                   placeholder="npx"
                   aria-invalid={Boolean(errorFor('command'))}
-                  onChange={(event) => patch({ command: event.target.value })}
+                  onChange={(command) => patch({ command })}
                 />
               </SettingRow>
 
@@ -177,15 +180,21 @@ export function McpServerCard({
                 />
               </SettingRow>
 
-              <SettingRow label="工作目录" htmlFor={`mcp-cwd-${index}`} hint="可选，进程的当前目录。" error={errorFor('cwd')}>
-                <input
+              <SettingRow
+                label="工作目录"
+                htmlFor={`mcp-cwd-${index}`}
+                hint="可选，进程的当前目录。"
+                error={errorFor('cwd')}
+              >
+                <Input
                   id={`mcp-cwd-${index}`}
-                  className={invalidClass(errorFor('cwd'))}
+                  className="mcp-field-input"
+                  status={errorFor('cwd') ? 'error' : undefined}
                   value={fields.cwd}
                   spellCheck={false}
                   placeholder="默认跟随当前工作目录"
                   aria-invalid={Boolean(errorFor('cwd'))}
-                  onChange={(event) => patch({ cwd: event.target.value })}
+                  onChange={(cwd) => patch({ cwd })}
                 />
               </SettingRow>
 
@@ -195,14 +204,15 @@ export function McpServerCard({
                 hint="可选，例如 pipe 把子进程 stderr 交给 Mica 读。"
                 error={errorFor('stderr')}
               >
-                <input
+                <Input
                   id={`mcp-stderr-${index}`}
-                  className={invalidClass(errorFor('stderr'))}
+                  className="mcp-field-input"
+                  status={errorFor('stderr') ? 'error' : undefined}
                   value={fields.stderr}
                   spellCheck={false}
                   placeholder="留空使用默认值"
                   aria-invalid={Boolean(errorFor('stderr'))}
-                  onChange={(event) => patch({ stderr: event.target.value })}
+                  onChange={(stderr) => patch({ stderr })}
                 />
               </SettingRow>
             </>
@@ -214,14 +224,15 @@ export function McpServerCard({
                 hint="MCP 端点，例如 http://127.0.0.1:8787/mcp/browser。"
                 error={errorFor('url')}
               >
-                <input
+                <Input
                   id={`mcp-url-${index}`}
-                  className={invalidClass(errorFor('url'))}
+                  className="mcp-field-input"
+                  status={errorFor('url') ? 'error' : undefined}
                   value={fields.url}
                   spellCheck={false}
                   placeholder="https://example.com/mcp"
                   aria-invalid={Boolean(errorFor('url'))}
-                  onChange={(event) => patch({ url: event.target.value })}
+                  onChange={(url) => patch({ url })}
                 />
               </SettingRow>
 
@@ -253,9 +264,9 @@ export function McpServerCard({
             >
               <div className="config-chip-list">
                 {liveServer.tools.map((tool) => (
-                  <span className="config-chip" key={tool.name} title={tool.description || tool.name}>
-                    <span className="config-chip-label">{tool.name}</span>
-                  </span>
+                  <ArcoTag key={tool.name} title={tool.description || tool.name} bordered>
+                    {tool.name}
+                  </ArcoTag>
                 ))}
               </div>
             </SettingRow>
@@ -294,20 +305,17 @@ function ArgumentList({ args, onChange }: { args: readonly string[]; onChange(ne
       {args.length > 0 ? (
         <div className="config-chip-list">
           {args.map((arg, index) => (
-            <span className="config-chip" key={`${arg}:${index}`}>
-              <span className="config-chip-label" title={arg}>
-                {arg}
-              </span>
-              <button
-                type="button"
-                className="config-chip-remove"
-                title={`移除 ${arg}`}
-                aria-label={`移除参数 ${arg}`}
-                onClick={() => onChange(args.filter((_, current) => current !== index))}
-              >
-                ×
-              </button>
-            </span>
+            <ArcoTag
+              key={`${arg}:${index}`}
+              title={arg}
+              bordered
+              closable
+              visible
+              __closeIconProps={{ 'aria-label': `移除参数 ${arg}`, title: `移除 ${arg}` }}
+              onClose={() => onChange(args.filter((_, current) => current !== index))}
+            >
+              {arg}
+            </ArcoTag>
           ))}
         </div>
       ) : null}
@@ -318,13 +326,13 @@ function ArgumentList({ args, onChange }: { args: readonly string[]; onChange(ne
           add();
         }}
       >
-        <input
-          className="text-input"
+        <Input
+          className="mcp-argument-input"
           value={input}
           spellCheck={false}
           placeholder="输入参数后回车添加"
           aria-label="新增参数"
-          onChange={(event) => setInput(event.target.value)}
+          onChange={setInput}
         />
         <Button disabled={!trimmed} onClick={add}>
           添加
@@ -377,21 +385,21 @@ function KeyValueRows({
           {entries.map((entry, index) => (
             // 按下标做 key：名称输入框里改字时，用名称拼接会让这一行重建、光标跳出输入框。
             <div className="mcp-kv-row" key={index}>
-              <input
-                className="text-input"
+              <Input
+                className="mcp-key-value-input"
                 value={entry.key}
                 spellCheck={false}
                 placeholder="名称"
                 aria-label={`第 ${index + 1} 行名称`}
-                onChange={(event) => patchEntry(index, { key: event.target.value })}
+                onChange={(key) => patchEntry(index, { key })}
               />
-              <input
-                className="text-input"
+              <Input
+                className="mcp-key-value-input"
                 value={entry.value}
                 spellCheck={false}
                 placeholder="值"
                 aria-label={`${entry.key || `第 ${index + 1} 行`} 的值`}
-                onChange={(event) => patchEntry(index, { value: event.target.value })}
+                onChange={(value) => patchEntry(index, { value })}
               />
               <Button
                 variant="ghost"
@@ -412,21 +420,21 @@ function KeyValueRows({
           addEntry();
         }}
       >
-        <input
-          className="text-input"
+        <Input
+          className="mcp-key-value-input"
           value={name}
           spellCheck={false}
           placeholder={namePlaceholder}
           aria-label={`${addLabel}：名称`}
-          onChange={(event) => setName(event.target.value)}
+          onChange={setName}
         />
-        <input
-          className="text-input"
+        <Input
+          className="mcp-key-value-input"
           value={value}
           spellCheck={false}
           placeholder={valuePlaceholder}
           aria-label={`${addLabel}：值`}
-          onChange={(event) => setValue(event.target.value)}
+          onChange={setValue}
         />
         <Button disabled={!trimmed || duplicated} title={addLabel} onClick={addEntry}>
           添加
@@ -435,8 +443,4 @@ function KeyValueRows({
       {duplicated ? <span className="config-field-hint">已有同名的一行，改那一行即可。</span> : null}
     </div>
   );
-}
-
-function invalidClass(message?: string): string {
-  return message ? 'text-input text-input-invalid' : 'text-input';
 }

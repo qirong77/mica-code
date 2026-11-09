@@ -1,5 +1,10 @@
 import { createRoot } from 'react-dom/client'
-import { setConfigWebClient, setConfigWebEditor, setConfigWebThemeHost } from '@mica-config-ui/web'
+import {
+  ArcoProvider,
+  setConfigWebClient,
+  setConfigWebEditor,
+  setConfigWebThemeHost
+} from '@mica-config-ui/web'
 import App from './App'
 import { DesktopDialogHost } from './desktop-dialog'
 import { NotificationHost } from './NotificationHost'
@@ -17,6 +22,8 @@ import {
 } from '@packages/mica-web-shared/index.js'
 import { readAppUrl } from './app-url'
 import { createDesktopConfigWebClient } from './config-web'
+
+document.body.classList.add('mica-arco-theme')
 
 // 编辑器在这里注册一次：设置页、会话详情和插件卡片（笔记）都读这一份。跟着设置页懒加载
 // 会让「还没打开过设置就点开笔记」拿到朴素文本域，再也不会切回 monaco。
@@ -66,7 +73,8 @@ void import('./log-probe')
 
 // 页面在任何容器里都是同一份代码：window.mica 由 transport 适配层通过 HTTP + SSE
 // 建立（Electron 外壳只是装载同一个地址）。连不上运行时时给出可读提示，不要白屏。
-const quickButtonsDemo = new URLSearchParams(window.location.search).get('quick-buttons-demo') === '1'
+const quickButtonsDemo =
+  new URLSearchParams(window.location.search).get('quick-buttons-demo') === '1'
 
 // 外观验收页（`?quick-buttons-demo=1`）是纯静态的：只画按钮与预览卡片，不读会话、不发请求。
 // 它在 `ensureMicaApi()` 之前渲染，才能在静态服务下打开，也不会先闪一屏连不上运行时的提示。
@@ -83,57 +91,66 @@ if (quickButtonsDemo) {
     .catch((error) => renderBootError(error))
 }
 
-if (!quickButtonsDemo) ensureMicaApi()
-  .catch((error) => {
-    console.error('初始化 mica 接口失败', error)
-    renderBootError(error)
-    return null
-  })
-  .then((api) => {
-    if (!api) return
-    // 界面状态（草稿/工作区/面板布局/主题偏好）来自运行时：先取回来再渲染，第一帧就是
-    // 上一次留下的样子，不用先画一个空界面再对齐。取不到不阻断启动——只是回到默认界面，
-    // 比整页停在一个错误提示上可用。
-    return ensureUiState()
-      .catch((error) => console.error('初始化界面状态失败', error))
-      .then(() => {
-        // 运行时保存的偏好比首帧缓存权威：以它为准重新上色，并让其他窗口的修改
-        // （ui-state 广播）继续跟随。分享页也走这条路径，看到的是同一套配色。
-        syncThemeFromUiState(uiStateKeys()[THEME_UI_STATE_KEY])
-        subscribeUiState(() => syncThemeFromUiState(uiStateKeys()[THEME_UI_STATE_KEY]))
+if (!quickButtonsDemo)
+  ensureMicaApi()
+    .catch((error) => {
+      console.error('初始化 mica 接口失败', error)
+      renderBootError(error)
+      return null
+    })
+    .then((api) => {
+      if (!api) return
+      // 界面状态（草稿/工作区/面板布局/主题偏好）来自运行时：先取回来再渲染，第一帧就是
+      // 上一次留下的样子，不用先画一个空界面再对齐。取不到不阻断启动——只是回到默认界面，
+      // 比整页停在一个错误提示上可用。
+      return ensureUiState()
+        .catch((error) => console.error('初始化界面状态失败', error))
+        .then(() => {
+          // 运行时保存的偏好比首帧缓存权威：以它为准重新上色，并让其他窗口的修改
+          // （ui-state 广播）继续跟随。分享页也走这条路径，看到的是同一套配色。
+          syncThemeFromUiState(uiStateKeys()[THEME_UI_STATE_KEY])
+          subscribeUiState(() => syncThemeFromUiState(uiStateKeys()[THEME_UI_STATE_KEY]))
 
-        const launcherId = new URLSearchParams(window.location.search).get('pluginLauncher')
-        if (launcherId && !api.shareView) {
-          createRoot(document.getElementById('root')).render(
-            <ErrorBoundary><PluginLauncher pluginId={launcherId} /></ErrorBoundary>
-          )
-          dismissBootPlaceholder()
-          return
-        }
+          const launcherId = new URLSearchParams(window.location.search).get('pluginLauncher')
+          if (launcherId && !api.shareView) {
+            createRoot(document.getElementById('root')).render(
+              <ErrorBoundary>
+                <ArcoProvider>
+                  <PluginLauncher pluginId={launcherId} />
+                </ArcoProvider>
+              </ErrorBoundary>
+            )
+            dismissBootPlaceholder()
+            return
+          }
 
-        // `/share` 本身是「分享链接列表」：这一页不需要工作区/草稿那些界面状态，也不该按
-        // 「没有打开的会话」去开一条新会话，所以在渲染 App 之前就分出去。带 `?session=<id>`
-        // 时仍旧渲染 App（只是不画左侧会话列表，见 App.jsx 的 shareView）。
-        if (api.shareView && !readAppUrl(window.location.search).sessionId) {
+          // `/share` 本身是「分享链接列表」：这一页不需要工作区/草稿那些界面状态，也不该按
+          // 「没有打开的会话」去开一条新会话，所以在渲染 App 之前就分出去。带 `?session=<id>`
+          // 时仍旧渲染 App（只是不画左侧会话列表，见 App.jsx 的 shareView）。
+          if (api.shareView && !readAppUrl(window.location.search).sessionId) {
+            createRoot(document.getElementById('root')).render(
+              <ErrorBoundary>
+                <ArcoProvider>
+                  <ShareIndex />
+                  <DesktopDialogHost />
+                </ArcoProvider>
+              </ErrorBoundary>
+            )
+            dismissBootPlaceholder()
+            return
+          }
           createRoot(document.getElementById('root')).render(
             <ErrorBoundary>
-              <ShareIndex />
-              <DesktopDialogHost />
+              <ArcoProvider>
+                <NotificationHost />
+                <App />
+                <DesktopDialogHost />
+              </ArcoProvider>
             </ErrorBoundary>
           )
           dismissBootPlaceholder()
-          return
-        }
-        createRoot(document.getElementById('root')).render(
-          <ErrorBoundary>
-            <NotificationHost />
-            <App />
-            <DesktopDialogHost />
-          </ErrorBoundary>
-        )
-        dismissBootPlaceholder()
-      })
-  })
+        })
+    })
 
 /**
  * 摘掉 index.html 里的启动占位（首帧底色 + 「正在载入…」）。React 18 的首次提交是

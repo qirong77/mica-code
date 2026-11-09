@@ -1,5 +1,6 @@
 import { Fragment, useEffect, useMemo, useState } from 'react'
 import { Button, DataTable, Segmented, SelectMenu, Tag } from '@mica-config-ui/web'
+import { IconX } from '@tabler/icons-react'
 import { CalendarHeatmap } from './charts'
 import { SpeedBars } from './SpeedBars'
 import { OverviewVisuals } from './OverviewVisuals'
@@ -335,19 +336,16 @@ function OverviewCard({ snap, range, onSelectDay, calendar }) {
       <div className="p-4">
         <header className="mb-4 flex items-center justify-between gap-2">
           <h2 className={OVERLINE_CLASS}>Contributions</h2>
-          <span className="mica-config-ui is-embed">
-            {/* 年选择是同一份自绘下拉：原生 select 的弹层不受页面控制。 */}
-            <SelectMenu
-              size="compact"
-              value={calendar.year === null ? 'trailing' : String(calendar.year)}
-              options={[
-                { value: 'trailing', label: 'Last 12 months' },
-                ...calendar.years.map((y) => ({ value: String(y), label: String(y) }))
-              ]}
-              ariaLabel="Contributions year"
-              onChange={(next) => calendar.onYear(next === 'trailing' ? null : Number(next))}
-            />
-          </span>
+          <SelectMenu
+            size="compact"
+            value={calendar.year === null ? 'trailing' : String(calendar.year)}
+            options={[
+              { value: 'trailing', label: 'Last 12 months' },
+              ...calendar.years.map((y) => ({ value: String(y), label: String(y) }))
+            ]}
+            ariaLabel="Contributions year"
+            onChange={(next) => calendar.onYear(next === 'trailing' ? null : Number(next))}
+          />
         </header>
         <CalendarHeatmap
           weeks={calendarWeeks}
@@ -410,18 +408,16 @@ function ModelPerformanceCard({ scoped }) {
     <section className={`${CARD_CLASS} p-4`}>
       <header className="flex flex-wrap items-center justify-between gap-2">
         <h2 className={OVERLINE_CLASS}>模型速度</h2>
-        <span className="mica-config-ui is-embed">
-          <Segmented
-            size="compact"
-            value={metric}
-            options={[
-              { value: 'responseWait', label: '响应等待' },
-              { value: 'generation', label: '生成速率' }
-            ]}
-            ariaLabel="模型速度指标"
-            onChange={setMetric}
-          />
-        </span>
+        <Segmented
+          size="compact"
+          value={metric}
+          options={[
+            { value: 'responseWait', label: '响应等待' },
+            { value: 'generation', label: '生成速率' }
+          ]}
+          ariaLabel="模型速度指标"
+          onChange={setMetric}
+        />
       </header>
       <p className="mt-1 text-[11px] text-fg-dim">
         {metric === 'responseWait'
@@ -804,13 +800,14 @@ function ByProjectCard({ scoped, visibleRows, onShowMore }) {
         ))}
       </div>
       {rest > 0 && (
-        <button
-          type="button"
+        <Button
+          size="compact"
+          variant="ghost"
           onClick={onShowMore}
-          className="mt-2 text-[11px] text-fg-faint transition-colors hover:text-fg-muted"
+          className="mt-2"
         >
           Show {Math.min(PROJECT_BATCH, rest)} more
-        </button>
+        </Button>
       )}
     </section>
   )
@@ -1071,29 +1068,25 @@ export function StatsView({ visible }) {
                 {rangeText} · {activeScoped.length} sessions
               </p>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               {isDayRange(range) && (
-                <button
-                  type="button"
+                <Button
+                  size="compact"
+                  variant="ghost"
                   onClick={() => setRangePreset('today')}
                   title="清除单日筛选"
-                  className="flex items-center gap-1 rounded-[4px] border border-line bg-panel px-2 py-1 text-[11px] text-fg-muted transition-colors hover:text-fg-strong"
+                  icon={<IconX size={12} />}
                 >
                   {dayShort(range.day)}
-                  <span aria-hidden className="text-fg-faint">
-                    ×
-                  </span>
-                </button>
+                </Button>
               )}
-              <div className="mica-config-ui is-embed">
-                <Segmented
-                  size="compact"
-                  value={isDayRange(range) ? 'day' : range}
-                  options={RANGE_OPTIONS.map(([value, label]) => ({ value, label }))}
-                  ariaLabel="统计区间"
-                  onChange={setRangePreset}
-                />
-              </div>
+              <Segmented
+                size="compact"
+                value={isDayRange(range) ? 'day' : range}
+                options={RANGE_OPTIONS.map(([value, label]) => ({ value, label }))}
+                ariaLabel="统计区间"
+                onChange={setRangePreset}
+              />
             </div>
           </header>
           {!hasAny ? (

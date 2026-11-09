@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { PageFrame, PluginIcon, SettingRow, SettingsGroup, Tag } from '@mica-config-ui/web'
-import { quickbarButtonLook } from './plugin-panels'
+import { PageFrame, SettingRow, SettingsGroup, Tag } from '@mica-config-ui/web'
+import { ShortcutButton } from './ShortcutButton'
 import { PREVIEW_HOVER_DELAY_MS, QuickbarPreview } from './PluginPanels'
 import './quick-buttons-preview-demo.css'
 
@@ -9,7 +9,7 @@ import './quick-buttons-preview-demo.css'
  *
  * 这一页不只是演示按钮本身，也要演示它们落在什么版式里：整页骨架用组件库的
  * `PageFrame`（页头 / 说明 / 可滚内容区），场景用 `SettingsGroup` + `SettingRow`
- * 分块，状态用 `Tag`。按钮走生产的 `quickbarButtonLook`（同一套
+ * 分块，状态用 `Tag`。按钮走生产的 `ShortcutButton`（同一套
  * `chat-plugin-quickbar-*` 类），卡片直接用生产的 `QuickbarPreview`。
  *
  * 所以这里**没有自己的一套视觉**：不另写页头、不另写卡片、不另写按钮。一旦演示页
@@ -164,7 +164,7 @@ const SCENARIOS = [
     name: '外观规格',
     kind: '外观',
     tone: 'default',
-    note: '颜色、形状、纯图标都走主题令牌与同一套类名；一排里最多一两颗强调色，其余保持默认。',
+    note: '颜色、形状、纯图标都走主题令牌与同一套类名；模型快捷按钮默认使用主题强调色，状态动作保留语义色。',
     message: '同一排按钮的外观组合（都没有预览，悬停不会出卡片）。',
     buttons: [
       { label: '主操作', action: 'primary', style: { icon: 'zap', color: 'accent' } },
@@ -205,7 +205,6 @@ function DemoQuickbar({ buttons, onAct, onOpenPreview, onLeaveButton, onEnterBut
       }}
     >
       {buttons.map((button) => {
-        const look = quickbarButtonLook(button, { panelLabel: '演示' })
         return (
           <div
             className="chat-plugin-quickbar-group"
@@ -215,11 +214,9 @@ function DemoQuickbar({ buttons, onAct, onOpenPreview, onLeaveButton, onEnterBut
               hover(event, button)
             }}
           >
-            <button
-              type="button"
-              className={look.className}
-              title={look.title}
-              aria-label={look.ariaLabel}
+            <ShortcutButton
+              shortcut={button}
+              panelLabel="演示"
               onFocus={(event) => {
                 if (!button.preview) return
                 onOpenPreview(button.preview, event.currentTarget.getBoundingClientRect(), 'focus')
@@ -228,10 +225,7 @@ function DemoQuickbar({ buttons, onAct, onOpenPreview, onLeaveButton, onEnterBut
                 cancelHover()
                 onAct(button.label)
               }}
-            >
-              {look.icon && <PluginIcon name={look.icon} size={13} />}
-              {!look.iconOnly && button.label}
-            </button>
+            />
           </div>
         )
       })}

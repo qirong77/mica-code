@@ -170,7 +170,7 @@ Electron 外壳 `main/plugin-launchers.js` 管理系统快捷键与独立浮窗�
 
 ## 界面控件只有一份
 
-控件在 `@mica-config-ui/web`：按钮 `Button`（`variant` + `size="compact"` + `fullWidth`；`primary` 是抬起的灰底、`accent` 是实心强调，对话框主操作（确定 / 开始 / 保存）用 `accent`，行内动作用 `ghost`、破坏性的用 `danger-ghost`）、状态 `Tag`、空态 `Empty`、错误 `Alert`、开关 `Switch`、勾选 `Checkbox`（带 `mixed`）、下拉 `SelectMenu`（可 `filterable` / 分组 / compact）、日期 `DateField`（可打字 + 自绘月历）、分段 `Segmented`、数据表 `DataTable`（列定义 + 受控排序 + 翻页 + 窄容器退列，单元格内容由调用方渲染）、输入框样式类 `text-input`（密集工具栏加 `is-compact`）、行 `SettingRow`、分组 `SettingsGroup`、折叠 `CollapsiblePanel`、`SecretInput`。样式全部限定在 `.mica-config-ui` 作用域内，宿主负责套这一层：插件整页（`PluginPage`）与插件入口卡片（`PluginEntries`）已统一套好，面板视图本身由宿主渲染。
+控件在 `@mica-config-ui/web`：按钮 `Button`（`variant` + `size="compact"` + `fullWidth`；`primary` 是抬起的灰底、`accent` 是实心强调，对话框主操作（确定 / 开始 / 保存）用 `accent`，行内动作用 `ghost`、破坏性的用 `danger-ghost`）、状态 `Tag`、空态 `Empty`、错误 `Alert`、开关 `Switch`、勾选 `Checkbox`（带 `mixed`）、下拉 `SelectMenu`（可 `filterable` / 分组 / compact）、日期 `DateField`（可打字 + Arco 月历）、分段 `Segmented`、数据表 `DataTable`（列定义 + 受控排序 + 翻页 + 窄容器退列，单元格内容由调用方渲染）、普通输入 `Input` / `InputNumber`（onChange 接收值）与透传原生按钮属性的 `ArcoAction`、行 `SettingRow`、分组 `SettingsGroup`、折叠 `CollapsiblePanel`、`SecretInput`。基础控件统一基于 Arco；全应用由 `ArcoProvider` 和 `body.mica-arco-theme` 提供配置与主题，设置布局样式仍限定在 `.mica-config-ui` 作用域内：插件整页（`PluginPage`）与插件入口卡片（`PluginEntries`）已统一套好，面板视图本身由宿主渲染。
 
 **禁止原生 `<select>` / `type="date"` / `type="checkbox"`**：它们的弹层与外观由系统绘制，在浮层和内嵌视图里会飘出控件、几百个选项时铺满整屏，也和旁边的共享控件对不齐；也确实存在不了的形态（多行截断的行按钮、页签、导航项）才用结构化 `<button>` + 自己的布局类，而不是重画一个按钮控件。要新控件先加到 `web/components/Ui.tsx`（或同目录的独立组件）再从 `web/index.tsx` 导出，别在页面、面板或插件里各写一套——同一应用里三种按钮高度比样式不统一更糟的是每次改都要改两处。
 

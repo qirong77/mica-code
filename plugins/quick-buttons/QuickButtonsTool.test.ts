@@ -72,8 +72,35 @@ describe('quick_buttons 工具', () => {
       ],
     });
     expect(buttons().map((button) => button.id)).toEqual(['button-1', 'button-2']);
+    expect(buttons().map((button) => button.style)).toEqual([{ color: 'accent' }, { color: 'accent' }]);
     expect(text).toContain('显示在输入框上方');
     expect(text).toContain('打开需求单 · 打开网页');
+  });
+
+  it('defaults set and add to accent while preserving explicit styles and action payloads', async () => {
+    const { tool, buttons } = harness();
+    const first = { id: 'ask', label: 'Ask', kind: 'compose', text: 'Continue' };
+    const second = {
+      id: 'report',
+      label: 'Report',
+      kind: 'path',
+      path: '/tmp/report.md',
+      style: { icon: 'file-text', shape: 'soft', iconOnly: true },
+    };
+    const third = {
+      id: 'retry',
+      label: 'Retry',
+      kind: 'compose',
+      text: 'Check again',
+      style: { color: 'warn', shape: 'plain' },
+    };
+    await tool.execute({ operation: 'set', buttons: [first] });
+    await tool.execute({ operation: 'add', buttons: [second, third] });
+    expect(buttons()).toMatchObject([
+      { ...first, style: { color: 'accent' } },
+      { ...second, style: { ...second.style, color: 'accent' } },
+      third,
+    ]);
   });
 
   it('appends on add and updates in place when the id repeats', async () => {

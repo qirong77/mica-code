@@ -54,10 +54,14 @@ describe('插件目录分类', () => {
     expect(pluginCategory(plugin())).toBe('tools');
     expect(pluginCategory(plugin({ desktopPanel: {} as never }))).toBe('desktop');
     expect(pluginCategory(plugin({ desktopSessionMenu: [{}] as never }))).toBe('desktop');
-    expect(pluginCategory(plugin({ desktopLauncher: { title: 'Search', shortcut: 'Alt+Space', width: 720, height: 480 } }))).toBe('desktop');
+    expect(
+      pluginCategory(plugin({ desktopLauncher: { title: 'Search', shortcut: 'Alt+Space', width: 720, height: 480 } })),
+    ).toBe('desktop');
     expect(pluginCategory(plugin({ desktopChecks: [{}] as never }))).toBe('configurable');
     expect(pluginCategory(plugin({ actions: [{}] as never }))).toBe('configurable');
-    expect(pluginCategory(plugin({ settings: { fields: [{}] as never, values: {}, issues: [] } }))).toBe('configurable');
+    expect(pluginCategory(plugin({ settings: { fields: [{}] as never, values: {}, issues: [] } }))).toBe(
+      'configurable',
+    );
     expect(pluginCategory(plugin({ source: 'user', desktopPanel: {} as never }))).toBe('user');
     expect(pluginCategory(plugin({ desktopPanel: {} as never, actions: [{}] as never }))).toBe('desktop');
   });
@@ -91,14 +95,17 @@ describe('插件目录卡片', () => {
     // 按钮里再套按钮是非法嵌套：开关必须排在 </button> 之后
     expect(html).toContain('plugin-card-open');
     expect(html.indexOf('plugin-card-toggle')).toBeGreaterThan(html.indexOf('</button>'));
-    expect(html.indexOf('<button')).toBe(html.lastIndexOf('<button'));
+    expect(html.match(/<button\b/g)).toHaveLength(2);
+    const toggle = html.match(/<button\b[^>]*role="switch"[^>]*>/)?.[0];
+    expect(toggle).toContain('arco-switch');
+    expect(html.indexOf(toggle!)).toBeGreaterThan(html.indexOf('</button>'));
   });
 
   it('开关反映当前的启用状态，停用的卡片压暗', () => {
     const enabled = render(
       createElement(PluginCard, { plugin: plugin(), canToggle: true, busy: false, onOpen: noop, onToggle: noop }),
     );
-    expect(enabled).toContain('checked=""');
+    expect(enabled).toContain('role="switch" aria-checked="true"');
     expect(enabled).not.toContain('is-inactive');
 
     const disabled = render(
@@ -111,7 +118,7 @@ describe('插件目录卡片', () => {
       }),
     );
     expect(disabled).toContain('is-inactive');
-    expect(disabled).not.toContain('checked=""');
+    expect(disabled).toContain('role="switch" aria-checked="false"');
     // 停用态只掉颜色：卡片本身还是那张卡
     expect(disabled).toContain('plugin-card-open');
   });
@@ -211,8 +218,8 @@ describe('插件详情页', () => {
         onSaved: noop,
       }),
     );
-    // 一个开关就是一个 ui-switch-track；两个说明旁边还挂着那枚标签
-    expect(html.match(/ui-switch-track/g)).toHaveLength(1);
+    expect(html.match(/role="switch"/g)).toHaveLength(1);
+    expect(html).toContain('arco-switch');
     expect(html).not.toContain('已启用');
     expect(html).toContain('已加载');
   });

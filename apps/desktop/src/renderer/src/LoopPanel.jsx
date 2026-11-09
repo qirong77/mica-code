@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { IconAlertCircle } from '@tabler/icons-react'
-import { Button, SelectMenu } from '@mica-config-ui/web'
+import { Button, Input, Select } from '@mica-config-ui/web'
 import {
   DEFAULT_LOOP_MINUTES,
   LOOP_INTERVAL_UNITS,
@@ -90,32 +90,27 @@ export function LoopPanel({
         <div className="chat-loop-field">
           <span className="chat-loop-label">触发间隔</span>
           <div className="chat-loop-row">
-            <div className="chat-loop-interval">
-              <input
+            <Input.Group compact className="chat-loop-interval">
+              <Input
+                size="small"
                 className="chat-loop-amount"
                 value={amount}
                 inputMode="numeric"
                 aria-label="触发间隔"
-                onChange={(event) => {
-                  setAmount(event.target.value.replace(/[^\d.]/g, ''))
+                onChange={(value) => {
+                  setAmount(value.replace(/[^\d.]/g, ''))
                   setError('')
                 }}
               />
-              <span className="chat-loop-unit mica-config-ui is-embed">
-                {/* 下拉只有 @mica-config-ui/web 那一份：原生 select 的弹层由系统绘制，
-                    在这块浮层里会飘到面板外。 */}
-                <SelectMenu
-                  size="compact"
-                  value={unit}
-                  options={LOOP_INTERVAL_UNITS.map((item) => ({
-                    value: item.id,
-                    label: item.label
-                  }))}
-                  ariaLabel="间隔单位"
-                  onChange={setUnit}
-                />
-              </span>
-            </div>
+              <Select
+                size="small"
+                className="chat-loop-unit"
+                value={unit}
+                options={LOOP_INTERVAL_UNITS.map((item) => ({ value: item.id, label: item.label }))}
+                aria-label="间隔单位"
+                onChange={setUnit}
+              />
+            </Input.Group>
             <span className="chat-loop-every">
               {parsed.ok ? `每 ${parsed.label}发送一次` : '尚未设置有效间隔'}
             </span>
@@ -124,14 +119,14 @@ export function LoopPanel({
 
         <label className="chat-loop-field">
           <span className="chat-loop-label">任务内容</span>
-          <textarea
+          <Input.TextArea
             className="chat-loop-task"
             value={task}
             rows={3}
             aria-label="任务内容"
             placeholder="要定时执行的任务，例如：推荐一个 AI 新闻"
-            onChange={(event) => {
-              setTask(event.target.value)
+            onChange={(value) => {
+              setTask(value)
               setError('')
             }}
           />

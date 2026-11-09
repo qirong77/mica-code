@@ -1,3 +1,4 @@
+import { ArcoAction } from '@mica-config-ui/web'
 import { confirmAction } from './desktop-dialog'
 import {
   forwardRef,
@@ -326,37 +327,40 @@ export const EditorTerminal = forwardRef(function EditorTerminal({ cwd, hidden =
                   <IconTerminal2 size={12} className="shrink-0 opacity-75" />
                   <span className="max-w-36 truncate">{tab.title}</span>
                 </button>
-                <button
+                <ArcoAction
+                  iconOnly
                   type="button"
                   title="关闭终端"
                   aria-label={`关闭 ${tab.title}`}
-                  className="grid h-4 w-4 shrink-0 place-items-center rounded text-fg-muted opacity-0 transition-opacity hover:bg-overlay-strong hover:text-fg-max group-hover:opacity-100"
+                  className="grid h-4 w-4 shrink-0 place-items-center opacity-0 transition-opacity group-hover:opacity-100"
                   onClick={() => void closeTab(tab.id)}
                 >
                   <IconX size={11} />
-                </button>
+                </ArcoAction>
               </div>
             )
           })}
         </div>
-        <button
+        <ArcoAction
+          iconOnly
           type="button"
           title="新建终端"
           aria-label="新建终端"
-          className="grid h-6 w-6 shrink-0 place-items-center rounded-md text-fg-soft transition-colors hover:bg-overlay hover:text-fg-max"
+          className="grid h-6 w-6 shrink-0 place-items-center transition-colors "
           onClick={() => addTab(cwdRef.current)}
         >
           <IconPlus size={14} />
-        </button>
-        <button
+        </ArcoAction>
+        <ArcoAction
+          iconOnly
           type="button"
           title="收起终端 (Ctrl+`)"
           aria-label="收起终端"
-          className="grid h-6 w-6 shrink-0 place-items-center rounded-md text-fg-soft transition-colors hover:bg-overlay hover:text-fg-max"
+          className="grid h-6 w-6 shrink-0 place-items-center transition-colors "
           onClick={() => setEditorTerminalOpen(false)}
         >
           <IconX size={13} />
-        </button>
+        </ArcoAction>
       </div>
       <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
         <TerminalHost

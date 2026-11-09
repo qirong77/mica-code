@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Button, Segmented, Switch } from './Ui.js';
+import { Input, InputNumber } from './ArcoSettings.js';
 import { pickDirectory, supportsDirectoryPicker } from '../api.js';
 import { SecretInput } from './SecretInput.js';
 import type { ConfigWebPluginSetting } from '../../src/shared/types.js';
@@ -39,32 +40,31 @@ export function PluginSettingInput({
   }
 
   if (field.type === 'number') {
-    const step = field.step ?? 1;
-    // 步进按钮落在同一条边框里，与输入框共用高度：原生 number 的上下箭头既占位
-    // 又和 −/+ 重复，所以这里关掉它们（appearance: none 在样式里）。
-    const nudge = (direction: 1 | -1) => onChange(nudgeSettingValue(field, value, direction));
     return (
-      <span className={`config-stepper${invalid ? ' is-invalid' : ''}`}>
-        <button type="button" className="config-stepper-btn" disabled={disabled} onClick={() => nudge(-1)}>
-          −
-        </button>
-        <input
-          id={inputId}
-          className="text-input config-stepper-input"
-          type="number"
-          inputMode="numeric"
-          value={value}
-          min={field.min}
-          max={field.max}
-          step={step}
-          disabled={disabled}
-          onChange={(event) => onChange(event.target.value)}
-        />
-        <button type="button" className="config-stepper-btn" disabled={disabled} onClick={() => nudge(1)}>
-          +
-        </button>
-        {field.unit ? <span className="config-stepper-unit">{field.unit}</span> : null}
-      </span>
+      <InputNumber
+        id={inputId}
+        className="config-number-input"
+        mode="button"
+        inputMode="decimal"
+        value={value}
+        aria-valuemin={field.min}
+        aria-valuemax={field.max}
+        step={field.step ?? 1}
+        disabled={disabled}
+        error={invalid}
+        aria-label={field.label}
+        aria-invalid={invalid || undefined}
+        suffix={field.unit ? <span className="config-number-unit">{field.unit}</span> : undefined}
+        parser={(text) => text}
+        formatter={(_, info) => (info.userTyping ? info.input : value)}
+        // Arco clamps manual input and blur values; only its step actions may normalize the draft.
+        onInput={(event) => onChange(numberSettingInputValue(event.currentTarget.value))}
+        onChange={(_, reason) => {
+          if (reason === 'increase' || reason === 'decrease') {
+            onChange(nudgeSettingValue(field, value, reason === 'increase' ? 1 : -1));
+          }
+        }}
+      />
     );
   }
 
@@ -84,15 +84,16 @@ export function PluginSettingInput({
 
   if (field.type === 'textarea') {
     return (
-      <textarea
+      <Input.TextArea
         id={inputId}
-        className={`text-input text-input-multiline${invalid ? ' is-invalid' : ''}`}
+        className="config-setting-multiline"
+        status={invalid ? 'error' : undefined}
         value={value}
         rows={4}
         spellCheck={false}
         placeholder={field.placeholder}
         disabled={disabled}
-        onChange={(event) => onChange(event.target.value)}
+        onChange={onChange}
       />
     );
   }
@@ -117,18 +118,23 @@ export function PluginSettingInput({
   }
 
   return (
-    <input
+    <Input
       id={inputId}
-      className={`text-input${invalid ? ' is-invalid' : ''}`}
+      className="config-setting-input"
+      status={invalid ? 'error' : undefined}
       type="text"
       value={value}
       spellCheck={false}
       autoComplete="off"
       placeholder={field.placeholder}
       disabled={disabled}
-      onChange={(event) => onChange(event.target.value)}
+      onChange={onChange}
     />
   );
+}
+
+export function numberSettingInputValue(text: string): string {
+  return /^-?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?$/.test(text) && Number.isFinite(Number(text)) ? text : '';
 }
 
 /**
@@ -232,17 +238,17 @@ function DirectoriesInput({
       {rows.length === 0 ? <p className="config-directories-empty">还没有添加目录</p> : null}
       {rows.map((row, index) => (
         <div className="config-directory-row" key={index}>
-          <input
+          <Input
             id={index === 0 ? inputId : undefined}
-            className="text-input"
+            className="config-directory-input"
             value={row}
             spellCheck={false}
             disabled={disabled}
             placeholder={field.placeholder || '~/Desktop'}
             aria-label={`第 ${index + 1} 个目录`}
-            onChange={(event) => {
+            onChange={(text) => {
               const next = [...rows];
-              next[index] = event.target.value;
+              next[index] = text;
               apply(next);
             }}
           />

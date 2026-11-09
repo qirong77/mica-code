@@ -41,7 +41,7 @@ const DESCRIPTION = [
   `Kinds: ${QUICK_BUTTON_KINDS.map((kind) => `${kind} (${QUICK_BUTTON_KIND_LABELS[kind]})`).join(' / ')}. \`open\` defaults to the controlled browser the agent can keep driving; pass target:"external" for the system browser.`,
   "Use `dialog` when one click should first show something: a short result, a list of candidates with links, or one explanation with two or three ways to continue (its own buttons). The host renders it with the app's own dialog components — you only describe the content, never markup or styles.",
   'Optional `preview` is a non-blocking hover card: give it a title plus at least one readable block — text, markdown, a `columns` + `rows` table, or a note. Use it for a useful summary of a generated file, page, build result, or follow-up; a spreadsheet gets `columns` + a few `rows` (first rows and totals) instead of a wall of text. Text and markdown are mutually exclusive. The host adds the button action itself, so preview never accepts actions.',
-  'Looks: `style` takes an icon name from the app icon set (`globe`, `external`, `search`, `sparkles`, `zap`, `file-text`, `git-branch`, `notebook-pen`, `list-checks`, `terminal`, `video`, `calendar`, `tags`, `settings-2` …), a color (`accent` / `danger` / `success` / `warn`), a shape (`pill` / `soft` / `plain`) and `iconOnly`. Colors come from the app theme, so they follow light and dark mode; never try to express a color yourself. Use at most one or two styled buttons per row — the rest stay plain.',
+  'Looks: `style` takes an icon name from the app icon set (`globe`, `external`, `search`, `sparkles`, `zap`, `file-text`, `git-branch`, `notebook-pen`, `list-checks`, `terminal`, `video`, `calendar`, `tags`, `settings-2` …), a color (`accent` / `danger` / `success` / `warn`), a shape (`pill` / `soft` / `plain`) and `iconOnly`. Colors come from the app theme, so they follow light and dark mode; never try to express a color yourself. Buttons default to the theme accent color; use other colors only to convey a specific intent.',
   `At most ${QUICK_BUTTON_LIMIT} buttons; pass the whole row with operation:"set" when the task changes what the user needs next, operation:"add" to append, "remove" (by id) or "clear" to take them away.`,
   'Buttons belong to this session only — they disappear when the user switches conversations, so do not use them as a place to store anything.',
   'List marks model-created buttons older than seven days as possibly stale. clear_stale explicitly removes only those buttons; manual buttons and older buttons without known timestamps are kept.',
@@ -119,7 +119,7 @@ const BUTTON_SCHEMA = {
         color: {
           type: 'string',
           enum: [...QUICK_BUTTON_COLORS],
-          description: 'Accent color; omit for a plain button.',
+          description: 'Semantic color; defaults to the theme accent color.',
         },
         shape: {
           type: 'string',

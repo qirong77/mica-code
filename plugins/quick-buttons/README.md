@@ -67,7 +67,7 @@
   （`globe` / `external` / `search` / `zap` / `list-checks` …），颜色取 `accent`（点这个）/
   `danger`（会改东西）/ `success` / `warn`，形状取 `soft` / `plain`，`iconOnly` 只画图标。
   色值来自宿主主题令牌，明暗两套各自成立——插件写死颜色必然有一边读不清，所以这里只能选，不能写。
-  认不出的取值当没写（不猜一个差不多的颜色）。
+  认不出的取值当没写（不猜一个差不多的颜色）。宿主实际快捷栏与演示页共用 `ShortcutButton`，底层使用共享 Arco 组件；本插件未声明颜色时默认补 `accent`，已有 `danger` / `success` / `warn` 等语义色与图标、形状、纯图标配置保持不变。其它插件未声明颜色的静态快捷入口仍使用主题中性色。
 
 - **弹窗 `dialog`**：一段说明 + 可选的两列清单 + 最多三颗底部按钮，全部由宿主用已有的
   `ModalShell` / 表格 / `Button` 画，插件只给内容：
@@ -120,6 +120,8 @@
 | 会话快照 `pluginState['quick-buttons']` | `{ version: 1, buttons: [...] }`，最多 6 条 |
 
 按钮 id 是小写 slug（`open-demand`、`button-1`），它是页面上的 React key 与 `shortcutStates` 的键；点击时回传的 key 另外带内容指纹。历史数据里 id 不合法的条目在读取时就被丢掉，宁可少一枚按钮也不要一枚点不动的。
+
+历史按钮缺失的 `style.color` 由 Evolution 的 `quick-buttons-accent-color` 会话迁移补为 `accent`；迁移只补颜色，不重排、不删按钮，也不改内容或动作。
 
 ## 文件
 

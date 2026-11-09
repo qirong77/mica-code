@@ -1,3 +1,4 @@
+import { ArcoAction } from '@mica-config-ui/web'
 import { Suspense, useMemo } from 'react'
 import { IconArrowLeft } from '@tabler/icons-react'
 import { createPluginHostApi } from './plugin-host'
@@ -29,16 +30,16 @@ export function PluginPage({ entry, onClose }) {
       )}
       <div className="no-drag flex min-h-0 flex-1 flex-col">
         <header className="flex h-10 shrink-0 items-center gap-2 border-b border-line bg-panel px-2">
-          <button
+          <ArcoAction
             type="button"
             title="返回对话"
             aria-label="返回对话"
-            className="flex h-6 shrink-0 items-center gap-1 rounded-md px-1.5 text-fg-muted transition-colors hover:bg-overlay hover:text-fg-max"
+            className="flex h-6 shrink-0 items-center gap-1 px-1.5 transition-colors "
             onClick={onClose}
           >
             <IconArrowLeft size={13} />
             <span className="text-xs">返回对话</span>
-          </button>
+          </ArcoAction>
           <span className="min-w-0 truncate text-xs font-medium text-fg-strong">
             {entry.page.title || entry.label}
           </span>

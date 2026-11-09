@@ -1,5 +1,6 @@
-import { useEffect, useRef } from 'react'
-import { createPortal } from 'react-dom'
+import { cloneElement, createContext, useContext, useEffect, useRef } from 'react'
+import ArcoModal from '@arco-design/web-react/es/Modal'
+import { ArcoAction } from '@mica-config-ui/web'
 import { IconX } from '@tabler/icons-react'
 
 /**
@@ -9,10 +10,44 @@ import { IconX } from '@tabler/icons-react'
  * 一次 Esc 会把两层一起关掉。BTW 抽屉的 capture 监听也据此判断是否让位。
  */
 const modalStack = []
+const ModalParent = createContext(null)
+const getModalContainer = () => document.body
 
 /** 有弹窗打开时，外层容器（BTW 抽屉）的 Esc 要让位给栈顶弹窗。 */
 export function isModalOpen() {
   return modalStack.length > 0
+}
+
+function canCloseModal(entry, ownerDocument = document) {
+  return (
+    modalStack[modalStack.length - 1] === entry &&
+    !ownerDocument.querySelector('[data-mica-config-modal]')
+  )
+}
+
+export function registerModal(entry, target = window, ownerDocument = document) {
+  // Child effects run first when a whole nested modal tree mounts together.
+  const descendantIndex = modalStack.findIndex((modal) => {
+    for (let parent = modal.parent; parent; parent = parent.parent) {
+      if (parent === entry) return true
+    }
+    return false
+  })
+  if (descendantIndex < 0) modalStack.push(entry)
+  else modalStack.splice(descendantIndex, 0, entry)
+
+  const onKeyDown = (event) => {
+    if (event.key !== 'Escape' || !canCloseModal(entry, ownerDocument)) return
+    event.preventDefault()
+    event.stopImmediatePropagation()
+    entry.close()
+  }
+  target.addEventListener('keydown', onKeyDown, true)
+  return () => {
+    target.removeEventListener('keydown', onKeyDown, true)
+    const index = modalStack.indexOf(entry)
+    if (index >= 0) modalStack.splice(index, 1)
+  }
 }
 
 /**
@@ -49,40 +84,45 @@ export function ModalShell({
 }) {
   const closeRef = useRef(onClose)
   closeRef.current = onClose
+  const parent = useContext(ModalParent)
+  const entry = useRef({ parent, close: () => closeRef.current?.() }).current
+  entry.parent = parent
+  const depth = Math.max(nested ? 1 : 0, parent ? parent.depth + 1 : 0)
+  entry.depth = depth
 
-  useEffect(() => {
-    const entry = { close: () => closeRef.current?.() }
-    modalStack.push(entry)
-    const onKeyDown = (event) => {
-      if (event.key !== 'Escape') return
-      // 配置页的详情浮层位于宿主弹窗之上，Esc 留给它自己处理。
-      if (document.querySelector('[data-mica-config-modal]')) return
-      if (modalStack[modalStack.length - 1] !== entry) return
-      event.stopPropagation()
-      entry.close()
-    }
-    window.addEventListener('keydown', onKeyDown, true)
-    return () => {
-      window.removeEventListener('keydown', onKeyDown, true)
-      const index = modalStack.indexOf(entry)
-      if (index >= 0) modalStack.splice(index, 1)
-    }
-  }, [])
+  useEffect(() => registerModal(entry), [entry])
 
-  return createPortal(
-    <div
-      className={`chat-modal-overlay no-drag${nested ? ' is-nested' : ''}`}
-      role="dialog"
-      aria-modal="true"
-      aria-label={typeof title === 'string' ? title : undefined}
-      onClick={(event) => event.target === event.currentTarget && onClose?.()}
-    >
-      <div
+  return (
+    <ModalParent.Provider value={entry}>
+      <ArcoModal
+        visible
+        title={null}
+        footer={null}
+        closable={false}
+        escToExit={false}
+        focusLock
+        autoFocus
+        getPopupContainer={getModalContainer}
         className={`chat-modal ${className}`.trim()}
-        onClick={(event) => event.stopPropagation()}
+        wrapClassName={`chat-modal-arco-wrap no-drag${nested ? ' is-nested' : ''}`}
+        wrapStyle={{ zIndex: 10000 + depth * 10 }}
+        maskStyle={{
+          zIndex: 10000 + depth * 10,
+          backgroundColor: nested ? 'rgb(0 0 0 / 24%)' : 'var(--color-mask-bg, rgb(0 0 0 / 55%))'
+        }}
+        onCancel={() => {
+          if (canCloseModal(entry)) entry.close()
+        }}
+        modalRender={(modal) =>
+          cloneElement(modal, {
+            'aria-label': typeof title === 'string' ? title : undefined,
+            onClick: (event) => event.stopPropagation()
+          })
+        }
       >
         {bare ? (
-          <button
+          <ArcoAction
+            iconOnly
             type="button"
             className="chat-modal-close chat-modal-close-float"
             aria-label="关闭"
@@ -90,7 +130,7 @@ export function ModalShell({
             onClick={onClose}
           >
             <IconX size={14} />
-          </button>
+          </ArcoAction>
         ) : (
           <header className="chat-modal-header">
             {/* 没有图标就整块不占位：标题与正文的左边缘对齐（留一条 22px 空位会让标题凭空缩进
@@ -114,7 +154,8 @@ export function ModalShell({
             {/* 操作区与底栏同样套上共享控件的作用域：`Tag` 与文字按钮都来自那一套 */}
             <div className="chat-modal-actions mica-config-ui is-embed">
               {actions}
-              <button
+              <ArcoAction
+                iconOnly
                 type="button"
                 className="chat-modal-close"
                 aria-label="关闭"
@@ -122,7 +163,7 @@ export function ModalShell({
                 onClick={onClose}
               >
                 <IconX size={14} />
-              </button>
+              </ArcoAction>
             </div>
           </header>
         )}
@@ -135,9 +176,8 @@ export function ModalShell({
         {footer ? (
           <footer className="chat-modal-footer mica-config-ui is-embed">{footer}</footer>
         ) : null}
-      </div>
-    </div>,
-    document.body
+      </ArcoModal>
+    </ModalParent.Provider>
   )
 }
 

@@ -1,6 +1,7 @@
 import { lazyView } from './lazy-view'
 import { Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { ArcoAction, Input } from '@mica-config-ui/web'
 import {
   IconCheck,
   IconChevronRight,
@@ -231,11 +232,13 @@ function RenameInput({ value, onCommit, onCancel }) {
     ref.current?.select()
   }, [])
   return (
-    <input
-      ref={ref}
+    <Input
+      ref={(instance) => { ref.current = instance?.dom ?? null }}
       defaultValue={value}
       spellCheck={false}
-      className="h-5 min-w-0 flex-1 rounded-sm border border-line bg-overlay px-1.5 text-[13px] text-fg-max"
+      className="min-w-0 flex-1"
+      height={20}
+      style={{ paddingInline: 6, fontSize: 13 }}
       onClick={(event) => event.stopPropagation()}
       onDoubleClick={(event) => event.stopPropagation()}
       onBlur={(event) => onCommit(event.currentTarget.value)}
@@ -1769,27 +1772,31 @@ export function SessionTree({
           {/* 分组操作浮在行尾：它要是占位，右侧的时间就会被挤得比下面
               会话行的时间靠左；悬浮时让摘要淡出、按钮出现在同一块地方。 */}
           <span className="pointer-events-none absolute inset-y-0 right-1 flex items-center gap-0.5 rounded-md px-0.5 opacity-0 transition-opacity group-hover/grow:pointer-events-auto group-hover/grow:opacity-100 focus-within:pointer-events-auto focus-within:opacity-100 max-md:static max-md:pointer-events-auto max-md:opacity-100">
-            <button
+            <ArcoAction
               type="button"
+              iconOnly
               title="在此分组新建会话"
               aria-label={`在 ${group.name} 中新建会话`}
-              className="grid size-5 shrink-0 place-items-center rounded text-fg-muted hover:bg-overlay-heavy hover:text-fg-max"
+              className="shrink-0"
+              style={{ width: 20, height: 20, padding: 0 }}
               onClick={(event) => {
                 event.stopPropagation()
                 onCreateSessionInGroup(groupId)
               }}
             >
               <IconPlus size={13} />
-            </button>
-            <button
+            </ArcoAction>
+            <ArcoAction
               type="button"
+              iconOnly
               title="分组操作"
               aria-label={`${group.name} 分组操作`}
-              className="grid size-5 shrink-0 place-items-center rounded text-fg-muted hover:bg-overlay-heavy hover:text-fg-max"
+              className="shrink-0"
+              style={{ width: 20, height: 20, padding: 0 }}
               onClick={(event) => openMenuAtElement(event, { group, items: groupMenuItems() })}
             >
               <IconDots size={13} />
-            </button>
+            </ArcoAction>
           </span>
           {digestTime ? (
             <span className="shrink-0 text-[11px] tabular-nums text-fg-dim transition-opacity group-hover/grow:opacity-0">
@@ -1864,15 +1871,17 @@ export function SessionTree({
           </span>
         </button>
         {onAdd && (
-          <button
+          <ArcoAction
             type="button"
+            iconOnly
             title={addTitle}
             aria-label={addTitle}
-            className="absolute top-0 right-1 grid h-6 w-5 place-items-center rounded text-fg-muted opacity-0 transition-opacity group-hover/header:opacity-100 hover:bg-overlay-strong hover:text-fg-max focus-visible:opacity-100 max-md:opacity-100"
+            className="opacity-0 transition-opacity group-hover/header:opacity-100 focus-visible:opacity-100 max-md:opacity-100"
+            style={{ position: 'absolute', top: 0, right: 4, width: 20, height: 24, padding: 0 }}
             onClick={onAdd}
           >
             <IconPlus size={14} />
-          </button>
+          </ArcoAction>
         )}
       </div>
     )
@@ -1884,17 +1893,18 @@ export function SessionTree({
         {/* 搜索框钉在滚动容器顶部：会话一多就要往下滚，搜索框跟着滚出去的话，想搜索
             还得先滚回顶部。`-mx-2 px-2` 让底色铺满整条，滚过去的内容不会从两侧透出来。 */}
         <div className="sticky top-0 z-10 -mx-2 mb-1.5 bg-panel px-2 pt-0.5 pb-1.5">
-          <div className="flex h-7 items-center gap-1.5 rounded-md bg-overlay px-2 transition-colors focus-within:bg-overlay-strong">
-            <IconSearch size={13} className="shrink-0 text-fg-dim" />
-            <input
-              ref={searchInputRef}
-              type="search"
+          <div className="flex h-7 items-center gap-1.5">
+            <Input
+              ref={(instance) => { searchInputRef.current = instance?.dom ?? null }}
               value={query}
               placeholder="搜索会话（⌘K）"
               aria-label="搜索会话"
               spellCheck={false}
-              className="h-full min-w-0 flex-1 appearance-none bg-transparent text-[13px] text-fg-max placeholder:text-fg-dim focus:outline-none [&::-webkit-search-cancel-button]:hidden"
-              onChange={(event) => setQuery(event.target.value)}
+              className="min-w-0 flex-1"
+              height={28}
+              style={{ fontSize: 13 }}
+              prefix={<IconSearch size={13} />}
+              onChange={setQuery}
               onKeyDown={(event) => {
                 if (event.key === 'ArrowDown') {
                   event.preventDefault()
@@ -1915,30 +1925,33 @@ export function SessionTree({
               }}
             />
             {query && (
-              <button
+              <ArcoAction
                 type="button"
+                iconOnly
                 title="清除搜索"
                 aria-label="清除搜索"
-                className="grid size-5 shrink-0 place-items-center rounded text-fg-muted hover:bg-overlay-strong hover:text-fg-max"
+                className="shrink-0"
+                style={{ width: 28, height: 28 }}
                 onClick={() => setQuery('')}
               >
                 <IconX size={14} />
-              </button>
+              </ArcoAction>
             )}
             {/* 筛选入口：不点它的时候侧栏和以前一模一样（没有任何会话被藏起来）。
                 激活态的按钮一直亮着，因为筛着的时候列表是平铺的，得让用户看得出
                 「我现在看的是一份子集」——亮的是图标本身，连一层底色都不铺：侧栏本来就窄，
                 任何一块色块都会把眼睛从会话标题上拽走。 */}
-            <button
+            <ArcoAction
               type="button"
+              iconOnly
               title={filterOpen ? '收起筛选' : '筛选会话'}
               aria-label={filterOpen ? '收起筛选' : '筛选会话'}
               aria-pressed={filterOpen}
-              className={`grid size-5 shrink-0 place-items-center rounded transition-colors ${
-                filterOpen
-                  ? 'text-accent hover:bg-overlay'
-                  : 'text-fg-muted hover:bg-overlay-strong hover:text-fg-max'
-              }`}
+              className="shrink-0"
+              style={{
+                width: 28, height: 28,
+                ...(filterOpen ? { color: 'rgb(var(--primary-6))' } : {})
+              }}
               onClick={() => {
                 // 筛选与搜索是两条平行入口：搜索接管列表时先关掉搜索，否则筛出来的
                 // 结果会被搜索态挡住，点了像没反应。
@@ -1947,7 +1960,7 @@ export function SessionTree({
               }}
             >
               <IconFilter size={14} />
-            </button>
+            </ArcoAction>
           </div>
           {/* 几档互斥，默认「全部」：它不筛任何东西，列表照旧是 Pinned / Projects /
               Recent。选其余档时列表整体变平铺（见下面的 filterBlocks 分支）。

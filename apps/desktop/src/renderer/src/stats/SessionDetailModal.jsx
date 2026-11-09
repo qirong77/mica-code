@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Segmented, SelectMenu, SessionDetailView } from '@mica-config-ui/web'
+import { Button, Segmented, SelectMenu, SessionDetailView } from '@mica-config-ui/web'
 import { usageSourceOf } from '@packages/mica-web-shared/usage-source.js'
 import { BarSeries, StackedShareBar } from './charts'
 import {
@@ -108,15 +108,13 @@ function RequestChartCard({ series }) {
     <section className={CARD_CLASS}>
       <header className="mb-1 flex flex-wrap items-center justify-between gap-2">
         <h3 className={OVERLINE_CLASS}>逐次请求</h3>
-        <span className="mica-config-ui is-embed">
-          <Segmented
-            size="compact"
-            value={mode}
-            options={CHART_MODES}
-            ariaLabel="图表指标"
-            onChange={setMode}
-          />
-        </span>
+        <Segmented
+          size="compact"
+          value={mode}
+          options={CHART_MODES}
+          ariaLabel="图表指标"
+          onChange={setMode}
+        />
       </header>
       <BarSeries
         columns={requests.map((request) => ({
@@ -340,44 +338,40 @@ function UsageTable({
       <div className="mt-1.5 flex items-center justify-between gap-1.5">
         <div className="flex items-center gap-1 text-[10px] text-fg-faint">
           每页
-          <span className="mica-config-ui is-embed">
-            <SelectMenu
-              size="compact"
-              value={String(pageSize)}
-              options={pageSizeOptions.map((size) => ({
-                value: String(size),
-                label: String(size)
-              }))}
-              ariaLabel="每页条数"
-              onChange={(next) => {
-                setPageSize(Number(next))
-                setPage(0)
-              }}
-            />
-          </span>
+          <SelectMenu
+            size="compact"
+            value={String(pageSize)}
+            options={pageSizeOptions.map((size) => ({
+              value: String(size),
+              label: String(size)
+            }))}
+            ariaLabel="每页条数"
+            onChange={(next) => {
+              setPageSize(Number(next))
+              setPage(0)
+            }}
+          />
           条
         </div>
         {totalPages > 1 && (
           <div className="flex items-center gap-1.5">
-            <button
-              type="button"
+            <Button
+              size="compact"
               disabled={current === 0}
               onClick={() => setPage((p) => Math.max(0, p - 1))}
-              className="rounded-[4px] border border-line bg-panel-hi px-2 py-0.5 text-[10px] text-fg-muted transition-colors enabled:hover:text-fg-strong disabled:opacity-40"
             >
               上一页
-            </button>
+            </Button>
             <span className="font-mono text-[10px] text-fg-faint tabular-nums">
               {current + 1} / {totalPages}
             </span>
-            <button
-              type="button"
+            <Button
+              size="compact"
               disabled={current >= totalPages - 1}
               onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
-              className="rounded-[4px] border border-line bg-panel-hi px-2 py-0.5 text-[10px] text-fg-muted transition-colors enabled:hover:text-fg-strong disabled:opacity-40"
             >
               下一页
-            </button>
+            </Button>
           </div>
         )}
       </div>

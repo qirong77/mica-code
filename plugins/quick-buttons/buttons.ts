@@ -106,7 +106,7 @@ export function isStaleQuickButton(button: QuickButton, now = Date.now()): boole
 export type QuickButtonStyle = {
   /** 图标名，取自宿主那张 lucide 表（`globe` / `external` / `search` / `sparkles` / `zap` …）。 */
   icon?: string;
-  /** 强调色；不写就是普通描边胶囊。 */
+  /** 语义色；不写时使用主题强调色。 */
   color?: QuickButtonColor;
   /** 形状：`pill`（默认）/ `soft`（无边框）/ `plain`（纯文字）。 */
   shape?: QuickButtonShape;
@@ -242,7 +242,7 @@ export function normalizeQuickButton(input: unknown): QuickButton | null {
     id,
     label,
     kind,
-    ...(style ? { style } : {}),
+    style,
     ...(hint ? { hint } : {}),
     ...(preview ? { preview } : {}),
     ...(raw.source === 'model' ? { source: 'model' as const } : {}),
@@ -277,16 +277,15 @@ export function normalizeQuickButton(input: unknown): QuickButton | null {
   }
 }
 
-export function normalizeQuickButtonStyle(input: unknown): QuickButtonStyle | undefined {
-  if (!isRecord(input)) return undefined;
-  const icon = trimTo(input.icon, 40);
-  const color = isQuickButtonColor(input.color) ? input.color : undefined;
-  const shape = isQuickButtonShape(input.shape) ? input.shape : undefined;
-  const iconOnly = input.iconOnly === true;
-  if (!icon && !color && !shape && !iconOnly) return undefined;
+export function normalizeQuickButtonStyle(input: unknown): QuickButtonStyle {
+  const raw = isRecord(input) ? input : {};
+  const icon = trimTo(raw.icon, 40);
+  const color = isQuickButtonColor(raw.color) ? raw.color : 'accent';
+  const shape = isQuickButtonShape(raw.shape) ? raw.shape : undefined;
+  const iconOnly = raw.iconOnly === true;
   return {
     ...(icon ? { icon } : {}),
-    ...(color ? { color } : {}),
+    color,
     ...(shape ? { shape } : {}),
     ...(iconOnly ? { iconOnly } : {}),
   };

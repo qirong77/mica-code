@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef } from 'react'
+import { Input } from '@mica-config-ui/web'
 import { IconChevronRight } from '@tabler/icons-react'
 import { FileSystemIcon } from './FileIcon'
 import { longPressHandlers } from './hooks'
@@ -34,9 +35,12 @@ export function FileNameInput({ edit, depth, onChange, onSubmit, onCancel }) {
       >
         <span className="size-4 shrink-0" />
         <FileSystemIcon name={edit.value} type={edit.type} className="size-4 shrink-0" />
-        <input
-          ref={inputRef}
-          className={`ml-[5px] h-[22px] min-w-0 flex-1 border bg-canvas px-1 text-[16px] text-fg-strong outline-none md:text-[13px] ${edit.error ? 'border-danger' : 'border-accent'}`}
+        <Input
+          ref={(instance) => { inputRef.current = instance?.dom ?? null }}
+          className="ml-[5px] min-w-0 flex-1 text-[16px] md:text-[13px]"
+          height={22}
+          style={{ paddingInline: 4 }}
+          status={edit.error ? 'error' : undefined}
           aria-label={`${label}名称`}
           aria-invalid={!!edit.error}
           aria-describedby={edit.error ? 'file-entry-error' : undefined}
@@ -45,7 +49,7 @@ export function FileNameInput({ edit, depth, onChange, onSubmit, onCancel }) {
           placeholder={rename ? '' : '名称或相对路径'}
           autoComplete="off"
           spellCheck={false}
-          onChange={(event) => onChange(event.target.value)}
+          onChange={onChange}
           onContextMenu={(event) => event.stopPropagation()}
           onBlur={() => onSubmit(true)}
           onKeyDown={(event) => {

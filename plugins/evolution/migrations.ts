@@ -255,10 +255,36 @@ export const generationTimingV2: Migration = {
   },
 };
 
+export const quickButtonsAccentColor: Migration = {
+  id: 'quick-buttons-accent-color',
+  description: '给 quick-buttons 未声明颜色的按钮补上主题强调色，保留已有外观与动作',
+  apply(document) {
+    const snapshot = document.snapshot;
+    const pluginState = isRecord(snapshot) ? snapshot.pluginState : undefined;
+    const state = isRecord(pluginState) ? pluginState['quick-buttons'] : undefined;
+    const buttons = isRecord(state) ? state.buttons : undefined;
+    if (!Array.isArray(buttons)) return 0;
+    let changed = 0;
+    for (const button of buttons) {
+      if (!isRecord(button)) continue;
+      if (button.style === undefined) {
+        button.style = { color: 'accent' };
+      } else if (isRecord(button.style) && button.style.color === undefined) {
+        button.style.color = 'accent';
+      } else {
+        continue;
+      }
+      changed += 1;
+    }
+    return changed;
+  },
+};
+
 export const MIGRATIONS: Migration[] = [
   usageOccurredAt,
   sessionCompactRename,
   dropRawUsage,
   usageSourceOwner,
   generationTimingV2,
+  quickButtonsAccentColor,
 ];

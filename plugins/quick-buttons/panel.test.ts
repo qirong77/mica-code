@@ -97,6 +97,7 @@ describe('快捷按钮面板 view', () => {
     expect(view.shortcuts).toHaveLength(2);
     expect(view.shortcuts?.[0]).toMatchObject({ id: 'doc', label: '打开需求单', action: RUN_ACTION, key: expect.stringMatching(/^doc:/) });
     expect(view.shortcuts?.[1]).toMatchObject({ id: 'ask', label: '追问', action: RUN_ACTION, key: expect.stringMatching(/^ask:/) });
+    expect(view.shortcuts?.map((shortcut) => shortcut.style)).toEqual([{ color: 'accent' }, { color: 'accent' }]);
     expect(view.subtitle).toContain('2 个按钮');
     const list = view.sections?.[0];
     expect(list?.items?.map((item) => item.label)).toEqual(['打开需求单', '追问']);
@@ -230,7 +231,9 @@ describe('快捷按钮面板动作', () => {
     });
     expect(result).toEqual({ message: '已添加「看日志」' });
     expect(harnessed.buttons()).toEqual([
-      expect.objectContaining({ label: '看日志', kind: 'path', path: '/Users/me/project/logs/a.log' }),
+      expect.objectContaining({
+        label: '看日志', kind: 'path', path: '/Users/me/project/logs/a.log', style: { color: 'accent' },
+      }),
     ]);
   });
 

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Monitor, Pencil, Trash2 } from 'lucide-react';
-import { Alert, Button, ConfigSwitch as Switch, Tag } from '@mica-config-ui/web';
+import { Alert, Button, ConfigSwitch as Switch, Input, Tag } from '@mica-config-ui/web';
 import { DEFAULT_RUNTIME_URL, isLoopbackRuntime, normalizeEntryAddress, relayTokenOf, runtimeLabel } from '@packages/mica-web-shared/index.js';
 import { MAX_PEER_NOTE_LENGTH, emptyPeerStore, findPeer, peerRows, rememberPeer, samePeer, setPeerNote } from './peers';
 import { createPeerPersistence } from './persistence';
@@ -289,12 +289,12 @@ export default function ConnectionsCard({ api, onClose }) {
       {error && <Alert message={error} />}
 
       <div className="flex gap-2">
-        <input
+        <Input
           value={value}
           spellCheck={false}
           placeholder="Mica 地址或 https://… 网页地址"
           className="text-input min-w-0 flex-1"
-          onChange={(event) => setValue(event.target.value)}
+          onChange={setValue}
           onKeyDown={(event) => {
             if (event.key === 'Enter' && !event.nativeEvent.isComposing) {
               event.preventDefault();
@@ -393,14 +393,14 @@ function RemoteAccess({ api }) {
       </div>
       {enabled && (
         <div className="mt-1.5 flex items-center gap-2">
-          <input
+          <Input
             value={draft}
             spellCheck={false}
             maxLength={64}
             aria-label="访问口令"
             placeholder="访问口令"
             className="text-input min-w-0 flex-1"
-            onChange={(event) => setDraft(event.target.value)}
+            onChange={setDraft}
             onKeyDown={(event) => {
               if (event.key === 'Enter' && !event.nativeEvent.isComposing) {
                 event.preventDefault();
@@ -485,14 +485,14 @@ function NoteInput({ value, onChange, onSave, onCancel }) {
 
   return (
     <div className="flex items-center gap-2 border-t border-line px-2.5 py-1.5">
-      <input
+      <Input
         autoFocus
         value={value}
         maxLength={MAX_PEER_NOTE_LENGTH}
         spellCheck={false}
         placeholder="备注，如「办公室的 Mac」"
         className="text-input min-w-0 flex-1"
-        onChange={(event) => onChange(event.target.value)}
+        onChange={onChange}
         onKeyDown={onKeyDown}
         onBlur={onBlur}
       />

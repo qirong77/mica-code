@@ -18,7 +18,7 @@ import {
   IconX
 } from '@tabler/icons-react'
 import { FileSystemIcon } from './FileIcon'
-import { Checkbox } from '@mica-config-ui/web'
+import { ArcoAction, Checkbox, Input } from '@mica-config-ui/web'
 import { FloatingMenu, MenuItem, MenuSeparator } from './FloatingMenu'
 import { GitComparePicker } from './GitComparePicker'
 import { statusColor, statusLabel } from './git-decorations'
@@ -148,12 +148,13 @@ function CompareRow({
       {!directory && (onDiscard || onOpenFile) && (
         <span className="ml-1 hidden shrink-0 items-center group-focus-within:flex group-hover:flex">
           {onDiscard && row.uncommitted && (
-            <button
+            <ArcoAction
+              iconOnly
               type="button"
               tabIndex={-1}
               title="放弃更改"
               aria-label={`放弃更改：${row.path}`}
-              className="grid size-[18px] shrink-0 place-items-center rounded-sm text-fg-muted hover:bg-overlay-strong hover:text-fg-max"
+              className="grid size-[18px] shrink-0 place-items-center "
               onClick={(event) => {
                 event.stopPropagation()
                 onDiscard(row.files)
@@ -161,15 +162,16 @@ function CompareRow({
               onKeyDown={(event) => event.stopPropagation()}
             >
               <IconArrowBackUp size={13} />
-            </button>
+            </ArcoAction>
           )}
           {onOpenFile && row.status !== 'deleted' && (
-            <button
+            <ArcoAction
+              iconOnly
               type="button"
               tabIndex={-1}
               title="打开文件"
               aria-label={`打开文件：${row.path}`}
-              className="grid size-[18px] shrink-0 place-items-center rounded-sm text-fg-muted hover:bg-overlay-strong hover:text-fg-max"
+              className="grid size-[18px] shrink-0 place-items-center "
               onClick={(event) => {
                 event.stopPropagation()
                 onOpenFile(row.files[0])
@@ -177,7 +179,7 @@ function CompareRow({
               onKeyDown={(event) => event.stopPropagation()}
             >
               <IconArrowUpRight size={13} />
-            </button>
+            </ArcoAction>
           )}
         </span>
       )}
@@ -185,12 +187,13 @@ function CompareRow({
           动作不该只藏在右键里。 */}
       {directory && onDiscardFolder && (
         <span className="ml-1 hidden shrink-0 items-center group-focus-within:flex group-hover:flex">
-          <button
+          <ArcoAction
+            iconOnly
             type="button"
             tabIndex={-1}
             title="回退此文件夹的更改"
             aria-label={`回退此文件夹的更改：${row.path}`}
-            className="grid size-[18px] shrink-0 place-items-center rounded-sm text-fg-muted hover:bg-overlay-strong hover:text-fg-max"
+            className="grid size-[18px] shrink-0 place-items-center "
             onClick={(event) => {
               event.stopPropagation()
               onDiscardFolder(row.path, row.files)
@@ -198,7 +201,7 @@ function CompareRow({
             onKeyDown={(event) => event.stopPropagation()}
           >
             <IconArrowBackUp size={13} />
-          </button>
+          </ArcoAction>
         </span>
       )}
       {preferences.showStats && !row.binary && Boolean(row.additions || row.deletions) && (
@@ -487,7 +490,8 @@ export function GitComparePanel({
         >
           {repoName || 'Git 比较'}
         </span>
-        <button
+        <ArcoAction
+          iconOnly
           type="button"
           className={ACTION}
           title="筛选更改"
@@ -499,8 +503,9 @@ export function GitComparePanel({
           }}
         >
           <IconSearch size={15} />
-        </button>
-        <button
+        </ArcoAction>
+        <ArcoAction
+          iconOnly
           type="button"
           className={ACTION}
           title="刷新比较"
@@ -509,8 +514,9 @@ export function GitComparePanel({
           onClick={onRefresh}
         >
           <IconRefresh size={15} className={loading ? 'animate-spin' : ''} />
-        </button>
-        <button
+        </ArcoAction>
+        <ArcoAction
+          iconOnly
           type="button"
           className={ACTION}
           title="折叠所有文件夹"
@@ -524,8 +530,9 @@ export function GitComparePanel({
           }}
         >
           <IconSquareMinus size={15} />
-        </button>
-        <button
+        </ArcoAction>
+        <ArcoAction
+          iconOnly
           type="button"
           className={ACTION}
           title="更多比较操作"
@@ -548,15 +555,15 @@ export function GitComparePanel({
           }}
         >
           <IconDots size={16} />
-        </button>
+        </ArcoAction>
       </header>
 
       {/* 比较的两头各一格：上「当前分支」（我在开发的一侧，缺省工作区），下「目标分支」
           （合入的去处，通常是默认分支）。两格随时可换，改的只是这一页的对比，不碰会话。 */}
       <div className="mx-2 mb-1 shrink-0 overflow-hidden rounded-sm border border-line-soft bg-overlay-subtle">
-        <button
+        <ArcoAction
           type="button"
-          className="flex h-8 w-full min-w-0 items-center gap-2 px-2 text-left hover:bg-overlay focus-visible:outline focus-visible:outline-1 focus-visible:outline-accent disabled:opacity-40"
+          className="flex h-8 w-full min-w-0 items-center gap-2 px-2 text-left focus-visible:outline focus-visible:outline-1 focus-visible:outline-accent disabled:opacity-40"
           disabled={!cwd || !onCompareHeadChange}
           title={`当前分支：${headName} · 点击选择分支、标签或提交`}
           aria-label={`当前分支：${headName}`}
@@ -570,11 +577,11 @@ export function GitComparePanel({
             {headName}
           </span>
           <IconChevronRight size={12} className="shrink-0 rotate-90 text-fg-muted" />
-        </button>
+        </ArcoAction>
         <div className="h-px bg-line-soft" />
-        <button
+        <ArcoAction
           type="button"
-          className="flex h-8 w-full min-w-0 items-center gap-2 px-2 text-left hover:bg-overlay focus-visible:outline focus-visible:outline-1 focus-visible:outline-accent disabled:opacity-40"
+          className="flex h-8 w-full min-w-0 items-center gap-2 px-2 text-left focus-visible:outline focus-visible:outline-1 focus-visible:outline-accent disabled:opacity-40"
           disabled={!cwd || !onCompareBaseChange}
           title={`目标分支：${baseName} · 点击选择分支、标签或提交`}
           aria-label={`目标分支：${baseName}`}
@@ -588,19 +595,19 @@ export function GitComparePanel({
             {baseName}
           </span>
           <IconChevronRight size={12} className="shrink-0 rotate-90 text-fg-muted" />
-        </button>
+        </ArcoAction>
       </div>
 
       {searchOpen && (
         <div className="mx-2 mb-1 flex h-[26px] shrink-0 items-center gap-1 rounded-sm border border-line bg-overlay-subtle px-2 focus-within:border-accent/70">
           <IconSearch size={13} className="shrink-0 text-fg-muted" />
-          <input
-            ref={searchRef}
+          <Input
+            ref={(instance) => { searchRef.current = instance?.dom ?? null }}
             aria-label="按路径筛选更改"
             placeholder="筛选文件或路径"
             value={query}
-            className="min-w-0 flex-1 bg-transparent text-[12px] outline-none placeholder:text-fg-dim"
-            onChange={(event) => setQuery(event.target.value)}
+            className="min-w-0 flex-1"
+            onChange={setQuery}
             onKeyDown={(event) => {
               if (event.key === 'Escape') {
                 setQuery('')
@@ -613,9 +620,10 @@ export function GitComparePanel({
               }
             }}
           />
-          <button
+          <ArcoAction
+            iconOnly
             type="button"
-            className="text-fg-muted hover:text-fg-max"
+            className=" "
             title="关闭筛选"
             aria-label="关闭筛选"
             onClick={() => {
@@ -624,21 +632,22 @@ export function GitComparePanel({
             }}
           >
             <IconX size={13} />
-          </button>
+          </ArcoAction>
         </div>
       )}
       {preferences.unreviewedOnly && (
         <div className="mx-2 mb-1 flex shrink-0 items-center gap-1 text-[11px] text-info-soft">
           <IconCheck size={12} />
           <span className="flex-1">仅显示未审阅</span>
-          <button
+          <ArcoAction
+            iconOnly
             type="button"
             title="显示全部更改"
             aria-label="显示全部更改"
             onClick={() => setPreference('unreviewedOnly', false)}
           >
             <IconX size={13} />
-          </button>
+          </ArcoAction>
         </div>
       )}
 
@@ -675,14 +684,14 @@ export function GitComparePanel({
             <p className="mb-2 text-danger-soft">
               {typeof failure === 'string' ? failure : failure.message || '无法读取 Git 比较'}
             </p>
-            <button
+            <ArcoAction
               type="button"
-              className="text-info-soft hover:underline"
+              className=" hover:underline"
               disabled={loading}
               onClick={onRefresh}
             >
               重新比较
-            </button>
+            </ArcoAction>
           </div>
         ) : !cwd ? (
           <p className="px-4 py-4 text-[12px] leading-relaxed text-fg-muted">
@@ -702,13 +711,13 @@ export function GitComparePanel({
                   ? '工作区没有未提交的更改。'
                   : `相对 ${baseName} 没有更改。`}
             </p>
-            <button
+            <ArcoAction
               type="button"
-              className="mt-2 text-info-soft hover:underline"
+              className="mt-2 hover:underline"
               onClick={() => setPickerOpen('base')}
             >
               选择其他目标分支
-            </button>
+            </ArcoAction>
           </div>
         ) : !visibleFiles.length ? (
           <div role="status" className="px-4 py-5 text-[12px] leading-relaxed text-fg-muted">
@@ -717,16 +726,16 @@ export function GitComparePanel({
                 ? '全部更改已审阅。'
                 : '没有符合筛选条件的更改。'}
             </p>
-            <button
+            <ArcoAction
               type="button"
-              className="mt-2 text-info-soft hover:underline"
+              className="mt-2 hover:underline"
               onClick={() => {
                 setQuery('')
                 setPreference('unreviewedOnly', false)
               }}
             >
               显示全部更改
-            </button>
+            </ArcoAction>
           </div>
         ) : (
           !rootCollapsed && (

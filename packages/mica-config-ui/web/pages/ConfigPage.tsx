@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { JsonEditor } from '../components/JsonEditor.js';
 import { PageFrame } from '../components/PageFrame.js';
 import { ProviderEditor } from '../components/ProviderEditor.js';
-import { ArcoSettings, Button, Input, Select } from '../components/ArcoSettings.js';
+import { Button, Input, Select } from '../components/ArcoSettings.js';
 import { Alert, SaveStatus, SettingRow, SettingsGroup } from '../components/Ui.js';
 import { readConfigFile, testProvider, writeConfigFile } from '../api.js';
 import { appIcons } from '../icons.js';
@@ -35,14 +35,6 @@ import { filterSelectOptions } from '../components/selectMenuModel.js';
  * 页面上照旧提示哪里要修——自动保存的前提是别把一份会让 CLI 起不来的配置落盘。
  */
 export function ConfigPage() {
-  return (
-    <ArcoSettings>
-      <ConfigPageContent />
-    </ArcoSettings>
-  );
-}
-
-function ConfigPageContent() {
   const [draft, setDraft] = useState<ConfigDraft | null>(null);
   const [savedJson, setSavedJson] = useState('');
   const [jsonText, setJsonText] = useState('');

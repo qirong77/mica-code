@@ -1,5 +1,6 @@
 import { forwardRef, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { IconGitBranch } from '@tabler/icons-react'
+import { ArcoAction } from '@mica-config-ui/web'
 import { FilesView } from './FilesView'
 import { BranchPicker } from './BranchPicker'
 import { CwdPicker } from './CwdPicker'
@@ -168,12 +169,13 @@ export const EditorWorkspace = forwardRef(function EditorWorkspace(
       <EditorTerminal ref={terminalRef} cwd={cwd} hidden={!visible || mobile} />
       <footer className="safe-bottom no-drag flex h-7 shrink-0 items-center justify-between gap-4 border-t border-line-soft bg-shade px-3 text-xs text-fg-soft">
         {branchLabel && (
-          <button
+          <ArcoAction
             ref={branchAnchorRef}
             type="button"
-            className={`-ml-1.5 flex h-full items-center gap-1.5 rounded-sm px-1.5 text-left hover:bg-overlay-strong hover:text-fg-max ${
+            className={`-ml-1.5 flex items-center gap-1.5 text-left ${
               cwd ? 'max-w-[45%] shrink-0' : 'min-w-0'
             }`}
+            style={{ height: '100%', paddingInline: 6, fontSize: 12 }}
             title="切换分支…"
             aria-label="切换编辑器分支"
             aria-haspopup="dialog"
@@ -182,14 +184,13 @@ export const EditorWorkspace = forwardRef(function EditorWorkspace(
           >
             <IconGitBranch size={13} className="shrink-0" />
             <span className="truncate">{branchLabel}</span>
-          </button>
+          </ArcoAction>
         )}
-        <button
+        <ArcoAction
           ref={cwdAnchorRef}
           type="button"
-          className={`ml-auto min-w-0 truncate rounded-sm px-1.5 py-0.5 text-right hover:bg-overlay ${
-            cwd ? 'text-fg-dim hover:text-fg-strong' : 'text-fg-faint'
-          }`}
+          className="ml-auto min-w-0 truncate text-right"
+          style={{ height: 24, paddingInline: 6, fontSize: 12 }}
           title={cwd ? `${cwd}\n切换目录…` : '选择编辑器目录…'}
           aria-label="切换编辑器目录"
           aria-haspopup="dialog"
@@ -197,7 +198,7 @@ export const EditorWorkspace = forwardRef(function EditorWorkspace(
           onClick={openPathPicker}
         >
           {cwd || '选择目录…'}
-        </button>
+        </ArcoAction>
       </footer>
       {visible && picker === 'branch' && cwd && (
         <BranchPicker

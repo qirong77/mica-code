@@ -13,7 +13,8 @@
 - 两个宿主都整页打开：桌面端点左下角设置按钮、左上角插件菜单，都以覆盖整窗的一层渲染 `<App>`（`section` 定位到 Config 或 Plugins、`pluginId` 定位到插件详情，`onClose` 渲染左上角返回）。页面内导航由侧栏切换，不做弹窗内嵌。
 - 新页面只用既有积木：`PageFrame`、`Button`、`Tag`、`Switch`、`CollapsiblePanel`、`SettingsGroup`、`SettingRow`、`SplitView`、`ControlEndpointList`；文案走 `labels.ts`。
 - 三块骨架：`PageFrame`（窄页头 + 内容区）、`SettingsGroup` + `SettingRow`（一页一块面，行间分隔线）、`SplitView`（左列表 + 右详情）。
-- Arco 渐进试验目前仅覆盖「配置」页（`ConfigPage` / `ProviderEditor`）：基础控件从 `components/ArcoSettings.tsx` 引入，`arco-settings.css` 按需加载控件样式并在局部容器映射主题，弹层留在该容器内。不替换页面骨架、导航或共享 `Ui.tsx`，不影响其它设置页及聊天界面。
+- Web 基础控件以 Arco Design React 为实现：`Ui.tsx` 保留共享语义接口，`SelectMenu` / `DateField` / `Modal` / `DataTable` 适配原有业务契约，普通输入从共享入口引入 `Input` / `InputNumber`。`ArcoProvider` 供完整 App 统一配置语言、尺寸与弹层容器；`ArcoAction` 透传原生按钮事件与 ref。`arco-settings.css` 按需载入控件样式，在 `body.mica-arco-theme` 与 `.mica-config-ui` 映射主题；页面旧控件皮肤不得覆盖 Arco。保留页面骨架、导航、布局与专用编辑器，不另写第二套基础控件。
+- 纯图标动作显式传 `iconOnly`，共享适配层用双轴居中，禁止沿用文字内边距；文字动作继承所在工具栏字号与字色，状态色仍交给 Arco。普通导航、工具栏与文字动作使用当前主题的中性色，不套 Arco 默认蓝色；主操作与选中态才使用主题强调色，危险/成功/警告保留语义色。主题沿用现有六套与 `auto`，组件及 body Portal 通过同一份 token 映射即时更新。
 - 折叠按容器宽度（`@container page (max-width: 860px)`），不按视口。
 - Config 页只按字段编辑 providers；`mcpServers` 与 `capabilityDefaults` 不在这页编辑——前者在 MCP 页按字段填，后者跳到 Capabilities 页。
 - MCP 页没有左列表：`mcpServers` 的协议与字段是固定的，一页就一个 `SettingsGroup`，一个 server 一张可折叠的 `entry-row`（与服务商同一套行），折叠行显示名称 / 连接方式 / 命令或地址 / 连接状态，展开接字段行。类型用 `Segmented`，本地进程填命令 / 参数 / 环境变量 / 工作目录 / 标准错误，HTTP 填地址 / 请求头；切类型会删掉另一侧的已知键（文件里同时留着 `command` 与 `url` 的条目说不清是哪种）。连接状态与工具列表只属于磁盘上那份配置，类型换掉后不再显示。右上角「编辑 JSON」是**整份** `mcpServers`（也接受文档里抄来的 `{ "mcpServers": { … } }`），与表单是同一份内容的两种形态；转换唯一实现是 `web/mcpDraft.ts`。
@@ -27,10 +28,10 @@
 - Capabilities 页改 `config.capabilityDefaults`，读写实现在 `src/server/capabilityDefaults.ts`。
 - 插件页是「目录 + 整页详情」：目录首个页签是「全部」，其后按已声明的桌面能力 / 可配置能力 / 其他工具 / 用户来源切换卡片网格（停用的卡片压暗），每张卡显示清单 `icon`（`web/pluginIcons.tsx` 的映射表，未登记回落 `puzzle`）与一枚启停开关（卡片是「外壳 + 打开详情的按钮 + 右上角的开关」，开关不能塞进按钮里）；点开进入单插件详情页，返回走详情页自己的返回行。**开关是唯一的启停控件**：卡片脚注与详情页信息表的「加载」行只说装配结论（已加载 / 已跳过 / 加载失败 / 尚未加载，停用时是「已停用」），不要再放一枚「已启用」标签去重复开关的语义（唯一实现在 `pluginRunningStatus()`）。清单 icon 不参与内核逻辑，只在配置页呈现。
 - 详情页右侧信息表只有标识 / 加载 / 目录 / 日志四行、单行省略；「日志」是路径链接（单击选「在 Finder 中打开 / 在 Mica 中打开」，⌘ 点击直接进编辑器，用的是 `PathLink` + 宿主的 `revealPath` / `openPathInEditor`），目录那行不是——官方插件的目录是仓库里的相对路径。插件里的文件清单不进界面（`PluginInspection` 不读目录），用户要的是「装没装上」而不是文件浏览器。
-- 插件设置在详情页按清单渲染：开关用共享 `Switch`，数字用 `config-stepper`（−/输入/+ 共用一条边框，单位定宽）。
+- 插件设置在详情页按清单渲染：开关用共享 `Switch`，数字用 Arco `InputNumber` 的按钮模式，单位定宽；手输草稿不夹值，步进才按边界归一，校验与落盘规则不变。
 - 所有页面不设保存按钮：`useAutoSave`（400ms 防抖、串行写盘、卸载补发）；校验不过不写盘。
 - 新建/删除/放弃用 `DialogHost` 的 confirmDialog / promptDialog。
-- 改配置页后跑 `bun run build:config-web` 并提交 `generatedStaticAssets.ts`。
+- 配置页产物由用户决定何时生成：明确要求构建时跑 `bun run build:config-web` 并更新 `generatedStaticAssets.ts`；日常源码改动不自动构建或重启。
 - 样式限定 `.mica-config-ui`；桌面 app.css 与配置页共用 Darcula 暗色 token；页面级 html/body 高度链归宿主。
 
 ## 主题（6 套主题 + 跟随系统）
@@ -47,10 +48,10 @@
 
 - 顶部临时提示走 `renderer/src/notify.js` + `NotificationHost.jsx`：`notify({ key, text, detail, level, timeout, actions })`，同 key 原地更新，最多三条，`sticky` 置顶；需要「页面刷完再提示」用 `queueAfterReload`。不要另外写浮层。
 
-- 控件只用 `@mica-config-ui/web` 那一套（`Button` / `Tag` / `Alert` / `Empty` / `Switch` / `Checkbox` / `SelectMenu` / `DateField` / `Segmented` / `text-input`），原生 `<select>`、`type="date"`、`type="checkbox"` 一律不用——`web/noNativeControls.test.ts` 按源码挡住，插件页面同样在范围内。
-- 这些控件的样式限定在 `@scope (.mica-config-ui)` 里：Portal 到 `body` 的浮层（预览卡片、菜单、对话框）里用共享控件，装控件的那一块必须自己套 `mica-config-ui is-embed`，否则全落不到样式，按钮退化成裸文字。整层套会把配色切成 Darcula 那套，所以只套控件区。
-- 快捷按钮的外观验收页是 `?quick-buttons-demo=1`（`renderer/src/QuickButtonsPreviewDemo.jsx`），按钮走 `quickbarButtonLook`、卡片用 `PluginPanels.jsx` 的 `QuickbarPreview`——演示页只提供「模拟对话 + 模拟输入条」的壳，不复制任何按钮或卡片样式，否则两边迟早长得不一样。它是纯静态页，在 `ensureMicaApi()` 之前渲染，可以挂在任意静态服务下看。
-- Portal 到 `body` 的浮层要自己声明 `font-size` / `line-height`：不声明就继承 `body` 的 16px，正文会比它自己的标题还大。浮层的排版按 `.chat-tooltip` 那一档来（`calc(var(--chat-text-size) - 1px)`、1.55、圆角 10px、130ms 位移 2px 入场），并给 `prefers-reduced-motion` 关掉动画；纯文本分支保留换行（`white-space: pre-line`），Markdown 分支要抹平 `.chat-markdown` 自带的字号行高，否则同一张卡片换个写法就换一套排版。
+- 控件只用 `@mica-config-ui/web` 那一套（`Button` / `Tag` / `Alert` / `Empty` / `Switch` / `Checkbox` / `SelectMenu` / `DateField` / `Segmented` / `Input` / `InputNumber`），原生 `<select>`、`type="date"`、`type="checkbox"` 一律不用——`web/noNativeControls.test.ts` 按源码挡住，插件页面同样在范围内。
+- Arco 基础样式通过 `body.mica-arco-theme` 覆盖完整应用及 Portal；设置页布局样式仍限定在 `@scope (.mica-config-ui)`。不要把整个 App 包进 `.mica-config-ui`（它带整页尺寸与配色）；内嵌设置布局才套 `mica-config-ui is-embed`。
+- 快捷按钮的外观验收页是 `?quick-buttons-demo=1`（`renderer/src/QuickButtonsPreviewDemo.jsx`），按钮与实际快捷栏共用 `ShortcutButton`（外观规格来自 `quickbarButtonLook`）、卡片用 `PluginPanels.jsx` 的 `QuickbarPreview`——演示页只提供「模拟对话 + 模拟输入条」的壳，不复制任何按钮或卡片样式，否则两边迟早长得不一样。它是纯静态页，在 `ensureMicaApi()` 之前渲染，可以挂在任意静态服务下看。
+- 快捷按钮预览使用共享 `ArcoPopover` 的定位、边框、圆角、阴影和排版，不再叠加旧卡片皮肤或 `.mica-config-ui` 主题壳。其它 Portal 到 `body` 的自绘浮层要自己声明 `font-size` / `line-height`：不声明就继承 `body` 的 16px，正文会比它自己的标题还大。浮层的排版按 `.chat-tooltip` 那一档来（`calc(var(--chat-text-size) - 1px)`、1.55、圆角 10px、130ms 位移 2px 入场），并给 `prefers-reduced-motion` 关掉动画；纯文本分支保留换行（`white-space: pre-line`），Markdown 分支要抹平 `.chat-markdown` 自带的字号行高，否则同一张卡片换个写法就换一套排版。
 - `app.css` 认识的状态色是 `--color-success` / `--color-warn` / `--color-danger` / `--color-accent`（明暗各一套）；`--green` / `--amber` / `--red` / `--blue` 只在组件库 `web/styles.css` 的 `.mica-config-ui` 作用域内定义，在 `app.css` 里引用它们等于没写，`color` 会静默落回继承——写状态色时先确认变量属于哪份表。
 - 选中态不要用 `border-left` 或 `inset ... 0 0` 造竖直亮条，用背景、圆角边框与字重区分。
 - 一行里的控件必须等高：原生 select / checkbox 要么 `appearance: none` 自绘，要么用共享组件。

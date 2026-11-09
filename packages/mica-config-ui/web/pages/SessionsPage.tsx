@@ -3,6 +3,7 @@ import { readSessionsDetails } from '../api.js';
 import { PageFrame } from '../components/PageFrame.js';
 import { SessionDetailView } from '../components/SessionDetailView.js';
 import { Alert, Button, Empty, SplitView } from '../components/Ui.js';
+import { Input } from '../components/ArcoSettings.js';
 import { appIcons } from '../icons.js';
 import type { ConfigWebSessionOption, ConfigWebSessionsDetails } from '../../src/shared/types.js';
 
@@ -92,12 +93,12 @@ export function SessionsPage() {
                 <div className="split-rail-head">
                   <div className="split-rail-filter">
                     <SearchIcon size={14} aria-hidden="true" />
-                    <input
+                    <Input
                       value={filter}
                       type="search"
                       aria-label="搜索会话"
                       placeholder="搜索标题、目录或模型"
-                      onChange={(event) => setFilter(event.target.value)}
+                      onChange={setFilter}
                     />
                   </div>
                 </div>

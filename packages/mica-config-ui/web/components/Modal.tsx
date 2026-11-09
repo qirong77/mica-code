@@ -1,8 +1,10 @@
 import { useEffect, useRef, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
+import ArcoModal from '@arco-design/web-react/es/Modal';
+import '../arco-settings.css';
 import { appIcons } from '../icons.js';
 
-const modalStack: object[] = [];
+const modalStack: { host: HTMLDivElement | null }[] = [];
 
 export function Modal({
   title,
@@ -21,10 +23,15 @@ export function Modal({
   const closeRef = useRef(onClose);
   closeRef.current = onClose;
   const cardRef = useRef<HTMLDivElement>(null);
+  const hostRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    const entry = {};
-    modalStack.push(entry);
+    const entry = { host: hostRef.current };
+    const descendantIndex = modalStack.findIndex(
+      (modal) => modal.host !== entry.host && entry.host?.contains(modal.host),
+    );
+    if (descendantIndex < 0) modalStack.push(entry);
+    else modalStack.splice(descendantIndex, 0, entry);
     const previousFocus = document.activeElement;
     if (portal) cardRef.current?.querySelector<HTMLButtonElement>('.modal-close')?.focus();
     const closeOnEscape = (event: KeyboardEvent) => {
@@ -60,30 +67,37 @@ export function Modal({
   }, [portal]);
 
   const content = (
-    <div
-      data-mica-config-modal
-      className="modal-backdrop"
-      onClick={(event) => event.target === event.currentTarget && onClose()}
-    >
-      <div
-        ref={cardRef}
-        className={`modal-card${wide ? ' modal-card-wide' : ''}`}
-        role="dialog"
-        aria-modal="true"
-        aria-label={typeof title === 'string' ? title : undefined}
-      >
-        <header className="modal-header">
-          <div className="modal-title">{title}</div>
-          <button type="button" className="modal-close" aria-label="关闭" onClick={onClose}>
+    <div ref={hostRef} className={portal ? 'mica-config-ui is-embed modal-portal' : 'modal-anchor'}>
+      <ArcoModal
+        visible
+        title={title}
+        footer={null}
+        className={`modal-card modal-arco${wide ? ' modal-card-wide' : ''}`}
+        style={{ width: wide ? 880 : 680, maxWidth: 'calc(100% - 48px)' }}
+        wrapClassName="modal-arco-backdrop"
+        escToExit={false}
+        focusLock={false}
+        autoFocus={false}
+        getPopupContainer={() => hostRef.current!}
+        getChildrenPopupContainer={(node) => node.closest('.mica-config-ui') ?? node.parentElement ?? node}
+        onCancel={onClose}
+        afterOpen={() => {
+          if (portal) cardRef.current?.querySelector<HTMLButtonElement>('.modal-close')?.focus();
+        }}
+        closeIcon={
+          <button type="button" className="modal-close" aria-label="关闭">
             <CloseIcon size={15} aria-hidden="true" />
           </button>
-        </header>
+        }
+        modalRender={(modal) => (
+          <div ref={cardRef} className="modal-arco-content" data-mica-config-modal>
+            {modal}
+          </div>
+        )}
+      >
         <div className="modal-body">{children}</div>
-      </div>
+      </ArcoModal>
     </div>
   );
-
-  return portal
-    ? createPortal(<div className="mica-config-ui is-embed modal-portal">{content}</div>, document.body)
-    : content;
+  return portal ? createPortal(content, document.body) : content;
 }

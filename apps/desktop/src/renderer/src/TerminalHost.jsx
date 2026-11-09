@@ -1,3 +1,4 @@
+import { ArcoAction } from '@mica-config-ui/web'
 import {
   forwardRef,
   useCallback,
@@ -541,13 +542,13 @@ export const TerminalHost = forwardRef(function TerminalHost(
                   <div className="max-w-md space-y-2 text-xs text-fg-soft">
                     <div className="text-fg-strong">终端未能启动</div>
                     <div className="break-words text-fg-muted">{failure}</div>
-                    <button
+                    <ArcoAction
                       type="button"
-                      className="rounded-md border border-line px-2 py-1 text-fg-strong transition-colors hover:bg-overlay"
+                      className=" px-2 py-1 transition-colors "
                       onClick={() => retry(ptyId)}
                     >
                       重试
-                    </button>
+                    </ArcoAction>
                   </div>
                 </div>
               )
