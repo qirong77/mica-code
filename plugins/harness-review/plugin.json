@@ -20,8 +20,15 @@
   ],
   "status": [
     { "key": "scope", "label": "统计范围", "type": "text" },
-    { "key": "runs", "label": "已记录运行", "type": "text" },
-    { "key": "openFindings", "label": "待复盘问题", "type": "text" },
+    { "key": "runs", "label": "纳入统计的主运行", "type": "text" },
+    { "key": "openFindings", "label": "待评估与复核候选", "type": "text" },
+    { "key": "recent", "label": "近期未评估", "type": "text" },
+    { "key": "historical", "label": "历史与时间未知", "type": "text" },
+    { "key": "assessment", "label": "已登记评估", "type": "text" },
+    { "key": "followups", "label": "需要复核", "type": "text" },
+    { "key": "coverage", "label": "数据覆盖", "type": "text" },
+    { "key": "window", "label": "近期统计窗口", "type": "text" },
+    { "key": "updated", "label": "统计更新时间", "type": "text" },
     { "key": "lastRun", "label": "最近运行", "type": "text" },
     { "key": "rebuilt", "label": "上次重算", "type": "text" }
   ],

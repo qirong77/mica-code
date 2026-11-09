@@ -40,7 +40,11 @@ describe('Button', () => {
     const css = readFileSync(new URL('./arco-settings.css', import.meta.url), 'utf8');
     const button = css.match(/\.ui-button\s*\{([^}]+)\}/)?.[1];
     expect(button).toContain('display: inline-flex');
+    expect(button).toContain('flex-flow: row nowrap');
     expect(button).toContain('align-items: center');
+    expect(button).toContain('white-space: nowrap');
+    const icon = css.match(/\.ui-button-icon\s*\{([^}]+)\}/)?.[1];
+    expect(icon).toContain('flex: none');
     expect(css).toMatch(/\.ui-button-icon \+ span\s*\{\s*margin-left: 6px;/);
     const styles = readFileSync(new URL('./styles.css', import.meta.url), 'utf8');
     const dot = styles.match(/\.perf-auto-dot\s*\{([^}]+)\}/)?.[1];
@@ -170,6 +174,13 @@ describe('shared Arco controls', () => {
     expect(html).not.toContain('ui-switch-track');
     expect(html).toContain('arco-switch-dot');
     expect(html).not.toContain('style=');
+  });
+
+  it('设置行中的开关保持固有尺寸，不随 Grid 拉满整列', () => {
+    const css = readFileSync(new URL('./arco-settings.css', import.meta.url), 'utf8');
+    const rule = css.match(/\.ui-switch\s*\{([^}]+)\}/)?.[1];
+    expect(rule).toContain('justify-self: start');
+    expect(rule).toContain('flex-shrink: 0');
   });
 
   it('勾选框由 Arco 绘制半选状态并保留标签和禁用', () => {

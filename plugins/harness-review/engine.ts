@@ -51,6 +51,16 @@ export type ReviewFinding = {
   assessments?: Pick<FindingAssessment, 'status' | 'note' | 'updatedAt'>[];
   reviewNeeded?: { reason: 'new-evidence' | 'baseline-unavailable'; occurrences: number; runs: number };
   occurrences: number;
+  /** Report-only: earliest/latest confirmed event timestamps in the included evidence.
+   * Missing event times are never replaced with the run's start time. */
+  firstSeenAt?: string;
+  lastSeenAt?: string;
+  /** Report-only lower bounds in coverage's inclusive 24-hour window. */
+  recentOccurrences?: number;
+  recentRuns?: number;
+  /** Unknown event times may still be assigned to a window if the entire finished
+   * run is inside it. A run crossing a window boundary stays uncertain. */
+  timing?: { unknownOccurrences: number; recentUncertainOccurrences: number };
   /** Workspace this aggregation belongs to. Findings are keyed per workspace, so
    *  a global review shows the same cause once per project — without this the
    *  rows are indistinguishable. */
@@ -222,6 +232,19 @@ export type ToolHealthRow = {
 export type ReviewReport = {
   version: 1;
   generatedAt: string;
+  coverage: {
+    totalRunDirectories: number;
+    scannedRunDirectories: number;
+    includedRuns: number;
+    scanLimitReached: boolean;
+    runLimitReached: boolean;
+    unreadableSummaries: number;
+    directoryReadFailed: boolean;
+    windowStart: string;
+    windowEnd: string;
+    earliestRunStartedAt?: string;
+    latestRunFinishedAt?: string;
+  };
   root: string;
   cwd?: string;
   runs: RunSummary[];
@@ -267,6 +290,8 @@ type RunState = {
   candidates: Map<string, ReviewFinding>;
   toolTally?: ToolTally;
   unknownResults?: number;
+  /** Transient replay hook; never serialized into summaries. */
+  onFinding?: (id: string, seq: number) => void;
 };
 const MAX_RUNS = 2000;
 /** 没有 hostPid 的旧记录：summary 超过这么久没被写过，就当宿主已经退出。 */
@@ -1789,7 +1814,10 @@ export class HarnessRecorder {
    * 坏行、缺文件、超限都是「读不到那一部分」，记 warning 后继续：一份写坏的日志
    * 不该让整次复盘失败。
    */
-  private async readPluginFailures(warnings: string[]): Promise<PluginFailureSummary[]> {
+  private async readPluginFailures(
+    warnings: string[],
+    eventTimes?: Map<string, Set<number>>,
+  ): Promise<PluginFailureSummary[]> {
     const groups = new Map<string, PluginFailureSummary>();
     // 写盘被限流：一个每 30 秒失败一次的任务，一小时只留 12 行，真实失败 120 次。
     // 事件自带累计数，最后取「行数」与「累计数最大值」中大的那个，才不会低估。
@@ -1828,6 +1856,12 @@ export class HarnessRecorder {
         const error = typeof item.error === 'string' ? boundedText(item.error, 500) : '';
         const key = `${pluginId}\n${taskId}`;
         const failures = typeof item.failures === 'number' ? finiteCount(item.failures) : 0;
+        if (eventTimes) {
+          const id = pluginFailureId(pluginId, taskId);
+          const times = eventTimes.get(id) ?? new Set<number>();
+          times.add(Date.parse(at));
+          eventTimes.set(id, times);
+        }
         if (failures > (reported.get(key) ?? 0)) reported.set(key, failures);
         const existing = groups.get(key);
         if (!existing) {
@@ -1928,6 +1962,7 @@ export class HarnessRecorder {
       state.summary.findings.push(finding);
     }
     finding.occurrences++;
+    state.onFinding?.(id, seq);
     if (finding.evidence.length < MAX_EVIDENCE)
       finding.evidence.push({
         runId: state.summary.id,
@@ -2292,6 +2327,20 @@ export class HarnessRecorder {
   async review(cwd?: string): Promise<ReviewReport> {
     await this.flush();
     const reclaimed = await this.reclaim();
+    const now = Date.now();
+    const windowStart = now - 24 * 60 * 60 * 1000;
+    const generatedAt = new Date(now).toISOString();
+    const coverage: ReviewReport['coverage'] = {
+      totalRunDirectories: 0,
+      scannedRunDirectories: 0,
+      includedRuns: 0,
+      scanLimitReached: false,
+      runLimitReached: false,
+      unreadableSummaries: 0,
+      directoryReadFailed: false,
+      windowStart: new Date(windowStart).toISOString(),
+      windowEnd: generatedAt,
+    };
     const filter = cwd ? canonicalCwd(cwd) : undefined;
     const warnings = [...this.writeWarnings, ...this.correctionQueue.warnings];
     if (reclaimed > 0) warnings.push(`已回收 ${reclaimed} 个宿主已退出的未完成运行，标记为 interrupted。`);
@@ -2303,6 +2352,8 @@ export class HarnessRecorder {
     try {
       const directories = await readdir(join(this.root, 'runs'), { withFileTypes: true });
       const candidates = directories.filter((entry) => entry.isDirectory());
+      coverage.totalRunDirectories = candidates.length;
+      coverage.scanLimitReached = candidates.length > MAX_SCANNED_RUNS;
       if (candidates.length > MAX_SCANNED_RUNS)
         warnings.push(
           `Global directory scan limited to ${MAX_SCANNED_RUNS} of ${candidates.length} runs before scope filtering; this review may be incomplete.`,
@@ -2317,8 +2368,10 @@ export class HarnessRecorder {
         }),
       );
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT')
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+        coverage.directoryReadFailed = true;
         warnings.push(`Cannot list runs: ${boundedText(String(error))}`);
+      }
     }
     entries.sort((a, b) => b.modified - a.modified || a.id.localeCompare(b.id));
     let scannedRuns = 0;
@@ -2342,6 +2395,7 @@ export class HarnessRecorder {
         else delete summary.helper;
         if (filter && summary.cwd !== filter) continue;
         if (runs.length >= MAX_RUNS) {
+          coverage.runLimitReached = true;
           warnings.push(`Review limited to the ${MAX_RUNS} most recently updated runs in the selected scope.`);
           break;
         }
@@ -2357,18 +2411,55 @@ export class HarnessRecorder {
             `Run ${summary.id} omitted ${summary.droppedEvents} trace events at its capture limit; summary counters include them. Evidence without a stored event is marked unavailable.`,
           );
       } catch (error) {
+        coverage.unreadableSummaries++;
         warnings.push(
           `Unreadable or corrupt run ${entry.id}: ${boundedText(error instanceof Error ? error.message : error)}`,
         );
       }
     }
     const toolTally: ToolTally = new Map();
+    const findingTimes = new Map<string, Map<string, FindingTiming>>();
     const toolHealthCoverage = { includedRuns: 0, excludedRuns: 0, unknownResults: 0 };
     const memory: InputMemory = new Map();
     for (const summary of [...runs].sort(
       (a, b) => a.startedAt.localeCompare(b.startedAt) || a.id.localeCompare(b.id),
     )) {
-      const events = await inspectTrace(summary, warnings);
+      const timestamps = new Map<number, string>();
+      const events = await inspectTrace(summary, warnings, timestamps);
+      const observed = new Map<string, Set<number>>();
+      const state = derivationState(summary, events?.length ?? 0);
+      state.onFinding = (id, seq) => {
+        const sequences = observed.get(id) ?? new Set<number>();
+        sequences.add(seq);
+        observed.set(id, sequences);
+      };
+      // Replay uncapped occurrence signals, not only the first MAX_EVIDENCE
+      // references. Even partial traces can confirm the events actually present.
+      if (events) for (const event of events) this.replay(state, event, memory);
+      const recordTimes = (): void => {
+        const times = new Map<string, FindingTiming>();
+        for (const candidate of summary.findings)
+          times.set(
+            candidate.id,
+            findingTiming(
+              candidate,
+              summary,
+              timestamps,
+              candidate.kind === 'retry' ||
+                candidate.kind === 'run-error' ||
+                (events &&
+                  summary.droppedEvents === 0 &&
+                  events.length === summary.eventCount &&
+                  !state.unknownResults &&
+                  state.pending.size === 0)
+                ? observed.get(candidate.id)
+                : undefined,
+              windowStart,
+              now,
+            ),
+          );
+        findingTimes.set(summary.id, times);
+      };
       if (
         !events ||
         summary.outcome === 'running' ||
@@ -2376,38 +2467,44 @@ export class HarnessRecorder {
         events.length !== summary.eventCount
       ) {
         toolHealthCoverage.excludedRuns++;
+        recordTimes();
         continue;
       }
-      const state = derivationState(summary, events.length);
-      state.toolTally = new Map();
+      // Tool health uses its own replay so timing collection cannot alter the
+      // existing health coverage or cross-run input classification.
+      const healthState = derivationState(summary, events.length);
+      healthState.toolTally = new Map();
       for (const event of events)
-        if (event.type === 'tool:call' || event.type === 'tool:result') this.replay(state, event, memory);
-      const unknown = (state.unknownResults ?? 0) + state.pending.size;
+        if (event.type === 'tool:call' || event.type === 'tool:result') this.replay(healthState, event, memory);
+      const unknown = (healthState.unknownResults ?? 0) + healthState.pending.size;
       toolHealthCoverage.unknownResults += unknown;
       if (unknown > 0) {
         toolHealthCoverage.excludedRuns++;
         warnings.push(
           `Run ${summary.id} has ${unknown} unpaired or unclassifiable tool result(s); excluded from tool health.`,
         );
+        recordTimes();
         continue;
       }
       toolHealthCoverage.includedRuns++;
-      mergeToolTally(toolTally, state.toolTally);
-      summary.toolErrors = state.summary.toolErrors;
-      summary.expectedExits = state.summary.expectedExits;
-      summary.derivationDrops = state.summary.derivationDrops;
+      mergeToolTally(toolTally, healthState.toolTally);
+      summary.toolErrors = healthState.summary.toolErrors;
+      summary.expectedExits = healthState.summary.expectedExits;
+      summary.derivationDrops = healthState.summary.derivationDrops;
       summary.findings = [
-        ...state.candidates.values(),
+        ...healthState.candidates.values(),
         ...summary.findings.filter((finding) => finding.kind !== 'tool-error' && finding.kind !== 'repeated-call'),
       ];
       for (const finding of summary.findings)
         for (const evidence of finding.evidence)
           evidence.available = events.some((event) => event.seq === evidence.seq);
+      recordTimes();
     }
     runs.sort((a, b) => b.startedAt.localeCompare(a.startedAt));
     const delegation = summarizeDelegation(runs, warnings);
     const helpers = summarizeHelpers(runs, warnings);
-    const pluginFailures = await this.readPluginFailures(warnings);
+    const pluginTimes = new Map<string, Set<number>>();
+    const pluginFailures = await this.readPluginFailures(warnings, pluginTimes);
     const derivationCoverage: DerivationCoverage = {
       limitedRuns: 0,
       callObservationsNotTracked: 0,
@@ -2435,12 +2532,14 @@ export class HarnessRecorder {
     const merged = new Map<string, ReviewFinding>();
     for (const run of runs)
       for (const candidate of run.findings) {
+        const times = findingTimes.get(run.id)!.get(candidate.id)!;
         const existing = merged.get(candidate.id);
         if (!existing) {
-          merged.set(candidate.id, copy(candidate));
+          merged.set(candidate.id, { ...copy(candidate), ...times });
           continue;
         }
         existing.occurrences += candidate.occurrences;
+        mergeFindingTiming(existing, times);
         existing.evidence.push(...candidate.evidence.slice(0, Math.max(0, MAX_EVIDENCE - existing.evidence.length)));
       }
     // 插件常驻任务的失败不属于任何一条 run（没有 runId、也没有 cwd），但同样要进
@@ -2448,6 +2547,8 @@ export class HarnessRecorder {
     for (const failure of pluginFailures) {
       if (failure.count < PLUGIN_FAILURE_FINDING_COUNT) continue;
       const id = pluginFailureId(failure.pluginId, failure.taskId);
+      const times = [...(pluginTimes.get(id) ?? [])];
+      const unknownOccurrences = Math.max(0, failure.count - times.length);
       merged.set(id, {
         id,
         kind: 'plugin-background',
@@ -2458,6 +2559,16 @@ export class HarnessRecorder {
         evaluation: `最近一次记录（${failure.lastAt}）：${failure.lastError || '(没有错误文本)'}。等下一个周期（或手动触发一次）确认日志里不再出现同一个错误，并且插件的「运行状态」恢复上报。`,
         status: 'open',
         occurrences: failure.count,
+        ...(times.length
+          ? { firstSeenAt: new Date(times.reduce((first, at) => Math.min(first, at), Infinity)).toISOString() }
+          : {}),
+        lastSeenAt: failure.lastAt,
+        recentOccurrences: times.filter((at) => at >= windowStart && at <= now).length,
+        recentRuns: 0,
+        timing: {
+          unknownOccurrences,
+          recentUncertainOccurrences: Date.parse(failure.lastAt) >= windowStart ? unknownOccurrences : 0,
+        },
         // 插件事件不属于任何一条 run：伪造一个 runId 只会让人点进去看不到东西。
         evidence: [],
       });
@@ -2505,9 +2616,17 @@ export class HarnessRecorder {
       }
       if (occurrences > 0) finding.reviewNeeded = { reason: 'new-evidence', occurrences, runs: affectedRuns };
     }
+    coverage.scannedRunDirectories = scannedRuns;
+    coverage.includedRuns = runs.length;
+    if (runs.length) {
+      coverage.earliestRunStartedAt = new Date(Math.min(...runs.map((run) => Date.parse(run.startedAt)))).toISOString();
+      const finishes = runs.flatMap((run) => (run.finishedAt ? [Date.parse(run.finishedAt)] : []));
+      if (finishes.length) coverage.latestRunFinishedAt = new Date(Math.max(...finishes)).toISOString();
+    }
     return {
       version: 1,
-      generatedAt: new Date().toISOString(),
+      generatedAt,
+      coverage,
       root: this.root,
       ...(filter ? { cwd: filter } : {}),
       runs,
@@ -3159,7 +3278,79 @@ function derivationState(summary: RunSummary, written: number): RunState {
   };
 }
 
-async function inspectTrace(summary: RunSummary, warnings: string[]): Promise<StoredEvent[] | null> {
+type FindingTiming = Pick<ReviewFinding, 'firstSeenAt' | 'lastSeenAt'> & {
+  recentOccurrences: number;
+  recentRuns: number;
+  timing: { unknownOccurrences: number; recentUncertainOccurrences: number };
+};
+
+function findingTiming(
+  candidate: ReviewFinding,
+  run: RunSummary,
+  timestamps: Map<number, string>,
+  replayed: Set<number> | undefined,
+  windowStart: number,
+  now: number,
+): FindingTiming {
+  // Corrections are queued BEFORE run:start, which is only their attachment
+  // point, not their occurrence time. Neither its timestamp nor run bounds can
+  // date those corrections reliably without inspecting the original queue.
+  const sequences =
+    candidate.kind === 'user-correction'
+      ? []
+      : [
+          ...new Set([
+            ...(replayed ?? []),
+            ...candidate.evidence
+              .filter((item) => item.runId === run.id && item.traceFile === run.traceFile)
+              .map((item) => item.seq),
+          ]),
+        ];
+  const times = sequences
+    .flatMap((seq) => {
+      const time = timestamps.get(seq);
+      return time ? [Date.parse(time)] : [];
+    })
+    .slice(0, candidate.occurrences);
+  const unknownOccurrences = Math.max(0, candidate.occurrences - times.length);
+  let recentOccurrences = times.filter((time) => time >= windowStart && time <= now).length;
+  let recentUncertainOccurrences = 0;
+  const start = Date.parse(run.startedAt);
+  const end = run.finishedAt ? Date.parse(run.finishedAt) : now;
+  if (candidate.kind === 'user-correction' || start > end || times.some((time) => time < start || time > end))
+    recentUncertainOccurrences = unknownOccurrences;
+  else if (start >= windowStart && start <= end && end <= now) recentOccurrences += unknownOccurrences;
+  else if (!(end < windowStart || start > now)) recentUncertainOccurrences = unknownOccurrences;
+  return {
+    ...(times.length
+      ? {
+          firstSeenAt: new Date(Math.min(...times)).toISOString(),
+          lastSeenAt: new Date(Math.max(...times)).toISOString(),
+        }
+      : {}),
+    recentOccurrences,
+    recentRuns: recentOccurrences > 0 ? 1 : 0,
+    timing: { unknownOccurrences, recentUncertainOccurrences },
+  };
+}
+
+function mergeFindingTiming(target: ReviewFinding, source: FindingTiming): void {
+  if (source.firstSeenAt && (!target.firstSeenAt || source.firstSeenAt < target.firstSeenAt))
+    target.firstSeenAt = source.firstSeenAt;
+  if (source.lastSeenAt && (!target.lastSeenAt || source.lastSeenAt > target.lastSeenAt))
+    target.lastSeenAt = source.lastSeenAt;
+  target.recentOccurrences = (target.recentOccurrences ?? 0) + source.recentOccurrences;
+  target.recentRuns = (target.recentRuns ?? 0) + source.recentRuns;
+  target.timing ??= { unknownOccurrences: 0, recentUncertainOccurrences: 0 };
+  target.timing.unknownOccurrences += source.timing.unknownOccurrences;
+  target.timing.recentUncertainOccurrences += source.timing.recentUncertainOccurrences;
+}
+
+async function inspectTrace(
+  summary: RunSummary,
+  warnings: string[],
+  timestamps?: Map<number, string>,
+): Promise<StoredEvent[] | null> {
   const evidence = summary.findings.flatMap((finding) => finding.evidence);
   const bySeq = new Map<number, Evidence[]>();
   for (const item of evidence) {
@@ -3194,6 +3385,7 @@ async function inspectTrace(summary: RunSummary, warnings: string[]): Promise<St
           throw new Error('invalid event');
         previous = event.seq;
         events.push(event);
+        timestamps?.set(event.seq, event.timestamp);
         for (const item of bySeq.get(event.seq) ?? []) item.available = true;
       } catch {
         warnings.push(`Run ${summary.id} has a corrupt trace at line ${index + 1}.`);
@@ -3284,6 +3476,14 @@ function markdownReport(report: ReviewReport, directory: string): string {
     report.interpretation,
     '',
     `Scanned ${report.scannedRuns} runs; ${report.runs.length} in scope; ${report.findings.length} aggregated findings.`,
+    '',
+    `Recent window (inclusive): ${report.coverage.windowStart} to ${report.coverage.windowEnd}.`,
+    '',
+    `Coverage: ${report.coverage.totalRunDirectories} run directories total; ${report.coverage.scannedRunDirectories} actually scanned; ${report.coverage.includedRuns} included; ${report.coverage.unreadableSummaries} unreadable summaries. Directory read failed: ${report.coverage.directoryReadFailed}; directory scan truncated: ${report.coverage.scanLimitReached}; run limit truncated: ${report.coverage.runLimitReached}.`,
+    '',
+    `Included run bounds: ${report.coverage.earliestRunStartedAt ?? 'unknown'} to ${report.coverage.latestRunFinishedAt ?? 'no recorded finish'}. Selection uses directory modification time, not a complete chronological window.`,
+    '',
+    'Recent counts are lower bounds. Event timestamps take precedence; missing times use run bounds only when the entire run is inside or outside the window. Runs crossing a boundary remain uncertain. First/last seen show confirmed event times only; unknown occurrence times can extend that range. Queued corrections predate their attachment run and remain undated. Plugin counts are machine-wide and their cumulative history cannot be dated from the last failure alone.',
     '',
     '## Runs',
     '',
@@ -3376,6 +3576,10 @@ function markdownReport(report: ReviewReport, directory: string): string {
       `ID: ${finding.id}`,
       '',
       `Status: **${finding.status}** · Occurrences: ${finding.occurrences} · Module: ${markdownText(finding.module)}`,
+      '',
+      `Confirmed first / last seen: ${finding.firstSeenAt ?? 'unknown'} / ${finding.lastSeenAt ?? 'unknown'} · Recent occurrences: ${finding.recentOccurrences ?? 0} in ${finding.recentRuns ?? 0} run(s).`,
+      '',
+      `Occurrence times unknown: ${finding.timing?.unknownOccurrences ?? 0}; recent-window membership uncertain: ${finding.timing?.recentUncertainOccurrences ?? 0}.`,
       '',
       ...(finding.cwd ? [`Workspace: ${markdownText(finding.cwd)}`, ''] : []),
       `Suggestion: ${markdownText(finding.suggestion)}`,

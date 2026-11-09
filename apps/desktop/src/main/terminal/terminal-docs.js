@@ -252,7 +252,7 @@ export const TERMINAL_GUIDE = [
   '推荐流程：createSession → waitFor({idleMs:800}) 等登录 shell 出提示符 → writeInput → waitFor 等输出稳定 → getSession 读屏幕。',
   '屏幕文本已经过 ANSI 解析，TUI 的重绘、清屏、光标位置都按终端语义落定，不需要自己剥转义。',
   'waitFor 默认跳过「刚输入命令的回显」所在行（30 秒内写入的原文），确实要匹配回显时传 skipEcho:false；判断命令成败优先用 expectExitCode 或 idleMs。',
-  '进程退出后屏幕仍可读；用完请自己 closeSession。没有归属的终端会被立刻回收；没有窗口在看的已退出会话 10 分钟后回收，隐藏且 6 小时没有任何活动（输出、输入、改尺寸）的活会话也会被回收。',
+  '进程退出后屏幕仍可读；用完请自己 closeSession。没有归属的终端会被立刻回收；没有窗口在看的已退出会话空闲 10 分钟后回收，活会话默认空闲 30 分钟后回收（MICA_TERMINAL_IDLE_REAP_MS 可调，0 关闭活会话自动回收）。输出、输入、读屏、等待与改尺寸会续期，在途请求不回收；回收会关闭 PTY 并释放屏幕缓存和窗口，再用需要新建终端。',
   'idleMs 只代表「这段时间没有新输出」：刚创建的终端可能还在启动 shell，命令要等它就绪才会执行，必要时把 idleMs 调大或多读一次屏幕。'
 ].join('\n')
 

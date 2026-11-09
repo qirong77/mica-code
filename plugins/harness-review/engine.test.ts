@@ -83,6 +83,227 @@ async function trace(run: RunSummary): Promise<Record<string, unknown>[]> {
     : [];
 }
 
+test('recent plugin failure counts use dated event rows, not the lifetime failure counter', async (t) => {
+  const { root, recorder } = await fixture(t);
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime('2026-06-03T12:00:00.000Z');
+  t.onTestFinished(() => {
+    vi.useRealTimers();
+  });
+  await mkdir(root, { recursive: true });
+  const events = [
+    { at: '2026-06-01T12:00:00.000Z', pluginId: 'sample', taskId: 'poll', failures: 100 },
+    { at: '2026-06-03T09:00:00.000Z', pluginId: 'sample', taskId: 'poll', failures: 101 },
+    { at: '2026-06-03T10:00:00.000Z', pluginId: 'sample', taskId: 'poll', failures: 102 },
+    { at: '2026-06-03T11:00:00.000Z', pluginId: 'sample', taskId: 'poll', failures: 103 },
+  ];
+  await writeFile(
+    join(root, 'plugin-events.jsonl'),
+    events.map((event) => JSON.stringify({ ...event, error: 'Connection error' })).join('\n') + '\n',
+  );
+  const report = await recorder.review();
+  assert.equal(report.findings.length, 1);
+  assert.equal(report.findings[0].occurrences, 103);
+  assert.equal(report.findings[0].recentOccurrences, 3);
+  assert.equal(report.findings[0].firstSeenAt, events[0].at);
+  assert.equal(report.findings[0].lastSeenAt, events[3].at);
+  assert.deepEqual(report.findings[0].timing, { unknownOccurrences: 99, recentUncertainOccurrences: 99 });
+});
+
+test('recent findings follow event timestamps across days and beyond the evidence cap', async (t) => {
+  const { recorder } = await fixture(t);
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime('2026-06-03T12:00:00.000Z');
+  t.onTestFinished(() => {
+    vi.useRealTimers();
+  });
+  const run = runner(recorder, { timestamp: '2026-06-01T10:00:00.000Z' });
+  run.start();
+  const fail = (timestamp: string, index: number): void => {
+    run.emit({
+      type: 'tool:call',
+      name: 'read_file',
+      args: JSON.stringify({ path: `missing-${index}` }),
+      id: `call-${index}`,
+      timestamp,
+    });
+    run.emit({
+      type: 'tool:result',
+      name: 'read_file',
+      result: 'Error: ENOENT: no such file',
+      id: `call-${index}`,
+      timestamp,
+    });
+  };
+  // The first 21 failures predate the window. Evidence is capped at 20;
+  // uncapped replay must still find the recent events and exclude the future.
+  for (let index = 0; index < 21; index++) fail('2026-06-02T11:59:59.999Z', index);
+  fail('2026-06-02T12:00:00.000Z', 21);
+  fail('2026-06-03T11:00:00.000Z', 22);
+  fail('2026-06-03T12:00:00.001Z', 23);
+  run.emit({ type: 'run:finish', outcome: 'completed', elapsedMs: 1, timestamp: '2026-06-03T12:00:00.001Z' });
+  const recentRun = runner(recorder, { runId: 2, timestamp: '2026-06-03T10:00:00.000Z' });
+  recentRun.start('different input');
+  recentRun.call();
+  recentRun.result();
+  recentRun.finish();
+  const historical = runner(recorder, { runId: 3, timestamp: '2026-05-30T10:00:00.000Z' });
+  historical.start();
+  historical.call();
+  historical.result();
+  historical.finish();
+  const report = await recorder.review();
+  const finding = report.findings.find((item) => item.kind === 'tool-error')!;
+  assert.equal(finding.occurrences, 26);
+  assert.equal(finding.evidence.length, 20);
+  assert.equal(finding.recentOccurrences, 3);
+  assert.equal(finding.recentRuns, 2);
+  assert.equal(finding.firstSeenAt, '2026-05-30T10:00:00.000Z');
+  assert.equal(finding.lastSeenAt, '2026-06-03T12:00:00.001Z');
+  assert.deepEqual(finding.timing, { unknownOccurrences: 0, recentUncertainOccurrences: 0 });
+  assert.equal(report.coverage.windowStart, '2026-06-02T12:00:00.000Z');
+  assert.equal(report.coverage.windowEnd, report.generatedAt);
+  assert.equal(report.coverage.includedRuns, 3);
+  const persisted = JSON.parse(
+    await readFile(join(report.runs[0].traceFile, '..', 'summary.json'), 'utf8'),
+  ) as RunSummary;
+  assert.ok(persisted.findings.every((item) => item.recentOccurrences === undefined && item.timing === undefined));
+  const markdown = await readFile(await recorder.exportReport(), 'utf8');
+  assert.match(markdown, /Recent window \(inclusive\): 2026-06-02T12:00:00.000Z/);
+  assert.match(markdown, /Recent occurrences: 3 in 2 run\(s\)/);
+  assert.match(markdown, /run directories total/);
+});
+
+test('unpaired tools do not discard confirmed retry timestamps beyond the evidence cap', async (t) => {
+  const { recorder } = await fixture(t);
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime('2026-06-03T12:00:00.000Z');
+  t.onTestFinished(() => {
+    vi.useRealTimers();
+  });
+  const run = runner(recorder, { timestamp: '2026-06-01T10:00:00.000Z' });
+  run.start();
+  for (let index = 0; index < 22; index++) {
+    run.emit({
+      type: 'retry',
+      attempt: index + 1,
+      delayMs: 1,
+      error: 'Connection error',
+      timestamp: index < 20 ? '2026-06-01T11:00:00.000Z' : '2026-06-03T11:00:00.000Z',
+    });
+  }
+  run.call();
+  run.emit({
+    type: 'run:finish',
+    outcome: 'error',
+    error: 'Connection error',
+    elapsedMs: 1,
+    timestamp: '2026-06-03T11:30:00.000Z',
+  });
+  const report = await recorder.review();
+  const finding = report.findings.find((item) => item.kind === 'retry')!;
+  assert.equal(finding.occurrences, 22);
+  assert.equal(finding.recentOccurrences, 2);
+  assert.equal(finding.recentRuns, 1);
+  assert.deepEqual(finding.timing, { unknownOccurrences: 0, recentUncertainOccurrences: 0 });
+  assert.equal(report.toolHealthCoverage.excludedRuns, 1);
+});
+
+test('coverage counts unreadable summaries and directory failures instead of implying a clean empty report', async (t) => {
+  const { root, recorder } = await fixture(t);
+  const badRun = join(root, 'runs', randomUUID());
+  await mkdir(badRun, { recursive: true });
+  await writeFile(join(badRun, 'summary.json'), 'broken json');
+  const report = await recorder.review();
+  assert.equal(report.coverage.totalRunDirectories, 1);
+  assert.equal(report.coverage.includedRuns, 0);
+  assert.equal(report.coverage.unreadableSummaries, 1);
+  assert.equal(report.coverage.directoryReadFailed, false);
+  await rm(join(root, 'runs'), { recursive: true });
+  await writeFile(join(root, 'runs'), 'not a directory');
+  assert.equal((await recorder.review()).coverage.directoryReadFailed, true);
+});
+
+test('incomplete traces keep confirmed times and expose uncertain window membership', async (t) => {
+  const { recorder } = await fixture(t);
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime('2026-06-03T12:00:00.000Z');
+  t.onTestFinished(() => {
+    vi.useRealTimers();
+  });
+  const run = runner(recorder, { timestamp: '2026-06-01T10:00:00.000Z', capture: { ...options, maxEventsPerRun: 3 } });
+  run.start();
+  run.call();
+  run.result();
+  run.emit({
+    type: 'tool:call',
+    name: 'read_file',
+    args: '{"path":"other"}',
+    id: 'second',
+    timestamp: '2026-06-03T10:00:00.000Z',
+  });
+  run.emit({
+    type: 'tool:result',
+    name: 'read_file',
+    result: 'Error: ENOENT: no such file',
+    id: 'second',
+    timestamp: '2026-06-03T10:00:00.000Z',
+  });
+  run.emit({ type: 'run:finish', outcome: 'completed', elapsedMs: 1, timestamp: '2026-06-03T11:00:00.000Z' });
+  let report = await recorder.review();
+  let finding = report.findings[0];
+  assert.equal(finding.recentOccurrences, 0);
+  assert.equal(finding.firstSeenAt, '2026-06-01T10:00:00.000Z');
+  assert.deepEqual(finding.timing, { unknownOccurrences: 1, recentUncertainOccurrences: 1 });
+  await rm(report.runs[0].traceFile);
+  report = await recorder.review();
+  finding = report.findings[0];
+  assert.equal(finding.firstSeenAt, undefined);
+  assert.equal(finding.lastSeenAt, undefined);
+  assert.equal(finding.recentRuns, 0);
+  assert.deepEqual(finding.timing, { unknownOccurrences: 2, recentUncertainOccurrences: 2 });
+  // Run bounds can establish membership without inventing an event timestamp.
+  const file = join(report.runs[0].traceFile, '..', 'summary.json');
+  await writeFile(file, JSON.stringify({ ...report.runs[0], startedAt: '2026-06-03T09:00:00.000Z' }));
+  finding = (await recorder.review()).findings[0];
+  assert.equal(finding.recentOccurrences, 2);
+  assert.equal(finding.recentRuns, 1);
+  assert.deepEqual(finding.timing, { unknownOccurrences: 2, recentUncertainOccurrences: 0 });
+});
+
+test('coverage exposes MAX_RUNS truncation independently of the global directory scan', async (t) => {
+  const { recorder, root } = await fixture(t);
+  const run = runner(recorder);
+  run.start();
+  run.finish();
+  const initial = (await recorder.review()).runs[0];
+  for (let offset = 0; offset < 2000; offset += 100) {
+    await Promise.all(
+      Array.from({ length: 100 }, async () => {
+        const id = randomUUID();
+        const directory = join(root, 'runs', id);
+        await mkdir(directory);
+        await writeFile(
+          join(directory, 'summary.json'),
+          JSON.stringify({
+            ...initial,
+            id,
+            traceFile: join(directory, 'events.jsonl'),
+          }),
+        );
+      }),
+    );
+  }
+  const report = await recorder.review();
+  assert.equal(report.coverage.totalRunDirectories, 2001);
+  assert.equal(report.coverage.scannedRunDirectories, 2001);
+  assert.equal(report.coverage.includedRuns, 2000);
+  assert.equal(report.coverage.scanLimitReached, false);
+  assert.equal(report.coverage.runLimitReached, true);
+  assert.equal(report.coverage.earliestRunStartedAt, at);
+  assert.equal(report.coverage.latestRunFinishedAt, at);
+}, 30_000);
+
 // 子运行（委派 / helper）的 runId 是负数：早先版本按「必须非负」校验，会把它们整份
 // 当成损坏记录丢掉，报告里既没有委派树也没有 helper 汇总。
 test('keeps child runs that use negative run IDs', async (t) => {

@@ -15,6 +15,7 @@ import headless from '@xterm/headless'
 import { resolveUsableCwd } from '../../host/cwd-utils.js'
 import { resolveDefaultShell } from '../../host/shell-path.js'
 import { parseBoolean } from '../shared/endpoint-http.js'
+import { TERMINAL_IDLE_REAP_MS, resolveMs } from '../window-idle.js'
 import {
   TERMINAL_MAX_SCREEN_LINES,
   TERMINAL_OUTPUT_BUFFER,
@@ -47,7 +48,6 @@ const EXITED_TTL_MS = 10 * 60 * 1000
  * 活着但没人管的会话：agent 建完就忘了的话，shell 会一直占着 fd 与内存。
  * 隐藏状态下连续这么久没有任何活动（输出、输入、改尺寸）就回收。
  */
-const IDLE_TTL_MS = 6 * 60 * 60 * 1000
 const SWEEP_INTERVAL_MS = 60 * 1000
 /** 只留最近几次输入用于回显判断，不用记整段历史 */
 const RECENT_INPUT_LIMIT = 8
@@ -99,7 +99,7 @@ export function createTerminalSessions({
   // 0 关掉自动回收（测试里用 sweep() 手动触发）
   sweepIntervalMs = SWEEP_INTERVAL_MS,
   exitedTtlMs = EXITED_TTL_MS,
-  idleTtlMs = IDLE_TTL_MS
+  idleTtlMs = resolveMs(process.env.MICA_TERMINAL_IDLE_REAP_MS, TERMINAL_IDLE_REAP_MS)
 } = {}) {
   const sessions = new Map()
   let sequence = 0
@@ -115,6 +115,18 @@ export function createTerminalSessions({
   function touch(session) {
     session.updatedAt = nowIso()
     session.lastActivityAt = Date.now()
+  }
+
+  async function withActivity(id, operation) {
+    const session = get(id)
+    session.activeOperations += 1
+    touch(session)
+    try {
+      return await operation()
+    } finally {
+      session.activeOperations -= 1
+      if (!session.closed) touch(session)
+    }
   }
 
   function flush(session) {
@@ -241,6 +253,7 @@ export function createTerminalSessions({
       flushTimer: null,
       lastOutputAt: Date.now(),
       lastActivityAt: Date.now(),
+      activeOperations: 0,
       recentInputs: [],
       output: { seq: 0, data: '', truncated: false },
       windowVisible: false
@@ -358,6 +371,7 @@ export function createTerminalSessions({
 
   function readOutput(id, { since = 0 } = {}) {
     const session = get(id)
+    touch(session)
     return outputSince(session.output, since)
   }
 
@@ -465,14 +479,15 @@ export function createTerminalSessions({
    * - 没有归属：立刻回收（归属是顶栏图标的唯一依据，没归属的终端在界面上没有入口）。
    * 其余两条都以「窗口没在显示」为前提：正在看的终端一律不动。
    * - 进程已退出：留十分钟供 AI 读最后屏幕，然后回收。
-   * - 进程还活着：隐藏且连续 6 小时没有任何活动才回收；只要还有输出、输入或
-   *   改尺寸就重新计时，正在跑东西的 shell 不会被误杀。
+   * - 进程还活着：隐藏且超过空闲期限才回收；输出、输入、读屏与等待都会续期。
+   *   在途请求与尚未解析的输出不回收。
    */
   function shouldRecycle(session, now) {
     if (!session.owner) return true
     if (session.windowVisible) return false
-    if (session.exited) return now - (session.exitedAt || now) >= exitedTtlMs
-    return now - (session.lastActivityAt || now) >= idleTtlMs
+    if (session.activeOperations > 0 || session.pending || session.pendingWrites > 0) return false
+    const ttl = session.exited ? exitedTtlMs : idleTtlMs
+    return ttl > 0 && now - session.lastActivityAt >= ttl
   }
 
   function sweep(now = Date.now()) {
@@ -536,12 +551,12 @@ export function createTerminalSessions({
     create,
     list,
     get,
-    detail,
+    detail: (id, options) => withActivity(id, () => detail(id, options)),
     write,
     keys,
-    resize,
+    resize: (id, options) => withActivity(id, () => resize(id, options)),
     readOutput,
-    waitFor,
+    waitFor: (id, options) => withActivity(id, () => waitFor(id, options)),
     setWindowVisible,
     sweep,
     close,

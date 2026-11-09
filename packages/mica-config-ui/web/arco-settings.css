@@ -329,13 +329,16 @@ html[data-appearance='light'] body.mica-arco-theme {
 
 :where(body.mica-arco-theme, .mica-config-ui) .ui-button {
   display: inline-flex;
+  flex-flow: row nowrap;
   align-items: center;
   justify-content: center;
   flex: none;
+  white-space: nowrap;
 }
 
 :where(body.mica-arco-theme, .mica-config-ui) .ui-button-icon {
   display: inline-flex;
+  flex: none;
   align-items: center;
   justify-content: center;
   vertical-align: middle;
@@ -378,6 +381,11 @@ html[data-appearance='light'] body.mica-arco-theme {
   .arco-btn:not(.arco-btn-size-mini) {
     height: var(--control-h);
     font-size: var(--text-body);
+  }
+
+  .ui-switch {
+    justify-self: start;
+    flex-shrink: 0;
   }
 
   .setting-row-control > .arco-input,

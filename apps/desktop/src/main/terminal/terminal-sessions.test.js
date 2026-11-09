@@ -250,11 +250,11 @@ describe('terminal session reclamation', () => {
     })
     const session = await sessions.create({ shell: '/bin/sh', cols: 80, rows: 24, owner: 'sess-1' })
 
-    // 5 小时还在 TTL 内：这是 agent 建了暂时没用的终端，不能提前杀掉
-    expect(sessions.sweep(Date.now() + 5 * 60 * 60 * 1000)).toEqual([])
+    // 默认半小时回收，期限内保留
+    expect(sessions.sweep(Date.now() + 29 * 60 * 1000)).toEqual([])
     expect(sessions.list()).toHaveLength(1)
 
-    expect(sessions.sweep(Date.now() + 7 * 60 * 60 * 1000)).toEqual([session.id])
+    expect(sessions.sweep(Date.now() + 31 * 60 * 1000)).toEqual([session.id])
     expect(sessions.list()).toHaveLength(0)
     expect(ptys[0].destroyed).toBe(1)
     sessions.shutdown()
@@ -274,6 +274,87 @@ describe('terminal session reclamation', () => {
     expect(sessions.sweep(Date.now() + 9_000)).toEqual([])
     expect(sessions.sweep(Date.now() + 11_000)).toEqual([session.id])
     sessions.shutdown()
+  })
+
+  test('reads renew live and exited sessions but list polling does not', async () => {
+    const proc = createFakePty()
+    const sessions = createTerminalSessions({
+      sweepIntervalMs: 0,
+      idleTtlMs: 10_000,
+      exitedTtlMs: 10_000,
+      spawnPty: () => proc
+    })
+    try {
+      const session = await sessions.create({ shell: '/bin/sh', owner: 'sess-1' })
+      for (const exited of [false, true]) {
+        if (exited) proc.exit()
+        for (const read of [
+          () => sessions.detail(session.id),
+          () => sessions.readOutput(session.id)
+        ]) {
+          session.lastActivityAt = Date.now() - 20_000
+          await read()
+          expect(sessions.sweep()).toEqual([])
+        }
+      }
+      session.lastActivityAt = Date.now() - 20_000
+      sessions.list({ owner: 'sess-1' })
+      expect(sessions.sweep()).toEqual([session.id])
+    } finally {
+      sessions.shutdown()
+    }
+  })
+
+  test('protects pending waits and renews activity on completion', async () => {
+    const sessions = createTerminalSessions({
+      sweepIntervalMs: 0,
+      idleTtlMs: 10_000,
+      spawnPty: () => createFakePty()
+    })
+    try {
+      const session = await sessions.create({ shell: '/bin/sh', owner: 'sess-1' })
+      const waiting = sessions.waitFor(session.id, { text: 'never', timeoutMs: 100 })
+      expect(sessions.sweep(Date.now() + 60_000)).toEqual([])
+      expect((await waiting).reason).toBe('timeout')
+      expect(session.activeOperations).toBe(0)
+      expect(sessions.sweep(Date.now() + 9_000)).toEqual([])
+      expect(sessions.sweep(Date.now() + 11_000)).toEqual([session.id])
+    } finally {
+      sessions.shutdown()
+    }
+  })
+
+  test('pending output protects the shell', async () => {
+    const proc = createFakePty()
+    const sessions = createTerminalSessions({
+      sweepIntervalMs: 0,
+      idleTtlMs: 10_000,
+      spawnPty: () => proc
+    })
+    try {
+      const session = await sessions.create({ shell: '/bin/sh', owner: 'sess-1' })
+      session.lastActivityAt = Date.now() - 20_000
+      proc.data('still working\r\n')
+      expect(sessions.sweep()).toEqual([])
+      await sessions.detail(session.id)
+      expect(sessions.sweep()).toEqual([])
+    } finally {
+      sessions.shutdown()
+    }
+  })
+
+  test('zero idle TTL disables live shell reclamation', async () => {
+    const sessions = createTerminalSessions({
+      sweepIntervalMs: 0,
+      idleTtlMs: 0,
+      spawnPty: () => createFakePty()
+    })
+    try {
+      await sessions.create({ shell: '/bin/sh', owner: 'sess-1' })
+      expect(sessions.sweep(Date.now() + 24 * 60 * 60 * 1000)).toEqual([])
+    } finally {
+      sessions.shutdown()
+    }
   })
 
   test('keeps a live shell whose window is showing', async () => {

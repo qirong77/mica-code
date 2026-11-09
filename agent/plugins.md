@@ -76,7 +76,7 @@ setup 必须先登记独立动作再按能力装配会话工具；动作宿主�
 
 - 运行归因使用 `ctx.pluginStatus?.()`（当前 manager 内存里的装配快照、动态启停后即时变化），不要用其它进程可覆盖的 `plugin-status.json` 代替。
 - setup 异常只走装配报告 / 日志，不写运行健康；hook 错误写入当前插件版本。成功装配不清除 runtime 故障。旧启动错误由 evolution 的 `plugin-startup-health` 归档原文，运行时不兼容这种混写形态。
-- Harness Review 配置页状态聚合所有工作区，工具按会话目录筛选；手动重算 / 清理后立即更新全局状态，局部重算不提升全局规则版本。提示点是问题候选与登记评估的状态，不表示已确认缺陷或从未有人分析。
+- Harness Review 配置页状态聚合所有工作区，工具按会话目录筛选；手动重算 / 清理后立即更新全局状态，局部重算不提升全局规则版本。展示近期24小时、历史待评估、评估进展与待复核，时间覆盖不足单独标未知，同时展示统计时间及扫描/分析限制。仅近期重复与待复核触发提示点；代码修改或没有新错误不自动写评估、不表示已确认修复。
 
 - 输入框上方的会话摘要用 `PluginPanelView.cards`（每插件最多 3 张，`id/title/summary/detail/tone/revision/actions/impressionAction`），由宿主复用主题和共享控件；清单 `dynamicShortcuts: true` 使快捷区获取视图。动作带版本 key，插件拒绝旧内容点击。`impressionAction` 只记录实际可见展示，不能在 `view()` 中记录曝光或执行副作用。
 - 插件行为埋点用 `createPluginExperience(ctx)`（`PluginExperience.ts`），事件 `plugin:experience`、schemaVersion 1；仅固定动作与结果等元数据，禁放正文、路径、命令与服务地址。`telemetry` 开关即时停记，日志沿用现有轮转。导出：`bun scripts/plugin-experience-report.ts`，口径见 `docs/plugin-experience.md`。

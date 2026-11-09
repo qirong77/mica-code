@@ -224,6 +224,53 @@ describe('harness-review plugin', () => {
     expect(String(data.openFindings)).toContain('项');
   });
 
+  it('keeps historical recurrence visible without raising a current-failure prompt', async () => {
+    const h = harness({ mode: 'one-shot' });
+    await h.start();
+    for (const id of ['first', 'second']) {
+      await h.emit({ type: 'tool:call', id, name: 'read_file', args: '{"file_path":"missing"}' } as never);
+      await h.emit({ type: 'tool:result', id, name: 'read_file', result: 'Error: ENOENT' } as never);
+    }
+    await h.finish();
+    const [run] = (await h.review()).runs;
+    const root = join(h.home, 'plugin-data', 'harness-review');
+    const old = '2020-01-01T00:00:00.000Z';
+    const trace = await readFile(run.traceFile, 'utf8');
+    await writeFile(
+      run.traceFile,
+      trace
+        .trimEnd()
+        .split('\n')
+        .map((line) => JSON.stringify({ ...JSON.parse(line), timestamp: old }))
+        .join('\n') + '\n',
+    );
+    const summaryFile = join(root, 'runs', run.id, 'summary.json');
+    const summary = JSON.parse(await readFile(summaryFile, 'utf8'));
+    await writeFile(summaryFile, JSON.stringify({ ...summary, startedAt: old, finishedAt: old }));
+    expect((await h.commands.execute('/harness-review rebuild')).ok).toBe(true);
+    const data = JSON.parse(await readFile(join(root, 'data.json'), 'utf8'));
+    expect(data.attention).toBeUndefined();
+    expect(data.progress).toMatchObject({ recentRecurring: 0, recentSingle: 0, historicalPending: 1 });
+    expect(data.historical).toContain('1 项历史待评估');
+    expect(data.updated).toBe(data.generatedAt);
+    const report = await h.review();
+    expect(report.progress.historicalPending).toBe(1);
+    expect(report.findings[0]).toMatchObject({ occurrences: 2, recentOccurrences: 0 });
+    const id = report.findings[0].id;
+    const assess = async (status: string) =>
+      h.tools[0].execute({ action: 'assess', id, status, note: 'Regression fixture verified in isolated workspace' });
+    await assess('accepted');
+    expect(JSON.parse(await readFile(join(root, 'data.json'), 'utf8')).progress).toMatchObject({
+      acceptedPending: 1,
+      historicalPending: 0,
+    });
+    await assess('validated');
+    expect(JSON.parse(await readFile(join(root, 'data.json'), 'utf8')).progress).toMatchObject({
+      validatedWatching: 1,
+      acceptedPending: 0,
+    });
+  });
+
   it('surfaces new evidence after validation and explicitly regressed findings without changing the verdict', async () => {
     const h = harness();
     const fail = async () => {
@@ -391,6 +438,43 @@ describe('harness-review plugin', () => {
     harness({ home: seed.home, cwd: '/workspace/other' });
     const data = await waitForStatus(seed.home, (value) => (value as Record<string, unknown>).scope === '所有工作区');
     expect(data).toMatchObject({ runs: '1 次', scope: '所有工作区' });
+  });
+
+  it('shows incomplete coverage when unreadable summaries leave no included runs', async () => {
+    const h = harness({ mode: 'one-shot' });
+    const root = join(h.home, 'plugin-data', 'harness-review');
+    const bad = join(root, 'runs', '11111111-1111-4111-8111-111111111111');
+    await mkdir(bad, { recursive: true });
+    await writeFile(join(bad, 'summary.json'), 'broken json');
+    expect((await h.commands.execute('/harness-review rebuild')).ok).toBe(true);
+    const data = JSON.parse(await readFile(join(root, 'data.json'), 'utf8'));
+    expect(data.coverage.tone).toBe('warn');
+    expect(data.coverage.text).toContain('摘要读取失败 1 条');
+    expect(data.runs).toBe('0 次');
+  });
+
+  it('invalidates the old cumulative badge cache even when its global scope and classifier version match', async () => {
+    const seed = harness({ mode: 'one-shot' });
+    await seed.start();
+    await seed.finish();
+    await seed.review();
+    const root = join(seed.home, 'plugin-data', 'harness-review');
+    await writeFile(
+      join(root, 'state.json'),
+      JSON.stringify({ classifierVersion: CLASSIFIER_VERSION, lastStatusAt: Date.now() }),
+    );
+    await writeFile(
+      join(root, 'data.json'),
+      JSON.stringify({ scope: '所有工作区', attention: { text: '137 项问题候选重复出现、尚未登记评估' } }),
+    );
+    harness({ home: seed.home });
+    const data = await waitForStatus(seed.home, (value) => Boolean((value as Record<string, unknown>).generatedAt));
+    expect(data.attention).toBeUndefined();
+    expect(data).toMatchObject({
+      statusViewVersion: 2,
+      scope: '所有工作区',
+      progress: { recentRecurring: 0, historicalPending: 0 },
+    });
   });
 
   it('takes the host plugin snapshot only at run:start after the remaining plugins were assembled', async () => {

@@ -6,11 +6,14 @@ import { resolveMicaHome } from '@packages/mica-config/brand.js';
 import type { AgentObservationEvent, PluginContext, PluginObservationEvent } from '@packages/mica-plugin/index.js';
 import { MicaTool, type ToolInput } from '@packages/mica-tools/index.js';
 import { CLASSIFIER_VERSION, HarnessRecorder, type CaptureOptions, type ReviewReport } from './engine.js';
+import { prioritizeFindings, summarizeProgress } from './progress.js';
 
 const STATUSES = ['open', 'accepted', 'dismissed', 'validated', 'regressed'] as const;
 const DEFAULT_CAPTURE: CaptureOptions = { captureContent: true, maxEventChars: 4000, maxEventsPerRun: 2000 };
 /** 复盘页面不是每次任务结束都会被打开，状态与提示点按这个间隔对齐一次。 */
 const STATUS_REFRESH_MS = 30 * 60 * 1000;
+/** Derived UI cache revision; does not change assessment history. */
+const STATUS_VIEW_VERSION = 2;
 type ReviewStatus = (typeof STATUSES)[number];
 
 /** 插件自己的小状态：上次重算的规则版本、上次刷新状态的时间。 */
@@ -31,7 +34,8 @@ export default function setup(ctx: PluginContext): void {
       newSession: {
         prompt:
           '看一下 harness-review 的运行复盘：先用 harness_review 工具 action=list 读当前工作区的运行指标与问题候选，' +
-          '挑出最值得处理的几项，逐项说明证据（哪次运行、哪次调用）、影响和你的判断；' +
+          '按 progress 区分最近24小时重复、历史待评估、已接受待验证、已验证待观察和待复核，先检查 coverage 与统计时间；' +
+          '优先查看近期重复和评估后新证据，逐项说明证据（哪次运行、哪次调用）、影响和你的判断；' +
           '需要完整证据时用 action=report 导出报告。结论给我，先不要改任何代码，也不要代我登记 assess 决定。',
         cwd,
         send: false,
@@ -79,12 +83,10 @@ export default function setup(ctx: PluginContext): void {
           state.lastRebuildAt = new Date().toISOString();
           changed = true;
         }
-        if (!afterTurn && !hasGlobalStatus(root)) changed = true;
-        if (afterTurn && Date.now() - (state.lastStatusAt ?? 0) >= STATUS_REFRESH_MS) {
-          state.lastStatusAt = Date.now();
-          changed = true;
-        }
+        if (!hasCurrentStatus(root)) changed = true;
+        if (afterTurn && Date.now() - (state.lastStatusAt ?? 0) >= STATUS_REFRESH_MS) changed = true;
         if (!changed) return;
+        if (afterTurn) state.lastStatusAt = Date.now();
         writeStatus(root, await recorder.review(), state);
         writeState(root, state);
       });
@@ -183,22 +185,26 @@ export default function setup(ctx: PluginContext): void {
       const userRuns = report.runs.filter((run) => !run.helper);
       return {
         ...report,
+        progress: summarizeProgress(report.findings),
         totalRuns: userRuns.length,
         totalFindings: report.findings.length,
         runs: userRuns.slice(0, 20).map(({ findings: _findings, ...summary }) => summary),
         // 52 个工具一次全塞进上下文没有意义：按失败率排过序，前 15 个就是要看的那些。
         toolHealth: report.toolHealth.slice(0, 15),
-        findings: report.findings.slice(0, 20).map((finding) => ({
-          ...finding,
-          evidence: finding.evidence.slice(0, 5),
-          ...(finding.assessments
-            ? {
-                assessmentCount: finding.assessments.length,
-                assessments: finding.assessments.slice(-3),
-              }
-            : {}),
-        })),
-        displayLimit: '最多显示最近 20 次运行与 20 项问题，每项 5 条证据；report 导出完整复盘。',
+        findings: prioritizeFindings(report.findings)
+          .slice(0, 20)
+          .map((finding) => ({
+            ...finding,
+            evidence: finding.evidence.slice(0, 5),
+            ...(finding.assessments
+              ? {
+                  assessmentCount: finding.assessments.length,
+                  assessments: finding.assessments.slice(-3),
+                }
+              : {}),
+          })),
+        displayLimit:
+          '最多显示最近 20 次运行与 20 项问题（待复核、近期重复优先），每项 5 条证据；report 导出完整复盘。',
       };
     }
     if (action === 'report') return { path: await recorder.exportReport(cwd) };
@@ -339,10 +345,17 @@ function writeState(root: string, state: PluginState): void {
   writeTextFileAtomic(join(root, 'state.json'), `${JSON.stringify(state, null, 2)}\n`);
 }
 
-function hasGlobalStatus(root: string): boolean {
+function hasCurrentStatus(root: string): boolean {
   try {
     const data = JSON.parse(readFileSync(join(root, 'data.json'), 'utf8')) as Record<string, unknown>;
-    return data.scope === '所有工作区';
+    const generatedAt = typeof data.generatedAt === 'string' ? Date.parse(data.generatedAt) : NaN;
+    const age = Date.now() - generatedAt;
+    return (
+      data.scope === '所有工作区' &&
+      data.statusViewVersion === STATUS_VIEW_VERSION &&
+      age >= 0 &&
+      age < STATUS_REFRESH_MS
+    );
   } catch {
     return false;
   }
@@ -366,15 +379,10 @@ async function withStatusLock<T>(root: string, work: () => Promise<T>): Promise<
 /**
  * 配置页插件详情读的那份 `data.json`：随时可读的状态 + 只在「点一下就能变好」时的提示点。
  *
- * 只有跨多轮重复出现、且尚未登记评估的问题候选才打扰人——单次失败是噪声，
- * 而一枚点不动的提示点比没有提示更糟。
+ * 近期重复与需要复核才提示；历史候选和评估进展仍可见，但不冒充当前故障。
  */
 function writeStatus(root: string, report: ReviewReport, state: PluginState): void {
-  const open = report.findings.filter((finding) => finding.status === 'open');
-  const recurring = open.filter(
-    (finding) => finding.occurrences >= 2 || new Set(finding.evidence.map((item) => item.runId)).size >= 2,
-  );
-  const followups = report.findings.filter((finding) => finding.reviewNeeded || finding.status === 'regressed');
+  const progress = summarizeProgress(report.findings);
   // 「已记录运行」与「最近运行」只数用户的一轮：helper（起标题、压缩摘要）跟着每一轮
   // 都会发生、委派子代理也是同一次请求派出去的，算进去会把「跑了 100 次」说成 200 次。
   const userRuns = report.runs.filter((run) => !run.helper && !run.delegation);
@@ -383,18 +391,41 @@ function writeStatus(root: string, report: ReviewReport, state: PluginState): vo
     null,
   );
   const data: Record<string, unknown> = {
+    statusViewVersion: STATUS_VIEW_VERSION,
+    generatedAt: report.generatedAt,
     scope: '所有工作区',
     runs: `${userRuns.length} 次`,
-    openFindings: open.length + followups.length === 0 ? '没有待复盘的问题' : `${open.length + followups.length} 项`,
+    openFindings: `${progress.recentRecurring + progress.recentSingle + progress.historicalPending + progress.timeUnknown + progress.needsReview} 项候选（含历史，不等于缺陷数）`,
+    recent: `${progress.recentRecurring} 项重复候选；${progress.recentSingle} 项单次信号（最近24小时）`,
+    historical: `${progress.historicalPending} 项历史待评估；${progress.timeUnknown} 项时间覆盖不足`,
+    assessment: `已接受待验证 ${progress.acceptedPending} 项；已验证待观察 ${progress.validatedWatching} 项；已忽略 ${progress.dismissed} 项`,
+    followups: `${progress.needsReview} 项待复核（新证据、基线缺失或人工标记回归）`,
+    updated: report.generatedAt,
+    window: `${report.coverage.windowStart} — ${report.coverage.windowEnd}`,
+    coverage: {
+      text: `运行目录 ${report.coverage.totalRunDirectories} 个，已扫描 ${report.coverage.scannedRunDirectories} 个，纳入 ${report.coverage.includedRuns} 条（含委派/helper）；${report.coverage.scanLimitReached || report.coverage.runLimitReached ? '已触及扫描/运行上限，统计不完整' : '未触及扫描/运行上限'}；摘要读取失败 ${report.coverage.unreadableSummaries} 条${report.coverage.directoryReadFailed ? '，运行目录读取失败' : ''}；工具健康排除 ${report.toolHealthCoverage.excludedRuns} 条；推导受限 ${report.derivationCoverage.limitedRuns} 条、覆盖未知 ${report.derivationCoverage.unknownRuns} 条。按目录更新时间选取，非完整历史。`,
+      tone:
+        report.coverage.scanLimitReached ||
+        report.coverage.runLimitReached ||
+        report.coverage.unreadableSummaries > 0 ||
+        report.coverage.directoryReadFailed ||
+        report.toolHealthCoverage.excludedRuns > 0 ||
+        report.derivationCoverage.limitedRuns > 0 ||
+        report.derivationCoverage.unknownRuns > 0
+          ? 'warn'
+          : 'ok',
+    },
+    progress,
     lastRun: lastRun ? `${lastRun} 起` : '尚未记录',
     rebuilt: state.lastRebuildAt ? state.lastRebuildAt : '尚未重算',
   };
-  if (recurring.length > 0 || followups.length > 0) {
+  if (progress.recentRecurring > 0 || progress.needsReview > 0) {
+    const messages: string[] = [];
+    if (progress.recentRecurring > 0)
+      messages.push(`最近24小时 ${progress.recentRecurring} 项候选重复出现、尚未登记评估`);
+    if (progress.needsReview > 0) messages.push(`${progress.needsReview} 项已有评估的候选待复核`);
     data.attention = {
-      text:
-        followups.length > 0
-          ? `${followups.length} 项已有评估的问题待复核（新证据、历史基线缺失或人工标记回归）`
-          : `${recurring.length} 项问题候选重复出现、尚未登记评估`,
+      text: messages.join('；'),
       tone: 'warn',
       action: 'open-review',
     };
