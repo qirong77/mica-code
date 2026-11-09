@@ -227,7 +227,9 @@ export function QuickbarPreview({
               {actions.map((action) => (
                 <ArcoAction
                   key={`${previewActionId(action)}:${action.key || ''}`}
-                  appearance={action.tone === 'primary' ? 'primary' : 'secondary'}
+                  /* 次要动作是文字按钮：整卡只有一颗带底色的主操作，其余按钮各带一层
+                     灰底时，页脚会变成一排一样重的方块，谁是真的下一步看不出来。 */
+                  appearance={action.tone === 'primary' ? 'primary' : 'text'}
                   tone={action.tone === 'danger' ? 'danger' : action.tone === 'primary' ? 'accent' : undefined}
                   onClick={() => {
                     onClose()

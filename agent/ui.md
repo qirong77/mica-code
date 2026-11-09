@@ -52,6 +52,7 @@
 - Arco 基础样式通过 `body.mica-arco-theme` 覆盖完整应用及 Portal；设置页布局样式仍限定在 `@scope (.mica-config-ui)`。不要把整个 App 包进 `.mica-config-ui`（它带整页尺寸与配色）；内嵌设置布局才套 `mica-config-ui is-embed`。
 - 快捷按钮的外观验收页是 `?quick-buttons-demo=1`（`renderer/src/QuickButtonsPreviewDemo.jsx`），按钮与实际快捷栏共用 `ShortcutButton`（外观规格来自 `quickbarButtonLook`）、卡片用 `PluginPanels.jsx` 的 `QuickbarPreview`——演示页只提供「模拟对话 + 模拟输入条」的壳，不复制任何按钮或卡片样式，否则两边迟早长得不一样。它是纯静态页，在 `ensureMicaApi()` 之前渲染，可以挂在任意静态服务下看。
 - 快捷按钮预览使用共享 `ArcoPopover` 的定位、边框、圆角、阴影和排版，不再叠加旧卡片皮肤或 `.mica-config-ui` 主题壳。其它 Portal 到 `body` 的自绘浮层要自己声明 `font-size` / `line-height`：不声明就继承 `body` 的 16px，正文会比它自己的标题还大。浮层的排版按 `.chat-tooltip` 那一档来（`calc(var(--chat-text-size) - 1px)`、1.55、圆角 10px、130ms 位移 2px 入场），并给 `prefers-reduced-motion` 关掉动画；纯文本分支保留换行（`white-space: pre-line`），Markdown 分支要抹平 `.chat-markdown` 自带的字号行高，否则同一张卡片换个写法就换一套排版。
+- 预览卡片里只有正文用对话区的等宽字体，标题、说明与动作跟随界面字体；标题与副标题排成一行（副标题太长自然折行），字号分别取弹窗标题档 12.5/600 与浮层说明档 `calc(var(--chat-text-size) - 2px)`。动作区只有主操作带底（`--color-accent-subtle` 淡强调底 + 强调色文字），其余是文字按钮——一排同重量的实心块会盖过标题和正文，谁是真的下一步看不出来。
 - `app.css` 认识的状态色是 `--color-success` / `--color-warn` / `--color-danger` / `--color-accent`（明暗各一套）；`--green` / `--amber` / `--red` / `--blue` 只在组件库 `web/styles.css` 的 `.mica-config-ui` 作用域内定义，在 `app.css` 里引用它们等于没写，`color` 会静默落回继承——写状态色时先确认变量属于哪份表。
 - 选中态不要用 `border-left` 或 `inset ... 0 0` 造竖直亮条，用背景、圆角边框与字重区分。
 - 一行里的控件必须等高：原生 select / checkbox 要么 `appearance: none` 自绘，要么用共享组件。

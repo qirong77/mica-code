@@ -6425,34 +6425,50 @@ html body #root {
   max-height: min(456px, calc(100vh - 48px));
   flex-direction: column;
   overflow: hidden;
-  font-family: var(--chat-font);
+  /* 卡片是浮层，不是对话正文：标题、说明与按钮跟随界面字体，只有内容区沿用对话区的
+     等宽（下面单独给 `.chat-plugin-quickbar-preview-body`）。整张卡片都用等宽时，
+     它看起来像从另一个产品里弹出来的一块终端输出。 */
+  font-family: inherit;
+  /* 字号取浮层那一档（对话字号 - 1px，与 `.chat-tooltip` 同一个来源），
+     对话字号改了这里跟着改。 */
+  font-size: calc(var(--chat-text-size) - 1px);
+  line-height: 1.55;
   overscroll-behavior: contain;
   scrollbar-width: thin;
 }
 
 .chat-plugin-quickbar-preview-head {
-  display: flex;
+  /* 标题与副标题排成一句话（标题 + 一小段事实），而不是上下两行：两行时副标题独占
+     一行，卡片头部凭空高出半行，短标题的卡片看上去像少画了点什么。副标题太长会
+     自然折到下一行，折行处仍与标题左对齐。 */
+  display: block;
   min-width: 0;
   flex: none;
-  flex-direction: column;
-  gap: 3px;
-  padding-bottom: 8px;
+  padding-bottom: 6px;
+  line-height: 1.45;
 }
 
 .chat-plugin-quickbar-preview-title {
-  color: var(--color-text-1);
-  font-size: 16px;
-  font-weight: 500;
+  /* 与弹窗、面板标题同一档（12.5/600）：预览卡片是同一层浮层，标题不该比它们大一圈。 */
+  color: var(--color-fg-strong);
+  font-size: 12.5px;
+  font-weight: 600;
 }
 
 .chat-plugin-quickbar-preview-subtitle {
+  margin-left: 8px;
   overflow-wrap: anywhere;
-  color: var(--color-text-3);
-  font-size: 12px;
+  color: var(--color-fg-faint);
+  /* 副标题多是路径、地址、行数这类要逐字读的东西，保持等宽。 */
+  font-family: var(--font-mono);
+  font-size: calc(var(--chat-text-size) - 2px);
 }
 
 .chat-plugin-quickbar-preview-body {
   min-height: 0;
+  font-family: var(--chat-font);
+  font-size: inherit;
+  line-height: 1.62;
   overflow: auto;
   overscroll-behavior: contain;
   scrollbar-width: thin;
@@ -6534,21 +6550,41 @@ html body #root {
   flex: none;
   flex-direction: column;
   gap: 8px;
-  margin-top: 12px;
-  padding-top: 12px;
-  border-top: 1px solid var(--color-border-1);
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--color-line);
 }
 
 .chat-plugin-quickbar-preview-note {
   margin: 0;
-  color: var(--color-text-3);
-  font-size: 12px;
+  color: var(--color-fg-faint);
+  font-size: calc(var(--chat-text-size) - 2px);
+  line-height: 1.5;
 }
 
 .chat-plugin-quickbar-preview-actions {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
+}
+
+/* 卡片里的主操作压低一档：实心强调块在一张 300px 宽的浮层里是整卡最亮的东西，
+   压过标题与正文，看着像弹了个对话框出来。这里给它一层淡强调底 + 强调色文字，
+   悬停留一点加深，主次仍分得清。选择器带上卡片与动作区两层：共享按钮库里
+   `.arco-btn.arco-btn-primary` 那条规则同权重，写成三层才不会靠源码顺序决胜。 */
+.chat-plugin-quickbar-preview-content
+  .chat-plugin-quickbar-preview-actions
+  .mica-arco-action-accent {
+  border-color: transparent;
+  background: var(--color-accent-subtle);
+  color: var(--color-accent);
+}
+
+.chat-plugin-quickbar-preview-content
+  .chat-plugin-quickbar-preview-actions
+  .mica-arco-action-accent:hover:not(:disabled) {
+  background: var(--color-accent-region);
+  color: var(--color-accent-hover);
 }
 
 /* 菜单：这一排紧贴输入框，往下开会压住输入框，所以整组向上开（FloatingMenu 的
