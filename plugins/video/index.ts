@@ -33,6 +33,17 @@ const plugin: MicaPlugin = {
       cacheLimitMb: resolveNumber(ctx.settings.get().cacheLimitMb, DEFAULT_CACHE_LIMIT_MB),
     });
 
+    if (ctx.actions) {
+      const action = ctx.actions.register('check', async ({ values }) => {
+        const configuredPath =
+          values.ffmpegPath === undefined ? readConfig().ffmpegPath : values.ffmpegPath.trim() || undefined;
+        const tools = await refreshAvailability(ctx, configuredPath);
+        return { message: tools ? `ffmpeg 可用：${tools.version}` : '仍然没有找到 ffmpeg' };
+      });
+      ctx.onDispose(() => action.dispose());
+    }
+    if (!ctx.tools) return;
+
     // 探测放在后台：装没装 ffmpeg 不该拖慢启动，而第一次调用自己也会探测一次。
     void refreshAvailability(ctx, readConfig().ffmpegPath);
 
@@ -49,16 +60,8 @@ const plugin: MicaPlugin = {
       getConfig: readConfig,
       onMissingFfmpeg: () => reportMissing(ctx),
     });
-    const registration = ctx.tools!.register(tool, { icon: '🎞️' });
+    const registration = ctx.tools.register(tool, { icon: '🎞️' });
     ctx.onDispose(() => registration.dispose());
-
-    if (ctx.actions) {
-      const action = ctx.actions.register('check', async () => {
-        const tools = await refreshAvailability(ctx, readConfig().ffmpegPath);
-        return { message: tools ? `ffmpeg 可用：${tools.version}` : '仍然没有找到 ffmpeg' };
-      });
-      ctx.onDispose(() => action.dispose());
-    }
 
     // 视频的用法没法靠 schema 描述讲清楚「先粗看再点名」，所以带一小段 prompt。
     // 只在插件启用时出现——插件停用之后模型不该还惦记一个不存在的工具。
@@ -84,7 +87,10 @@ const VIDEO_PROMPT = [
   '- 音轨不会被转写。用户问的是「说了什么」而不是「画面是什么」时，先说明这一点，再决定要不要抽帧看画面上的字幕或标注。',
 ].join('\n');
 
-async function refreshAvailability(ctx: PluginContext, configuredPath: string | undefined): Promise<FfmpegTools | null> {
+async function refreshAvailability(
+  ctx: PluginContext,
+  configuredPath: string | undefined,
+): Promise<FfmpegTools | null> {
   const tools = await warmUpFfmpeg(configuredPath);
   const stats = await cacheStats(defaultCacheRoot()).catch(() => ({ bytes: 0, files: 0 }));
 
@@ -95,9 +101,7 @@ async function refreshAvailability(ctx: PluginContext, configuredPath: string | 
   }
 
   publishStatus(ctx, {
-    ffmpeg: tools
-      ? { text: tools.version.slice(0, 40), tone: 'ok' }
-      : { text: '未找到 ffmpeg', tone: 'error' },
+    ffmpeg: tools ? { text: tools.version.slice(0, 40), tone: 'ok' } : { text: '未找到 ffmpeg', tone: 'error' },
     cache: {
       text: describeCache(stats),
     },

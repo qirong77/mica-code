@@ -1,9 +1,9 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { readFileSync, realpathSync } from 'node:fs';
+import { realpathSync } from 'node:fs';
 import { appendFile, chmod, mkdir, readFile, readdir, rename, rm, stat, unlink, writeFile } from 'node:fs/promises';
 import { resolve, join, relative } from 'node:path';
 import { acquireProcessLock } from '@packages/mica-common/processLock.js';
-import type { AgentObservationEvent, PluginObservationEvent } from '@packages/mica-plugin/index.js';
+import type { AgentObservationEvent, PluginObservationEvent, PluginStatusFile } from '@packages/mica-plugin/index.js';
 import {
   readAssessments,
   writeAssessment,
@@ -80,7 +80,7 @@ export type RunDelegation = { type: string; parentSessionId?: string };
  */
 export type RunHelper = { kind: string; pluginId?: string; purpose?: string };
 /**
- * 采集那一刻的插件装配结论（`$MICA_HOME/plugin-status.json`）。
+ * 采集那一刻的插件装配结论（当前宿主的内存快照）。
  *
  * `hash` 只覆盖这份内容：两次运行之间 hash 变了就说明插件集合变了，排查「这一轮变差
  * 是不是插件没装上」不用再翻日志。
@@ -1125,15 +1125,15 @@ const CORRECTION_GUIDANCE: Record<CorrectionKind, { title: string; suggestion: s
 };
 
 /**
- * `plugin-status.json` → 这次运行看到的插件装配结论。
+ * 宿主回调 → 这次运行看到的插件装配结论，不读取其他宿主共享的状态文件。
  *
- * 文件缺失或损坏一律返回 undefined（整块省略），不抛错、不生成问题条目：插件没装上
+ * 回调缺失或失败一律返回 undefined（整块省略），不抛错、不生成问题条目：插件没装上
  * 有很多正常原因，采集侧不该把它变成一条待复盘的问题。
  */
-function readPluginSnapshot(path: string | undefined): RunPlugins | undefined {
-  if (!path) return undefined;
+function readPluginSnapshot(pluginStatus: (() => PluginStatusFile) | undefined): RunPlugins | undefined {
+  if (!pluginStatus) return undefined;
   try {
-    const parsed = JSON.parse(readFileSync(path, 'utf8')) as unknown;
+    const parsed: unknown = pluginStatus();
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return undefined;
     const file = parsed as { host?: unknown; plugins?: unknown };
     if (!Array.isArray(file.plugins)) return undefined;
@@ -1158,7 +1158,7 @@ function readPluginSnapshot(path: string | undefined): RunPlugins | undefined {
       skipped: ids('skipped'),
       hash: '',
     };
-    // 同一份状态必须得到同一个 hash：只喂排好序的数组与该文件自己的字段。
+    // 同一份状态必须得到同一个 hash：只喂排好序的数组与快照自己的字段。
     snapshot.hash = digest(
       JSON.stringify([snapshot.host ?? null, snapshot.loaded, snapshot.failed, snapshot.skipped]),
     ).slice(0, PLUGIN_HASH_CHARS);
@@ -1312,7 +1312,7 @@ export class HarnessRecorder {
   constructor(
     root: string,
     private readonly onError: (error: unknown) => void = () => {},
-    private readonly context: { mode?: string; host?: string; pluginStatusPath?: string } = {},
+    private readonly context: { mode?: string; host?: string; pluginStatus?: () => PluginStatusFile } = {},
   ) {
     this.root = resolve(root);
     this.correctionQueue = new CorrectionQueue(this.root, (error) => this.persistenceError(error));
@@ -2051,8 +2051,8 @@ export class HarnessRecorder {
           }
         }
         this.noteRunInput(state, seq, inputText, this.lastInputs);
-        // 插件装配结论只在 run:start 读一次：文件缺失或损坏就整块省略。
-        const plugins = readPluginSnapshot(this.context.pluginStatusPath);
+        // run:start 时宿主已完成装配；每次运行只取一次内存快照。
+        const plugins = readPluginSnapshot(this.context.pluginStatus);
         if (plugins) state.summary.plugins = plugins;
         if (!state.summary.helper && !state.summary.delegation && state.summary.sessionId) {
           const current = state;

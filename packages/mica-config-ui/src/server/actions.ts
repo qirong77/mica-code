@@ -86,6 +86,7 @@ export const configWebActions = {
     runPluginActionProcess({
       id: text(input, 'id'),
       action: text(input, 'action'),
+      cwd: optionalText(input, 'cwd') || undefined,
       values: optionalStringRecord(input.values),
     }),
 

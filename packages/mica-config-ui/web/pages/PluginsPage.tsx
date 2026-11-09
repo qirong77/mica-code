@@ -55,11 +55,13 @@ const DESKTOP_CHECK_TONE = { granted: 'green', denied: 'red', unknown: 'default'
  */
 export function PluginsPage({
   pluginId = null,
+  actionCwd,
   onSelectPlugin = () => {},
   onNewSession,
   onOpenPluginPage,
 }: {
   pluginId?: string | null;
+  actionCwd?: string;
   onSelectPlugin?(pluginId: string | null): void;
   /**
    * 动作要求「开一个新会话去做」时由宿主接手（桌面端会开页签、把提示词放进输入框）。
@@ -124,6 +126,7 @@ export function PluginsPage({
     return (
       <PluginDetail
         plugin={openPlugin}
+        actionCwd={actionCwd}
         busy={pendingId === openPlugin.id}
         canToggle={canToggle}
         canSettings={canSettings}
@@ -457,6 +460,7 @@ export function PluginDetail({
   onRefresh,
   onToggleEnabled,
   onSaved,
+  actionCwd,
   onNewSession,
   onOpenPluginPage,
 }: {
@@ -471,6 +475,7 @@ export function PluginDetail({
   onRefresh(): void;
   onToggleEnabled(enabled: boolean): void;
   onSaved(next: ConfigWebPluginsDetails): void;
+  actionCwd?: string;
   onNewSession?(task: ConfigWebPluginNewSession): boolean | void;
   onOpenPluginPage?(pluginId: string): boolean | void | Promise<boolean | void>;
 }) {
@@ -563,7 +568,13 @@ export function PluginDetail({
         {/* 插件上报的「点一下就能变好」：提示点已经把人引到这里，这里给的是那个按钮。
             一直挂着不卸载：动作成功后插件往往会撤掉 attention，结果那句话还得留在原地。 */}
         {plugin.state === 'enabled' && (plugin.attention || plugin.actions.length > 0) ? (
-          <PluginAttentionBar plugin={plugin} values={draft.values} onDone={onSaved} onNewSession={onNewSession} />
+          <PluginAttentionBar
+            actionCwd={actionCwd}
+            plugin={plugin}
+            values={draft.values}
+            onDone={onSaved}
+            onNewSession={onNewSession}
+          />
         ) : null}
         {plugin.health && plugin.health.level !== 'ok' ? (
           <div className={`plugin-health is-${plugin.health.level}`}>
@@ -586,6 +597,7 @@ export function PluginDetail({
               ) : null}
               {plugin.actions.length > 0 ? (
                 <PluginActionsGroup
+                  actionCwd={actionCwd}
                   plugin={plugin}
                   values={draft.values}
                   onDone={onSaved}
@@ -604,6 +616,7 @@ export function PluginDetail({
               <PluginStatusGroup plugin={plugin} />
               {plugin.actions.length > 0 ? (
                 <PluginActionsGroup
+                  actionCwd={actionCwd}
                   plugin={plugin}
                   values={draft.values}
                   onDone={onSaved}
@@ -664,11 +677,13 @@ function newSessionHint(outcome: NewSessionOutcome): string {
  */
 export function PluginActionsGroup({
   plugin,
+  actionCwd,
   values,
   onDone,
   onNewSession,
 }: {
   plugin: ConfigWebPlugin;
+  actionCwd?: string;
   values: Record<string, string>;
   onDone: (next: ConfigWebPluginsDetails) => void;
   onNewSession?(task: ConfigWebPluginNewSession): boolean | void;
@@ -682,7 +697,7 @@ export function PluginActionsGroup({
     setRunning(action.key);
     setErrors((prev) => ({ ...prev, [action.key]: '' }));
     try {
-      const result = await runPluginAction(plugin.id, action.key, values);
+      const result = await runPluginAction(plugin.id, action.key, values, actionCwd);
       setResults((prev) => ({ ...prev, [action.key]: result }));
       const outcome = dispatchNewSession(result, onNewSession);
       setHints((prev) => ({ ...prev, [action.key]: newSessionHint(outcome) }));
@@ -756,11 +771,13 @@ export function PluginActionsGroup({
  */
 function PluginAttentionBar({
   plugin,
+  actionCwd,
   values,
   onDone,
   onNewSession,
 }: {
   plugin: ConfigWebPlugin;
+  actionCwd?: string;
   values: Record<string, string>;
   onDone: (next: ConfigWebPluginsDetails) => void;
   onNewSession?(task: ConfigWebPluginNewSession): boolean | void;
@@ -781,7 +798,7 @@ function PluginAttentionBar({
     setError(null);
     setHint('');
     try {
-      const next = await runPluginAction(plugin.id, action.key, values);
+      const next = await runPluginAction(plugin.id, action.key, values, actionCwd);
       const outcome = dispatchNewSession(next, onNewSession);
       // 已经跳到新会话了：这个页面正在关掉，不再为它刷新一次详情。
       if (outcome === 'launched') return;

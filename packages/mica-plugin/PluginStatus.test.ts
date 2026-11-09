@@ -1,8 +1,8 @@
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { writePluginStatus } from './PluginStatus.js';
+import { createPluginStatus, writePluginStatus } from './PluginStatus.js';
 
 let configDir: string;
 
@@ -28,6 +28,26 @@ function write(
 }
 
 describe('writePluginStatus', () => {
+  it('constructs deterministic detached snapshots without writing to disk', () => {
+    const options: Parameters<typeof createPluginStatus>[0] = {
+      pluginsDir: join(configDir, 'plugins'),
+      host: 'tui',
+      updatedAt: '2026-11-08T10:00:00.000Z',
+      filePlugins: { loaded: [], failed: [{ file: '/plugins/bad', error: new Error('bad manifest') }] },
+      setupReport: { loaded: ['demo'], failed: [], skipped: [] },
+    };
+    const status = createPluginStatus(options);
+    expect(createPluginStatus(options)).toEqual(status);
+    expect(status.updatedAt).toBe(options.updatedAt);
+    expect(existsSync(join(configDir, 'plugin-status.json'))).toBe(false);
+    status.plugins[0]!.id = 'mutated';
+    status.loadFailed.length = 0;
+    expect(createPluginStatus(options)).toMatchObject({
+      plugins: [{ id: 'demo', status: 'loaded' }],
+      loadFailed: [{ file: '/plugins/bad', status: 'failed', error: 'bad manifest' }],
+    });
+  });
+
   it('records a plugin that was skipped for missing host capabilities', () => {
     const status = write({ loaded: [], failed: [], skipped: [{ pluginId: 'user.b', missing: ['prompt', 'ui'] }] });
 
@@ -63,10 +83,9 @@ describe('writePluginStatus', () => {
   });
 
   it('keeps the entry file for user plugins and names the host that wrote it', () => {
-    const status = write(
-      { loaded: ['user.hello'], failed: [], skipped: [] },
-      [{ pluginId: 'user.hello', file: '/plugins/hello/index.js' }],
-    );
+    const status = write({ loaded: ['user.hello'], failed: [], skipped: [] }, [
+      { pluginId: 'user.hello', file: '/plugins/hello/index.js' },
+    ]);
 
     expect(status.host).toBe('app-server');
     expect(status.plugins).toEqual([{ id: 'user.hello', file: '/plugins/hello/index.js', status: 'loaded' }]);
@@ -82,5 +101,6 @@ describe('writePluginStatus', () => {
       ['todo', 'loaded'],
       ['user.a', 'loaded'],
     ]);
+    expect(readdirSync(configDir)).toEqual(['plugin-status.json']);
   });
 });

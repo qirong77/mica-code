@@ -26,7 +26,7 @@ import { createPluginLogger } from './PluginLog.js';
 import { createPluginSettingsStore } from './PluginSettings.js';
 import { PluginActionRegistry, type PluginActionInput, type PluginActionResult } from './PluginActions.js';
 import { PLUGIN_STATE_FILE, readPluginState, resolvePluginStatePath } from './PluginState.js';
-import { writePluginStatus, type PluginHostKind } from './PluginStatus.js';
+import { createPluginStatus, writePluginStatus, type PluginHostKind } from './PluginStatus.js';
 import type { FilePluginLoadResult } from './FilePluginLoader.js';
 import { micaSkills } from '@packages/mica-skills/index.js';
 
@@ -49,7 +49,7 @@ export type PluginStateChange = {
   disabled: string[];
   /** 因为名单里重新启用而装配的插件。 */
   enabled: string[];
-  /** 变化过程中装配或卸载失败的插件；原因已写进插件日志与健康状态。 */
+  /** 变化过程中装配或卸载失败的插件；装配失败记入 setupReport，原因写进插件日志。 */
   failed: { pluginId: string; error: unknown }[];
 };
 
@@ -95,7 +95,7 @@ export type PluginStateSyncOptions = {
  */
 export type PluginBaseContext = Omit<
   PluginContext,
-  'pluginId' | 'onDispose' | 'logger' | 'settings' | 'sessionSettings' | 'health' | 'skills' | 'models'
+  'pluginId' | 'pluginStatus' | 'onDispose' | 'logger' | 'settings' | 'sessionSettings' | 'health' | 'skills' | 'models'
 > & {
   logger?: PluginContext['logger'];
   /**
@@ -333,9 +333,23 @@ export class PluginManager {
     // 宿主的会话级读写面按 pluginId 绑定；没有它就退化成「只有全局设置」，
     // 插件通过 `requires: ['sessionSettings']` 声明这一点，缺能力时注册阶段跳过。
     const sessionSettingsHost = sessionSettingsFor?.(plugin.id);
+    const statusHost = baseContext.pluginStateSync?.host;
+    const paths = baseContext.paths;
     const ctx: PluginContext = {
       ...shared,
       pluginId: plugin.id,
+      ...(statusHost && paths
+        ? {
+            pluginStatus: () =>
+              createPluginStatus({
+                pluginsDir: paths.plugins,
+                host: statusHost,
+                updatedAt: new Date().toISOString(),
+                filePlugins: this.userPluginFiles,
+                setupReport: this.setupReport(),
+              }),
+          }
+        : {}),
       logger,
       settings,
       ...(sessionSettingsHost
@@ -535,7 +549,6 @@ export class PluginManager {
       report.failed.push({ pluginId: plugin.id, error });
       this.attempts.set(plugin.id, { status: 'failed', error });
       logger.error('plugin:setup-failed', { error: errorMessage(error) });
-      ctx.health.report({ level: 'error', message: `启动失败：${errorMessage(error)}` });
       if (plugin.required) throw error;
     }
   }
@@ -809,7 +822,11 @@ export class PluginManager {
       const message = errorMessage(error);
       logger.error('plugin:hook-failed', { hook, error: message });
       if (pluginId)
-        writePluginHealth(pluginId, { level: 'error', message: `钩子 ${hook} 执行失败：${message}` }, { configDir });
+        writePluginHealth(
+          pluginId,
+          { level: 'error', message: `钩子 ${hook} 执行失败：${message}` },
+          { configDir, version: this.plugins.get(pluginId)?.version },
+        );
       // 观察通道自己的 handler 失败不再回灌：那会让 notify 递归调用自己。
       if (pluginId && hook !== 'plugin:observe') {
         const key = `${pluginId}\n${hook}`;

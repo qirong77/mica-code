@@ -24,6 +24,8 @@ export type ConfigWebAppProps = {
   initialSection?: ConfigWebAppSection;
   /** 打开时直接落到某个插件的详情（桌面端的插件菜单用）。 */
   initialPluginId?: string | null;
+  /** 当前工作区，作为插件动作上下文；独立配置页不传。 */
+  actionCwd?: string;
   /** 回到应用：由宿主提供时导航栏顶部出现「返回应用」，浏览器宿主不传。 */
   onClose?(): void;
   closeLabel?: string;
@@ -43,6 +45,7 @@ export type ConfigWebAppProps = {
 export function App({
   initialSection,
   initialPluginId = null,
+  actionCwd,
   onClose,
   closeLabel,
   onNewSession,
@@ -98,6 +101,7 @@ export function App({
             {section === 'plugins' ? (
               <PluginsPage
                 pluginId={pluginId}
+                actionCwd={actionCwd}
                 onSelectPlugin={selectPlugin}
                 onNewSession={onNewSession}
                 onOpenPluginPage={onOpenPluginPage}

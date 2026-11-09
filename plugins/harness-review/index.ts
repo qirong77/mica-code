@@ -1,5 +1,7 @@
 import { join } from 'node:path';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
+import { acquireProcessLock } from '@packages/mica-common/processLock.js';
+import { writeTextFileAtomic } from '@packages/mica-config/atomicWrite.js';
 import { resolveMicaHome } from '@packages/mica-config/brand.js';
 import type { AgentObservationEvent, PluginContext, PluginObservationEvent } from '@packages/mica-plugin/index.js';
 import { MicaTool, type ToolInput } from '@packages/mica-tools/index.js';
@@ -16,9 +18,31 @@ type PluginState = { classifierVersion?: number; lastRebuildAt?: string; lastSta
 
 /** Recording is driven by runtime hooks; it never asks the task model to remember to reflect. */
 export default function setup(ctx: PluginContext): void {
+  const currentCwd = () => ctx.session?.describe()?.cwd;
+  const action = ctx.actions?.register('open-review', (input) => {
+    let cwd = input.cwd;
+    try {
+      cwd ||= currentCwd();
+    } catch {
+      // A closed session is not a reason to open a review in the host's cwd.
+    }
+    if (!cwd) return { message: '无法确定复盘工作区，请从工作区会话中打开复盘。' };
+    return {
+      newSession: {
+        prompt:
+          '看一下 harness-review 的运行复盘：先用 harness_review 工具 action=list 读当前工作区的运行指标与问题候选，' +
+          '挑出最值得处理的几项，逐项说明证据（哪次运行、哪次调用）、影响和你的判断；' +
+          '需要完整证据时用 action=report 导出报告。结论给我，先不要改任何代码，也不要代我登记 assess 决定。',
+        cwd,
+        send: false,
+      },
+    };
+  });
+  if (action) ctx.onDispose(() => action.dispose());
+  if (!ctx.tools || !ctx.session) return;
+
   const configHome = ctx.paths?.config ?? resolveMicaHome();
   const root = join(configHome, 'plugin-data', ctx.pluginId);
-  const state = readState(root);
   const mode = ctx.agent?.mode === 'one-shot' ? 'one-shot' : 'session';
   const recorder = new HarnessRecorder(
     root,
@@ -27,50 +51,50 @@ export default function setup(ctx: PluginContext): void {
       ctx.logger.error('harness-review:storage-failed', { name: error instanceof Error ? error.name : 'Error' });
       ctx.health.report({ level: 'error', message: '运行记录读写失败', hint: `检查目录权限和磁盘空间：${root}` });
     },
-    // 运行来自哪个宿主：桌面端 spawn 的 app-server 才有 desktop 能力。
-    // `plugin-status.json` 是这次运行看到的插件装配快照，与其所处的宿主同一份目录。
-    { mode, host: ctx.desktop ? 'desktop' : 'cli', pluginStatusPath: join(configHome, 'plugin-status.json') },
+    { mode, host: ctx.desktop ? 'desktop' : 'cli', pluginStatus: ctx.pluginStatus },
   );
-  const currentCwd = () => ctx.session?.describe()?.cwd ?? process.cwd();
 
-  let refreshing = false;
+  let maintenance = Promise.resolve();
+  const maintain = <T>(work: () => Promise<T>): Promise<T> => {
+    const task = maintenance.then(() => withStatusLock(root, work));
+    maintenance = task.then(
+      () => {},
+      () => {},
+    );
+    return task;
+  };
   const refreshStatus = async (): Promise<void> => {
-    if (refreshing) return;
-    refreshing = true;
+    writeStatus(root, await recorder.review(), readState(root));
+  };
+
+  const updateStatus = async (afterTurn = false): Promise<void> => {
+    if (mode === 'one-shot') return;
     try {
-      writeStatus(root, await recorder.review(currentCwd()), state);
+      await maintain(async () => {
+        const state = readState(root);
+        let changed = false;
+        if (state.classifierVersion !== CLASSIFIER_VERSION) {
+          await recorder.rebuild();
+          state.classifierVersion = CLASSIFIER_VERSION;
+          state.lastRebuildAt = new Date().toISOString();
+          changed = true;
+        }
+        if (!afterTurn && !hasGlobalStatus(root)) changed = true;
+        if (afterTurn && Date.now() - (state.lastStatusAt ?? 0) >= STATUS_REFRESH_MS) {
+          state.lastStatusAt = Date.now();
+          changed = true;
+        }
+        if (!changed) return;
+        writeStatus(root, await recorder.review(), state);
+        writeState(root, state);
+      });
     } catch (error) {
       ctx.logger.warn('harness-review:status-failed', {
         error: error instanceof Error ? error.message : String(error),
       });
-    } finally {
-      refreshing = false;
     }
   };
-
-  let rebuilding = false;
-  const rebuildIfRulesChanged = async (): Promise<void> => {
-    // 一次性宿主（`mica exec`）活几秒，扫全量历史只是白花时间；它记下的运行
-    // 会由下一次常驻宿主启动时一起重算。
-    if (rebuilding || mode === 'one-shot' || state.classifierVersion === CLASSIFIER_VERSION) return;
-    rebuilding = true;
-    try {
-      await recorder.rebuild();
-      state.classifierVersion = CLASSIFIER_VERSION;
-      state.lastRebuildAt = new Date().toISOString();
-      writeState(root, state);
-      // 重算之后页面上的数字与提示点必须立刻跟着变，不能等下一次轮次。
-      await refreshStatus();
-    } catch (error) {
-      ctx.logger.warn('harness-review:rebuild-failed', {
-        error: error instanceof Error ? error.message : String(error),
-      });
-    } finally {
-      rebuilding = false;
-    }
-  };
-  // 规则变了就重算一次历史：派生数据不该因为改了一行分类就永久失真。
-  void rebuildIfRulesChanged();
+  void updateStatus();
   const hook = ctx.hooks.on<AgentObservationEvent>(
     'agent:observe',
     (event) => {
@@ -104,7 +128,10 @@ export default function setup(ctx: PluginContext): void {
     { pluginId: ctx.pluginId },
   );
   ctx.onDispose(() => pluginHook.dispose());
-  ctx.onDispose(() => recorder.dispose());
+  ctx.onDispose(async () => {
+    await maintenance;
+    await recorder.dispose();
+  });
 
   // 用户动作是纠正证据，不单凭它判定回答质量；先落盘，再由下一次主运行消费。
   const events: PluginContext['events'] | undefined = ctx.events;
@@ -134,39 +161,19 @@ export default function setup(ctx: PluginContext): void {
     }
   }
 
-  // 复盘一直没人打开过：`decisions/` 空着就是证据。把状态写进 data.json，
-  // 有重复出现又没人处理的问题时在侧栏 Plugins 上点一枚提示点。
   const turnHook = ctx.hooks.on(
     'turn:after',
     () => {
-      void rebuildIfRulesChanged();
-      // `mica exec` 是一次性运行：复盘扫描是纯开销，那儿只采集。
-      if (mode === 'one-shot') return;
-      if (Date.now() - (state.lastStatusAt ?? 0) < STATUS_REFRESH_MS) return;
-      state.lastStatusAt = Date.now();
-      writeState(root, state);
-      void refreshStatus();
+      void updateStatus(true);
     },
     { pluginId: ctx.pluginId },
   );
   ctx.onDispose(() => turnHook.dispose());
 
-  ctx.actions?.register('open-review', () => ({
-    // 复盘要读报告、挑条目、讲判断——一串要判断的动作交给 agent 做，
-    // 这里只把提示词放进输入框，发不发由用户决定。
-    newSession: {
-      prompt:
-        '看一下 harness-review 的运行复盘：先用 harness_review 工具 action=list 读当前工作区的运行指标与问题条目，' +
-        '挑出最值得处理的几项，逐项说明证据（哪次运行、哪次调用）、影响和你的判断；' +
-        '需要完整证据时用 action=report 导出报告。结论给我，先不要改任何代码。',
-      cwd: currentCwd(),
-      send: false,
-    },
-  }));
-
   const execute = async (input: ToolInput): Promise<unknown> => {
     const action = input.action ?? 'list';
     const cwd = currentCwd();
+    if (!cwd) throw new Error('无法确定复盘工作区，请从工作区会话中打开复盘。');
     if (action === 'list') {
       const report = await recorder.review(cwd);
       // Keep an accumulated review usable inside a model context. The full
@@ -200,7 +207,11 @@ export default function setup(ctx: PluginContext): void {
       // never removed. Scoped to the current workspace so one project's cleanup
       // cannot drop another project's evidence.
       const days = count(input.days === undefined ? undefined : String(input.days), 30, 1, 3650);
-      const result = await recorder.prune({ olderThanDays: days, cwd });
+      const result = await maintain(async () => {
+        const result = await recorder.prune({ olderThanDays: days, cwd });
+        await refreshStatus();
+        return result;
+      });
       return {
         ...result,
         freedMb: Math.round((result.freedBytes / 1_048_576) * 10) / 10,
@@ -210,7 +221,12 @@ export default function setup(ctx: PluginContext): void {
     }
     if (action === 'rebuild') {
       // Only derived error counts change; usage, timing and outcomes stay untouched.
-      const result = await recorder.rebuild({ cwd });
+      const result = await maintain(async () => {
+        const result = await recorder.rebuild({ cwd });
+        writeState(root, { ...readState(root), lastRebuildAt: new Date().toISOString() });
+        await refreshStatus();
+        return result;
+      });
       return {
         ...result,
         displayLimit: '已按当前规则重算问题条目与工具错误/预期退出计数；用量、耗时、终态与人工评估历史不变。',
@@ -224,14 +240,16 @@ export default function setup(ctx: PluginContext): void {
       const report = await recorder.review(cwd);
       if (!report.findings.some((finding) => finding.id === input.id))
         throw new Error('当前工作区没有这个 review 条目');
-      await recorder.decide(input.id, input.status as ReviewStatus, input.note, cwd);
-      await refreshStatus();
+      await maintain(async () => {
+        await recorder.decide(input.id as string, input.status as ReviewStatus, input.note as string, cwd);
+        await refreshStatus();
+      });
       return { id: input.id, status: input.status, recorded: true };
     }
     throw new Error('action 必须是 list / report / prune / rebuild / assess');
   };
 
-  const tool = ctx.tools!.register(new HarnessReviewTool(execute));
+  const tool = ctx.tools.register(new HarnessReviewTool(execute));
   ctx.onDispose(() => tool.dispose());
   const command = ctx.commands.register({
     name: 'harness-review',
@@ -318,18 +336,37 @@ function readState(root: string): PluginState {
 }
 
 function writeState(root: string, state: PluginState): void {
+  writeTextFileAtomic(join(root, 'state.json'), `${JSON.stringify(state, null, 2)}\n`);
+}
+
+function hasGlobalStatus(root: string): boolean {
   try {
-    mkdirSync(root, { recursive: true });
-    writeFileSync(join(root, 'state.json'), `${JSON.stringify(state, null, 2)}\n`, 'utf8');
+    const data = JSON.parse(readFileSync(join(root, 'data.json'), 'utf8')) as Record<string, unknown>;
+    return data.scope === '所有工作区';
   } catch {
-    // 状态只是加速，写不进去不影响记录。
+    return false;
   }
+}
+
+async function withStatusLock<T>(root: string, work: () => Promise<T>): Promise<T> {
+  for (let attempt = 0; attempt < 200; attempt++) {
+    const release = acquireProcessLock(join(root, 'status.lock'));
+    if (release) {
+      try {
+        return await work();
+      } finally {
+        release();
+      }
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error('复盘状态正在由其他宿主更新，请稍后重试。');
 }
 
 /**
  * 配置页插件详情读的那份 `data.json`：随时可读的状态 + 只在「点一下就能变好」时的提示点。
  *
- * 只有跨多轮重复出现、且还没人处理过的问题才打扰人——单次失败是噪声，
+ * 只有跨多轮重复出现、且尚未登记评估的问题候选才打扰人——单次失败是噪声，
  * 而一枚点不动的提示点比没有提示更糟。
  */
 function writeStatus(root: string, report: ReviewReport, state: PluginState): void {
@@ -346,6 +383,7 @@ function writeStatus(root: string, report: ReviewReport, state: PluginState): vo
     null,
   );
   const data: Record<string, unknown> = {
+    scope: '所有工作区',
     runs: `${userRuns.length} 次`,
     openFindings: open.length + followups.length === 0 ? '没有待复盘的问题' : `${open.length + followups.length} 项`,
     lastRun: lastRun ? `${lastRun} 起` : '尚未记录',
@@ -356,15 +394,10 @@ function writeStatus(root: string, report: ReviewReport, state: PluginState): vo
       text:
         followups.length > 0
           ? `${followups.length} 项已有评估的问题待复核（新证据、历史基线缺失或人工标记回归）`
-          : `${recurring.length} 项问题重复出现、还没有人复盘`,
+          : `${recurring.length} 项问题候选重复出现、尚未登记评估`,
       tone: 'warn',
       action: 'open-review',
     };
   }
-  try {
-    mkdirSync(root, { recursive: true });
-    writeFileSync(join(root, 'data.json'), `${JSON.stringify(data, null, 2)}\n`, 'utf8');
-  } catch {
-    // 上报失败只影响配置页显示。
-  }
+  writeTextFileAtomic(join(root, 'data.json'), `${JSON.stringify(data, null, 2)}\n`);
 }

@@ -1,5 +1,7 @@
 # mica-config-ui
 
+配置页 `ConfigWebApp` 的可选 `actionCwd` 指定发起插件动作的工作区；`runPluginAction(id, action, values, cwd)` 经 HTTP / IPC 与一次性 CLI 原样传入。缺失时不从配置服务进程推断目录，插件决定是否需要工作区并给出提示。
+
 配置页（Mica Config）的**唯一一份实现**：页面组件、数据动作与共享类型。两个宿主都用它，区别只在「谁提供数据、谁来渲染」。
 
 - **浏览器宿主**（`apps/config-web`）：Bun HTTP 服务托管页面产物（`bun run build:config-web` 生成内嵌资源），页面走同源 `/api/*`。

@@ -555,6 +555,7 @@ export const configWebActions = {
     runPluginActionProcess({
       id: text(input, 'id'),
       action: text(input, 'action'),
+      cwd: typeof input?.cwd === 'string' && input.cwd ? input.cwd : undefined,
       values: isRecord(input?.values) ? input.values : undefined
     }),
 

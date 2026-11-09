@@ -5,7 +5,7 @@ import { ServiceContainer } from './ServiceContainer.js';
 import { createServiceToken } from './ServiceToken.js';
 import { inspectPlugins, loadFilePlugins } from './FilePluginLoader.js';
 import { loadUserPlugins } from './UserPlugins.js';
-import { writePluginStatus } from './PluginStatus.js';
+import { createPluginStatus, writePluginStatus } from './PluginStatus.js';
 import { parsePluginManifest, PLUGIN_API_VERSION, PLUGIN_MANIFEST_FILE } from './PluginManifest.js';
 import {
   PLUGIN_SETTINGS_DIR,
@@ -111,6 +111,7 @@ export const micaPlugin = {
   loadFilePlugins,
   inspectPlugins,
   loadUserPlugins,
+  createPluginStatus,
   writePluginStatus,
   parsePluginManifest,
   createPluginSettingsStore,
@@ -199,7 +200,7 @@ export type {
   PluginSessionMenuResult,
 } from './PluginSessionMenu.js';
 export { loadUserPlugins } from './UserPlugins.js';
-export { writePluginStatus } from './PluginStatus.js';
+export { createPluginStatus, writePluginStatus } from './PluginStatus.js';
 export type { PluginHostKind, PluginStatusEntry, PluginStatusFile } from './PluginStatus.js';
 export {
   PLUGIN_API_VERSION,

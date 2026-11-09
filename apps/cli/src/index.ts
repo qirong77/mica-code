@@ -183,6 +183,7 @@ if (invocation.mode === 'plugin-action') {
     const result = await runPluginAction({
       pluginId: invocation.pluginId,
       action: invocation.action,
+      cwd: invocation.cwd,
       values: invocation.values
     });
     process.stdout.write(`${JSON.stringify(result)}\n`);

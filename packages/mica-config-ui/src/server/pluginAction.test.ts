@@ -1,5 +1,5 @@
 import { describe, expect, it, afterEach } from 'vitest';
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { runPluginAction } from './pluginAction';
@@ -24,6 +24,31 @@ afterEach(() => {
 });
 
 describe('config page plugin actions', () => {
+  it('passes workspace context as an argument without changing the host cwd', async () => {
+    const cliPath = fakeCli('');
+    writeFileSync(
+      cliPath,
+      '#!/bin/sh\nfor arg in "$@"; do printf "%s\\n" "$arg"; done > "$0.args"\nprintf \'{"ok":true,"message":"done"}\\n\'\n',
+    );
+    const cwd = join(tmpdir(), 'workspace with spaces');
+    await runPluginAction({ id: 'harness-review', action: 'open-review', cwd }, { cliPath });
+    expect(readFileSync(`${cliPath}.args`, 'utf8').split('\n')).toEqual([
+      'plugin-action',
+      '--plugin',
+      'harness-review',
+      '--action',
+      'open-review',
+      '--dir',
+      cwd,
+      '',
+    ]);
+  });
+
+  it('rejects relative workspace context instead of resolving against the server directory', async () => {
+    await expect(
+      runPluginAction({ id: 'harness-review', action: 'open-review', cwd: 'wrong' }, { cliPath: '/must-not-start' }),
+    ).rejects.toThrow('绝对路径');
+  });
   it('把「交给新会话」的交接单原样带回页面', async () => {
     const cliPath = fakeCli(JSON.stringify({ ok: true, newSession: { prompt: '去更新页面', send: false } }));
     const result = await runPluginAction({ id: 'mobile-relay', action: 'sync-page' }, { cliPath });

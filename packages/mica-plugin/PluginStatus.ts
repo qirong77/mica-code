@@ -1,5 +1,5 @@
-import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { writeTextFileAtomic } from '@packages/mica-config/atomicWrite.js';
 import type { FilePluginLoadResult } from './FilePluginLoader.js';
 import type { PluginSetupReport } from './PluginManager.js';
 
@@ -37,15 +37,15 @@ export type PluginStatusFile = {
 };
 
 /**
- * 写 `plugin-status.json`。
+ * 从当前宿主的装配记录生成快照，不读写共享状态文件。
  *
  * 结论来自 `setupReport`（官方 + 用户插件都已装配过）与 `filePlugins`（用户插件的磁盘
  * 加载结果，补上入口路径与那些连清单都没读出来的失败）。
  */
-export function writePluginStatus(options: {
+export function createPluginStatus(options: {
   pluginsDir: string;
-  configDir: string;
   host: PluginHostKind;
+  updatedAt: string;
   filePlugins: Pick<FilePluginLoadResult, 'loaded' | 'failed'>;
   setupReport: Pick<PluginSetupReport, 'loaded' | 'failed' | 'skipped'>;
 }): PluginStatusFile {
@@ -70,10 +70,10 @@ export function writePluginStatus(options: {
     return entry;
   });
 
-  const status: PluginStatusFile = {
+  return {
     host: options.host,
     root: options.pluginsDir,
-    updatedAt: new Date().toISOString(),
+    updatedAt: options.updatedAt,
     plugins,
     loadFailed: options.filePlugins.failed.map((item) => ({
       file: item.file,
@@ -81,8 +81,13 @@ export function writePluginStatus(options: {
       error: formatError(item.error),
     })),
   };
-  mkdirSync(options.configDir, { recursive: true });
-  writeFileSync(join(options.configDir, 'plugin-status.json'), `${JSON.stringify(status, null, 2)}\n`, 'utf-8');
+}
+
+export function writePluginStatus(
+  options: Omit<Parameters<typeof createPluginStatus>[0], 'updatedAt'> & { configDir: string },
+): PluginStatusFile {
+  const status = createPluginStatus({ ...options, updatedAt: new Date().toISOString() });
+  writeTextFileAtomic(join(options.configDir, 'plugin-status.json'), `${JSON.stringify(status, null, 2)}\n`);
   return status;
 }
 

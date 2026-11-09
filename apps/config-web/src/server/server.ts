@@ -285,7 +285,7 @@ async function resolveApiCall(
     case '/api/details/plugin-action':
       // 动作会改状态（注册会写回口令），所以用 POST。
       if (method !== 'POST') return METHOD_NOT_ALLOWED;
-      return get('runPluginAction', { id: body.id, action: body.action, values: body.values });
+      return get('runPluginAction', { id: body.id, action: body.action, values: body.values, cwd: body.cwd });
     case '/api/details/sessions':
       return method === 'GET' ? get('readSessionsDetails') : METHOD_NOT_ALLOWED;
 

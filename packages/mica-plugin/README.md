@@ -29,7 +29,7 @@ lease 并应用配置后、保存用户输入前执行，可通过事件上的 `
 - 插件日志：`ctx.logger` 自带文件输出，落在 `resolveLogDir()`（与运行时日志同目录），按天分片、按大小轮转。 `pluginLogPath()` 返回该插件实际存在的最新日志；没有记录时返回日志目录，不创建空日志。
 - 本地使用统计：`createPluginExperience(ctx)` 输出版本化的 `plugin:experience` 元数据事件，白名单限制字段、哈希化会话键，不记录正文、路径和地址；插件设置 `telemetry: "false"` 可立即停记。`summarizePluginExperience(lines, { since?, plugin? })` 只读聚合 JSONL，按插件版本分组、按 eventId 去重。导出脚本和口径见 [会话体验卡与埋点](../../docs/plugin-experience.md)。
 - 面板摘要卡：`PluginPanelView.cards` 在输入框上方展示紧凑摘要（每插件最多 3 张），动作走既有面板通道；`revision` 和动作 `key` 由插件配合校验。可选 `impressionAction` 由宿主在可见展示时触发，轮询视图不算曝光。卡片样式和控件由宿主统一提供。
-- 插件健康：`ctx.health.report()` 写 `$MICA_HOME/plugin-health/<id>.json`，配置页据此显示「正常 / 待配置 / 运行出错」。只有插件自己的状态写这里；缺宿主能力由 manager 记 `plugin-status.json` 的 `skipped`（见 `PluginManager.setupAll`），不进健康文件。记录带插件版本，读的一方传 `version` 就只认这一版写的（升级后旧结论自动失效）。
+- 插件健康：`ctx.health.report()` 原子写入 `$MICA_HOME/plugin-health/<id>.json`，配置页据此显示「正常 / 待配置 / 运行出错」。只有插件运行状态写这里；缺宿主能力与装配失败分别由 manager 记入 `setupReport()` / `plugin-status.json` 的 `skipped` 与 `failed`，不进健康文件。成功装配不清除已有运行故障，恢复由插件自己上报。记录（含钩子失败）带当前插件版本，读的一方传 `version` 就只认这一版写的（升级后旧结论自动失效）。
 - 提示词贡献：`ctx.prompt.section()` 追加一段 system prompt，随插件启停一起出现 / 消失。
 - 会话状态：`ctx.sessionState` 按插件 id 存进会话快照，resume / fork / rewind 跟着走。
 - 会话标注：`sessionAnnotations.ts` 按 session 存插件自己的标注（标签色点等），供 `session-tags` 插件与桌面端会话列表共用。
@@ -74,11 +74,19 @@ lease 并应用配置后、保存用户输入前执行，可通过事件上的 `
   同一份清单同时喂两个入口（侧栏会话行与对话区右键），插件侧只有一套处理器。
 - 用户插件装载：`loadUserPlugins()` 扫描 `$MICA_HOME/plugins` 并注册进 manager。常驻宿主
   （TUI、`mica app-server`）都要做这一步，`mica exec` 不装用户插件。
-- 装配结论：`writePluginStatus()` 把「加载 / 跳过（缺宿主能力）/ 失败」写进
+- 装配结论：纯函数 `createPluginStatus()` 从装配报告、文件加载记录、宿主身份和显式 `updatedAt` 生成快照，
+  `writePluginStatus()` 复用它把「加载 / 跳过（缺宿主能力）/ 失败」原子写进
   `plugin-status.json`，**官方与用户插件都记**，并写下是哪个宿主装配的（`host`）。配置页
   据此显示「已跳过 · TUI」这类结论；缺哪一面取决于宿主，所以跳过不等于插件坏了。
+- 宿主本地快照：`ctx.pluginStatus?: () => PluginStatusFile` 每次从所属 manager 的 `setupReport()` 与用户插件
+  加载记录生成，启停后立即反映新状态，不读共享 `plugin-status.json`，不会混入其它会话的装配结果。
+  manager 从 `pluginStateSync.host` 取得宿主身份；未提供该身份或 `paths` 的一次性宿主不提供此接口。
 
 ## 使用入口
+
+配置页动作的 `PluginActionInput.cwd` 可携带发起方工作区（绝对路径），无上下文时省略；
+项目相关动作不应回退到一次性宿主的 `process.cwd()`。setup 先登记独立动作，再按 `tools/session`
+能力装配采集与工具；`mica plugin-action` 在所有返回路径释放插件资源。
 
 随包插件与用户插件都只有一种形态：目录 + `plugin.json` + 入口文件 default 导出的 `setup(ctx)`：
 
@@ -191,6 +199,7 @@ context.onDispose(() => registration.dispose());
 - `FilePluginLoader.ts`：扫描 `$MICA_HOME/plugins/<id>/`，以及不执行代码的 `inspectPlugins`。没有 `plugin.json` 的目录和散落的 `.js` / `.mjs` 都不算插件。
 - `PluginState.ts`：启停状态文件的读写。
 - `PluginHealth.ts`：插件健康状态（`$MICA_HOME/plugin-health/<id>.json`）的读写。
+- `PluginStatus.ts`：宿主装配快照的纯构造与原子写盘。
 - `PluginSettings.ts`：设置项的声明类型、规范化读写与按 mtime 刷新的 store，供配置页与插件共用。
 - `PluginPrompt.ts`：插件贡献的 system prompt 片段收集。
 - `PluginDesktop.ts`：桌面宿主的能力面——检查项目录（`DESKTOP_CHECKS`）、运行条件声明与

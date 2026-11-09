@@ -28,6 +28,8 @@ export type PluginActionDeclaration = {
 };
 
 export type PluginActionInput = {
+  /** 发起动作的工作区；没有会话上下文时省略，不使用动作进程的 cwd 冒充。 */
+  cwd?: string;
   /**
    * 页面上当前的设置值（可能是还没写盘的草稿）。
    *

@@ -19,6 +19,7 @@
     }
   ],
   "status": [
+    { "key": "scope", "label": "统计范围", "type": "text" },
     { "key": "runs", "label": "已记录运行", "type": "text" },
     { "key": "openFindings", "label": "待复盘问题", "type": "text" },
     { "key": "lastRun", "label": "最近运行", "type": "text" },

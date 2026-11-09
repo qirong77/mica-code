@@ -8,6 +8,7 @@ import { readActiveProviderConfig } from '@packages/mica-config/index.js';
 import { createPluginModels } from '../plugins/pluginModels.js';
 import { createPluginPaths } from '../plugins/pluginPaths.js';
 import { appendPluginUsage } from '../plugins/usageLedger.js';
+import { isAbsolute } from 'node:path';
 
 /**
  * 一次性执行某个插件的配置页动作（配置页的「注册」「测试连接」这类按钮走这里）。
@@ -22,6 +23,7 @@ import { appendPluginUsage } from '../plugins/usageLedger.js';
 export type PluginActionRunOptions = {
   pluginId: string;
   action: string;
+  cwd?: string;
   /** 页面上当前的设置值（可能是还没写盘的草稿）。 */
   values?: Record<string, string>;
 };
@@ -41,6 +43,9 @@ export type PluginActionRunResult = {
 };
 
 export async function runPluginAction(options: PluginActionRunOptions): Promise<PluginActionRunResult> {
+  if (options.cwd !== undefined && !isAbsolute(options.cwd)) {
+    return { ok: false, code: 'invalid_cwd', error: '插件动作的 cwd 必须是绝对路径' };
+  }
   const paths = createPluginPaths();
   const plugins = new micaPlugin.PluginManager();
   const commands = new micaCommands.CommandRegistry();
@@ -50,7 +55,10 @@ export async function runPluginAction(options: PluginActionRunOptions): Promise<
   // 只接受清单里声明过的 key：声明与实现写岔了要当场报出来，而不是点了没反应。
   const declared = new Map<string, string[]>();
   for (const plugin of officialPlugins) {
-    declared.set(plugin.id, (plugin.manifest?.actions ?? []).map((entry) => entry.key));
+    declared.set(
+      plugin.id,
+      (plugin.manifest?.actions ?? []).map((entry) => entry.key),
+    );
   }
   const disabled = readDisabledPluginIds();
   for (const plugin of officialPlugins) {
@@ -61,74 +69,85 @@ export async function runPluginAction(options: PluginActionRunOptions): Promise<
   // 点一次按钮不该改写「插件装没装上」的记录，那是常驻宿主的职责。
   const userPlugins = await loadUserPlugins(plugins, {
     pluginsDir: paths.plugins,
-    disabled: [...disabled]
+    disabled: [...disabled],
   });
   for (const plugin of userPlugins.plugins) {
     if (!plugin.manifest) continue;
-    declared.set(plugin.id, (plugin.manifest.actions ?? []).map((entry) => entry.key));
-  }
-
-  await plugins.setupAll(
-    {
-      paths,
-      services,
-      hooks,
-      commands,
-      events,
-      // 动作里可能要问一次模型（试连插件自己的模型接口），请求由宿主代发；没有会话，
-      // 因此只发请求、不入账。
-      pluginModels: createPluginModels({
-        resolveMainProvider: (model) => readActiveProviderConfig(model ? { model } : {}),
-        // 动作里真的问了一次模型时（不是「测试连接」——那个走 probe，不记账）同样不能漏：
-        // 这个进程没有会话，用量记进无会话账本，统计页并进总量。
-        record: (entry) =>
-          appendPluginUsage({
-            pluginId: entry.pluginId,
-            purpose: entry.purpose,
-            cwd: process.cwd(),
-            requests: entry.requests,
-            fallbackAt: entry.finishedAt,
-          }),
-      }),
-    },
-    // 只装目标插件：这个进程不提供 tools / background 这类能力，无关插件装配进来
-    // 只会得到一堆「缺能力」的跳过记录。
-    {
-      only: [options.pluginId],
-      ignoreRequirements: true,
-      // 一次点击不该留下常驻进程：常驻任务只登记，不排期。
-      backgroundTasks: false,
-    },
-  );
-
-  if (!declared.get(options.pluginId)?.includes(options.action)) {
-    return {
-      ok: false,
-      code: 'unknown_action',
-      error: `插件 ${options.pluginId} 没有声明动作 ${options.action}`
-    };
-  }
-  if (!plugins.hasPluginAction(options.pluginId, options.action)) {
-    return {
-      ok: false,
-      code: 'action_not_registered',
-      error: `插件 ${options.pluginId} 的动作 ${options.action} 在当前宿主里不可用（可能被停用或缺少依赖）`
-    };
+    declared.set(
+      plugin.id,
+      (plugin.manifest.actions ?? []).map((entry) => entry.key),
+    );
   }
 
   try {
-    const result = await plugins.runPluginAction(options.pluginId, options.action, {
-      values: options.values ?? {}
-    });
-    if (!result) return { ok: true };
-    const newSession = micaPlugin.normalizePluginNewSession(result.newSession);
-    return {
-      ok: true,
-      ...(result.message ? { message: result.message } : {}),
-      ...(result.link ? { link: result.link } : {}),
-      ...(newSession ? { newSession } : {})
-    };
-  } catch (error) {
-    return { ok: false, code: 'error', error: formatExecError(error) };
+    await plugins.setupAll(
+      {
+        paths,
+        services,
+        hooks,
+        commands,
+        events,
+        // 动作里可能要问一次模型（试连插件自己的模型接口），请求由宿主代发；没有会话，
+        // 因此只发请求、不入账。
+        pluginModels: createPluginModels({
+          resolveMainProvider: (model) => readActiveProviderConfig(model ? { model } : {}),
+          // 动作里真的问了一次模型时（不是「测试连接」——那个走 probe，不记账）同样不能漏：
+          // 这个进程没有会话，用量记进无会话账本，统计页并进总量。
+          record: (entry) =>
+            appendPluginUsage({
+              pluginId: entry.pluginId,
+              purpose: entry.purpose,
+              cwd: process.cwd(),
+              requests: entry.requests,
+              fallbackAt: entry.finishedAt,
+            }),
+        }),
+      },
+      // 只装目标插件：这个进程不提供 tools / background 这类能力，无关插件装配进来
+      // 只会得到一堆「缺能力」的跳过记录。
+      {
+        only: [options.pluginId],
+        ignoreRequirements: true,
+        // 一次点击不该留下常驻进程：常驻任务只登记，不排期。
+        backgroundTasks: false,
+      },
+    );
+
+    if (!declared.get(options.pluginId)?.includes(options.action)) {
+      return {
+        ok: false,
+        code: 'unknown_action',
+        error: `插件 ${options.pluginId} 没有声明动作 ${options.action}`,
+      };
+    }
+    if (!plugins.hasPluginAction(options.pluginId, options.action)) {
+      const failure = plugins.setupReport().failed.find((entry) => entry.pluginId === options.pluginId);
+      return {
+        ok: false,
+        code: 'action_not_registered',
+        error: failure
+          ? `插件 ${options.pluginId} 启动失败：${formatExecError(failure.error)}`
+          : `插件 ${options.pluginId} 的动作 ${options.action} 在当前宿主里不可用（可能被停用或缺少依赖）`,
+      };
+    }
+
+    try {
+      const result = await plugins.runPluginAction(options.pluginId, options.action, {
+        ...(options.cwd ? { cwd: options.cwd } : {}),
+        values: options.values ?? {},
+      });
+      if (!result) return { ok: true };
+      const newSession = micaPlugin.normalizePluginNewSession(result.newSession);
+      return {
+        ok: true,
+        ...(result.message ? { message: result.message } : {}),
+        ...(result.link ? { link: result.link } : {}),
+        ...(newSession ? { newSession } : {}),
+      };
+    } catch (error) {
+      return { ok: false, code: 'error', error: formatExecError(error) };
+    }
+  } finally {
+    await plugins.disposeAll();
   }
 }

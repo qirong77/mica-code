@@ -1937,21 +1937,15 @@ export function SessionTree({
                 <IconX size={14} />
               </ArcoAction>
             )}
-            {/* 筛选入口：不点它的时候侧栏和以前一模一样（没有任何会话被藏起来）。
-                激活态的按钮一直亮着，因为筛着的时候列表是平铺的，得让用户看得出
-                「我现在看的是一份子集」——亮的是图标本身，连一层底色都不铺：侧栏本来就窄，
-                任何一块色块都会把眼睛从会话标题上拽走。 */}
             <ArcoAction
               type="button"
               iconOnly
               title={filterOpen ? '收起筛选' : '筛选会话'}
               aria-label={filterOpen ? '收起筛选' : '筛选会话'}
               aria-pressed={filterOpen}
+              tone={filterOpen ? 'accent' : undefined}
               className="shrink-0"
-              style={{
-                width: 28, height: 28,
-                ...(filterOpen ? { color: 'rgb(var(--primary-6))' } : {})
-              }}
+              style={{ width: 28, height: 28 }}
               onClick={() => {
                 // 筛选与搜索是两条平行入口：搜索接管列表时先关掉搜索，否则筛出来的
                 // 结果会被搜索态挡住，点了像没反应。
@@ -1975,20 +1969,19 @@ export function SessionTree({
               className="mt-1 flex items-center gap-1 overflow-x-auto"
             >
               {SESSION_FILTER_MODES.map((mode) => (
-                <button
+                <ArcoAction
                   key={mode.id}
                   type="button"
                   aria-pressed={filterMode === mode.id}
                   title={filterHint(mode)}
-                  className={`h-6 min-w-fit flex-1 whitespace-nowrap rounded-md px-1.5 text-[11.5px] font-medium transition-colors ${
-                    filterMode === mode.id
-                      ? 'bg-overlay-heavy text-fg-max'
-                      : 'bg-overlay text-fg-soft hover:bg-overlay-strong hover:text-fg-max'
-                  }`}
+                  tone={filterMode === mode.id ? 'accent' : undefined}
+                  appearance="secondary"
+                  className="min-w-fit flex-1 whitespace-nowrap"
+                  style={{ height: 24, paddingInline: 6, fontSize: 11.5, fontWeight: 500, borderRadius: 6 }}
                   onClick={() => chooseFilter(mode.id)}
                 >
                   {mode.label}
-                </button>
+                </ArcoAction>
               ))}
             </div>
           )}

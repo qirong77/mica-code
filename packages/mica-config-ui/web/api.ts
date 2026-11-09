@@ -76,7 +76,12 @@ export type ConfigWebClient = {
    * 与设置、启停不同，这一步会真的去跑插件代码——注册、探测这类事因此不用跳去对话里，
    * 也不需要会话宿主在线。两个宿主都支持。
    */
-  runPluginAction?(id: string, action: string, values?: Record<string, string>): Promise<ConfigWebPluginActionResult>;
+  runPluginAction?(
+    id: string,
+    action: string,
+    values?: Record<string, string>,
+    cwd?: string,
+  ): Promise<ConfigWebPluginActionResult>;
   /**
    * 插件声明的运行条件（辅助功能、屏幕录制等）此刻是否满足。
    *
@@ -267,10 +272,11 @@ export function runPluginAction(
   id: string,
   action: string,
   values?: Record<string, string>,
+  cwd?: string,
 ): Promise<ConfigWebPluginActionResult> {
   const current = requireClient();
   if (typeof current.runPluginAction !== 'function') throw new Error('当前宿主不支持插件动作');
-  return current.runPluginAction(id, action, values);
+  return current.runPluginAction(id, action, values, cwd);
 }
 
 /**

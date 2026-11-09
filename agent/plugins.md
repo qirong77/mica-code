@@ -28,9 +28,16 @@
 
 ### actions（不依赖会话的动作）
 
+动作输入可带发起方工作区 `cwd`（绝对路径）：桌面设置页通过 `ConfigWebApp.actionCwd` 传入，独立配置页省略。
+需要项目目录的动作缺上下文时应明确提示，不使用一次性宿主的 `process.cwd()` 冒充。
+setup 必须先登记独立动作再按能力装配会话工具；动作宿主不伪造 `tools/session`，退出前统一释放注册资源。
+
 属于插件、但不属于任何一次会话的操作（注册到中转机、试连接口、生成访问链接）声明成清单 `actions`，实现用 `ctx.actions.register(key, handler)`，结果是 `{ message?, link? }`。配置页在插件设置下方画按钮、就地显示结果，**不要**为此把用户跳去对话、也不要为此要求会话宿主在线：执行它的是 `mica plugin-action --plugin <id> --action <key>`，一个只装配目标插件的一次性进程（没有 agent、没有 turn）。动作通常要顺手写设置与状态文件（`ctx.settings.set()` + `plugin-data/<id>/data.json`），这样页面刷新后仍能看到结果。做不完的操作（要一串判断、要调工具）就回 `{ newSession: { prompt, send: false } }`：页面开一个新会话、把提示词放进输入框、关掉配置页，等用户按回车后由 agent 去做——提示词要能独立成立（接手的新会话看不到这里的状态）：随包 skill 用 `[skill:名字](绝对路径)` 指过去，要它落在某个仓库里做事就用 `cwd` 指定工作目录；这是与面板动作同一份 `newSession` 形状（归一化在 `mica-plugin/PluginNewSession.ts`），浏览器宿主没有会话可开时如实说「在桌面端里点」。
 
 ### background（一直在跑的东西）
+
+随包脚本的解释器必须是真正的 Node（如 `node` 或显式的 Node 路径），不能用安装版的 `process.execPath`：
+后者指向 Mica 本身。DeepSeek Harness supervisor 对启动异常与快速退出采用跨宿主共享的指数退避，设置变化重置退避。
 
 需要「一直在跑」的东西（周期轮询、心跳、增量同步）注册成 `ctx.background.register(...)`，不要自己 `setInterval`，更不要装成 launchd / systemd 服务：那种形态在插件停用后还在跑，用户以为关了其实没有。间隔用 `every: number | (() => number)` 声明，退避策略留在插件里；单轮抛错只记健康状态与日志。跟着插件一起结束的子进程在 `ctx.onDispose()` 里杀掉，状态写 `$MICA_HOME/plugin-data/<id>/`。
 
@@ -66,6 +73,10 @@
 - 插件异步回写先通过 `ctx.session.captureOwner?.(callbacks.context)` 捕获发起者（命令不传上下文则取当前会话），notice 显式传回 owner；`turn:before` / `turn:after` 与会话生命周期按 owner 隔离临时状态，`primaryAgentOnly` 不代表整个 TUI 只有一条主会话。
 
 ### ui / logger / health
+
+- 运行归因使用 `ctx.pluginStatus?.()`（当前 manager 内存里的装配快照、动态启停后即时变化），不要用其它进程可覆盖的 `plugin-status.json` 代替。
+- setup 异常只走装配报告 / 日志，不写运行健康；hook 错误写入当前插件版本。成功装配不清除 runtime 故障。旧启动错误由 evolution 的 `plugin-startup-health` 归档原文，运行时不兼容这种混写形态。
+- Harness Review 配置页状态聚合所有工作区，工具按会话目录筛选；手动重算 / 清理后立即更新全局状态，局部重算不提升全局规则版本。提示点是问题候选与登记评估的状态，不表示已确认缺陷或从未有人分析。
 
 - 输入框上方的会话摘要用 `PluginPanelView.cards`（每插件最多 3 张，`id/title/summary/detail/tone/revision/actions/impressionAction`），由宿主复用主题和共享控件；清单 `dynamicShortcuts: true` 使快捷区获取视图。动作带版本 key，插件拒绝旧内容点击。`impressionAction` 只记录实际可见展示，不能在 `view()` 中记录曝光或执行副作用。
 - 插件行为埋点用 `createPluginExperience(ctx)`（`PluginExperience.ts`），事件 `plugin:experience`、schemaVersion 1；仅固定动作与结果等元数据，禁放正文、路径、命令与服务地址。`telemetry` 开关即时停记，日志沿用现有轮转。导出：`bun scripts/plugin-experience-report.ts`，口径见 `docs/plugin-experience.md`。

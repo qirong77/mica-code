@@ -3310,6 +3310,7 @@ export default function App() {
               <SettingsView
                 section={configPage.section}
                 pluginId={configPage.pluginId}
+                actionCwd={activeChatCwd || undefined}
                 onClose={closeConfigPage}
                 onNewSession={launchPluginFromConfig}
                 onOpenPluginPage={openPluginPageById}

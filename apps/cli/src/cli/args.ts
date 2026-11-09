@@ -42,6 +42,7 @@ export type PluginActionCliInvocation = {
   mode: 'plugin-action';
   pluginId: string;
   action: string;
+  cwd?: string;
   /** 页面带上来的设置草稿；没传就是「按磁盘上的设置执行」。 */
   values?: Record<string, string>;
 };
@@ -203,15 +204,17 @@ export function parseCliArgs(argv: string[]): CliInvocation {
   if (argv[0] === 'plugin-action') {
     let pluginId = '';
     let action = '';
+    let cwd: string | undefined;
     let values: Record<string, string> | undefined;
     for (let index = 1; index < argv.length; index++) {
       const arg = argv[index]!;
-      const valueOption = parseValueOption(arg, argv, index, ['--plugin', '--action', '--values']);
+      const valueOption = parseValueOption(arg, argv, index, ['--plugin', '--action', '--values', '--dir']);
       if (!valueOption) return cliError(`Unknown plugin-action option: ${arg}`);
       if (!valueOption.ok) return valueOption.error;
       index = valueOption.nextIndex;
       if (valueOption.name === '--plugin') pluginId = valueOption.value;
       if (valueOption.name === '--action') action = valueOption.value;
+      if (valueOption.name === '--dir') cwd = valueOption.value;
       if (valueOption.name === '--values') {
         let parsed: unknown;
         try {
@@ -227,7 +230,7 @@ export function parseCliArgs(argv: string[]): CliInvocation {
     }
     if (!pluginId) return cliError('plugin-action 缺少 --plugin');
     if (!action) return cliError('plugin-action 缺少 --action');
-    return { mode: 'plugin-action', pluginId, action, values };
+    return { mode: 'plugin-action', pluginId, action, values, ...(cwd ? { cwd } : {}) };
   }
   if (argv[0] === 'app-server') {
     let sessionId: string | undefined;

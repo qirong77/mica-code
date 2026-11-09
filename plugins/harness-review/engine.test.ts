@@ -6,7 +6,7 @@ import { appendFile, mkdtemp, mkdir, readFile, readdir, rm, stat, symlink, utime
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { test, vi, type TestContext } from 'vitest';
-import type { AgentObservationEvent } from '@packages/mica-plugin/index.js';
+import type { AgentObservationEvent, PluginStatusFile } from '@packages/mica-plugin/index.js';
 import { assessmentKey, writeAssessment } from './assessments.js';
 import {
   CLASSIFIER_VERSION,
@@ -2772,32 +2772,33 @@ test('delegation cannot replace the previous primary input or inherit its failed
   );
 });
 
-test('plugin install state is captured with a stable hash and dropped when unreadable', async (t) => {
+test('plugin install state comes from the host callback with a stable hash, never the shared status file', async (t) => {
   const temporary = await mkdtemp(join(tmpdir(), 'mica-harness-plugins-'));
   const root = join(temporary, 'capture');
   const statusFile = join(temporary, 'plugin-status.json');
   const errors: unknown[] = [];
+  let snapshot: PluginStatusFile = { host: 'app-server', root: temporary, updatedAt: at, plugins: [], loadFailed: [] };
+  const pluginStatus = vi.fn(() => snapshot);
   const recorder = new HarnessRecorder(
     root,
     (error) => {
       errors.push(error);
     },
-    { pluginStatusPath: statusFile },
+    { pluginStatus },
   );
   t.onTestFinished(async () => {
     await recorder.dispose();
     await rm(temporary, { recursive: true, force: true });
   });
-  const entries = [
+  const entries: PluginStatusFile['plugins'] = [
     { id: 'zz-skipped', status: 'skipped', error: '缺少宿主能力：desktop' },
     { id: 'a-loaded', status: 'loaded' },
     { id: 'm-failed', status: 'failed', error: 'boom' },
     { id: 'a-skipped', status: 'skipped' },
     { id: 'b-loaded', status: 'loaded' },
   ];
-  const write = async (plugins: unknown[]): Promise<void> => {
-    const file = { host: 'app-server', root: join(temporary, 'plugins'), updatedAt: at, plugins, loadFailed: [] };
-    await writeFile(statusFile, JSON.stringify(file));
+  const update = (plugins: PluginStatusFile['plugins']): void => {
+    snapshot = { host: 'app-server', root: join(temporary, 'plugins'), updatedAt: at, plugins, loadFailed: [] };
   };
   const emitRun = (runId: number): void => {
     const run = runner(recorder, { runId, cwd: resolve(`workspace-plugins-${runId}`) });
@@ -2805,7 +2806,9 @@ test('plugin install state is captured with a stable hash and dropped when unrea
     run.finish();
   };
 
-  await write(entries);
+  assert.equal(pluginStatus.mock.calls.length, 0);
+  await writeFile(statusFile, JSON.stringify({ host: 'tui', plugins: [{ id: 'other-host', status: 'failed' }] }));
+  update(entries);
   emitRun(1);
   const summary = (await recorder.review()).runs.find((run) => run.sourceRunId === 1)!;
   assert.equal(summary.plugins?.host, 'app-server');
@@ -2814,21 +2817,46 @@ test('plugin install state is captured with a stable hash and dropped when unrea
   assert.deepEqual(summary.plugins?.skipped, ['a-skipped', 'zz-skipped']);
   assert.match(summary.plugins!.hash, /^[a-f0-9]{12}$/);
 
-  // 同一份状态换个顺序写盘：hash 必须不变，否则「插件集合变了」会被顺序噪声淹没。
-  await write([...entries].reverse());
+  // 同一份状态换个顺序：hash 必须不变，否则「插件集合变了」会被顺序噪声淹没。
+  update([...entries].reverse());
+  await writeFile(statusFile, '{not json');
   emitRun(2);
   const reordered = (await recorder.review()).runs.find((run) => run.sourceRunId === 2)!;
   assert.equal(reordered.plugins?.hash, summary.plugins!.hash);
   assert.deepEqual(reordered.plugins?.skipped, summary.plugins!.skipped);
 
-  // 文件缺失或损坏都只是「这一轮没有快照」：不报错、不生成问题条目。
+  // 共享文件缺失不影响内存快照；回调失败才省略这一轮的快照。
   await rm(statusFile);
   emitRun(3);
-  await writeFile(statusFile, '{not json');
+  pluginStatus.mockImplementationOnce(() => {
+    throw new Error('Host snapshot unavailable');
+  });
   emitRun(4);
+  pluginStatus.mockReturnValueOnce({} as PluginStatusFile);
+  emitRun(5);
   const report = await recorder.review();
-  for (const runId of [3, 4])
+  assert.equal(report.runs.find((run) => run.sourceRunId === 3)!.plugins?.hash, summary.plugins!.hash);
+  for (const runId of [4, 5])
     assert.equal('plugins' in report.runs.find((run) => run.sourceRunId === runId)!, false, `run ${runId}`);
+  assert.equal(pluginStatus.mock.calls.length, 5);
+  snapshot.host = 'tui';
+  await recorder.rebuild();
+  const rebuilt = await recorder.review();
+  assert.deepEqual(rebuilt.runs.find((run) => run.sourceRunId === 1)!.plugins, summary.plugins);
+  assert.equal('plugins' in rebuilt.runs.find((run) => run.sourceRunId === 4)!, false);
+  assert.equal(pluginStatus.mock.calls.length, 5);
   assert.deepEqual(errors, []);
   assert.ok(!report.warnings.some((warning) => warning.includes('plugin-status')));
+});
+
+test('recorders without a host snapshot do not borrow a shared plugin-status file', async (t) => {
+  const { recorder, temporary } = await fixture(t);
+  await writeFile(
+    join(temporary, 'plugin-status.json'),
+    JSON.stringify({ host: 'tui', plugins: [{ id: 'foreign', status: 'loaded' }] }),
+  );
+  const run = runner(recorder);
+  run.start();
+  run.finish();
+  assert.equal('plugins' in (await recorder.review()).runs[0], false);
 });

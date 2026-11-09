@@ -134,7 +134,17 @@ export default function setup(ctx: PluginContext) {
 反过来，处理器里也不能假设 `ctx.tools` / `ctx.background` 存在（要另外声明 `requires` 并自己判断）。
 动作通常会顺手写设置与 `plugin-data/<id>/data.json`，页面刷新后仍能看到结果。
 
+动作输入还可带 `cwd`（发起方工作区的绝对路径）：桌面设置页经 `actionCwd` 逐层传入，独立配置页没有工作区就省略。
+需要开项目会话的动作必须显式使用它，缺失时提示从工作区打开，不能拿一次性进程的 `process.cwd()` 冒充。
+setup 先注册不依赖会话的动作，再检查 `ctx.tools/session` 等能力；一次性动作宿主不会采集轨迹或自动重建复盘。
+动作宿主在成功、失败与未注册返回时都释放插件资源。
+
 ### 运行状态（`status`）
+
+装配失败只记宿主装配报告，不写共享运行健康；钩子错误的健康记录带当前插件版本。
+旧启动错误由 evolution 的 `plugin-startup-health` 迁移归档，成功装配不清除真实运行故障。
+`ctx.pluginStatus?.()` 提供本宿主内存里的装配快照（包含动态启停），用于运行归因；不要读取共享 `plugin-status.json` 来推断当前会话装了什么。
+Harness Review 的插件页状态是所有工作区的全局汇总，工具与新会话复盘仍按明确的工作区筛选；候选不等于已确认缺陷，未登记评估也不等于从未讨论过。
 
 插件有运行态要给人看（连没连上、现在是哪台机器、链接是什么）时，在 `plugin.json` 里声明
 「页面有哪几行」，值自己写进 `$MICA_HOME/plugin-data/<id>/data.json`：

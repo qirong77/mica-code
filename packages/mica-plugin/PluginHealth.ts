@@ -1,5 +1,7 @@
-import { mkdirSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
+import { writeTextFileAtomic } from '@packages/mica-config/atomicWrite.js';
+import { acquireProcessLock } from '@packages/mica-common/processLock.js';
 
 /**
  * 插件健康状态：插件自己上报「我现在能不能正常工作」。
@@ -16,6 +18,34 @@ import { join } from 'node:path';
  *   会让用户去修一个这一版可能早就不存在的问题——宁可不显示，也不显示错的那条。
  */
 export const PLUGIN_HEALTH_DIR = 'plugin-health';
+
+const pendingWrites = new Map<string, ReturnType<typeof setTimeout>>();
+
+function commitHealth(file: string, content: string): void {
+  const pending = pendingWrites.get(file);
+  if (pending) {
+    clearTimeout(pending);
+    pendingWrites.delete(file);
+  }
+  const release = acquireProcessLock(`${file}.lock`);
+  if (!release) {
+    const timer = setTimeout(() => {
+      pendingWrites.delete(file);
+      try {
+        commitHealth(file, content);
+      } catch {
+        // Health reporting must not raise an uncaught asynchronous IO error.
+      }
+    }, 25);
+    pendingWrites.set(file, timer);
+    return;
+  }
+  try {
+    writeTextFileAtomic(file, content);
+  } finally {
+    release();
+  }
+}
 
 export type PluginHealthLevel = 'ok' | 'warn' | 'error';
 
@@ -76,17 +106,16 @@ export function writePluginHealth(
   if (report.hint) normalized.hint = truncate(report.hint);
   if (options.version) normalized.version = options.version;
   const file = resolvePluginHealthPath(pluginId, options.configDir);
-  mkdirSync(join(options.configDir, PLUGIN_HEALTH_DIR), { recursive: true });
-  writeFileSync(file, `${JSON.stringify(normalized, null, 2)}\n`, 'utf-8');
+  commitHealth(file, `${JSON.stringify(normalized, null, 2)}\n`);
   return normalized;
 }
 
 export function clearPluginHealth(pluginId: string, options: { configDir?: string } = {}): void {
   if (!options.configDir) return;
   const file = resolvePluginHealthPath(pluginId, options.configDir);
-  if (!existsSync(file)) return;
+  if (!existsSync(file) && !pendingWrites.has(file)) return;
   try {
-    writeFileSync(file, '', 'utf-8');
+    commitHealth(file, '');
   } catch {
     // 上报是辅助信息，清不掉也不该影响插件本身。
   }

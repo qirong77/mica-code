@@ -1,12 +1,13 @@
 import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { isAbsolute, join } from 'node:path';
 import { normalizePluginNewSession, type PluginNewSession } from '@packages/mica-plugin/PluginNewSession.js';
 
 export type RunPluginActionInput = {
   id: string;
   action: string;
+  cwd?: string;
   values?: Record<string, string>;
 };
 
@@ -37,9 +38,13 @@ export function runPluginAction(
   input: RunPluginActionInput,
   options: RunPluginActionOptions = {},
 ): Promise<RunPluginActionResult> {
+  if (input.cwd !== undefined && !isAbsolute(input.cwd)) {
+    return Promise.reject(new Error('插件动作的 cwd 必须是绝对路径'));
+  }
   const cliPath = options.cliPath ?? resolveMicaCli();
   const timeoutMs = options.timeoutMs ?? 120_000;
   const args = ['plugin-action', '--plugin', input.id, '--action', input.action];
+  if (input.cwd) args.push('--dir', input.cwd);
   if (input.values && Object.keys(input.values).length > 0) {
     args.push('--values', JSON.stringify(input.values));
   }

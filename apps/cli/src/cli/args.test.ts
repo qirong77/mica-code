@@ -158,7 +158,24 @@ describe('parseCliArgs', () => {
   // 配置页按钮走这个隐藏入口：它必须和 `--plugin` / `--action` 一起出现，缺一个就说清楚
   it('parses plugin-action invocations', () => {
     expect(
-      parseCliArgs(['plugin-action', '--plugin=mobile-relay', '--action=register', '--values={"relayUrl":"https://x"}']),
+      parseCliArgs([
+        'plugin-action',
+        '--plugin=harness-review',
+        '--action=open-review',
+        '--dir',
+        '/project with spaces',
+      ]),
+    ).toMatchObject({
+      mode: 'plugin-action',
+      cwd: '/project with spaces',
+    });
+    expect(
+      parseCliArgs([
+        'plugin-action',
+        '--plugin=mobile-relay',
+        '--action=register',
+        '--values={"relayUrl":"https://x"}',
+      ]),
     ).toEqual({
       mode: 'plugin-action',
       pluginId: 'mobile-relay',

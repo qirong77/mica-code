@@ -1,7 +1,7 @@
 import { join } from 'node:path';
 import { resolveMicaHome } from '@packages/mica-config/index.js';
 import type { PluginContext } from '@packages/mica-plugin/index.js';
-import { createHarnessSupervisor } from './supervisor.js';
+import { createHarnessSupervisor, isSupervisorHealthIssue } from './supervisor.js';
 
 export default function setup(ctx: PluginContext): void {
   if (!ctx.desktop || !ctx.background || !ctx.settings) return;
@@ -11,6 +11,10 @@ export default function setup(ctx: PluginContext): void {
     dataDir,
     getSettings: () => ctx.settings!.get(),
     report: (level, message) => ctx.health?.report({ level, message }),
+    recover: () => {
+      const health = ctx.health?.read();
+      if (health && isSupervisorHealthIssue(health)) ctx.health?.clear();
+    },
   });
   const background = ctx.background.register({
     id: 'deepseek-harness-supervisor',
