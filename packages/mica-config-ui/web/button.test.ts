@@ -38,11 +38,12 @@ describe('Button', () => {
     expect(html).toContain('ui-button-icon');
     expect(html).toContain('<span>自动刷新</span>');
     const css = readFileSync(new URL('./arco-settings.css', import.meta.url), 'utf8');
-    const button = css.match(/\.ui-button\s*\{([^}]+)\}/)?.[1];
+    const button = css.match(/\.arco-btn\s*\{([^}]+)\}/)?.[1];
     expect(button).toContain('display: inline-flex');
     expect(button).toContain('flex-flow: row nowrap');
     expect(button).toContain('align-items: center');
     expect(button).toContain('white-space: nowrap');
+    expect(css).toMatch(/\.arco-btn > svg\s*\{\s*flex: none;/);
     const icon = css.match(/\.ui-button-icon\s*\{([^}]+)\}/)?.[1];
     expect(icon).toContain('flex: none');
     expect(css).toMatch(/\.ui-button-icon \+ span\s*\{\s*margin-left: 6px;/);

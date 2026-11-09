@@ -57,6 +57,7 @@
 - 一行里的控件必须等高：原生 select / checkbox 要么 `appearance: none` 自绘，要么用共享组件。
 - 禁用态只掉颜色，尺寸、边框与位置不变。
 - 共享 `Button` 只在 `icon` / `loading` 存在时才输出图标格。
+- 图标与文字横排规则覆盖作用域内所有 `.arco-btn`（配置页也直接使用 Arco Button），不能只覆盖 `.ui-button`；桌面 Tailwind 会把 SVG 设为块元素，按钮必须使用单行 flex 布局。
 - 同一动作区的主次按钮统一高度；文字主按钮 `flex: none` + 不换行。
 - 标签在控件上方，不要把说明词塞进控件行；复合控件放在同一条边框里。
 - 条目列表不要靠 `padding-left` 造缩进，符号用 `li::before` 画在符号列里。

@@ -327,13 +327,17 @@ html[data-appearance='light'] body.mica-arco-theme {
   font-family: inherit;
 }
 
-:where(body.mica-arco-theme, .mica-config-ui) .ui-button {
+:where(body.mica-arco-theme, .mica-config-ui) .arco-btn {
   display: inline-flex;
   flex-flow: row nowrap;
   align-items: center;
   justify-content: center;
   flex: none;
   white-space: nowrap;
+}
+
+:where(body.mica-arco-theme, .mica-config-ui) .arco-btn > svg {
+  flex: none;
 }
 
 :where(body.mica-arco-theme, .mica-config-ui) .ui-button-icon {
