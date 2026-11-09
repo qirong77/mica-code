@@ -1876,7 +1876,7 @@ function tokenCount(value) {
 function MessageActions({ text, role, onQuote }) {
   const [copied, copy] = useCopied()
   return (
-    <>
+    <div className="chat-message-actions">
       <ArcoAction iconOnly
         type="button"
         className="chat-message-quote"
@@ -1895,7 +1895,7 @@ function MessageActions({ text, role, onQuote }) {
       >
         {copied ? <IconCheck size={12} /> : <IconCopy size={12} />}
       </ArcoAction>
-    </>
+    </div>
   )
 }
 

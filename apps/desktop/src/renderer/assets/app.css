@@ -1018,7 +1018,9 @@ html[data-appearance='light'] .chat-modal-arco-wrap {
 .chat-message {
   position: relative;
   display: grid;
-  grid-template-columns: var(--chat-row-marker-width) minmax(0, 1fr) 22px;
+  /* 第三列是悬停操作（引用 / 复制）的留白：宽度按整块面板来留，图标因此永远
+     落在这条空白带里，不会压在长消息第一行的字上。 */
+  grid-template-columns: var(--chat-row-marker-width) minmax(0, 1fr) 48px;
   width: 100%;
   min-width: 0;
   margin-top: 15px;
@@ -1200,33 +1202,83 @@ html[data-appearance='light'] .chat-modal-arco-wrap {
   }
 }
 
+/* 悬停操作（引用 / 复制）：两个按钮装在同一块面板里，整行悬浮时才一起淡入——
+   指针从消息文字移向按钮的途中不会闪，读起来是一个模块而不是两个各自出现的图标。
+   整块绝对定位落在行的右侧留白（上面 grid 的第三列）里，既不参与行高计算，
+   也不会盖住正文；默认透明且不接收指针，不挡选区与双击编辑。 */
+.chat-message-actions {
+  position: absolute;
+  top: -3px;
+  right: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  padding: 1px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  opacity: 0;
+  /* 从右侧轻轻滑进来：出现的动作比"啪地冒出来"安静，也不抢正在读的那行文字。 */
+  transform: translateX(4px) scale(0.96);
+  transition:
+    opacity var(--motion-fast) var(--ease-soft),
+    transform var(--motion-fast) var(--ease-soft),
+    border-color var(--motion-fast) var(--ease-soft),
+    background-color var(--motion-fast) var(--ease-soft),
+    box-shadow var(--motion-fast) var(--ease-soft);
+  pointer-events: none;
+}
+
+.chat-message:hover .chat-message-actions,
+.chat-message:focus-within .chat-message-actions {
+  border-color: color-mix(in srgb, var(--color-fg-max) 11%, transparent);
+  background: color-mix(in srgb, var(--color-panel-hi) 86%, transparent);
+  box-shadow: 0 3px 12px rgb(0 0 0 / 26%);
+  opacity: 1;
+  transform: none;
+  pointer-events: auto;
+}
+
 .chat-message-copy,
 .chat-message-quote {
-  /* Absolute so the 23px button never stretches the grid row: as an in-flow grid
-     item it made a one-line message 33px tall (23px button + block padding)
-     instead of 26.6px, leaving a gap under the first line while multi-line
-     messages looked fine. Hover affordances should not participate in layout. */
-  position: absolute;
-  top: 0;
   display: grid;
-  width: 23px;
-  height: 23px;
+  flex: none;
+  width: 21px;
+  height: 21px;
+  min-width: 0;
+  padding: 0;
   place-items: center;
+  border-radius: 5px;
 }
 
-.chat-message-copy {
-  right: 0;
+.chat-message-user .chat-message-actions {
+  /* 跟着第一行文字走，而不是高亮块的顶边（用户消息有 5px 的上下内边距）。 */
+  top: 2px;
 }
 
-/* 引用排在复制左边，两位都绝对定位（见上面的注释），仍然不参与布局。 */
-.chat-message-quote {
-  right: 25px;
-}
+/* 触屏没有 hover：没有"悬浮"这一步，操作只能常驻。收起面板的底与边（常驻的
+   芯片会在每行右侧堆一排），并把留白列与按钮一起收窄，保住正文宽度。 */
+@media (hover: none) {
+  .chat-message {
+    grid-template-columns: var(--chat-row-marker-width) minmax(0, 1fr) 38px;
+  }
 
-.chat-message-user .chat-message-copy,
-.chat-message-user .chat-message-quote {
-  /* Follow the first text line, not the top edge of the highlight block. */
-  top: 5px;
+  .chat-message-actions {
+    gap: 0;
+    padding: 0;
+    border-color: transparent;
+    background: none;
+    box-shadow: none;
+    opacity: 1;
+    transform: none;
+    pointer-events: auto;
+  }
+
+  .chat-message-copy,
+  .chat-message-quote {
+    width: 18px;
+    height: 18px;
+  }
 }
 
 /* 选中对话文字后浮在选区上方的操作条（引用 / 复制）；position: fixed，坐标由选区算出。 */
