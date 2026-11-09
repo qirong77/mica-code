@@ -27,12 +27,14 @@ describe('chat composer icon actions', () => {
     expect(stop).toContain('<IconSquareFilled size={12} />')
   })
 
-  it('keeps labeled composer menu items as text buttons', () => {
+  it('keeps labeled composer menu items as full-width Arco rows', () => {
     const menu = actions.filter((action) => action.includes('role="menuitem"'))
     expect(menu).toHaveLength(4)
     for (const action of menu) {
       expect(action).not.toMatch(/^\s+iconOnly\s*$/m)
       expect(action).toContain('<span>')
+      // 缺了 mica-arco-row，Arco 会把图标 + 文字居中，整列菜单跟着歪
+      expect(action).toContain('mica-arco-row')
     }
   })
 })

@@ -8016,6 +8016,7 @@ export function ChatView({
                     <ArcoAction
                       type="button"
                       role="menuitem"
+                      className="mica-arco-row"
                       onClick={() => {
                         setMoreOpen(false)
                         attachInputRef.current?.click()
@@ -8029,6 +8030,7 @@ export function ChatView({
                       role="menuitem"
                       title={btwEntryTitle}
                       disabled={!hasSession || remoteRunning}
+                      className="mica-arco-row"
                       onClick={() => {
                         setMoreOpen(false)
                         if (btwOpen) setBtwOpen(false)
@@ -8041,6 +8043,7 @@ export function ChatView({
                     <ArcoAction
                       type="button"
                       role="menuitem"
+                      className="mica-arco-row"
                       onClick={() => {
                         setMoreOpen(false)
                         setSettingsSection('loop')
@@ -8057,6 +8060,7 @@ export function ChatView({
                         key={`panel-${panel.id}`}
                         type="button"
                         role="menuitem"
+                        className="mica-arco-row"
                         onClick={() => {
                           setMoreOpen(false)
                           // 入口自己就是一个动作时不打开抽屉（「手机访问」只弹二维码）。

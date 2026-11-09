@@ -6,8 +6,10 @@
  * ——页面和 AI 一样通过 HTTP + SSE 访问终端服务，所以不需要 preload、也不注册外壳业务
  * IPC。外壳在这里只做「开窗口」这一件只有主进程能做的事。
  *
- * 隐藏窗口按 `idleReapMs` 回收：收掉的是壳子（renderer + 它的合成缓存），PTY 会话与
- * 滚动内容在运行时那边不受影响，下次 `ensure` 重新开一个、页面自己接上。
+ * 窗口按 `idleReapMs` 回收：收掉的是壳子（renderer + 它的合成缓存），PTY 会话与
+ * 滚动内容在运行时那边不受影响，下次 `ensure` 重新开一个、页面自己接上。聚焦中的窗口
+ * 不算闲置（用户正看着它），其余窗口——隐藏的也好、显示着但已经切走的也好——超过时长
+ * 就收掉，否则开着的窗口会一直占着 renderer。
  */
 
 import { BrowserWindow } from 'electron'
@@ -76,8 +78,11 @@ export function createTerminalWindows({
       sessionId: session.id,
       win,
       visible: false,
+      // 有焦点的窗口算「在用」：闲置回收跳过它，失焦后从那一刻重新计时
+      focused: false,
       // 从这一刻起没人看得见它；`show` 清空、`hide` 重新计时
       hiddenAt: Date.now(),
+      lastActiveAt: Date.now(),
       destroyRequested: false
     }
     windows.set(session.id, record)
@@ -100,13 +105,25 @@ export function createTerminalWindows({
     win.on('show', () => {
       record.visible = true
       record.hiddenAt = null
+      record.lastActiveAt = Date.now()
       onVisibleChange(session.id, true)
     })
 
     win.on('hide', () => {
       record.visible = false
       record.hiddenAt = Date.now()
+      record.lastActiveAt = Date.now()
       onVisibleChange(session.id, false)
+    })
+
+    win.on('focus', () => {
+      record.focused = true
+      record.lastActiveAt = Date.now()
+    })
+
+    win.on('blur', () => {
+      record.focused = false
+      record.lastActiveAt = Date.now()
     })
 
     load(record)
@@ -158,20 +175,22 @@ export function createTerminalWindows({
     }
   }
 
-  /** 收掉闲置太久的隐藏窗口。返回被收的会话 id，供日志与测试确认收了哪几个。 */
+  /** 收掉闲置太久的窗口（聚焦中的不动）。返回被收的会话 id，供日志与测试确认收了哪几个。 */
   function reapIdle(now = Date.now()) {
     if (isQuitting()) return []
     const entries = [...windows.entries()]
-      .filter(([, record]) => !record.win.isDestroyed())
+      .filter(([, record]) => !record.win.isDestroyed() && !record.destroyRequested)
       .map(([id, record]) => ({
         id,
-        // 窗口还没显示过也算隐藏：`hiddenAt` 在创建时就给了
         visible: record.visible,
-        idleSince: record.hiddenAt
+        focused: record.focused,
+        // 显示中但没焦点（用户已经切走）同样计时：闲置起点是最后一次交互
+        idleSince: record.focused ? null : Math.max(record.hiddenAt || 0, record.lastActiveAt || 0)
       }))
     const ids = selectIdleWindows(entries, now, { idleMs: idleReapMs })
     for (const id of ids) {
-      console.log(describeReap('terminal', id, now - (windows.get(id)?.hiddenAt || now)))
+      const idleSince = entries.find((entry) => entry.id === id)?.idleSince || now
+      console.log(describeReap('terminal', id, now - idleSince))
       try {
         destroy(id)
       } catch (error) {

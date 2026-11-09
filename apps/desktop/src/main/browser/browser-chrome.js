@@ -120,17 +120,11 @@ export function chromeHtml() {
     -webkit-app-region: drag;
   }
   /* 窗口身份（受控浏览器 / 无痕）只由窗口标题栏说一遍：这条顶栏不再重复那段文案，
-     左侧只留一个状态圆点，悬停能看到归属的会话。 */
+     左侧只留一个状态圆点，悬停能看到归属的会话。窗口之间彼此独立（每个窗口在顶栏各有
+     一枚图标），所以这条顶栏不提供「切换窗口」——那需要一个跨窗口的列表，而它只能是
+     原生菜单，既跟主题脱节，也让「每个窗口独立」这件事变得没有意义。 */
   .dot { flex: none; width: 5px; height: 5px; border-radius: 999px; background: var(--c-fg-dim); }
   .dot.loading { background: var(--c-warn); }
-  .windows {
-    flex: none; padding: 4px 8px; border: 1px solid var(--c-line); border-radius: 6px;
-    background: var(--c-active); color: var(--c-fg); font: inherit; cursor: pointer;
-    -webkit-app-region: no-drag;
-  }
-  .windows:hover { background: var(--c-overlay); }
-  .windows:focus-visible { outline: 1px solid var(--c-fg-soft); }
-  .windows[hidden] { display: none; }
   .tabs { display: flex; align-items: center; gap: 3px; min-width: 0; max-width: 40%; overflow-x: auto; scrollbar-width: none; -webkit-app-region: no-drag; }
   .tabs::-webkit-scrollbar { display: none; }
   .page-title { flex: 0 1 auto; min-width: 0; max-width: 190px; padding: 0 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -154,12 +148,10 @@ export function chromeHtml() {
 </head>
 <body>
   <span class="dot" id="loading"></span>
-  <button class="windows" id="windows" type="button" hidden></button>
   <span class="tabs" id="tabs"></span>
   <span class="url" id="url" title=""></span>
 <script>
   (function () {
-    var windows = document.getElementById('windows')
     var tabs = document.getElementById('tabs')
     var url = document.getElementById('url')
     var loading = document.getElementById('loading')
@@ -179,8 +171,6 @@ export function chromeHtml() {
     function send(action, payload) {
       console.log('${CHROME_MESSAGE_PREFIX}' + JSON.stringify(Object.assign({ action: action }, payload || {})))
     }
-
-    windows.addEventListener('click', function () { send('showWindows') })
 
     function selectionText() {
       var selection = window.getSelection && window.getSelection()
@@ -229,11 +219,6 @@ export function chromeHtml() {
         applyPalette(state.palette)
         var who = (state.incognito ? '无痕 · ' : '') + (state.label || '受控浏览器')
         loading.title = who + (state.owner ? '\\n用户会话 ' + state.owner : '\\n未归属')
-        var count = Number(state.windowCount) || 0
-        windows.hidden = count < 2
-        windows.textContent = '窗口 ' + count + ' ▾'
-        windows.title = '切换浏览器窗口（共 ' + count + ' 个）'
-        windows.setAttribute('aria-label', windows.title)
         url.textContent = state.url || 'about:blank'
         url.title = url.textContent + '\\n地址由 Mica 控制，不可编辑；可选中复制'
         loading.className = state.loading ? 'dot loading' : 'dot'

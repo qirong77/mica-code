@@ -74,10 +74,12 @@ describe('chromePalette', () => {
 })
 
 describe('chromeHtml', () => {
-  it('removes visible ownership, copy guidance, and hide controls', () => {
+  it('removes visible ownership, copy guidance, hide and window-switch controls', () => {
     const html = chromeHtml()
-    for (const id of ['owner', 'hint', 'hide', 'label', 'badge'])
+    // 窗口彼此独立：顶栏不提供「切换到别的窗口」的入口，那只能做成原生菜单
+    for (const id of ['owner', 'hint', 'hide', 'label', 'badge', 'windows'])
       expect(html).not.toContain('id="' + id + '"')
+    expect(html).not.toContain('showWindows')
   })
 
   it('deduplicates matching titles without losing tab switching or address copying', () => {
@@ -105,7 +107,7 @@ describe('chromeHtml', () => {
       }
     }
     const elements = Object.fromEntries(
-      ['windows', 'tabs', 'url', 'loading'].map((id) => [id, element()])
+      ['tabs', 'url', 'loading'].map((id) => [id, element()])
     )
     const messages = []
     const document = {
@@ -126,7 +128,6 @@ describe('chromeHtml', () => {
       owner: 'session-123',
       url: 'https://example.com',
       loading: true,
-      windowCount: 3,
       tabs: [
         { id: 'one', title: 'Qirong Entry', url: 'https://example.com/one' },
         { id: 'two', title: 'Qirong Entry', url: 'https://example.com/two', active: true }
@@ -135,10 +136,6 @@ describe('chromeHtml', () => {
     expect(elements.loading.title).toBe('Entry\n用户会话 session-123')
     expect(elements.url.title).toContain('地址由 Mica 控制，不可编辑；可选中复制')
     expect(elements.loading.className).toBe('dot loading')
-    expect(elements.windows.hidden).toBe(false)
-    expect(elements.windows.textContent).toBe('窗口 3 ▾')
-    expect(elements.windows.attributes['aria-label']).toBe('切换浏览器窗口（共 3 个）')
-    elements.windows.listeners.click()
     const [heading, first, second] = elements.tabs.children
     expect(heading.textContent).toBe('Qirong Entry')
     expect(first.children[0].textContent).toBe('1')
@@ -157,7 +154,6 @@ describe('chromeHtml', () => {
     document.listeners.contextmenu({ preventDefault() {} })
     expect(prevented).toBe(true)
     expect(messages).toEqual([
-      { action: 'showWindows' },
       { action: 'activateTab', tabId: 'one' },
       { action: 'copy', text: 'selected address' },
       { action: 'copy', text: 'selected address' }
@@ -173,7 +169,6 @@ describe('chromeHtml', () => {
       'Second'
     ])
     update({ tabs: [{ id: 'one', title: 'Only tab' }] })
-    expect(elements.windows.hidden).toBe(true)
     expect(elements.tabs.children).toHaveLength(1)
     expect(elements.tabs.children[0].className).toBe('page-title')
     expect(elements.tabs.children[0].title).toBe('Only tab')

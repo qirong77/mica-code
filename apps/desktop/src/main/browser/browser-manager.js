@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { BrowserWindow, Menu, WebContentsView, clipboard, session } from 'electron'
+import { BrowserWindow, WebContentsView, clipboard, session } from 'electron'
 import {
   BROWSER_PARTITION,
   BrowserRequestError,
@@ -40,6 +40,9 @@ import {
  * 页面操作（点击/输入/截图/读 cookie/控制台/网络），以及它们到 HTTP 服务的映射。
  *
  * 几个刻意的设计：
+ * - **窗口彼此独立**：一个窗口就是一个窗口，没有「在窗口之间切换」这回事——需要哪个
+ *   就点顶栏对应的那枚图标（每个窗口一枚）。窗口内部也不再提供跨窗口列表，那只能做成
+ *   原生菜单，与主题和组件库都不是一套东西。
  * - **窗口是隐藏式的**：用户点关闭只 `hide()`，页面与登录态原样留着；只有
  *   `POST /browser/browsers/:id/close` 才真的销毁。用户看到的关闭按钮不该等于丢掉现场。
  * - **默认全程不显示窗口**：截图、点击、输入、按键、滚动都在隐藏窗口里完成——实测
@@ -126,6 +129,7 @@ export function createBrowserManager({
     record.visible = Boolean(visible)
     // 隐藏的那一刻开始计闲置：隐藏窗口的 renderer 与合成缓存都还在，收的是这个
     record.hiddenAt = record.visible ? null : Date.now()
+    record.lastUsedAt = Date.now()
     if (!event) return
     emit(event)
   }
@@ -228,7 +232,6 @@ export function createBrowserManager({
       label: record.label,
       incognito: record.incognito,
       owner: record.owner || '',
-      windowCount: browsers.size,
       url: current?.url || '',
       title: current?.title || '',
       loading: Boolean(current?.loading),
@@ -244,10 +247,6 @@ export function createBrowserManager({
       .catch(() => {
         // chrome 还在加载或窗口已销毁：下一次状态变化会再推一遍
       })
-  }
-
-  function refreshWindowCounts() {
-    for (const record of browsers.values()) pushChrome(record)
   }
 
   function syncWindowTitle(record) {
@@ -313,6 +312,8 @@ export function createBrowserManager({
       browserSession,
       label: normalizeLabel(label),
       visible: false,
+      // 有键盘/鼠标焦点的窗口算「在用」：闲置回收会跳过它，失焦后重新计时
+      focused: false,
       // 新建的窗口默认隐藏，从这一刻起算闲置；`lastUsedAt` 跟着每次接口调用走
       hiddenAt: Date.now(),
       lastUsedAt: Date.now(),
@@ -326,7 +327,6 @@ export function createBrowserManager({
       destroyRequested: false
     }
     browsers.set(id, record)
-    refreshWindowCounts()
 
     win.on('close', (event) => {
       // 用户点关闭 = 隐藏；应用退出或显式 close 才真的销毁（否则关一次就丢现场）
@@ -339,7 +339,6 @@ export function createBrowserManager({
       for (const tab of record.tabs) detachTab(tab)
       record.tabs = []
       browsers.delete(id)
-      refreshWindowCounts()
       // 只清理本窗口的临时分区，绝不清理共享的普通浏览器数据。
       if (record.incognito) {
         void Promise.all([browserSession.clearStorageData(), browserSession.clearCache()]).catch(
@@ -352,6 +351,16 @@ export function createBrowserManager({
     })
 
     win.on('resize', () => layout(record))
+    // 聚焦中的窗口一律不回收：用户正看着它，哪怕一小时没动接口也不能在眼前消失。
+    // 失焦那一刻把闲置起点推到现在，于是「放着不管」的计时从离开它开始算。
+    win.on('focus', () => {
+      record.focused = true
+      record.lastUsedAt = Date.now()
+    })
+    win.on('blur', () => {
+      record.focused = false
+      record.lastUsedAt = Date.now()
+    })
     // 显示之前再推一次：窗口可能是在别的主题下建的，用户切主题时它正藏着
     win.on('show', () => pushChrome(record))
     // 逻辑可见状态只由 showBrowser / hideBrowser 改，不跟窗口的 show/hide 事件走：
@@ -387,24 +396,6 @@ export function createBrowserManager({
   }
 
   function handleChromeMessage(record, message) {
-    if (message.action === 'showWindows') {
-      const entries = [...browsers.values()].filter((item) => !item.win.isDestroyed())
-      if (entries.length < 2) return
-      const menu = Menu.buildFromTemplate(
-        entries.map((item, index) => {
-          const current = activeTab(item)
-          const title = current?.title || current?.url || item.label || '受控浏览器'
-          return {
-            label: `${index + 1}. ${item.incognito ? '无痕 · ' : ''}${title}${item.id === record.id ? '（当前窗口）' : !item.visible ? '（已隐藏）' : ''}`,
-            click: () => {
-              if (browsers.has(item.id)) showBrowser(item.id)
-            }
-          }
-        })
-      )
-      menu.popup({ window: record.win })
-      return
-    }
     if (message.action === 'hide') {
       hideBrowser(record.id)
       return
@@ -782,20 +773,22 @@ export function createBrowserManager({
   }
 
   /**
-   * 收掉闲置太久的隐藏窗口：窗口、标签页和它们的 renderer 一起回收。
+   * 收掉闲置太久的窗口：窗口、标签页和它们的 renderer 一起回收。
    *
    * 浏览器窗口按设计就是隐藏着用的（截图、点击都在隐藏窗口里完成），所以闲置要从
    * **最后一次接口调用**算起，不能只看隐藏时刻——否则代理一开着窗口就被算成闲置。
+   * 显示中的窗口同样计入回收：只要它没被聚焦（用户已经切走、或者根本没在看），
+   * 超过时长就收掉——否则「每个窗口独立、开着就有图标」会让桌面与内存一直堆着窗口。
    */
   function reapIdleBrowsers(now = Date.now()) {
     if (isQuitting()) return []
     const entries = [...browsers.values()]
-      .filter((record) => !record.win.isDestroyed())
+      .filter((record) => !record.win.isDestroyed() && !record.destroyRequested)
       .map((record) => ({
         id: record.id,
-        visible: record.visible || record.destroyRequested,
-        idleSince:
-          record.hiddenAt == null ? null : Math.max(record.hiddenAt, record.lastUsedAt || 0),
+        visible: record.visible,
+        focused: record.focused,
+        idleSince: record.focused ? null : Math.max(record.hiddenAt || 0, record.lastUsedAt || 0),
         busy: (busyOps.get(String(record.id)) || 0) > 0
       }))
     const ids = selectIdleWindows(entries, now, { idleMs: idleReapMs })

@@ -79,7 +79,7 @@ const RAW_ENDPOINTS = [
     id: 'createBrowser',
     method: 'POST',
     path: '/browser/browsers',
-    summary: '新开一个受控浏览器窗口（默认隐藏；普通与无痕各最多一个）',
+    summary: '新开一个受控浏览器窗口（默认隐藏；一个会话最多 8 个，顶栏一个窗口一枚图标）',
     params: [
       { name: 'url', in: 'body', required: false, description: '初始地址，省略则开 about:blank' },
       {
@@ -172,7 +172,7 @@ const RAW_ENDPOINTS = [
     id: 'createTab',
     method: 'POST',
     path: '/browser/tabs',
-    summary: '在已有窗口里新开标签页（不给 browserId 就新开一个窗口，同模式每会话最多一个）',
+    summary: '在已有窗口里新开标签页（不给 browserId 就新开一个窗口）',
     params: [
       {
         name: 'browserId',
@@ -549,7 +549,7 @@ function paramLabel(param) {
  */
 export const BROWSER_GUIDE = [
   '第一次用某个动作前，先不带 action 调用 control：返回的 actions[] 里每个动作都带 params（name / 类型 / 是否必填 / 示例值），一次就能看全，比猜参数名快。',
-  '先 listBrowsers 看本会话有没有对应模式的窗口；没有就 createBrowser（默认隐藏创建，不打断用户）。普通与无痕窗口每个会话各最多一个，需要多个页面时在对应窗口用 createTab。',
+  '先 listBrowsers 看本会话有没有对应模式的窗口；没有就 createBrowser（默认隐藏创建，不打断用户）。**窗口彼此独立**：每个窗口在顶栏各有一枚图标，同一个会话可以开多个（普通、无痕都行，最多 8 个），label 用来说明各是做什么的；同一个站点里的多个页面仍优先在同一个窗口里用 createTab，省一次窗口开销。',
   '无痕模式默认关闭，createBrowser 或不带 browserId 的 createTab 传 incognito: true 才开启。无痕窗口有独立内存分区，不继承普通窗口登录态，也不影响其他标签页的数据；同窗口标签页共享临时数据。新标签页继承目标窗口模式，不能原地切换。隐藏仍保留临时数据，closeBrowser 或关闭最后一个标签页才清理。cookies 按目标标签页分区读取；无标签页的 Cookie 读写、缓存文件与变化推送仅作用于普通分区。',
   '窗口全程保持隐藏：截图、点击、输入、按键、滚动、读页面/cookie/console/network 都在隐藏状态下完成，**不需要先 showBrowser**。显示窗口会让用户眼前弹一个窗，只在用户明确要求「演示给我看」时才调它。',
   '用户会自己点顶栏那枚浏览器图标唤出窗口查看（也能再点一次收起），这件事不要替用户做；你只需要保证页面状态是对的。',
@@ -634,7 +634,7 @@ export function buildDocsMarkdown({ serviceUrl = '$MICA_BROWSER_URL' } = {}) {
     `服务地址：\`${serviceUrl}\``,
     '',
     '新建窗口**必须**带 `x-mica-owner: $MICA_BROWSER_OWNER`：顶栏只显示本会话自己的窗口，没有归属的窗口会被直接关闭（缺这个头时新建返回 400）。',
-    '每个会话普通、无痕窗口各最多一个；同模式重复创建返回 409，请复用对应窗口或在其中新建标签页。普通窗口共享持久化分区，无痕窗口各自使用独立内存分区，返回的 Browser.incognito 标识窗口模式。',
+    '窗口彼此独立：同一个会话可以开多个窗口，顶栏按窗口各显示一枚图标（标签页仍按会话归属）。普通窗口、无痕窗口都用同一套规则，一个会话最多 8 个窗口，再开返回 409。普通窗口共享持久化分区，无痕窗口各自使用独立内存分区，返回的 Browser.incognito 标识窗口模式。',
     '',
     '## 通过 MCP 的 control 工具调用',
     '',

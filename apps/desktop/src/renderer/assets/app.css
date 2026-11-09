@@ -4870,12 +4870,18 @@ html[data-appearance='light'] .chat-markdown code:not(pre code) {
   z-index: 40;
   display: flex;
   min-width: 168px;
+  /* 菜单项不是动作条的图标：动作条那层 22% 的字色只给图标用，菜单继承它就成了
+     「每一项都像被禁用」的一列灰字，所以这里显式把字色交回正文色。 */
+  color: var(--color-fg);
   flex-direction: column;
   padding: 4px;
   border: 1px solid var(--color-line-strong);
   border-radius: 8px;
   background: var(--color-panel);
   box-shadow: 0 8px 24px var(--color-overlay-heavy);
+  /* 插件面板一个个加进来之后菜单会顶到窗口外面，滚动比被裁掉强 */
+  max-height: min(60vh, 420px);
+  overflow-y: auto;
 }
 
 /* 菜单与「+」之间那 6px 是空的：指针从按钮移向菜单时会掉回输入框，容器的
@@ -4897,9 +4903,16 @@ html[data-appearance='light'] .chat-markdown code:not(pre code) {
   align-items: center;
   gap: 8px;
   padding: 6px 8px;
+  /* 整行按钮的内容靠左（见 arco-settings.css 的 mica-arco-row）；这里再写一遍是为了
+     漏掉那个类时也只歪一条，不至于整列居中 */
+  justify-content: flex-start;
   font-size: 12px;
   text-align: left;
   white-space: nowrap;
+}
+
+.chat-composer-more-menu button:hover:not(:disabled) {
+  background: var(--color-active);
 }
 
 /* 只管动作区直接的按钮。`.chat-composer-more` 里的展开菜单也是 button，
@@ -6020,7 +6033,9 @@ html body #root {
 
 .session-settings-modal .chat-modal-body {
   display: grid;
-  grid-template-columns: 142px minmax(0, 1fr);
+  /* 菜单列按最宽的一行算：「定时任务 + 未设置」「会话能力 + 46/51」都要整行放下，
+     否则标签被省略成「会话能…」，读不出是哪一项。 */
+  grid-template-columns: 176px minmax(0, 1fr);
   /* 内容区自己滚：菜单固定在左侧，不跟着长列表一起滚走 */
   padding: 0;
   overflow: hidden;

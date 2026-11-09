@@ -77,7 +77,7 @@
 - 禁用态只掉颜色，尺寸、边框与位置不变。
 - 共享 `Button` 只在 `icon` / `loading` 存在时才输出图标格。
 - 图标与文字横排规则覆盖作用域内所有 `.arco-btn`（配置页也直接使用 Arco Button），不能只覆盖 `.ui-button`；桌面 Tailwind 会把 SVG 设为块元素，按钮必须使用单行 flex 布局。
-- 整行按钮（图标 + 文字、`w-full` + `text-left`）要带 `mica-arco-row`：Arco 的 `.arco-btn` 居中与 `svg + span` 6px 左边距写在 layer 外，Tailwind 的 `justify-*` 压不住它，只有这条更高特异性的规则能把内容按回左边、把图标与文字间距交回 `gap`。
+- 整行按钮（图标 + 文字、`w-full` + `text-left`）要带 `mica-arco-row`：Arco 的 `.arco-btn` 居中与 `svg + span` 6px 左边距写在 layer 外，Tailwind 的 `justify-*` 压不住它，只有这条更高特异性的规则能把内容按回左边、把图标与文字间距交回 `gap`。**浮层/菜单里的整行按钮同样要带**——它一旦继承动作条那层淡字色（`.chat-composer-actions` 的 22%），整列菜单看起来就像全被禁用了；容器显式给回 `var(--color-fg)`。
 - 同一动作区的主次按钮统一高度；文字主按钮 `flex: none` + 不换行。
 - 标签在控件上方，不要把说明词塞进控件行；复合控件放在同一条边框里。
 - 条目列表不要靠 `padding-left` 造缩进，符号用 `li::before` 画在符号列里。

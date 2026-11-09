@@ -328,6 +328,15 @@ export function createBrowserService({
 }
 
 /**
+ * 一个会话最多同时开几个窗口。
+ *
+ * 窗口彼此独立、顶栏一个窗口一枚图标，所以「同一会话开两个窗口」是正常用法（两个站点
+ * 并排放）。上限只是兜底：没有上限时一段循环里的 createBrowser 能一直堆下去，顶栏图标
+ * 也会被挤爆。
+ */
+const MAX_WINDOWS_PER_OWNER = 8
+
+/**
  * 新窗口必须带归属：顶栏图标只按归属渲染，没有归属的窗口对谁都不显示，留着只是个
  * 删不掉的后台进程。所以宁可直接拒掉，也不让它悄悄建出来。
  */
@@ -339,17 +348,12 @@ function buildHandlers({ getManager, address, cacheDir = '' }) {
   const manager = () => getManager()
   const requireNewBrowser = (ctx) => {
     requireOwner(ctx)
-    if (
-      manager()
-        .listBrowsers()
-        .some(
-          (browser) =>
-            browser.owner === ctx.owner &&
-            Boolean(browser.incognito) === (parseBoolean(ctx.body.incognito) === true)
-        )
-    ) {
+    const owned = manager()
+      .listBrowsers()
+      .filter((browser) => browser.owner === ctx.owner)
+    if (owned.length >= MAX_WINDOWS_PER_OWNER) {
       throw new BrowserRequestError(
-        '当前会话已有相同模式的浏览器窗口，请复用该窗口或在其中打开新标签页',
+        `当前会话已经有 ${owned.length} 个浏览器窗口（上限 ${MAX_WINDOWS_PER_OWNER}），先关掉不用的再开`,
         409
       )
     }

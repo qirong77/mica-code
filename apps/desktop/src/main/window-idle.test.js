@@ -12,11 +12,12 @@ import {
 const MINUTE = 60 * 1000
 const NOW = 100 * MINUTE
 
-/** 隐藏了多久（分钟）的窗口；`visible` 的给 null 的 idleSince */
+/** 多久（分钟）没人用了；正在用的（有焦点）给 null 的 idleSince */
 function win(id, idleMinutes, extra = {}) {
   return {
     id,
-    visible: idleMinutes === null,
+    visible: false,
+    focused: idleMinutes === null,
     idleSince: idleMinutes === null ? null : NOW - idleMinutes * MINUTE,
     ...extra
   }
@@ -28,9 +29,18 @@ describe('selectIdleWindows', () => {
     expect(selectIdleWindows(null, NOW, { idleMs: 30 * MINUTE })).toEqual([])
   })
 
-  it('显示中的窗口一律不收', () => {
+  it('正在用的窗口（聚焦中）一律不收', () => {
     const entries = [win('a', null), win('b', null)]
     expect(selectIdleWindows(entries, NOW, { idleMs: 30 * MINUTE, keep: 0 })).toEqual([])
+  })
+
+  it('显示中但已经切走的窗口照常计时：闲置到点就收', () => {
+    const entries = [
+      win('a', 90, { visible: true }),
+      win('b', 5, { visible: true }),
+      win('c', null, { visible: true })
+    ]
+    expect(selectIdleWindows(entries, NOW, { idleMs: 30 * MINUTE })).toEqual(['a'])
   })
 
   it('没到闲置时长的不收', () => {
@@ -59,9 +69,9 @@ describe('selectIdleWindows', () => {
 
   it('idleSince 缺失或非法的条目不动', () => {
     const entries = [
-      { id: 'a', visible: false, idleSince: null },
-      { id: 'b', visible: false, idleSince: Number.NaN },
-      { id: 'c', visible: false },
+      { id: 'a', focused: true, idleSince: null },
+      { id: 'b', idleSince: Number.NaN },
+      { id: 'c' },
       win('d', 90),
       win('e', 1)
     ]
@@ -135,7 +145,7 @@ describe('startIdleReaper', () => {
 describe('describeReap', () => {
   it('日志里带窗口种类与分钟数', () => {
     expect(describeReap('terminal', 's-1', 45 * MINUTE)).toBe(
-      '[mica-terminal] 回收隐藏窗口 s-1（闲置 45 分钟）'
+      '[mica-terminal] 回收闲置窗口 s-1（闲置 45 分钟）'
     )
     expect(describeReap('browser', 'brw-2', 30 * 1000)).toContain('闲置 1 分钟')
   })

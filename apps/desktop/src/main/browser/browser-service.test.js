@@ -325,23 +325,34 @@ describe('ownership', () => {
     expect((await call('/browser/tabs', { method: 'POST', body: {} })).status).toBe(400)
   })
 
-  it('limits both window creation paths to one per owner without closing the original', async () => {
-    const first = await call('/browser/tabs', { method: 'POST', body: { owner: 'limit-a' } })
+  it('allows several windows per owner and only caps the count', async () => {
+    const first = await call('/browser/tabs', { method: 'POST', body: { owner: 'multi-a' } })
     expect(first.status).toBe(200)
-    const id = first.body.browser.id
-    const second = await call('/browser/browsers', { method: 'POST', body: { owner: 'limit-a' } })
-    expect(second.status).toBe(409)
-    expect(second.body.error).toContain('复用')
+    // 两个窗口是正常用法：顶栏一个窗口一枚图标，各自独立
+    const second = await call('/browser/browsers', { method: 'POST', body: { owner: 'multi-a' } })
+    expect(second.status).toBe(200)
+    expect(second.body.browser.id).not.toBe(first.body.browser.id)
+    // 顶栏按窗口渲染：这个会话列出两个窗口，就是两枚图标
+    const listed = await call('/browser/browsers', { headers: { 'x-mica-owner': 'multi-a' } })
+    expect(listed.body.browsers.map((item) => item.id)).toEqual([
+      first.body.browser.id,
+      second.body.browser.id
+    ])
     expect(
-      (await call('/browser/tabs', { method: 'POST', body: { owner: 'limit-a' } })).status
-    ).toBe(409)
-    expect((await call(`/browser/browsers/${id}`)).status).toBe(200)
-    expect(
-      (await call('/browser/browsers', { method: 'POST', body: { owner: 'limit-b' } })).status
+      (await call(`/browser/browsers/${first.body.browser.id}`)).status
     ).toBe(200)
+    // 另一个会话不受影响，各自数各自的
     expect(
-      (await call('/browser/tabs', { method: 'POST', body: { owner: 'limit-b' } })).status
-    ).toBe(409)
+      (await call('/browser/browsers', { method: 'POST', body: { owner: 'multi-b' } })).status
+    ).toBe(200)
+    for (let index = 2; index < 8; index += 1) {
+      expect(
+        (await call('/browser/browsers', { method: 'POST', body: { owner: 'multi-a' } })).status
+      ).toBe(200)
+    }
+    const capped = await call('/browser/browsers', { method: 'POST', body: { owner: 'multi-a' } })
+    expect(capped.status).toBe(409)
+    expect(capped.body.error).toContain('上限')
   })
 
   it('keeps normal and private windows side by side and inherits the target mode', async () => {
@@ -354,14 +365,14 @@ describe('ownership', () => {
     })
     expect(privateWindow.body.browser.incognito).toBe(true)
     const browserId = privateWindow.body.browser.id
-    expect(
-      (
-        await call('/browser/browsers', {
-          method: 'POST',
-          body: { owner, incognito: true }
-        })
-      ).status
-    ).toBe(409)
+    // 无痕窗口同样可以不止一个，各自一个内存分区
+    const secondPrivate = await call('/browser/browsers', {
+      method: 'POST',
+      body: { owner, incognito: true }
+    })
+    expect(secondPrivate.status).toBe(200)
+    expect(secondPrivate.body.browser.incognito).toBe(true)
+    expect(secondPrivate.body.browser.id).not.toBe(browserId)
     const inherited = await call('/browser/tabs', { method: 'POST', body: { owner, browserId } })
     expect(inherited.body.browser.incognito).toBe(true)
     expect(
