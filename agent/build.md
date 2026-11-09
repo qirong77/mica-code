@@ -36,10 +36,6 @@ npm run start:web          # 运行已构建的 Web 运行时
 
 `build:app` 之前会执行根 `bun run build`：桌面端经 `resolveMicaExecutable()` 使用 `~/.local/bin/mica`，不刷新 CLI 就会连到旧二进制。
 
-### 本机性能监控（`apps/perf-monitor/`）
-
-独立依赖与构建产物，不构建或重启 Mica。`npm ci` 安装；`npm run typecheck`、`npm test` 做本应用验证；`npm run build` 构建前端，`bun run start` 在 `127.0.0.1:9316` 提供页面与只读 API。`bun run service:install` 安装用户级 LaunchAgent `com.qirong.mica-perf-web`，登录后自动启动。采集目录默认 `~/Library/Logs/cpu-watch`，使用 `MICA_PERF_LOG_DIR` 覆盖；数据含命令行和本机路径，仅监听 loopback。完整命令与指标解释见 `apps/perf-monitor/README.md`。
-
 ### macOS 签名
 
 `electron-builder.yml` 里 `mac.identity: mica-codesign` 指向一个**本机自签证书**（`~/.mica/codesign/` + 名为 `mica-codesign` 的钥匙串，密码在 login keychain 的通用密码项里）。这样做的原因是 adhoc 签名的 designated requirement 绑 cdhash，每次重建都变，macOS 的「本地网络」授权会随之失效——表现为进程内访问 `172.x`/`10.x` 4ms 内 `EHOSTUNREACH`，而 launchd 拉起的独立进程同时刻一切正常。
