@@ -51,12 +51,35 @@ describe('parseUsageLedger', () => {
     const entry = parseUsageLedger(line({
       id: 'u1', occurredAt: '2026-10-01T10:00:00.000Z', model: 'm', pluginId: 'commit',
       providerId: ' example ', durationMs: 1250.5, firstTokenMs: 0, responseWaitMs: 30, generationDurationMs: 50,
+      outputTokens: 100, generationOutputTokens: 99,
     }))[0];
     expect(entry.providerId).toBe('example');
     expect(entry.durationMs).toBe(1250.5);
     expect(entry.firstTokenMs).toBe(0);
     expect(entry.responseWaitMs).toBe(30);
     expect(entry.generationDurationMs).toBe(50);
+    expect(entry.generationOutputTokens).toBe(99);
+  });
+
+  test('requires attributable positive tokens and timing as a pair for generation', () => {
+    for (const generationOutputTokens of [undefined, 0, -1, 100, 101, 1.5, '99', Infinity]) {
+      const entry = parseUsageLedger(line({
+        id: 'u1', occurredAt: '2026-10-01', model: 'm', pluginId: 'commit',
+        outputTokens: 100, generationOutputTokens, generationDurationMs: 1000, responseWaitMs: 20,
+      }))[0];
+      expect(entry.outputTokens).toBe(100);
+      expect(entry.responseWaitMs).toBe(20);
+      expect(entry).not.toHaveProperty('generationDurationMs');
+      expect(entry).not.toHaveProperty('generationOutputTokens');
+    }
+    for (const outputTokens of [undefined, 0, -1, '100', Infinity]) {
+      const entry = parseUsageLedger(line({
+        id: 'u1', occurredAt: '2026-10-01', model: 'm', pluginId: 'commit',
+        outputTokens, generationOutputTokens: 99, generationDurationMs: 1000,
+      }))[0];
+      expect(entry).not.toHaveProperty('generationDurationMs');
+      expect(entry).not.toHaveProperty('generationOutputTokens');
+    }
   });
 
   test('omits invalid optional fields without dropping the entry', () => {

@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { MIGRATIONS, dropRawUsage, usageOccurredAt, usageSourceOwner } from './migrations.js';
+import { MIGRATIONS, dropRawUsage, generationTimingV2, usageOccurredAt, usageSourceOwner } from './migrations.js';
 import { runEvolution } from './run.js';
 
 const homes: string[] = [];
@@ -121,6 +121,26 @@ describe('drop-raw-usage 迁移', () => {
     expect(dropRawUsage.apply({})).toBe(0);
     expect(dropRawUsage.apply({ snapshot: { usageHistory: 'nope' } })).toBe(0);
     expect(dropRawUsage.apply({ snapshot: { usageHistory: [null, 3] } })).toBe(0);
+  });
+});
+
+describe('generation-timing-v2 migration', () => {
+  it('archives old timing without changing tokens, waits or current generation samples', () => {
+    const old = { outputTokens: 27, generationDurationMs: 11, responseWaitMs: 3964 };
+    const current = { outputTokens: 100, generationOutputTokens: 99, generationDurationMs: 1000 };
+    const document = { snapshot: {
+      usageHistory: [{ ...old }, { ...current }],
+      subagentUsageHistory: [{ requests: [{ ...old }] }],
+      lastUsage: { ...old },
+    } } as Record<string, any>;
+    expect(generationTimingV2.apply(document)).toBe(3);
+    const archived = { outputTokens: 27, legacyGenerationDurationMs: 11, responseWaitMs: 3964 };
+    expect(document.snapshot.usageHistory).toEqual([archived, current]);
+    expect(document.snapshot.subagentUsageHistory[0].requests).toEqual([archived]);
+    expect(document.snapshot.lastUsage).toEqual(archived);
+    expect(generationTimingV2.apply(document)).toBe(0);
+    expect(generationTimingV2.apply({ snapshot: { usageHistory: [null, 1, {}] } })).toBe(0);
+    expect(generationTimingV2.apply({})).toBe(0);
   });
 });
 

@@ -426,8 +426,10 @@ function ModelPerformanceCard({ scoped }) {
       <p className="mt-1 text-[11px] text-fg-dim">
         {metric === 'responseWait'
           ? '请求开始到首次内容的平均等待，包含重试。'
-          : '输出 tokens ÷ 首末内容增量间隔的估算速率，可能包含推理 tokens。'}{' '}
-        仅统计有计时的成功请求，按区间平均值逐行对比。
+          : '扣除推理与首个 token 后，按正文首末增量间隔估算；仅采纳至少 32 个正文 tokens、持续 0.5 秒的无工具请求。'}{' '}
+        {metric === 'responseWait'
+          ? '仅统计有计时的成功请求，按区间平均值逐行对比。'
+          : '缺少推理用量明细或旧口径记录不参与，按有效 tokens 总量 ÷ 总时长比较；仍受网络分块与格式 tokens 影响。'}
       </p>
       {rows.length === 0 ? (
         <p className="py-6 text-center text-xs text-fg-faint">当前区间没有可用的请求计时数据。</p>

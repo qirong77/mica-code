@@ -19,8 +19,8 @@ describe('Stats usage aggregation', () => {
   test('aggregates new timing independently for session and ledger records', () => {
     const time = new Date(2026, 7, 2, 12).getTime()
     const records = [
-      { outputTokens: 100, generationDurationMs: 2000, responseWaitMs: 0 },
-      { outputTokens: 50, generationDurationMs: 1000, responseWaitMs: 300 },
+      { outputTokens: 150, generationOutputTokens: 99, generationDurationMs: 2000, responseWaitMs: 0 },
+      { outputTokens: 50, generationOutputTokens: 49, generationDurationMs: 1000, responseWaitMs: 300 },
       { outputTokens: 40, durationMs: 100, firstTokenMs: 10 },
       { outputTokens: 10, generationDurationMs: 0, responseWaitMs: -1 },
       { generationDurationMs: 1000, responseWaitMs: Infinity }
@@ -29,7 +29,7 @@ describe('Stats usage aggregation', () => {
       records.map((record) => normalizeUsageEvent(record, time, 'm'))
     )
     expect(row.speedModels[0]).toMatchObject({
-      generationOutputTokens: 150,
+      generationOutputTokens: 148,
       generationDurationMs: 3000,
       generationSamples: 2,
       responseWaitMs: 300,
@@ -39,7 +39,7 @@ describe('Stats usage aggregation', () => {
       { ...records[0], occurredAt: new Date(time).toISOString(), pluginId: 'p', model: 'm' }
     ])
     expect(ledger.days[0].speedModels[0]).toMatchObject({
-      generationOutputTokens: 100,
+      generationOutputTokens: 99,
       generationDurationMs: 2000,
       generationSamples: 1,
       responseWaitMs: 0,
@@ -50,6 +50,18 @@ describe('Stats usage aggregation', () => {
     expect(legacy.generationDurationMs).toBeNull()
   })
 
+  test('rejects old or invalid generation numerators without dropping response wait or usage', () => {
+    const time = new Date(2026, 7, 2, 12).getTime()
+    const numerators = [undefined, 0, -1, 100, 101, 1.5, '99', Infinity, NaN]
+    const records = numerators.map((generationOutputTokens) => ({
+      outputTokens: 100, generationOutputTokens, generationDurationMs: 1000, responseWaitMs: 20
+    }))
+    const [day] = summarizeStatsDays(records.map((record) => normalizeUsageEvent(record, time, 'm')))
+    expect(day.outputTokens).toBe(900)
+    expect(day.speedModels[0].generationSamples).toBeUndefined()
+    expect(day.speedModels[0].responseWaitSamples).toBe(9)
+  })
+
   test('groups timestamped speed requests by minute without inventing times for old records', () => {
     const base = new Date(2026, 7, 2, 12, 15).getTime()
     const events = [
@@ -57,12 +69,14 @@ describe('Stats usage aggregation', () => {
         occurredAt: new Date(base + 4000).toISOString(),
         responseWaitMs: 100,
         generationDurationMs: 1000,
+        generationOutputTokens: 49,
         outputTokens: 50
       },
       {
         occurredAt: new Date(base + 21000).toISOString(),
         responseWaitMs: 300,
         generationDurationMs: 1000,
+        generationOutputTokens: 149,
         outputTokens: 150
       },
       { occurredAt: new Date(base + 61000).toISOString(), responseWaitMs: 600 },
@@ -77,7 +91,7 @@ describe('Stats usage aggregation', () => {
         {
           responseWaitMs: 400,
           responseWaitSamples: 2,
-          generationOutputTokens: 200,
+          generationOutputTokens: 198,
           generationSamples: 2
         }
       ]

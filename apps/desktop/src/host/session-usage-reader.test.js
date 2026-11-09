@@ -38,7 +38,7 @@ function fixture() {
         {
           inputTokens: '12', outputTokens: 3, cachedInputTokens: 4, totalTokens: 15,
           providerId: 'provider-1', model: 'model-1', turnId: 1,
-          durationMs: 10, firstTokenMs: 2, responseWaitMs: 3, generationDurationMs: 7,
+          durationMs: 10, firstTokenMs: 2, responseWaitMs: 3, generationDurationMs: 7, generationOutputTokens: 2,
           legacyExtra: { keepThisForIdentity: ['original', 1] }
         },
         { usageId: 'u-2', inputTokens: 5, outputTokens: 2 }

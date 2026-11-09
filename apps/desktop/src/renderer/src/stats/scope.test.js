@@ -142,6 +142,23 @@ describe('Stats range scoping', () => {
     expect(modelSpeedPerformance([scopeSession(input[0], { day: day(2026, 8, 4) })])).toEqual([])
   })
 
+  test('weights generation by duration and response wait by sample count across sessions', () => {
+    const speed = (tokens, duration, wait, samples) => ({
+      provider: 'p', model: 'm', generationOutputTokens: tokens,
+      generationDurationMs: duration, generationSamples: samples,
+      responseWaitMs: wait, responseWaitSamples: samples
+    })
+    const input = [
+      session({ days: [dayRow({ day: day(2026, 8, 2), speedModels: [speed(200, 2000, 200, 2)] })] }),
+      session({ days: [dayRow({ day: day(2026, 8, 3), speedModels: [speed(100, 4000, 700, 1)] })] })
+    ]
+    expect(modelSpeed(input, 'generation')[0]).toMatchObject({ value: 50, samples: 3 })
+    expect(modelSpeed(input, 'responseWait')[0]).toMatchObject({ value: 300, samples: 3 })
+    const scoped = input.map((row) => scopeSession(row, { day: day(2026, 8, 3) })).filter(Boolean)
+    expect(modelSpeed(scoped, 'generation')[0]).toMatchObject({ value: 25, samples: 1 })
+    expect(modelSpeed(scoped, 'responseWait')[0]).toMatchObject({ value: 700, samples: 1 })
+  })
+
   test('compares weighted performance only for selected days and separates providers', () => {
     const sample = (provider, outputTokens, durationMs, firstTokenMs) => ({
       provider,

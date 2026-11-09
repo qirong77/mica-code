@@ -3508,6 +3508,11 @@ html[data-appearance='light'] .chat-markdown code:not(pre code) {
   font-size: 10.5px;
 }
 
+.chat-role-palette {
+  right: auto;
+  left: 8px;
+}
+
 .chat-popover-head {
   display: flex;
   min-height: 26px;

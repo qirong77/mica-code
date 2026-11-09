@@ -32,6 +32,7 @@ import { executeProviderToolCalls, interruptedToolOutput, throwIfQueryStopped } 
 import { sendWithEffortFallback } from './effortFallback.js';
 import { imageOmittedPlaceholder } from './imagePlaceholder.js';
 import { applyImageBudget, describeImageBudget } from './imageBudget.js';
+import { observeGenerationText, sampleGenerationTiming, type GenerationSample, type GenerationTiming } from './generationTiming.js';
 import type { ModelClientOptions } from './types.js';
 
 export type ResponsesUsageRecord = AgentUsageRecord & {
@@ -400,8 +401,7 @@ export class ResponsesClient extends BaseAgent<ModelClientOptions, ResponseInput
       // 失败的时间也算进 TTFT（与 ChatCompletionsClient 同一份口径）。
       let attemptStartedAt = requestStartedAt;
       let firstDeltaAt = 0;
-      let lastDeltaAt = 0;
-      let deltaCount = 0;
+      let generationTiming: GenerationTiming = { textDeltaCount: 0, hasOtherOutput: false };
       let requestAttempts = 1;
       let requestEndSent = false;
       const finishRequest = (info: {
@@ -448,8 +448,7 @@ export class ResponsesClient extends BaseAgent<ModelClientOptions, ResponseInput
         async () => {
           attemptStartedAt = Date.now();
           firstDeltaAt = 0;
-          lastDeltaAt = 0;
-          deltaCount = 0;
+          generationTiming = { textDeltaCount: 0, hasOtherOutput: false };
           emittedContentSeparator = false;
           attemptHadToolOutput = false;
           content = '';
@@ -494,11 +493,19 @@ export class ResponsesClient extends BaseAgent<ModelClientOptions, ResponseInput
           for await (const event of withIdleTimeout(stream)) {
             throwIfQueryStopped(options);
             if (RESPONSE_TERMINAL_ERROR_TYPES.has(event.type)) throw responseEventError(event);
+            if (
+              ((event.type === 'response.output_item.added' || event.type === 'response.output_item.done') &&
+                hasUnattributableGenerationOutput(event.item)) ||
+              ((event.type === 'response.content_part.added' || event.type === 'response.content_part.done') &&
+                event.part.type !== 'output_text') ||
+              event.type.startsWith('response.refusal.') || event.type.startsWith('response.output_audio') ||
+              event.type.startsWith('response.audio.')
+            ) generationTiming.hasOtherOutput = true;
 
             if (event.type === 'response.output_text.delta') {
               // 首字只认正文/思考增量：response.created 之类的事件不算首字。
               if (event.delta && !firstDeltaAt) firstDeltaAt = Date.now();
-              if (event.delta) { lastDeltaAt = Date.now(); deltaCount++; }
+              observeGenerationText(generationTiming, event.delta);
               const textDelta: string =
                 contentSeparator && !emittedContentSeparator ? `${contentSeparator}${event.delta}` : event.delta;
               emittedContentSeparator = true;
@@ -514,7 +521,6 @@ export class ResponsesClient extends BaseAgent<ModelClientOptions, ResponseInput
               event.type === 'response.reasoning_text.done'
             ) {
               if ('delta' in event && event.delta && !firstDeltaAt) firstDeltaAt = Date.now();
-              if ('delta' in event && event.delta) { lastDeltaAt = Date.now(); deltaCount++; }
               reasoningParts.accept(event);
               continue;
             }
@@ -532,6 +538,7 @@ export class ResponsesClient extends BaseAgent<ModelClientOptions, ResponseInput
 
             if (event.type === 'response.function_call_arguments.delta') {
               attemptHadToolOutput = true;
+              generationTiming.hasOtherOutput = true;
               const pending = toolCalls.get(event.output_index);
               if (pending) pending.arguments += event.delta;
               continue;
@@ -539,6 +546,7 @@ export class ResponsesClient extends BaseAgent<ModelClientOptions, ResponseInput
 
             if (event.type === 'response.function_call_arguments.done') {
               attemptHadToolOutput = true;
+              generationTiming.hasOtherOutput = true;
               const pending = toolCalls.get(event.output_index);
               if (pending) pending.arguments = event.arguments;
               continue;
@@ -572,6 +580,9 @@ export class ResponsesClient extends BaseAgent<ModelClientOptions, ResponseInput
                 throw new Error(`Response completed with status: ${event.response.status}`);
               }
               completedResponse = event.response;
+              if (completedResponse.output?.some(hasUnattributableGenerationOutput)) {
+                generationTiming.hasOtherOutput = true;
+              }
             }
           }
           throwIfQueryStopped(options);
@@ -636,8 +647,9 @@ export class ResponsesClient extends BaseAgent<ModelClientOptions, ResponseInput
           durationMs,
           firstTokenMs,
           responseWaitMs: firstDeltaAt ? firstDeltaAt - requestStartedAt : undefined,
-          generationDurationMs: toolCalls.size === 0 && !attemptHadToolOutput && Number.isFinite(completedResponse.usage.output_tokens) && completedResponse.usage.output_tokens > 0 && deltaCount >= 2 && lastDeltaAt > firstDeltaAt
-            ? lastDeltaAt - firstDeltaAt : undefined,
+          generationSample: sampleGenerationTiming(
+            generationTiming, completedResponse.usage.output_tokens, completedResponse.usage.output_tokens_details?.reasoning_tokens,
+          ),
         });
       }
 
@@ -702,7 +714,7 @@ export class ResponsesClient extends BaseAgent<ModelClientOptions, ResponseInput
       durationMs?: number;
       firstTokenMs?: number;
       responseWaitMs?: number;
-      generationDurationMs?: number;
+      generationSample?: GenerationSample;
     },
   ): void {
     const inputTokens = usage.input_tokens ?? 0;
@@ -727,7 +739,7 @@ export class ResponsesClient extends BaseAgent<ModelClientOptions, ResponseInput
       durationMs: metadata.durationMs,
       firstTokenMs: metadata.firstTokenMs,
       ...(metadata.responseWaitMs !== undefined ? { responseWaitMs: metadata.responseWaitMs } : {}),
-      ...(metadata.generationDurationMs !== undefined ? { generationDurationMs: metadata.generationDurationMs } : {}),
+      ...(metadata.generationSample ?? {}),
     };
 
     this.lastUsage = record;
@@ -791,6 +803,11 @@ function responseMessageToAgentContent(message: {
 
 function responseOutputMessageText(message: ResponseOutputMessage): string {
   return message.content.map((part) => (part.type === 'output_text' ? part.text : part.refusal)).join('');
+}
+
+function hasUnattributableGenerationOutput(item: ResponseOutputItem): boolean {
+  if (item.type === 'reasoning') return false;
+  return item.type !== 'message' || !Array.isArray(item.content) || item.content.some((part) => part.type !== 'output_text');
 }
 
 function responseOutputItemToInputItem(item: ResponseOutputItem): ResponseInputItem | null {

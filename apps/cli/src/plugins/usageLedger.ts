@@ -48,6 +48,7 @@ export function appendPluginUsage(options: UsageLedgerAppendOptions): number {
       ...(usage.firstTokenMs !== undefined ? { firstTokenMs: usage.firstTokenMs } : {}),
       ...(usage.responseWaitMs !== undefined ? { responseWaitMs: usage.responseWaitMs } : {}),
       ...(usage.generationDurationMs !== undefined ? { generationDurationMs: usage.generationDurationMs } : {}),
+      ...(usage.generationOutputTokens !== undefined ? { generationOutputTokens: usage.generationOutputTokens } : {}),
       pluginId: options.pluginId,
       purpose: options.purpose,
       cwd: options.cwd,

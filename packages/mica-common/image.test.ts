@@ -1,6 +1,6 @@
 import { deflateSync } from 'node:zlib';
 import { describe, expect, it } from 'vitest';
-import { IMAGE_MAX_LONG_EDGE, prepareImageForApi } from './image.js';
+import { IMAGE_MAX_API_LONG_EDGE, IMAGE_MAX_LONG_EDGE, prepareImageForApi } from './image.js';
 import { decodePng, encodePng } from './imagePng.js';
 import { downscaleAreaAverage } from './imageResample.js';
 
@@ -48,6 +48,24 @@ function pngChunk(type: string, data: Buffer): Buffer {
   const crc = Buffer.alloc(4);
   crc.writeUInt32BE(crc32(body), 0);
   return Buffer.concat([length, body, crc]);
+}
+
+/** 只带 APP0 + SOF0 的 JPEG 头，给尺寸识别走真实解析路径，不需要真的像素数据。 */
+function buildJpegHeader(width: number, height: number): Buffer {
+  const app0 = Buffer.alloc(16 - 2);
+  Buffer.from([0x4a, 0x46, 0x49, 0x46, 0x00, 1, 1, 0, 0, 1, 0, 1, 0, 0]).copy(app0);
+  const sof0 = Buffer.alloc(17 - 2);
+  sof0[0] = 8;
+  sof0.writeUInt16BE(height, 1);
+  sof0.writeUInt16BE(width, 3);
+  sof0[5] = 3;
+  return Buffer.concat([
+    Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10]),
+    app0,
+    Buffer.from([0xff, 0xc0, 0x00, 0x11]),
+    sof0,
+    Buffer.alloc(64, 7),
+  ]);
 }
 
 function crc32(buffer: Buffer): number {
@@ -141,6 +159,22 @@ describe('prepareImageForApi', () => {
     const processed = await prepareImageForApi(jpeg);
     expect(processed.mediaType).toBe('image/jpeg');
     expect(processed.buffer.equals(jpeg)).toBe(true);
+  });
+
+  it('长边超过接口硬上限的非 PNG 直接报错，不发出去换 400', async () => {
+    const jpeg = buildJpegHeader(14075, 6530);
+    await expect(prepareImageForApi(jpeg)).rejects.toThrow(
+      `图片尺寸 14075x6530，长边超过接口上限 ${IMAGE_MAX_API_LONG_EDGE}px`,
+    );
+    // 刚好在上限上的图照旧透传。
+    const edge = buildJpegHeader(IMAGE_MAX_API_LONG_EDGE, 100);
+    const processed = await prepareImageForApi(edge);
+    expect(processed.buffer.equals(edge)).toBe(true);
+  });
+
+  it('PNG 解不开又超过接口硬上限时报错，而不是把原图发出去', async () => {
+    const png = buildPng(9000, 100, { colorType: 6, bitDepth: 8 }, () => [1, 2, 3, 255]);
+    await expect(prepareImageForApi(png.subarray(0, 40))).rejects.toThrow('PNG 的无损缩放没能把它缩到这个尺寸以内');
   });
 
   it('空文件与不认识的格式抛错', async () => {

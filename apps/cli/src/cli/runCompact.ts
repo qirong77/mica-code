@@ -114,6 +114,7 @@ export async function runCompact(options: CompactCliOptions): Promise<CompactCli
     const service = new micaContext.CompactionService();
     const result = await service.compact({
       messages: snapshot.messages,
+      signal: options.signal,
       options: options.toolResultsOnly
         ? {
             toolResultsOnly: true,
@@ -137,8 +138,21 @@ export async function runCompact(options: CompactCliOptions): Promise<CompactCli
           { helper: { kind: 'compaction', purpose: 'summarize' } },
         );
         const startedAt = new Date().toISOString();
+        let status: 'completed' | 'failed' | 'killed' = 'failed';
         try {
-          return await subAgent.query([SUMMARIZE_INSTRUCTIONS, '', transcript].join('\n'));
+          const summary = await subAgent.query([SUMMARIZE_INSTRUCTIONS, '', transcript].join('\n'), {
+            signal: options.signal,
+          });
+          status = 'completed';
+          return summary;
+        } catch (error) {
+          if (
+            options.signal?.aborted ||
+            (error instanceof Error && (error.name === 'AbortError' || error.name === 'AgentAbortError'))
+          ) {
+            status = 'killed';
+          }
+          throw error;
         } finally {
           // 摘要请求走子代理，不进主 usageHistory；它同样是本会话的模型开销，
           // 记进 subagentUsageHistory，否则 compact 的那次调用在 Stats 里不可见。
@@ -148,13 +162,14 @@ export async function runCompact(options: CompactCliOptions): Promise<CompactCli
             description: '生成 compact 摘要',
             model: owner.config.model,
             effort: 'none',
-            status: 'completed',
+            status: options.signal?.aborted ? 'killed' : status,
             startedAt,
             finishedAt: new Date().toISOString(),
           });
         }
       },
     });
+    options.signal?.throwIfAborted();
 
     if (result.preview) {
       return {
@@ -189,6 +204,7 @@ export async function runCompact(options: CompactCliOptions): Promise<CompactCli
       };
     }
 
+    options.signal?.throwIfAborted();
     try {
       agent.loadSnapshot({
         ...snapshot,
@@ -215,6 +231,7 @@ export async function runCompact(options: CompactCliOptions): Promise<CompactCli
       };
     }
 
+    options.signal?.throwIfAborted();
     sessionController.saveCurrent({
       preserveTitle: true,
       turnState: 'completed',

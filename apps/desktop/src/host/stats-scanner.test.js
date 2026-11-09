@@ -645,6 +645,34 @@ describe('incremental session scanner', () => {
     expect(harness.reads).toHaveLength(readsAfterFirst)
   })
 
+  test('rebuilds v10 speed samples even when session signatures have not changed', async () => {
+    const harness = createHarness()
+    const raw = fixture('one')
+    raw.snapshot.usageHistory = [{
+      usageId: 'u1', occurredAt: raw.createdAt, outputTokens: 100,
+      generationOutputTokens: 99, generationDurationMs: 1000
+    }]
+    harness.files.write('one', raw)
+    await harness.scanner.scanStats()
+    await flushIndex()
+    const stale = JSON.parse(harness.store.text)
+    stale.version = 10
+    for (const entry of Object.values(stale.files)) {
+      if (entry.stats?.days?.[0]?.speedModels?.[0]) {
+        entry.stats.days[0].speedModels[0].generationOutputTokens = 9999
+      }
+    }
+    harness.store.text = JSON.stringify(stale)
+    const restarted = createStatsScanner({
+      directory: () => harness.dir,
+      fileSystem: { readdirSync, statSync, readFileSync },
+      indexStore: harness.store,
+      indexWriteDelayMs: 0
+    })
+    const rows = await restarted.scanStats()
+    expect(rows[0].days[0].speedModels[0].generationOutputTokens).toBe(99)
+  })
+
   test('rebuilds the index when its format version is unknown', async () => {
     const harness = createHarness()
     harness.files.write('one', fixture('one'))

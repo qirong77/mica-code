@@ -50,10 +50,12 @@ describe('appendPluginUsage', () => {
           usageId: 'u1',
           inputTokens: 100,
           cachedInputTokens: 40,
-          outputTokens: 10,
-          totalTokens: 110,
+          outputTokens: 100,
+          totalTokens: 200,
           durationMs: 1234,
           firstTokenMs: 0,
+          generationDurationMs: 1000,
+          generationOutputTokens: 99,
         }),
         usage({
           usageId: 'u2',
@@ -80,7 +82,9 @@ describe('appendPluginUsage', () => {
         firstTokenMs: 0,
         inputTokens: 100,
         cachedInputTokens: 40,
-        outputTokens: 10,
+        outputTokens: 100,
+        generationDurationMs: 1000,
+        generationOutputTokens: 99,
       }),
       expect.objectContaining({ id: 'u2', inputTokens: 20, cachedInputTokens: 0 })
     ]);

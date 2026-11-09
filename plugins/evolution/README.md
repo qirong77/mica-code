@@ -45,6 +45,7 @@ mica 选后者，这个插件就是「洗」的地方。
 | `session-compact-rename` | 清掉旧压缩插件（`auto-compact`）留下的会话状态，并把摘要子代理的旧写法 `subagentType: 'auto-compact'` 归一为 `compact`。                               |
 | `drop-raw-usage`         | 删掉会话里存着的 provider 原始 usage（`rawUsage`，含 `attribution.items` 逐条 token 归因）：没有消费方，单条可达 247KB、实测占会话文件总量的 22%。     |
 | `usage-source-owner`     | 给没有归属的用量记录补上发起它的插件：委派（内置子代理类型）→ `subagent`，`btw` / `commit` / `memory-curator` → 各自插件；`compact` 是内核命令，不动。 |
+| `generation-timing-v2`   | 将没有 `generationOutputTokens` 的旧 `generationDurationMs` 归档为 `legacyGenerationDurationMs`；旧形态不再参与生成速率统计，token 用量与响应等待不变。 |
 
 ### 其它数据
 

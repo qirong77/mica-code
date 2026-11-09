@@ -1364,7 +1364,7 @@ test('failure lines and tool identity win over unrelated examples; rebuilt categ
   const cwd = resolve('workspace-failure-lines');
   const run = runner(recorder, { cwd });
   run.start();
-  assert.equal(CLASSIFIER_VERSION, 7);
+  assert.equal(CLASSIFIER_VERSION, 8);
   const samples = [
     {
       name: 'memory',
@@ -1574,7 +1574,9 @@ test('expectedExit only accepts the nonzero codes a command documents itself', (
   assert.equal(expectedExit('rg', 2, 'rg -n needle src'), false);
   assert.equal(expectedExit('grep', 1, 'grep -q x f'), true);
   assert.equal(expectedExit('diff', 1, 'diff a b'), true);
-  assert.equal(expectedExit('ls', 1, 'ls missing'), true);
+  assert.equal(expectedExit('ls', 1, 'ls missing'), false);
+  assert.equal(expectedExit('stat', 1, 'stat missing'), false);
+  assert.equal(expectedExit('find', 1, 'find missing -name file'), false);
   assert.equal(expectedExit('test', 1, 'test -f missing'), true);
   assert.equal(expectedExit('[', 1, '[ -f missing ]'), true);
   assert.equal(expectedExit('git', 1, 'git diff --quiet'), true);
@@ -1632,6 +1634,9 @@ test('nonzero exits a command documents itself are counted apart from real tool 
     // 2 means rg could not even search.
     ['rg -n needle src --unknown-flag', '2'],
     ['test -f missing.txt', '1'],
+    ['ls missing.txt', '1'],
+    ['stat missing.txt', '1'],
+    ['find missing-dir -name target', '1'],
     // The pipeline's status is tail's, not bun's.
     ['bun run build 2>&1 | tail -25', '1'],
     ['diff a.txt b.txt', '1'],
@@ -1645,7 +1650,7 @@ test('nonzero exits a command documents itself are counted apart from real tool 
   const report = await recorder.review(cwd);
   const summary = report.runs[0];
   assert.equal(summary.expectedExits, 3);
-  assert.equal(summary.toolErrors, 2);
+  assert.equal(summary.toolErrors, 5);
   assert.deepEqual(summary.findings.map((finding) => finding.title).sort(), [
     'Tool error in run_shell: exit-1',
     'Tool error in run_shell: exit-2',
@@ -1687,6 +1692,71 @@ test('a repeated call is reported only while nothing has changed in between', as
   assert.equal(report.runs[0].toolErrors, 0);
   assert.equal((await recorder.rebuild({ cwd })).rebuilt, 1);
   assert.deepEqual((await recorder.review(cwd)).findings, report.findings);
+});
+
+test('derivation limits count omitted call observations and findings in live review and rebuild', async (t) => {
+  const { recorder, root } = await fixture(t);
+  const cwd = resolve('workspace-derivation-limits');
+  const run = runner(recorder, { cwd, capture: { ...options, maxEventsPerRun: 3000 } });
+  run.start('exceed derivation limits');
+  for (let index = 0; index < 1000; index++) {
+    const id = `call-key-${index}`;
+    run.call(JSON.stringify({ path: `file-${index}` }), 'read_file', id);
+    run.result('success', 'read_file', id);
+  }
+  for (let index = 0; index < 101; index++) {
+    const id = `error-${index}`;
+    const name = `error-tool-${index}`;
+    run.call(JSON.stringify({ path: `missing-${index}` }), name, id);
+    run.result('{"isError":true,"message":"ENOENT: no such file"}', name, id);
+  }
+  run.finish();
+
+  const before = await recorder.review(cwd);
+  assert.deepEqual(before.derivationCoverage, {
+    limitedRuns: 1,
+    callObservationsNotTracked: 101,
+    findingSignalsNotRecorded: 1,
+    unknownRuns: 0,
+  });
+  assert.ok(before.warnings.some((warning) => warning.includes('101 tool-call observation(s)')));
+  assert.ok(before.warnings.some((warning) => warning.includes('1 finding signal(s)')));
+  assert.equal(before.limits.distinctCallKeysPerRun, 1000);
+  assert.equal(before.limits.findingsPerRun, 100);
+  assert.equal(before.runs[0]?.derivationDrops?.callObservations, 101);
+  assert.equal(before.runs[0]?.derivationDrops?.findingSignals, 1);
+  assert.equal(before.findings.filter((finding) => finding.kind === 'tool-error').length, 100);
+
+  const summaryFile = join(root, 'runs', before.runs[0]!.id, 'summary.json');
+  const summary = JSON.parse(await readFile(summaryFile, 'utf8')) as RunSummary;
+  delete summary.derivationDrops;
+  await writeFile(summaryFile, JSON.stringify(summary, null, 2));
+  const legacy = await recorder.review(cwd);
+  assert.deepEqual(legacy.derivationCoverage, before.derivationCoverage);
+  assert.ok(!legacy.warnings.some((warning) => warning.includes('previous overflow is unknown')));
+
+  const rebuilt = await recorder.rebuild({ cwd });
+  assert.equal(rebuilt.rebuilt, 1);
+  const after = await recorder.review(cwd);
+  assert.deepEqual(after.derivationCoverage, before.derivationCoverage);
+  assert.deepEqual(after.findings, before.findings);
+  const markdown = await readFile(await recorder.exportReport(cwd), 'utf8');
+  assert.match(markdown, /## Derivation coverage/);
+  assert.match(markdown, /1 finding signal\(s\) were not recorded/);
+  assert.match(markdown, /Analysis is incomplete/);
+
+  const unreadable = runner(recorder, { cwd, runId: 2 });
+  unreadable.start('legacy run with unavailable trace');
+  unreadable.finish();
+  const unreadableSummary = (await recorder.review(cwd)).runs.find((item) => item.sourceRunId === 2)!;
+  const unreadableSummaryFile = join(root, 'runs', unreadableSummary.id, 'summary.json');
+  const oldSummary = JSON.parse(await readFile(unreadableSummaryFile, 'utf8')) as RunSummary;
+  delete oldSummary.derivationDrops;
+  await writeFile(unreadableSummaryFile, JSON.stringify(oldSummary, null, 2));
+  await rm(unreadableSummary.traceFile);
+  const unknown = await recorder.review(cwd);
+  assert.equal(unknown.derivationCoverage.unknownRuns, 1);
+  assert.ok(unknown.warnings.some((warning) => warning.includes('previous overflow is unknown')));
 });
 
 test('polling tools and subagent reads never become repeated-call candidates', async (t) => {

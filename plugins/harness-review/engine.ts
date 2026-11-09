@@ -20,7 +20,7 @@ export type CaptureOptions = { captureContent: boolean; maxEventChars: number; m
  * 问题推导规则的版本。改了 classify / 退出码白名单 / 重复调用判定就加一：
  * 宿主据此重算 findings 与派生错误计数，不动用量、耗时和人工结论。
  */
-export const CLASSIFIER_VERSION = 7;
+export const CLASSIFIER_VERSION = 8;
 type Config = { providerId: string; protocol: string; model: string; effort: string; role: string };
 /**
  * `paused` 是宿主在迭代边界主动停下（开发构建重载），历史完整、随后续跑；
@@ -32,6 +32,12 @@ export type Evidence = { runId: string; seq: number; traceFile: string; availabl
 export type PromptSection = { label: string; sha256: string; chars: number };
 /** Fingerprint of the run's user input. `excerpt` is stored only with content capture. */
 export type RunInput = { sha256: string; chars: number; excerpt?: string };
+export type DerivationCoverage = {
+  limitedRuns: number;
+  callObservationsNotTracked: number;
+  findingSignalsNotRecorded: number;
+  unknownRuns: number;
+};
 export type ReviewFinding = {
   id: string;
   kind: 'tool-error' | 'repeated-call' | 'run-error' | 'retry' | 'user-retry' | 'user-correction' | 'plugin-background';
@@ -135,6 +141,7 @@ export type RunSummary = {
   /** Latest resolved prompt split into its top-level blocks, for prompt drift attribution. */
   promptSections?: PromptSection[];
   input?: RunInput;
+  derivationDrops?: { callObservations: number; findingSignals: number };
   /** Host shape at capture time: `session` (TUI / app-server) or `one-shot` (`mica exec`). */
   mode?: string;
   host?: string;
@@ -228,9 +235,10 @@ export type ReviewReport = {
   /** 每个工具的调用量与失败率：这张表才看得出「哪个工具的失败率高到该修」。 */
   toolHealth: ToolHealthRow[];
   toolHealthCoverage: { includedRuns: number; excludedRuns: number; unknownResults: number };
+  derivationCoverage: DerivationCoverage;
   warnings: string[];
   scannedRuns: number;
-  limits: { runs: number; findingsPerRun: number; evidencePerFinding: number };
+  limits: { runs: number; findingsPerRun: number; distinctCallKeysPerRun: number; evidencePerFinding: number };
   interpretation: string;
 };
 type StoredEvent = { seq: number; type: string; timestamp: string; [key: string]: unknown };
@@ -303,7 +311,7 @@ const POLLING =
 const SHELL_TOOL = /(?:^|[.:/])run_shell$/;
 const RETRY_OUTCOMES = new Set<Outcome>(['aborted', 'error', 'interrupted']);
 const NO_MATCH_EXIT = new Set(['rg', 'ripgrep', 'grep', 'egrep', 'fgrep', 'ag', 'ack', 'ugrep']);
-const MISSING_EXIT = new Set(['ls', 'stat', 'test', '[', 'which', 'type', 'find']);
+const MISSING_EXIT = new Set(['test', '[', 'which', 'type']);
 const DIFF_EXIT = new Set(['diff', 'cmp']);
 const SHELL_WRAPPERS = new Set(['sudo', 'env', 'time', 'nohup', 'command', 'builtin', 'exec']);
 const ENV_ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*=/;
@@ -1449,7 +1457,11 @@ export class HarnessRecorder {
     const key = `${name}\n${argsHash}`;
     let call = state.calls.get(key);
     if (!call) {
-      if (state.calls.size >= MAX_KEYS) return argsHash;
+      if (state.calls.size >= MAX_KEYS) {
+        state.summary.derivationDrops ??= { callObservations: 0, findingSignals: 0 };
+        state.summary.derivationDrops.callObservations++;
+        return argsHash;
+      }
       call = { count: 0, first: seq, name, prevSeq: 0, resultHashes: new Set(), emitted: false };
       state.calls.set(key, call);
     }
@@ -1895,7 +1907,11 @@ export class HarnessRecorder {
     const id = digest(`${state.summary.cwd ?? ''}\n${kind}\n${key}`);
     let finding = state.candidates.get(id);
     if (!finding) {
-      if (state.candidates.size >= MAX_FINDINGS) return;
+      if (state.candidates.size >= MAX_FINDINGS) {
+        state.summary.derivationDrops ??= { callObservations: 0, findingSignals: 0 };
+        state.summary.derivationDrops.findingSignals++;
+        return;
+      }
       finding = {
         id,
         kind,
@@ -1986,6 +2002,7 @@ export class HarnessRecorder {
           ...(this.context.mode ? { mode: boundedText(this.context.mode, 40) } : {}),
           ...(this.context.host ? { host: boundedText(this.context.host, 40) } : {}),
           hostPid: process.pid,
+          derivationDrops: { callObservations: 0, findingSignals: 0 },
           findings: [],
         },
         options: optionsOf(options),
@@ -2378,6 +2395,7 @@ export class HarnessRecorder {
       mergeToolTally(toolTally, state.toolTally);
       summary.toolErrors = state.summary.toolErrors;
       summary.expectedExits = state.summary.expectedExits;
+      summary.derivationDrops = state.summary.derivationDrops;
       summary.findings = [
         ...state.candidates.values(),
         ...summary.findings.filter((finding) => finding.kind !== 'tool-error' && finding.kind !== 'repeated-call'),
@@ -2390,6 +2408,30 @@ export class HarnessRecorder {
     const delegation = summarizeDelegation(runs, warnings);
     const helpers = summarizeHelpers(runs, warnings);
     const pluginFailures = await this.readPluginFailures(warnings);
+    const derivationCoverage: DerivationCoverage = {
+      limitedRuns: 0,
+      callObservationsNotTracked: 0,
+      findingSignalsNotRecorded: 0,
+      unknownRuns: 0,
+    };
+    for (const run of runs) {
+      if (!run.derivationDrops) {
+        derivationCoverage.unknownRuns++;
+        continue;
+      }
+      derivationCoverage.callObservationsNotTracked += run.derivationDrops.callObservations;
+      derivationCoverage.findingSignalsNotRecorded += run.derivationDrops.findingSignals;
+      if (run.derivationDrops.callObservations > 0 || run.derivationDrops.findingSignals > 0)
+        derivationCoverage.limitedRuns++;
+    }
+    if (derivationCoverage.limitedRuns > 0)
+      warnings.push(
+        `Derivation limits affected ${derivationCoverage.limitedRuns} run(s): ${derivationCoverage.callObservationsNotTracked} tool-call observation(s) were omitted from repeated-call analysis after ${MAX_KEYS} distinct call keys, and ${derivationCoverage.findingSignalsNotRecorded} finding signal(s) were not recorded after ${MAX_FINDINGS} findings per run. Analysis is incomplete; absence of a finding is not evidence that no issue occurred.`,
+      );
+    if (derivationCoverage.unknownRuns > 0)
+      warnings.push(
+        `${derivationCoverage.unknownRuns} run(s) lack derivation-limit counters, so previous overflow is unknown; run harness-review rebuild to recompute trace-backed findings before treating the absence of findings as evidence of none.`,
+      );
     const merged = new Map<string, ReviewFinding>();
     for (const run of runs)
       for (const candidate of run.findings) {
@@ -2481,9 +2523,15 @@ export class HarnessRecorder {
       pluginFailures,
       toolHealth: toolHealthRows(toolTally),
       toolHealthCoverage,
+      derivationCoverage,
       warnings,
       scannedRuns,
-      limits: { runs: MAX_RUNS, findingsPerRun: MAX_FINDINGS, evidencePerFinding: MAX_EVIDENCE },
+      limits: {
+        runs: MAX_RUNS,
+        findingsPerRun: MAX_FINDINGS,
+        distinctCallKeysPerRun: MAX_KEYS,
+        evidencePerFinding: MAX_EVIDENCE,
+      },
       interpretation:
         'Findings are review candidates, not established causes. Tool errors do not imply task failure. Completed runs are not user validation. Decisions are manual and persist across runs; repeated calls may reflect legitimate polling or pagination.',
     };
@@ -2773,6 +2821,7 @@ export class HarnessRecorder {
                 ...latest,
                 toolErrors: state.summary.toolErrors,
                 expectedExits: state.summary.expectedExits,
+                derivationDrops: state.summary.derivationDrops,
                 compactions: latest.compactions ?? recordedCompactions,
                 ...((latest.lastCompaction ?? recordedLastCompaction)
                   ? { lastCompaction: latest.lastCompaction ?? recordedLastCompaction }
@@ -2914,6 +2963,12 @@ function validSummary(value: RunSummary, directoryId: string): boolean {
   if (value.hostPid !== undefined && (!Number.isInteger(value.hostPid) || value.hostPid <= 0)) return false;
   if (value.mode !== undefined && typeof value.mode !== 'string') return false;
   if (value.host !== undefined && typeof value.host !== 'string') return false;
+  const derivationDrops = value.derivationDrops as { callObservations: number; findingSignals: number } | undefined;
+  if (
+    derivationDrops !== undefined &&
+    (!derivationDrops || !isCount(derivationDrops.callObservations) || !isCount(derivationDrops.findingSignals))
+  )
+    return false;
   const optionalTime = (item: string | undefined): boolean =>
     item === undefined || (typeof item === 'string' && Number.isFinite(Date.parse(item)));
   if (!optionalTime(value.updatedAt) || !optionalTime(value.reclaimedAt)) return false;
@@ -3087,7 +3142,13 @@ type ToolTally = Map<string, { calls: number; errors: Map<string, number> }>;
 
 function derivationState(summary: RunSummary, written: number): RunState {
   return {
-    summary: { ...summary, toolErrors: 0, expectedExits: 0, findings: [] },
+    summary: {
+      ...summary,
+      toolErrors: 0,
+      expectedExits: 0,
+      derivationDrops: { callObservations: 0, findingSignals: 0 },
+      findings: [],
+    },
     options: { captureContent: false, maxEventChars: 4000, maxEventsPerRun: 2000 },
     seq: 0,
     written,
@@ -3283,6 +3344,12 @@ function markdownReport(report: ReviewReport, directory: string): string {
       );
     lines.push('');
   }
+  lines.push('', '## Derivation coverage', '');
+  lines.push(
+    `${report.derivationCoverage.limitedRuns} run(s) reached an analysis limit; ${report.derivationCoverage.callObservationsNotTracked} tool-call observation(s) were omitted from repeated-call analysis; ${report.derivationCoverage.findingSignalsNotRecorded} finding signal(s) were not recorded; ${report.derivationCoverage.unknownRuns} run(s) have unknown limit history.`,
+    'A missing finding is not evidence that no issue occurred in limited or unknown runs.',
+    '',
+  );
   lines.push('', '## Plugin health', '');
   // 常驻任务失败是机器级事实：插件不在任何一轮里跑，也就没有 cwd 可过滤。
   lines.push(
@@ -3343,7 +3410,7 @@ function markdownReport(report: ReviewReport, directory: string): string {
   lines.push(...(report.warnings.length ? report.warnings.map((warning) => `- ${markdownText(warning)}`) : ['None.']));
   lines.push(
     '',
-    `Review limits: ${report.limits.runs} runs, ${report.limits.findingsPerRun} findings per run, ${report.limits.evidencePerFinding} evidence items per finding.`,
+    `Review limits: ${report.limits.runs} runs, ${report.limits.findingsPerRun} findings per run, ${report.limits.distinctCallKeysPerRun} distinct call keys per run, ${report.limits.evidencePerFinding} evidence items per finding.`,
     '',
   );
   return lines.join('\n');

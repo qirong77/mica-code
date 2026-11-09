@@ -11,7 +11,7 @@
 - 会话级状态都在快照里：`capabilitySelection` / `capabilitiesCustomized`、`pluginState`（插件自己的 JSON）、`pluginSessionSettings`（插件设置的会话覆盖，只存改过的键）、`notes`。`startNewSession` 清空，resume/fork 沿用，rewind 随 checkpoint 回滚。`turnTimings`（最近 50 轮的耗时分解）是例外：它记录这条会话跑过的轮次，`startNewSession` 与 fork 都清空，读盘时坏掉的条目丢掉而不是判整份会话损坏。
 - `snapshot.systemPrompt` 是「最近一次请求真正发出去的 system prompt」的存档（角色 + 项目说明 + skills 索引 + 环境信息 + 插件段落），只给界面看，绝不用于重建请求——下一轮仍然现场拼装。写在 `AgentRuntime` 解析 `systemPrompt` 的那一刻，随 checkpoint 落盘；旧会话没有这个字段，界面如实说「没有记录」而不重新拼一份冒充。
 - `subagentUsageHistory` 独立于主 `usageHistory`；fork 清空两类历史，只保留描述继承上下文的 `lastUsage`。
-- 请求用量可选保存 `providerId`、`durationMs`、`firstTokenMs`、`responseWaitMs` 和 `generationDurationMs`；新计时旧快照保持缺失，不能用旧口径推算。`responseWaitMs` 包含 provider 内重试，`generationDurationMs` 是成功尝试首末有效内容增量之间的时间；`provider` 仍表示协议，不能当作服务商 ID。
+- 请求用量可选保存 `providerId`、`durationMs`、`firstTokenMs`、`responseWaitMs` 与成对的 `generationDurationMs` / `generationOutputTokens`。`responseWaitMs` 包含 provider 内重试；生成计时只量成功尝试首末非空正文增量，分子是 API 输出量扣除明确记录的推理 tokens 与首 token（至少 32 个非推理输出 tokens、两个正文增量、500ms，无工具或其它输出）。缺少推理明细不假设为零；旧形态不再支持，迁移将未配分子的旧时长归档为 `legacyGenerationDurationMs`，统计不回退；账本旧行原样留存但不采纳。`provider` 仍表示协议，不能当作服务商 ID。
 - **不落盘 provider 的原始 usage**：聚合网关会在 `usage.attribution.items` 里逐条回传 token 归因（实测一份 1085 条、单条 247KB），没有任何消费方——界面与统计只读记录自身的 `inputTokens` / `cachedInputTokens` / `outputTokens` / `totalTokens`。早先的版本存过它，让一份会话的 22% 成了死数据（单文件最大 153MB，其中 74MB 是它）。provider adapter 现在只写 token 数字，存量由 `evolution` 的 `drop-raw-usage` 迁移删掉；不要为了「留着排查网关」再把它加回来。
 - compact 保留 `lastUsage` / `usageHistory` 供 Stats 对账；界面 ctx 优先读 `displayUsage`。
 - 无手动标题时取最后一条真实用户消息（最长 60 字符）；自动改名不得覆盖 `titleSource === 'manual'`。

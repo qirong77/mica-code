@@ -23,6 +23,7 @@ import { executeProviderToolCalls, interruptedToolOutput, throwIfQueryStopped } 
 import { sendWithEffortFallback } from './effortFallback.js';
 import { imageOmittedPlaceholder } from './imagePlaceholder.js';
 import { applyImageBudget, describeImageBudget } from './imageBudget.js';
+import { observeGenerationText, sampleGenerationTiming, type GenerationSample, type GenerationTiming } from './generationTiming.js';
 import type { ModelClientOptions } from './types.js';
 
 export type ChatCompletionsUsageRecord = AgentUsageRecord & {
@@ -202,8 +203,7 @@ export class ChatCompletionsClient extends BaseAgent<
       // 前几次失败的时间也算进 TTFT（注释里说要重新计时，之前只清零了 firstDeltaAt）。
       let attemptStartedAt = requestStartedAt;
       let firstDeltaAt = 0;
-      let lastDeltaAt = 0;
-      let deltaCount = 0;
+      let generationTiming: GenerationTiming = { textDeltaCount: 0, hasOtherOutput: false };
       let requestAttempts = 1;
       let requestEndSent = false;
       const finishRequest = (info: {
@@ -258,8 +258,7 @@ export class ChatCompletionsClient extends BaseAgent<
         async () => {
           attemptStartedAt = Date.now();
           firstDeltaAt = 0;
-          lastDeltaAt = 0;
-          deltaCount = 0;
+          generationTiming = { textDeltaCount: 0, hasOtherOutput: false };
           attemptHadOutput = false;
           attemptHadThinking = false;
           content = '';
@@ -302,18 +301,24 @@ export class ChatCompletionsClient extends BaseAgent<
               pendingUsage.push({ usage: chunk.usage, model: chunk.model });
             }
             const choices = Array.isArray(chunk.choices) ? chunk.choices : [];
+            if (choices.length > 1) generationTiming.hasOtherOutput = true;
             for (const choice of choices) {
+              if (typeof choice?.index === 'number' && choice.index !== 0) generationTiming.hasOtherOutput = true;
               if (typeof choice?.finish_reason === 'string' && choice.finish_reason) {
                 finishReason = choice.finish_reason;
+                if (finishReason === 'tool_calls' || finishReason === 'function_call') generationTiming.hasOtherOutput = true;
               }
               const delta = choice?.delta;
               if (!delta) continue;
+              if (
+                delta.tool_calls || delta.function_call || delta.refusal != null ||
+                ('audio' in delta && delta.audio != null)
+              ) generationTiming.hasOtherOutput = true;
               if (typeof delta.content === 'string' && delta.content) {
                 // 首字口径只认正文/思考增量：SDK 首块常常只有 role，记成「首字」会让
                 // firstTokenMs 退化成 TTFB。
                 if (!firstDeltaAt) firstDeltaAt = Date.now();
-                lastDeltaAt = Date.now();
-                deltaCount++;
+                observeGenerationText(generationTiming, delta.content);
                 attemptHadOutput = true;
                 const textDelta: string =
                   contentSeparator && !emittedContentSeparator ? `${contentSeparator}${delta.content}` : delta.content;
@@ -328,8 +333,6 @@ export class ChatCompletionsClient extends BaseAgent<
               const reasoning = readReasoningContent(delta);
               if (typeof reasoning === 'string' && reasoning) {
                 if (!firstDeltaAt) firstDeltaAt = Date.now();
-                lastDeltaAt = Date.now();
-                deltaCount++;
                 attemptHadOutput = true;
                 throwIfQueryStopped(options);
                 attemptHadThinking = true;
@@ -427,8 +430,9 @@ export class ChatCompletionsClient extends BaseAgent<
           ...(pendingUsage.length === 1 ? {
             durationMs, firstTokenMs,
             responseWaitMs: firstDeltaAt ? firstDeltaAt - requestStartedAt : undefined,
-            generationDurationMs: toolCallsMap.size === 0 && Number.isFinite(usage.completion_tokens) && usage.completion_tokens > 0 && deltaCount >= 2 && lastDeltaAt > firstDeltaAt
-              ? lastDeltaAt - firstDeltaAt : undefined,
+            generationSample: sampleGenerationTiming(
+              generationTiming, usage.completion_tokens, usage.completion_tokens_details?.reasoning_tokens,
+            ),
           } : {}),
         });
       }
@@ -525,7 +529,7 @@ export class ChatCompletionsClient extends BaseAgent<
       durationMs?: number;
       firstTokenMs?: number;
       responseWaitMs?: number;
-      generationDurationMs?: number;
+      generationSample?: GenerationSample;
     },
   ): void {
     const promptTokens = usage.prompt_tokens ?? 0;
@@ -550,7 +554,7 @@ export class ChatCompletionsClient extends BaseAgent<
       durationMs: metadata.durationMs,
       firstTokenMs: metadata.firstTokenMs,
       ...(metadata.responseWaitMs !== undefined ? { responseWaitMs: metadata.responseWaitMs } : {}),
-      ...(metadata.generationDurationMs !== undefined ? { generationDurationMs: metadata.generationDurationMs } : {}),
+      ...(metadata.generationSample ?? {}),
       promptTokens,
     };
 

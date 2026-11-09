@@ -33,6 +33,18 @@ export const IMAGE_MAX_LONG_EDGE = 1568;
 export const IMAGE_MIN_REPACK_BYTES = 512 * 1024;
 
 /**
+ * 接口对单边像素长度的硬上限。
+ *
+ * DeepSeek 的 `/responses` 实测：8192×4096 能过，8193×100 起直接 400，报错文案却是
+ * 「unsupported image … formats: webp, png, jpeg, and gif」——它按尺寸拒收，却说自己
+ * 不认格式。这条 400 不可重试，整个 turn 直接失败，所以要在本机拦住。
+ *
+ * PNG 走下面的缩放，到不了这里；JPEG/GIF/WebP 不重编码，超限只能报错让模型换手段
+ * （缩小、裁剪，或分段读）。
+ */
+export const IMAGE_MAX_API_LONG_EDGE = 8192;
+
+/**
  * 校验图片，并在需要时压小它。
  *
  * 策略（只对 PNG 生效，其它格式原样透传——重编码 JPEG/WebP 需要先自己写解码器，
@@ -41,6 +53,7 @@ export const IMAGE_MIN_REPACK_BYTES = 512 * 1024;
  * - 尺寸超出长边上限：面积平均缩到上限，再无损重编码；
  * - 只是字节偏大：只重打包，像素一个不差；
  * - 任何一步失败：退回原图，压缩不能挡住「读这张图」这件事。
+ * - 最终长边仍超过接口硬上限（8192）：抛错，而不是让请求在服务端 400。
  */
 export async function prepareImageForApi(imageBuffer: Buffer): Promise<ProcessedImage> {
   if (imageBuffer.length === 0) throw new Error('image file is empty');
@@ -58,16 +71,35 @@ export async function prepareImageForApi(imageBuffer: Buffer): Promise<Processed
     resized: false,
   };
 
-  if (mediaType !== 'image/png' || !isPng(imageBuffer)) return original;
+  if (mediaType !== 'image/png' || !isPng(imageBuffer)) return assertWithinApiLimit(original);
   const longestEdge = Math.max(dimensions.width ?? 0, dimensions.height ?? 0);
   const overLimit = longestEdge > IMAGE_MAX_LONG_EDGE;
-  if (!overLimit && imageBuffer.length <= IMAGE_MIN_REPACK_BYTES) return original;
+  if (!overLimit && imageBuffer.length <= IMAGE_MIN_REPACK_BYTES) return assertWithinApiLimit(original);
 
+  let processed = original;
   try {
-    return squeezePng(imageBuffer) ?? original;
+    processed = squeezePng(imageBuffer) ?? original;
   } catch {
-    return original;
+    processed = original;
   }
+  return assertWithinApiLimit(processed);
+}
+
+/**
+ * 发送前的最后一道尺寸闸：超过接口硬上限的图发出去只会换来一条 400，
+ * 报错文案还说自己不认格式。在这里抛，模型拿到的是一条能照做的提示。
+ */
+function assertWithinApiLimit(image: ProcessedImage): ProcessedImage {
+  const longestEdge = Math.max(image.width ?? 0, image.height ?? 0);
+  if (longestEdge <= IMAGE_MAX_API_LONG_EDGE) return image;
+  const reason =
+    image.mediaType === 'image/png'
+      ? 'PNG 的无损缩放没能把它缩到这个尺寸以内'
+      : `${image.mediaType} 在本机不重编码，会原样上行`;
+  throw new Error(
+    `图片尺寸 ${image.width}x${image.height}，长边超过接口上限 ${IMAGE_MAX_API_LONG_EDGE}px（${reason}）。` +
+      '请先缩小或裁剪再读，例如 `sips -Z 1568 <原图> --out <新路径>`；原图信息需要细分时按区域分段截图。',
+  );
 }
 
 function squeezePng(buffer: Buffer): ProcessedImage | null {

@@ -12,6 +12,7 @@ export type UsageLedgerEntry = {
   firstTokenMs?: number;
   responseWaitMs?: number;
   generationDurationMs?: number;
+  generationOutputTokens?: number;
   pluginId: string;
   /** 这笔请求是干什么的（插件自己给的 purpose）。 */
   purpose: string | null;
@@ -63,6 +64,11 @@ export function parseUsageLedger(content: string): UsageLedgerEntry[] {
     const firstTokenMs = timing(parsed.firstTokenMs);
     const responseWaitMs = timing(parsed.responseWaitMs);
     const generationDurationMs = timing(parsed.generationDurationMs);
+    const generationOutputTokens = parsed.generationOutputTokens;
+    const hasGeneration = generationDurationMs !== undefined && generationDurationMs > 0 &&
+      typeof generationOutputTokens === 'number' && Number.isInteger(generationOutputTokens) &&
+      generationOutputTokens > 0 && typeof parsed.outputTokens === 'number' &&
+      Number.isInteger(parsed.outputTokens) && generationOutputTokens < parsed.outputTokens;
     entries.push({
       id,
       occurredAt,
@@ -71,7 +77,7 @@ export function parseUsageLedger(content: string): UsageLedgerEntry[] {
       ...(durationMs !== undefined ? { durationMs } : {}),
       ...(firstTokenMs !== undefined ? { firstTokenMs } : {}),
       ...(responseWaitMs !== undefined ? { responseWaitMs } : {}),
-      ...(generationDurationMs !== undefined && generationDurationMs > 0 ? { generationDurationMs } : {}),
+      ...(hasGeneration ? { generationDurationMs, generationOutputTokens } : {}),
       pluginId,
       purpose: text(parsed.purpose),
       cwd: text(parsed.cwd),

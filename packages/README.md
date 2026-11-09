@@ -11,7 +11,7 @@
 `mica-plugin` 的 `PluginTurnPrepareEvent` 描述持久 headless 会话的异步轮前维护钩子：
 在 lease 内、用户输入落盘前读取前后模型配置并可压缩历史。
 
-- `mica-agent`：agent 抽象、模型 provider adapter、prompt 构建；请求用量可附服务商 ID、总耗时与首字等待。`IAgent.getSnapshot({ includeConversation: false })` 可省去展示消息投影。
+- `mica-agent`：agent 抽象、模型 provider adapter、prompt 构建；请求用量可附服务商 ID、总耗时与首字等待。生成速率另用成对的 `generationOutputTokens`（扣推理与首 token）/ `generationDurationMs`（正文首末增量），只采纳明细可归因且足够长的正文流，仍为客户端估算。`IAgent.getSnapshot({ includeConversation: false })` 可省去展示消息投影。
 - `mica-tools`：内置工具、支持文本/图片的工具结果、工具 registry、MCP 工具接入；`MicaTool.canOverlap(input)` 与 `micaTools.isOverlappable(name, input)` 为 provider 提供按调用输入判断的重叠调度能力。
 - `mica-mcp`：MCP 配置读取、server 连接管理和工具注册。
 - `mica-ui`：Ink 终端 UI 组件和 UI 状态。

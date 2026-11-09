@@ -22,8 +22,10 @@ export type AgentUsageRecord = {
   firstTokenMs?: number;
   /** Request start to the final successful attempt’s first text or reasoning delta, including retries. */
   responseWaitMs?: number;
-  /** First to last nonempty text or reasoning delta, when output usage is attributable. */
+  /** First to last nonempty body text delta, paired with generationOutputTokens. */
   generationDurationMs?: number;
+  /** Estimated API body tokens minus the first token: outputTokens - reasoning_tokens - 1. */
+  generationOutputTokens?: number;
 };
 
 export type AgentCallbacks = {

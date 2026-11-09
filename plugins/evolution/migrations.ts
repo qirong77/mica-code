@@ -230,9 +230,35 @@ export const harnessReviewAssessmentV1: Migration = {
   },
 };
 
+export const generationTimingV2: Migration = {
+  id: 'generation-timing-v2',
+  description: '将无法与正文 token 对应的旧生成计时归档，保留用量与响应等待',
+  apply(document) {
+    const snapshot = document.snapshot;
+    if (!isRecord(snapshot)) return 0;
+    let changed = 0;
+    const archive = (record: unknown) => {
+      if (!isRecord(record) || !('generationDurationMs' in record) || 'generationOutputTokens' in record) return;
+      if ('legacyGenerationDurationMs' in record) return;
+      record.legacyGenerationDurationMs = record.generationDurationMs;
+      delete record.generationDurationMs;
+      changed += 1;
+    };
+    if (Array.isArray(snapshot.usageHistory)) snapshot.usageHistory.forEach(archive);
+    if (Array.isArray(snapshot.subagentUsageHistory)) {
+      for (const record of snapshot.subagentUsageHistory) {
+        if (isRecord(record) && Array.isArray(record.requests)) record.requests.forEach(archive);
+      }
+    }
+    archive(snapshot.lastUsage);
+    return changed;
+  },
+};
+
 export const MIGRATIONS: Migration[] = [
   usageOccurredAt,
   sessionCompactRename,
   dropRawUsage,
   usageSourceOwner,
+  generationTimingV2,
 ];

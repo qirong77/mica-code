@@ -15,7 +15,7 @@ import {
 // 5：来源行带上 `pluginId`（统计页按插件归组的父级）。版本不提会让旧缓存行一直缺这个
 // 字段，界面上子代理就只能是一串没有归属的类型名。
 // v10：丢弃旧 reader 可能把 A 版投影记到 B 版签名下的缓存。
-const INDEX_VERSION = 10
+const INDEX_VERSION = 11
 /** 每批解析多少个会话文件就让出一次事件循环。 */
 const BATCH_FILES = 16
 /** Limit concurrent filesystem requests so a large directory cannot flood the thread pool. */

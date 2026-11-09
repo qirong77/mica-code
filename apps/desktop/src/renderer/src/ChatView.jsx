@@ -2697,6 +2697,7 @@ function ChatContextMenu({ menu, onAction, onClose, commitRunning = false, plugi
 }
 
 function SelectPalette({
+  kind,
   title,
   options,
   activeIndex,
@@ -2716,7 +2717,7 @@ function SelectPalette({
       meta="↑↓ 选择 · Enter 确认 · Esc 关闭"
       closable={false}
       onClose={onClose}
-      className="chat-select-palette"
+      className={`chat-select-palette${kind === 'role' ? ' chat-role-palette' : ''}`}
     >
       {loading && <div className="chat-select-empty">正在加载…</div>}
       {!loading && error && <div className="chat-select-empty chat-select-error">{error}</div>}
@@ -7634,6 +7635,7 @@ export function ChatView({
           )}
           {picker && (
             <SelectPalette
+              kind={picker.kind}
               title={picker.title}
               options={picker.options || []}
               activeIndex={Math.min(pickerIndex, Math.max(0, (picker.options?.length || 1) - 1))}

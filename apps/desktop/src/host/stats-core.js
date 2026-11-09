@@ -163,6 +163,13 @@ export function normalizeUsageEvent(usage, fallbackTime, fallbackModel) {
       usage.generationDurationMs > 0
         ? usage.generationDurationMs
         : null,
+    generationOutputTokens:
+      Number.isInteger(usage.generationOutputTokens) &&
+      usage.generationOutputTokens > 0 &&
+      Number.isInteger(usage.outputTokens) &&
+      usage.generationOutputTokens < usage.outputTokens
+        ? usage.generationOutputTokens
+        : null,
     hasOutputTokens:
       typeof usage.outputTokens === 'number' &&
       Number.isFinite(usage.outputTokens) &&
@@ -324,8 +331,8 @@ function addSpeedSample(models, usage) {
     speed.responseWaitMs = (speed.responseWaitMs || 0) + usage.responseWaitMs
     speed.responseWaitSamples = (speed.responseWaitSamples || 0) + 1
   }
-  if (usage.generationDurationMs != null && usage.hasOutputTokens) {
-    speed.generationOutputTokens = (speed.generationOutputTokens || 0) + usage.outputTokens
+  if (usage.generationDurationMs != null && usage.generationOutputTokens != null) {
+    speed.generationOutputTokens = (speed.generationOutputTokens || 0) + usage.generationOutputTokens
     speed.generationDurationMs = (speed.generationDurationMs || 0) + usage.generationDurationMs
     speed.generationSamples = (speed.generationSamples || 0) + 1
   }
@@ -362,7 +369,7 @@ export function summarizeStatsDays(usageEvents) {
     if (
       usage.hasOccurredAt &&
       (usage.responseWaitMs != null ||
-        (usage.generationDurationMs != null && usage.hasOutputTokens))
+        (usage.generationDurationMs != null && usage.generationOutputTokens != null))
     ) {
       const minute = Math.floor(usage.occurredAtMs / 60000) * 60000
       let bucket = row.speedMinutes.get(minute)
@@ -482,6 +489,7 @@ export function summarizeLedgerEntries(entries) {
             firstTokenMs: entry.firstTokenMs,
             responseWaitMs: entry.responseWaitMs,
             generationDurationMs: entry.generationDurationMs,
+            generationOutputTokens: entry.generationOutputTokens,
             inputTokens: entry.inputTokens,
             cachedInputTokens: entry.cachedInputTokens,
             outputTokens: entry.outputTokens
