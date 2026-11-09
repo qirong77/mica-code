@@ -103,6 +103,7 @@ const SessionDetailModal = lazyView(
 )
 import { applyTurnTimingEvent, createTurnTimingState, summarizeTurnTiming } from './turn-timing'
 import { CodeView } from './CodeView'
+import { DigestNotice } from './DigestNotice'
 import { newlyAnsweredBtwEntries } from './btw-thread'
 import { canCollapseMessage, measureChatCollapse } from './chat-collapse'
 import { useChatTooltip } from './chat-hover-tooltip'
@@ -798,21 +799,6 @@ function AskDock({ ask, submitting, onSubmit, onCancel }) {
     >
       {card}
     </div>
-  )
-}
-
-function DigestNotice({ message, onOpenFile }) {
-  return (
-    <section className="chat-digest-card" aria-label="长回复摘要">
-      <div className="chat-digest-head">
-        <span className="chat-digest-mark" aria-hidden="true">✦</span>
-        <span className="chat-digest-title">长回复摘要</span>
-        <span className="chat-digest-meta">自动整理</span>
-      </div>
-      <div className="chat-digest-body">
-        <Markdown text={message.text || ''} onOpenFile={onOpenFile} />
-      </div>
-    </section>
   )
 }
 
@@ -2895,7 +2881,11 @@ function MessageRowView({
   }
   if (message.kind === 'notice') {
     if (message.variant === 'digest') {
-      return <DigestNotice message={message} onOpenFile={onOpenFile} />
+      return (
+        <DigestNotice>
+          <Markdown text={message.text || ''} onOpenFile={onOpenFile} />
+        </DigestNotice>
+      )
     }
     const title =
       message.command ||

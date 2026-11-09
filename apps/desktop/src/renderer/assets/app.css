@@ -1411,62 +1411,120 @@ html[data-appearance='light'] .chat-modal-arco-wrap {
   white-space: pre-wrap;
 }
 
-/* 长回复摘要是给用户阅读的结果，不是 compact 的内部状态提示：沿用 ask 的卡片
-   轮廓与专属识别色，但把正文交给对话区 Markdown 渲染器。 */
-.chat-digest-card {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
+.chat-digest-notice {
+  --color-bg-2: var(--color-canvas);
+  --color-fill-1: var(--color-canvas);
+  min-width: 0;
   margin-top: 12px;
-  padding: 12px 14px 14px;
-  border: 1px solid color-mix(in srgb, var(--color-ask) 38%, var(--color-line-soft));
-  border-radius: 10px;
-  background:
-    linear-gradient(135deg, color-mix(in srgb, var(--color-ask) 12%, transparent), transparent 52%),
-    var(--color-panel);
-  box-shadow: 0 8px 24px color-mix(in srgb, var(--color-ask) 12%, transparent);
+  font-family: var(--chat-font);
+  font-size: var(--chat-text-size);
+  line-height: 1.65;
 }
 
-.chat-digest-head {
+.chat-digest-notice .collapsible-card,
+.chat-digest-notice .arco-collapse-item-header {
+  font-size: inherit;
+  line-height: inherit;
+}
+
+.chat-digest-notice .arco-collapse-item-header,
+.chat-digest-notice .arco-collapse-item-content,
+.chat-digest-notice .arco-collapse-item-content-box {
+  padding: 0;
+}
+
+.chat-digest-notice .arco-collapse-item-header-title {
+  min-width: 0;
+  width: 100%;
+  margin: 0;
+}
+
+.chat-digest-notice .collapsible-summary {
   display: flex;
   align-items: center;
-  gap: 8px;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 13px;
 }
 
-.chat-digest-mark {
-  display: grid;
-  width: 20px;
-  height: 20px;
+.chat-digest-notice .table-panel-title {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.chat-digest-notice .table-panel-title strong {
+  font-weight: 500;
+}
+
+.chat-digest-notice .collapsible-trailing {
+  display: flex;
   flex: none;
-  place-items: center;
-  border-radius: 7px;
-  background: var(--color-ask);
-  color: var(--color-ask-contrast);
-  font-size: 13px;
-  font-weight: 800;
+  align-items: center;
+  gap: 10px;
 }
 
-.chat-digest-title {
-  color: var(--color-fg-max);
-  font-size: 13px;
-  font-weight: 700;
+.chat-digest-notice .collapsible-chevron {
+  flex: none;
+  color: var(--color-fg-dim);
+  transition: transform 140ms ease;
+}
+
+.chat-digest-notice .arco-collapse-item-active .collapsible-chevron {
+  transform: rotate(90deg);
 }
 
 .chat-digest-meta {
-  color: var(--color-fg-muted);
-  font-size: 10.5px;
+  color: var(--color-fg-dim);
+  font-size: calc(var(--chat-text-size) - 2px);
+  font-weight: 400;
+  white-space: nowrap;
 }
 
-.chat-digest-body {
-  padding: 10px 12px;
-  border: 1px solid color-mix(in srgb, var(--color-ask) 16%, var(--color-line-soft));
-  border-radius: 7px;
-  background: color-mix(in srgb, var(--color-canvas) 72%, transparent);
+.chat-digest-notice .collapsible-body {
+  padding: 8px 13px;
 }
 
-.chat-digest-body .chat-markdown {
-  font-size: 12.5px;
-  line-height: 1.5;
+.chat-digest-notice .chat-markdown {
+  font-size: var(--chat-text-size);
+  line-height: 1.65;
+}
+
+.chat-digest-notice .chat-markdown ul {
+  display: grid;
+  gap: 6px;
+  margin-block: 0;
+  padding-left: 0;
+  list-style: none;
+}
+
+.chat-digest-notice .chat-markdown ul > li {
+  position: relative;
+  margin: 0;
+  padding-left: 16px;
+}
+
+.chat-digest-notice .chat-markdown ul > li::before {
+  position: absolute;
+  left: 0;
+  width: 10px;
+  color: var(--color-fg-dim);
+  content: '\2022';
+  text-align: center;
+}
+
+.chat-digest-notice .chat-markdown li > p {
+  margin-bottom: 0;
+}
+
+.chat-digest-notice .chat-markdown code:not(pre code) {
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-digest-notice .collapsible-chevron {
+    transition: none;
+  }
 }
 
 .chat-notice-error .chat-notice-title {

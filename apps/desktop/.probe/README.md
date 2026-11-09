@@ -11,6 +11,9 @@
 | `config-ui/`     | 会话设置弹窗的「插件」一节；`config-ui-shim.tsx` 替身 `@mica-config-ui/web`        |
 | `global-search/` | 全局搜索启动器的输入框、结果列表与焦点样式；右下 `#probe-out` 打出计算样式         |
 | `reply-digest/`  | 长回复摘要插件的产出：真实对话行 + `digest` notice 卡，右侧按 `digest.ts` 实时判定 |
+| `stats-design/` | Stats 图表新版：用量全景 / 来源环形分析 / 项目矩形地图，共享示例数据与主题 |
+| `digest-design/` | 长回复摘要的三版 Arco 容器对照，置于模拟对话流中 |
+| `stats-export/` | 将对照探针导出为不依赖服务的单文件 HTML |
 
 ## 运行
 
@@ -19,6 +22,8 @@ cd apps/desktop
 npx vite --config .probe/global-search/vite.config.mjs   # http://127.0.0.1:5231
 npx vite --config .probe/config-ui/vite.config.mjs       # http://127.0.0.1:5199
 npx vite --config .probe/reply-digest/vite.config.mjs    # http://127.0.0.1:5232
+npx vite --config .probe/stats-design/vite.config.mjs    # http://127.0.0.1:5233
+npx vite --config .probe/digest-design/vite.config.mjs   # http://127.0.0.1:5234
 ```
 
 `vite.config.mjs` 里已固定 `root`，所以在哪个目录执行都能跑；端口按上面两行分配，新增探针另取一个。

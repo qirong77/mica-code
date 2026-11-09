@@ -3,12 +3,13 @@ import { readFileSync } from 'node:fs'
 
 const stats = readFileSync(new URL('./StatsView.jsx', import.meta.url), 'utf8')
 const detail = readFileSync(new URL('./SessionDetailModal.jsx', import.meta.url), 'utf8')
-const actions = (source) => Array.from(source.matchAll(/<Button\b[\s\S]*?<\/Button>/g), ([action]) => action)
+const actions = (source) =>
+  Array.from(source.matchAll(/<Button\b[\s\S]*?<\/Button>/g), ([action]) => action)
 
 describe('stats controls', () => {
   it('uses shared compact actions without a second button skin', () => {
     const buttons = [...actions(stats), ...actions(detail)]
-    expect(buttons).toHaveLength(5)
+    expect(buttons).toHaveLength(6)
     for (const button of buttons) {
       expect(button).toContain('size="compact"')
       const className = button.match(/className="([^"]+)"/)?.[1] || ''
@@ -26,7 +27,7 @@ describe('stats controls', () => {
   })
 
   it('only embeds shared layouts, not individual stats controls', () => {
-    expect(stats.match(/className="mica-config-ui is-embed"/g)).toHaveLength(2)
+    expect(stats.match(/className="mica-config-ui is-embed"/g)).toHaveLength(3)
     expect(stats).not.toMatch(/className="mica-config-ui is-embed">\s*<(?:Segmented|SelectMenu)/)
     expect(detail).not.toMatch(/className="mica-config-ui is-embed">\s*<(?:Segmented|SelectMenu)/)
     expect(detail).toContain('className="mica-config-ui is-embed session-detail-embed"')

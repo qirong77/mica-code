@@ -4,12 +4,14 @@
 // 1. 样式：对话行、Markdown、摘要卡都用 app.css 的真实类名；
 // 2. 判定：用插件自己的 digest.ts（shouldDigest / digestInput / cleanSummary），
 //    不在这里抄一份阈值判断；
-// 3. 结构：摘要卡就是 ChatView 的 DigestNotice 输出（section.chat-digest-card）。
+// 3. 结构：直接复用正式 DigestNotice 容器，不复制摘要卡。
 //    只有摘要正文是固定样例——真跑起来时它由摘要模型生成。
 import { useEffect, useMemo, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import { ArcoProvider } from '@mica-config-ui/web'
+import { DigestNotice } from '../../src/renderer/src/DigestNotice.jsx'
 import '../../src/renderer/assets/app.css'
 import './probe.css'
 import {
@@ -211,31 +213,10 @@ function ChatRow({ role, text }) {
   )
 }
 
-/** ChatView 里 DigestNotice 的输出，一个类名都不改。 */
-function DigestCard({ text }) {
-  return (
-    <section className="chat-digest-card" aria-label="长回复摘要">
-      <div className="chat-digest-head">
-        <span className="chat-digest-mark" aria-hidden="true">
-          ✦
-        </span>
-        <span className="chat-digest-title">长回复摘要</span>
-        <span className="chat-digest-meta">自动整理</span>
-      </div>
-      <div className="chat-digest-body">
-        <Markdown text={text} />
-      </div>
-    </section>
-  )
-}
-
 function Side({ reply, onReply, summaryLength, fired, chars, lines, sent }) {
   return (
     <aside className="probe-pane probe-side">
       <div className="probe-side-head">
-        <span className="chat-digest-mark" aria-hidden="true">
-          ✦
-        </span>
         Long Reply Digest
         <span className="probe-side-id">reply-digest</span>
         <span className="probe-side-version">v1.0.0</span>
@@ -370,7 +351,11 @@ function Probe() {
         <div className="chat-transcript">
           <ChatRow role="user" text={USER_MESSAGE} />
           <ChatRow role="assistant" text={reply} />
-          {fired && <DigestCard text={summary} />}
+          {fired && (
+            <DigestNotice>
+              <Markdown text={summary} />
+            </DigestNotice>
+          )}
         </div>
         {!fired && (
           <div className="probe-absent">
@@ -392,4 +377,8 @@ function Probe() {
   )
 }
 
-createRoot(document.getElementById('root')).render(<Probe />)
+createRoot(document.getElementById('root')).render(
+  <ArcoProvider>
+    <Probe />
+  </ArcoProvider>
+)

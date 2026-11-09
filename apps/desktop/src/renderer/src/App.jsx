@@ -2884,11 +2884,11 @@ export default function App() {
                       size={14}
                       className={flashSeq ? 'control-icon-flash' : undefined}
                     />
-                    {badge && (
+                    {badge ? (
                       <span className="pointer-events-none absolute -bottom-0.5 -right-0.5 text-[8px] leading-none text-fg-muted">
                         {badge}
                       </span>
-                    )}
+                    ) : null}
                   </ArcoAction>
                 )
               })}
@@ -2921,11 +2921,11 @@ export default function App() {
                           .join(' ') || undefined
                       }
                     />
-                    {badge && (
+                    {badge ? (
                       <span className="pointer-events-none absolute -bottom-0.5 -right-0.5 text-[8px] leading-none text-fg-muted">
                         {badge}
                       </span>
-                    )}
+                    ) : null}
                   </ArcoAction>
                 )
               })}

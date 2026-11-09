@@ -2,6 +2,7 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import { fileURLToPath } from 'node:url'
+import { resolve } from 'node:path'
 
 const root = fileURLToPath(new URL('../../../..', import.meta.url))
 
@@ -13,6 +14,13 @@ const root = fileURLToPath(new URL('../../../..', import.meta.url))
 export default defineConfig({
   root: fileURLToPath(new URL('.', import.meta.url)),
   plugins: [react(), tailwindcss()],
-  resolve: { alias: [{ find: /^(apps|plugins)\//, replacement: `${root}/$1/` }] },
+  resolve: {
+    dedupe: ['react', 'react-dom'],
+    alias: [
+      { find: /^(apps|plugins)\//, replacement: `${root}/$1/` },
+      { find: '@packages', replacement: resolve(root, 'packages') },
+      { find: '@mica-config-ui/web', replacement: resolve(root, 'packages/mica-config-ui/web/index.tsx') }
+    ]
+  },
   server: { port: 5232, fs: { allow: [root] } }
 })

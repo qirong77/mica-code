@@ -1,21 +1,18 @@
-import { Fragment, useEffect, useMemo, useState } from 'react'
-import { Button, DataTable, Segmented, SelectMenu, Tag } from '@mica-config-ui/web'
+import { useEffect, useMemo, useState } from 'react'
+import { Button, DataTable, Empty, Segmented, SelectMenu, Tag } from '@mica-config-ui/web'
+import Alert from '@arco-design/web-react/es/Alert'
 import { IconX } from '@tabler/icons-react'
 import { CalendarHeatmap } from './charts'
 import { SpeedBars } from './SpeedBars'
 import { OverviewVisuals } from './OverviewVisuals'
+import { StatsPanel } from './StatsPanel'
+import { buildOverview } from './overview'
 import { SessionDetailModal } from './SessionDetailModal'
-import {
-  bucketByDay,
-  isDayRange,
-  modelSpeed,
-  scopeSession
-} from './scope'
+import { bucketByDay, isDayRange, modelSpeed, scopeSession } from './scope'
 import {
   USAGE_KIND_COLORS as SOURCE_COLORS,
   USAGE_KIND_ORDER as SOURCE_ORDER
 } from './usage-series'
-import { USAGE_SOURCE_LABELS } from '@packages/mica-web-shared/usage-source.js'
 import { usePluginsDetails } from '../plugins-details'
 import { createReadQueue } from '../read-queue'
 import {
@@ -36,13 +33,12 @@ import {
 } from './geometry'
 
 const RANGE_OPTIONS = [
-  ['today', 'Today'],
-  ['7d', '7d'],
-  ['30d', '30d'],
-  ['90d', '90d'],
-  ['all', 'All']
+  ['today', '今天'],
+  ['7d', '近 7 天'],
+  ['30d', '近 30 天'],
+  ['90d', '近 90 天'],
+  ['all', '全部']
 ]
-const PROJECT_BATCH = 7
 // 按会话的明细表一页放多少行。它会长到几百条；来源表是两层树（插件 → 子项），
 // 分页会把父行和它的子项劈到两页上，所以那张表不分页。
 const SESSION_PAGE_SIZE = 10
@@ -71,8 +67,15 @@ const CALENDAR_RAMP = [
   'var(--color-fg-strong)'
 ]
 
-const CARD_CLASS = 'rounded-[5px] border border-line bg-panel'
-const OVERLINE_CLASS = 'text-[11px] font-semibold uppercase tracking-[0.12em] text-fg-dim'
+const OVERLINE_CLASS = 'text-[13px] font-medium text-fg-strong'
+const REPORT_OPTIONS = [
+  { value: 'sessions', label: '会话明细' },
+  { value: 'sources', label: '来源明细' },
+  { value: 'models', label: '模型明细' },
+  { value: 'projects', label: '项目明细' },
+  { value: 'speed', label: '模型速度' },
+  { value: 'activity', label: '活跃日历' }
+]
 
 function basename(cwd) {
   if (!cwd) return '~'
@@ -102,117 +105,27 @@ function dayShort(day) {
   return `${Number(d[1])}/${Number(d[2])}`
 }
 
-function KpiTile({ label, value, title, className = '' }) {
-  return (
-    <div className={`flex min-w-0 flex-col px-4 py-3.5 ${className}`} title={title}>
-      <div className={OVERLINE_CLASS}>{label}</div>
-      <div className="mt-1.5 truncate font-mono text-base font-medium leading-tight tracking-tight text-fg-strong tabular-nums">
-        {value}
-      </div>
-    </div>
-  )
-}
-
-/** 主卡：8 格 KPI + 贡献日历活跃图 */
-function OverviewCard({ snap, range, onSelectDay, calendar }) {
-  const sessions = snap.sessions
-  const scoped = useMemo(
-    () => sessions.map((session) => scopeSession(session, range)).filter(Boolean),
+function ActivityReport({ sessions, range, onSelectDay, calendar }) {
+  const busiest = useMemo(
+    () =>
+      [
+        ...bucketByDay(
+          sessions.map((session) => scopeSession(session, range)).filter(Boolean)
+        ).values()
+      ].sort((a, b) => b.sessions - a.sessions || b.tokens - a.tokens)[0],
     [sessions, range]
   )
-
-  const allDays = useMemo(() => {
-    const days = new Set()
-    for (const s of sessions) for (const day of s.days || []) days.add(day.day)
-    return [...days].sort()
-  }, [sessions])
-
-  const totals = useMemo(() => {
-    let activeSessions = 0
-    let requests = 0
-    let inputTokens = 0
-    let outputTokens = 0
-    let cachedInputTokens = 0
-    let uncachedInputTokens = 0
-    let processedTokens = 0
-    for (const s of scoped) {
-      const sessionRequests = Number(s.requests) || 0
-      // 账本里的无会话用量不是一条会话，别把活跃会话数算多。
-      if (sessionRequests > 0 && !s.ledger) activeSessions++
-      requests += sessionRequests
-      inputTokens += Number(s.inputTokens) || 0
-      outputTokens += Number(s.outputTokens) || 0
-      cachedInputTokens += Number(s.cachedInputTokens) || 0
-      uncachedInputTokens += Number(s.uncachedInputTokens) || 0
-      processedTokens += Number(s.totalTokens) || 0
-    }
-    return {
-      activeSessions,
-      requests,
-      inputTokens,
-      outputTokens,
-      cachedInputTokens,
-      uncachedInputTokens,
-      processedTokens,
-      cacheRate: inputTokens > 0 ? cachedInputTokens / inputTokens : 0
-    }
-  }, [scoped])
-
-  const sourceSplit = useMemo(() => {
-    const byKind = new Map()
-    let all = 0
-    for (const s of scoped) {
-      for (const row of s.sourceUsage || []) {
-        const acc = byKind.get(row.kind) || { kind: row.kind, tokens: 0, requests: 0 }
-        acc.tokens += Number(row.totalTokens) || 0
-        acc.requests += Number(row.requests) || 0
-        byKind.set(row.kind, acc)
-        all += Number(row.totalTokens) || 0
-      }
-    }
-    return SOURCE_ORDER.filter((kind) => byKind.has(kind)).map((kind) => ({
-      ...byKind.get(kind),
-      share: all > 0 ? byKind.get(kind).tokens / all : 0
-    }))
-  }, [scoped])
-
-  const topModel = useMemo(() => {
-    const byModel = new Map()
-    for (const s of scoped) {
-      for (const usage of s.modelUsage || []) {
-        const row = byModel.get(usage.model) || { model: usage.model, tokens: 0, requests: 0 }
-        row.tokens += usage.totalTokens
-        row.requests += usage.requests
-        byModel.set(usage.model, row)
-      }
-    }
-    let best = null
-    for (const row of byModel.values()) {
-      if (!best || row.tokens > best.tokens) best = row
-    }
-    return best
-  }, [scoped])
-
-  const mostActive = useMemo(() => {
-    const byDay = bucketByDay(scoped)
-    let best = null
-    for (const row of byDay.values()) {
-      if (!best || row.sessions > best.sessions) best = row
-    }
-    return best || null
-  }, [scoped])
-
-  const streaks = useMemo(() => {
-    const today = localDayKey(Date.now())
-    return {
+  const allDays = useMemo(
+    () => [...new Set(sessions.flatMap((s) => (s.days || []).map((d) => d.day)))].sort(),
+    [sessions]
+  )
+  const streaks = useMemo(
+    () => ({
       longest: longestStreak(allDays),
-      current: currentStreak(allDays, today)
-    }
-  }, [allDays])
-
-  const cellBorder = (i) =>
-    `border-line ${(i + 1) % 4 === 0 ? '' : 'border-r'} ${i < 4 ? 'border-b' : ''}`
-
+      current: currentStreak(allDays, localDayKey(Date.now()))
+    }),
+    [allDays]
+  )
   const byDayMap = useMemo(() => bucketByDay(sessions), [sessions])
   const calendarWeeks = calendar.calendarWeeks
   const thresholds = useMemo(
@@ -242,105 +155,15 @@ function OverviewCard({ snap, range, onSelectDay, calendar }) {
   }
 
   return (
-    <section className={CARD_CLASS}>
-      <div className="grid grid-cols-4">
-        <KpiTile
-          label="Active sessions"
-          className={cellBorder(0)}
-          title={`${totals.activeSessions} sessions with model usage · ${scoped.length} total sessions`}
-          value={totals.activeSessions.toLocaleString()}
-        />
-        <KpiTile
-          label="Model requests"
-          className={cellBorder(1)}
-          title={`${totals.requests.toLocaleString()} requests (主对话 + 委派 + 插件 + 内核后台)`}
-          value={totals.requests.toLocaleString()}
-        />
-        <KpiTile
-          label="Processed tokens"
-          className={cellBorder(2)}
-          title={totals.processedTokens.toLocaleString()}
-          value={tokensShort(totals.processedTokens)}
-        />
-        <KpiTile
-          label="Cache hit rate"
-          className={cellBorder(3)}
-          title={`${totals.cachedInputTokens.toLocaleString()} / ${totals.inputTokens.toLocaleString()} input tokens`}
-          value={totals.inputTokens > 0 ? `${(totals.cacheRate * 100).toFixed(1)}%` : '—'}
-        />
-        <KpiTile
-          label="Cached input"
-          className={cellBorder(4)}
-          title={`${totals.cachedInputTokens.toLocaleString()} tokens`}
-          value={tokensShort(totals.cachedInputTokens)}
-        />
-        <KpiTile
-          label="Uncached input"
-          className={cellBorder(5)}
-          title={totals.uncachedInputTokens.toLocaleString()}
-          value={tokensShort(totals.uncachedInputTokens)}
-        />
-        <KpiTile
-          label="Output tokens"
-          className={cellBorder(6)}
-          title={totals.outputTokens.toLocaleString()}
-          value={tokensShort(totals.outputTokens)}
-        />
-        <KpiTile
-          label="Top model"
-          className={cellBorder(7)}
-          title={topModel?.model}
-          value={topModel?.model || '—'}
-        />
-      </div>
-      <OverviewVisuals scoped={scoped} totals={totals} />
-      {sourceSplit.length > 1 && (
-        <>
-          <div aria-hidden className="h-px bg-panel-hi" />
-          <div className="px-4 py-3">
-            <div className="flex items-baseline justify-between gap-2">
-              <h2 className={OVERLINE_CLASS}>Usage by source</h2>
-              <span className="text-[11px] text-fg-faint">
-                {totals.processedTokens.toLocaleString()} tokens
-              </span>
-            </div>
-            <div className="mt-2 flex h-[6px] overflow-hidden rounded-full bg-panel-hi">
-              {sourceSplit.map((row) => (
-                <div
-                  key={row.kind}
-                  style={{ width: `${row.share * 100}%`, background: SOURCE_COLORS[row.kind] }}
-                  title={`${USAGE_SOURCE_LABELS[row.kind]} · ${(row.share * 100).toFixed(1)}%`}
-                />
-              ))}
-            </div>
-            <div className="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-fg-faint">
-              {sourceSplit.map((row) => (
-                <span key={row.kind} className="inline-flex items-center gap-1.5">
-                  <span
-                    aria-hidden
-                    className="size-2 shrink-0 rounded-full"
-                    style={{ background: SOURCE_COLORS[row.kind] }}
-                  />
-                  {USAGE_SOURCE_LABELS[row.kind]}
-                  <strong className="font-medium text-fg-muted tabular-nums">
-                    {(row.share * 100).toFixed(1)}%
-                  </strong>
-                  <span className="tabular-nums">{tokensShort(row.tokens)}</span>
-                </span>
-              ))}
-            </div>
-          </div>
-        </>
-      )}
-      <div aria-hidden className="h-px bg-panel-hi" />
+    <div>
       <div className="p-4">
         <header className="mb-4 flex items-center justify-between gap-2">
-          <h2 className={OVERLINE_CLASS}>Contributions</h2>
+          <h2 className={OVERLINE_CLASS}>活跃日历</h2>
           <SelectMenu
             size="compact"
             value={calendar.year === null ? 'trailing' : String(calendar.year)}
             options={[
-              { value: 'trailing', label: 'Last 12 months' },
+              { value: 'trailing', label: '近 12 个月' },
               ...calendar.years.map((y) => ({ value: String(y), label: String(y) }))
             ]}
             ariaLabel="Contributions year"
@@ -371,30 +194,24 @@ function OverviewCard({ snap, range, onSelectDay, calendar }) {
         />
         <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-line pt-3 text-[11px] text-fg-faint">
           <span>
-            Busiest day{' '}
+            当前区间最忙日{' '}
             <strong className="font-medium text-fg-muted">
-              {mostActive ? `${dayShort(mostActive.day)} · ${mostActive.sessions} sessions` : '—'}
+              {busiest ? `${busiest.day} · ${busiest.sessions} 个会话` : '—'}
             </strong>
           </span>
           <span>
-            Longest streak{' '}
-            <strong className="font-medium text-fg-muted">{streaks.longest} days</strong>
+            累计活跃{' '}
+            <strong className="font-medium text-fg-muted">{allDays.length} 个活跃日</strong>
           </span>
           <span>
-            Current streak{' '}
-            <strong className="font-medium text-fg-muted">{streaks.current} days</strong>
+            最长连续 <strong className="font-medium text-fg-muted">{streaks.longest} 天</strong>
           </span>
-          {topModel && totals.processedTokens > 0 && (
-            <span>
-              Top model share{' '}
-              <strong className="font-medium text-fg-muted">
-                {((topModel.tokens / totals.processedTokens) * 100).toFixed(1)}%
-              </strong>
-            </span>
-          )}
+          <span>
+            当前连续 <strong className="font-medium text-fg-muted">{streaks.current} 天</strong>
+          </span>
         </div>
       </div>
-    </section>
+    </div>
   )
 }
 
@@ -405,7 +222,7 @@ function ModelPerformanceCard({ scoped }) {
     metric === 'responseWait' ? `${(value / 1000).toFixed(2)} s` : `${value.toFixed(1)} tokens/s`
   const unitText = metric === 'responseWait' ? '秒 · 越低越快' : 'tokens/s · 估算 · 越高越快'
   return (
-    <section className={`${CARD_CLASS} p-4`}>
+    <div>
       <header className="flex flex-wrap items-center justify-between gap-2">
         <h2 className={OVERLINE_CLASS}>模型速度</h2>
         <Segmented
@@ -432,77 +249,7 @@ function ModelPerformanceCard({ scoped }) {
       ) : (
         <SpeedBars rows={rows} metric={metric} formatValue={formatValue} unit={unitText} />
       )}
-    </section>
-  )
-}
-
-/** 按模型聚合 */
-function ByModelCard({ scoped }) {
-  const rows = useMemo(() => {
-    const map = new Map()
-    for (const s of scoped) {
-      for (const usage of s.modelUsage || []) {
-        const row = map.get(usage.model) || {
-          model: usage.model,
-          sessions: new Set(),
-          requests: 0,
-          tokens: 0
-        }
-        row.sessions.add(s.id)
-        row.requests += usage.requests
-        row.tokens += usage.totalTokens
-        map.set(usage.model, row)
-      }
-    }
-    return [...map.values()]
-      .map((row) => ({ ...row, sessions: row.sessions.size }))
-      .sort((a, b) => b.tokens - a.tokens || a.model.localeCompare(b.model))
-  }, [scoped])
-
-  if (rows.length === 0) return null
-  const totalTokens = rows.reduce((sum, r) => sum + r.tokens, 0)
-  // 条的宽度按份额而不是按最大值：这张卡回答的是「谁占了多少」，占 3% 就该是一条短条。
-  const maxTokens = rows[0].tokens
-
-  return (
-    <section className={`${CARD_CLASS} p-4`}>
-      <header className="mb-3 flex items-center justify-between">
-        <h2 className={OVERLINE_CLASS}>By model</h2>
-        <span className="text-[11px] text-fg-faint">
-          {rows.length} models · {tokensShort(totalTokens)} tokens
-        </span>
-      </header>
-      <div className="grid grid-cols-1 gap-x-8 gap-y-3 sm:grid-cols-2">
-        {rows.map((r) => {
-          const share = totalTokens > 0 ? r.tokens / totalTokens : 0
-          return (
-            <div key={r.model} className="min-w-0">
-              <div className="flex items-center gap-2">
-                <span className="size-2 shrink-0 rounded-full bg-fg" />
-                <span className="truncate font-mono text-xs text-fg-strong" title={r.model}>
-                  {r.model}
-                </span>
-                <span className="ml-auto shrink-0 font-mono text-[11px] text-fg-faint tabular-nums">
-                  {(share * 100).toFixed(1)}%
-                </span>
-              </div>
-              <div
-                className="mt-1.5 h-[5px] overflow-hidden rounded-full bg-panel-hi"
-                title={`${tokensShort(r.tokens)} / ${tokensShort(maxTokens)}（最大值）`}
-              >
-                <div
-                  className="h-full rounded-full bg-fg"
-                  style={{ width: `${maxTokens > 0 ? (r.tokens / maxTokens) * 100 : 0}%` }}
-                />
-              </div>
-              <div className="mt-1 font-mono text-[11px] text-fg-faint tabular-nums">
-                {r.sessions} sessions · {r.requests} requests · {tokensShort(r.tokens)} tokens
-              </div>
-            </div>
-          )
-        })}
-      </div>
-    </section>
+    </div>
   )
 }
 
@@ -515,12 +262,12 @@ function ByModelCard({ scoped }) {
  * 名称与数字就又要靠副标题去猜。
  */
 const SOURCE_COLUMNS = [
-  { key: 'source', label: 'Source', width: '38%' },
-  { key: 'kind', label: 'Type', width: '11%' },
-  { key: 'requests', label: 'Requests', width: '11%', align: 'right', sortable: true },
+  { key: 'source', label: '来源', width: '38%' },
+  { key: 'kind', label: '类型', width: '11%' },
+  { key: 'requests', label: '请求', width: '11%', align: 'right', sortable: true },
   {
     key: 'input',
-    label: 'Input',
+    label: '输入',
     width: '13%',
     align: 'right',
     sortable: true,
@@ -528,7 +275,7 @@ const SOURCE_COLUMNS = [
   },
   {
     key: 'output',
-    label: 'Output',
+    label: '输出',
     width: '12%',
     align: 'right',
     sortable: true,
@@ -536,7 +283,7 @@ const SOURCE_COLUMNS = [
     // 请求数一直留着——「这个来源被调了多少次」是判断它值不值的第一眼。
     narrow: 'secondary'
   },
-  { key: 'share', label: 'Share', width: '15%', align: 'right', sortable: true }
+  { key: 'share', label: '占比', width: '15%', align: 'right', sortable: true }
 ]
 
 function BySourceCard({ scoped }) {
@@ -597,14 +344,14 @@ function BySourceCard({ scoped }) {
     [rows, pluginNames, pluginDescriptions, sort]
   )
 
-  if (rows.length === 0) return null
+  if (rows.length === 0) return <Empty description="当前区间没有来源用量" />
   const maxShare =
     flattened.rows.length > 0 ? flattened.rows.reduce((m, r) => Math.max(m, r.share), 0) : 0
 
   return (
-    <section className={`${CARD_CLASS} p-4`}>
+    <div>
       <header className="mb-2 flex items-baseline justify-between gap-2">
-        <h2 className={OVERLINE_CLASS}>By source</h2>
+        <h2 className={OVERLINE_CLASS}>来源用量</h2>
         <span className="shrink-0 text-[11px] text-fg-faint tabular-nums">
           {flattened.groups} 个来源 · {tokensShort(flattened.total)} tokens
         </span>
@@ -693,123 +440,68 @@ function BySourceCard({ scoped }) {
           </li>
         ))}
       </ul>
-    </section>
+    </div>
   )
 }
 
-/**
- * 按项目（cwd basename）聚合，分批展示。
- *
- * 每行一条按来源拆开的堆叠条：同一个项目里「自己跑」和「派出去跑」的比例差得很多，
- * 单色条只能比大小，看不出这一点。
- */
-function ByProjectCard({ scoped, visibleRows, onShowMore }) {
-  const rows = useMemo(() => {
-    const map = new Map()
-    for (const s of scoped) {
-      const cwd = s.cwd || '~'
-      const row = map.get(cwd) || {
-        cwd,
-        project: basename(cwd),
-        sessions: 0,
-        turns: 0,
-        tokens: 0,
-        sources: { main: 0, delegation: 0, plugin: 0, helper: 0 }
-      }
-      // 无会话的账本用量（一次性命令）只加 token，不算一条会话。
-      if (!s.ledger) row.sessions++
-      row.turns += s.turns
-      row.tokens += s.totalTokens
-      for (const usage of s.sourceUsage || []) {
-        if (!(usage.kind in row.sources)) continue
-        row.sources[usage.kind] += Number(usage.totalTokens) || 0
-      }
-      map.set(cwd, row)
-    }
-    // 来源合计（主对话 + 委派 + 插件 + 内核）多数时候就是总量；`totalTokens` 里还有不带
-    // 来源归属的历史记录，差额补进主对话，免得堆叠条比总量短一截。这里按行算一次，
-    // 放进上面的循环会每加一条会话就再补一次。
-    return [...map.values()]
-      .map((row) => {
-        const classified = SOURCE_ORDER.reduce((sum, kind) => sum + row.sources[kind], 0)
-        return {
-          ...row,
-          sources: { ...row.sources, main: row.sources.main + Math.max(0, row.tokens - classified) }
-        }
-      })
-      .sort((a, b) => b.tokens - a.tokens || a.cwd.localeCompare(b.cwd))
-  }, [scoped])
+const BREAKDOWN_COLUMNS = [
+  { key: 'name', label: '名称', width: '40%' },
+  {
+    key: 'sessions',
+    label: '会话',
+    width: '15%',
+    align: 'right',
+    sortable: true,
+    narrow: 'secondary'
+  },
+  { key: 'requests', label: '请求', width: '15%', align: 'right', sortable: true },
+  { key: 'tokens', label: 'Tokens', width: '15%', align: 'right', sortable: true },
+  { key: 'share', label: '占比', width: '15%', align: 'right' }
+]
 
-  if (rows.length === 0) return null
-  const shown = rows.slice(0, visibleRows)
-  const max = Math.max(...shown.map((r) => r.tokens), 0)
-  const rest = rows.length - shown.length
-  const usedKinds = SOURCE_ORDER.filter((kind) => rows.some((r) => r.sources[kind] > 0))
-
+function BreakdownReport({ rows, type, total, selected, onSelect }) {
+  const [sort, setSort] = useState({ key: 'tokens', desc: true })
+  const sorted = useMemo(
+    () =>
+      [...rows].sort(
+        (a, b) =>
+          (sort.desc ? b[sort.key] - a[sort.key] : a[sort.key] - b[sort.key]) ||
+          a.id.localeCompare(b.id)
+      ),
+    [rows, sort]
+  )
   return (
-    <section className={`${CARD_CLASS} p-4`}>
-      <header className="mb-3 flex items-center justify-between">
-        <h2 className={OVERLINE_CLASS}>By project</h2>
-        <div className="flex items-center gap-x-3 gap-y-1 text-[11px] text-fg-faint">
-          {usedKinds.map((kind) => (
-            <span key={kind} className="inline-flex items-center gap-1.5">
-              <span
-                aria-hidden
-                className="size-2 shrink-0 rounded-[2px]"
-                style={{ background: SOURCE_COLORS[kind] }}
-              />
-              {USAGE_SOURCE_LABELS[kind]}
-            </span>
-          ))}
-          <span>{rows.length} projects</span>
-        </div>
-      </header>
-      <div>
-        {shown.map((row, index) => (
-          <Fragment key={row.cwd}>
-            <div className={`pt-1.5 ${index === 0 ? '' : 'mt-1 border-t border-line pt-2'}`}>
-              <div className="flex items-center gap-2">
-                <span className="min-w-0 flex-1 truncate text-xs text-fg-strong" title={row.cwd}>
-                  {row.project}
-                </span>
-                <span className="shrink-0 font-mono text-[11px] text-fg-muted tabular-nums">
-                  {row.sessions} sessions · {tokensShort(row.tokens)}
-                </span>
-              </div>
-              <div className="mt-1 h-[5px] overflow-hidden rounded-full bg-panel-hi">
-                <div
-                  className="flex h-full overflow-hidden rounded-full"
-                  style={{ width: `${max > 0 ? (row.tokens / max) * 100 : 0}%` }}
-                >
-                  {usedKinds.map((kind) =>
-                    row.sources[kind] > 0 ? (
-                      <span
-                        key={kind}
-                        className="h-full"
-                        style={{
-                          width: `${row.tokens > 0 ? (row.sources[kind] / row.tokens) * 100 : 0}%`,
-                          background: SOURCE_COLORS[kind]
-                        }}
-                      />
-                    ) : null
-                  )}
-                </div>
-              </div>
-            </div>
-          </Fragment>
-        ))}
-      </div>
-      {rest > 0 && (
-        <Button
-          size="compact"
-          variant="ghost"
-          onClick={onShowMore}
-          className="mt-2"
-        >
-          Show {Math.min(PROJECT_BATCH, rest)} more
-        </Button>
-      )}
-    </section>
+    <div className="mica-config-ui is-embed">
+      <DataTable
+        ariaLabel={type === 'models' ? '按模型用量' : '按项目用量'}
+        columns={BREAKDOWN_COLUMNS}
+        rows={sorted}
+        rowKey={(row) => row.id}
+        pageSize={10}
+        sort={sort}
+        onSortChange={(key) =>
+          setSort((current) => ({ key, desc: current.key === key ? !current.desc : true }))
+        }
+        renderCells={(row) => [
+          <Button
+            key="name"
+            variant="ghost"
+            size="compact"
+            pressed={selected === row.id}
+            title={row.cwd || row.label}
+            onClick={() => onSelect(row.id)}
+          >
+            <span className="block truncate">{row.label}</span>
+          </Button>,
+          <span key="sessions">{row.sessions.toLocaleString()}</span>,
+          <span key="requests">{row.requests.toLocaleString()}</span>,
+          <span key="tokens" title={row.tokens.toLocaleString()}>
+            {tokensShort(row.tokens)}
+          </span>,
+          <span key="share">{total > 0 ? `${((row.tokens / total) * 100).toFixed(1)}%` : '—'}</span>
+        ]}
+      />
+    </div>
   )
 }
 
@@ -818,20 +510,20 @@ function ByProjectCard({ scoped, visibleRows, onShowMore }) {
  * 请求数），剩下的列按比例摊开——判断的是卡片自己的宽度，不看视口。
  */
 const SESSION_COLUMNS = [
-  { key: 'session', label: 'Session', width: '30%' },
-  { key: 'model', label: 'Model', width: '15%', narrow: 'secondary' },
+  { key: 'session', label: '会话', width: '30%' },
+  { key: 'model', label: '模型', width: '15%', narrow: 'secondary' },
   {
     key: 'lastActivity',
-    label: 'Last activity',
+    label: '最近活跃',
     // 窄卡片里模型列先退场，这一列只剩一窄溜：表头 nowrap 会压到 Requests 上，
     // 所以窄容器换一个短标签。
-    narrowLabel: 'Activity',
+    narrowLabel: '活跃',
     width: '13%',
     sortable: true
   },
   {
     key: 'requests',
-    label: 'Requests',
+    label: '请求',
     width: '9%',
     align: 'right',
     sortable: true,
@@ -840,7 +532,7 @@ const SESSION_COLUMNS = [
   { key: 'tokens', label: 'Tokens', width: '12%', align: 'right', sortable: true },
   {
     key: 'cacheRate',
-    label: 'Cache hit',
+    label: '缓存命中',
     width: '10%',
     align: 'right',
     sortable: true,
@@ -874,10 +566,10 @@ function BySessionCard({ scoped, onDetail }) {
   const maxTokens = Math.max(...sorted.map((s) => s.totalTokens), 0)
 
   return (
-    <section className={`${CARD_CLASS} p-4`}>
+    <div>
       <header className="mb-2 flex items-baseline justify-between gap-2">
-        <h2 className={OVERLINE_CLASS}>By session</h2>
-        <span className="shrink-0 text-[11px] text-fg-faint">{sorted.length} sessions</span>
+        <h2 className={OVERLINE_CLASS}>会话用量</h2>
+        <span className="shrink-0 text-[11px] text-fg-faint">{sorted.length} 个会话</span>
       </header>
       <div className="mica-config-ui is-embed">
         <DataTable
@@ -952,7 +644,7 @@ function BySessionCard({ scoped, onDetail }) {
           ]}
         />
       </div>
-    </section>
+    </div>
   )
 }
 
@@ -960,7 +652,10 @@ export function StatsView({ visible }) {
   // 默认看今天：统计页打开时关心的是「刚才这一轮花了多少」，近 30 天的总量是决策时才切过去看的。
   const [range, setRange] = useState('today')
   const [snap, setSnap] = useState(null)
-  const [visibleRows, setVisibleRows] = useState(PROJECT_BATCH)
+  const [metric, setMetric] = useState('tokens')
+  const [report, setReport] = useState('sessions')
+  const [selectedModel, setSelectedModel] = useState(null)
+  const [selectedProject, setSelectedProject] = useState(null)
   const [calendarYear, setCalendarYear] = useState(null)
   const [detailSessionId, setDetailSessionId] = useState(null)
 
@@ -1035,37 +730,55 @@ export function StatsView({ visible }) {
   // 账本里的无会话用量没有 id，进不了按会话的明细表。
   const sessionScoped = useMemo(() => activeScoped.filter((session) => session.id), [activeScoped])
 
-  const hasAny = sessions.some((session) => (Number(session.requests) || 0) > 0)
+  const overview = useMemo(() => buildOverview(activeScoped, range), [activeScoped, range])
+  const modelFilter = overview.models.some((row) => row.id === selectedModel) ? selectedModel : null
+  const projectFilter = overview.projects.some((row) => row.id === selectedProject)
+    ? selectedProject
+    : null
+  const filteredSessions = useMemo(
+    () =>
+      sessionScoped.filter(
+        (session) =>
+          (projectFilter === null || (session.cwd || '') === projectFilter) &&
+          (modelFilter === null ||
+            session.modelUsage.some((usage) => usage.model === modelFilter && usage.requests > 0))
+      ),
+    [sessionScoped, modelFilter, projectFilter]
+  )
   const progress = snap?.progress
-
-  const setRangePreset = (value) => {
-    setRange(value)
+  const showReport = (next) => {
+    setReport(next)
+    document.getElementById('stats-details')?.scrollIntoView({ block: 'start' })
   }
-
-  const onSelectDay = (day) => setRange({ day })
-
+  const selectModel = (id) => {
+    setSelectedModel(id)
+    setSelectedProject(null)
+    showReport('models')
+  }
+  const selectProject = (id) => {
+    setSelectedProject(id)
+    setSelectedModel(null)
+    showReport(id === null ? 'projects' : 'sessions')
+  }
   const rangeText = isDayRange(range)
-    ? dayShort(range.day)
-    : range === 'all'
-      ? 'All time'
-      : range === 'today'
-        ? 'Today'
-        : `近 ${range}`
+    ? range.day
+    : RANGE_OPTIONS.find(([value]) => value === range)?.[1]
+  const periodText = overview.days.length
+    ? `${overview.days[0].day} — ${overview.days.at(-1).day}`
+    : rangeText
 
   return (
     <section
-      className={`min-h-0 flex-1 flex-col overflow-hidden ${visible ? 'flex' : 'hidden'}`}
+      className={`stats-view min-h-0 flex-1 flex-col overflow-hidden ${visible ? 'flex' : 'hidden'}`}
       aria-hidden={!visible}
     >
       <div className="h-full min-h-0 overflow-y-auto">
-        <div className="mx-auto flex max-w-[1100px] flex-col gap-4 px-6 py-6">
-          {/* 页面头：一句「现在看的是哪一段、涉及多少条会话」，右侧是区间选择。没有这一行时
-              整页从一片 KPI 数字开始，看不出当前区间是什么。 */}
-          <header className="flex flex-wrap items-end justify-between gap-3">
-            <div className="min-w-0">
-              <h1 className="text-[13px] font-semibold tracking-tight text-fg-strong">Usage</h1>
-              <p className="mt-0.5 truncate text-[11px] text-fg-faint">
-                {rangeText} · {activeScoped.length} sessions
+        <div className="stats-page">
+          <header className="stats-header">
+            <div>
+              <h1>用量全景</h1>
+              <p className="stats-meta">
+                {periodText} · {overview.totals.activeSessions} 个活跃会话
               </p>
             </div>
             <div className="flex flex-wrap items-center gap-2">
@@ -1073,7 +786,7 @@ export function StatsView({ visible }) {
                 <Button
                   size="compact"
                   variant="ghost"
-                  onClick={() => setRangePreset('today')}
+                  onClick={() => setRange('today')}
                   title="清除单日筛选"
                   icon={<IconX size={12} />}
                 >
@@ -1085,40 +798,111 @@ export function StatsView({ visible }) {
                 value={isDayRange(range) ? 'day' : range}
                 options={RANGE_OPTIONS.map(([value, label]) => ({ value, label }))}
                 ariaLabel="统计区间"
-                onChange={setRangePreset}
+                onChange={setRange}
               />
             </div>
           </header>
-          {!hasAny ? (
-            <div className="grid place-items-center rounded-[5px] border border-dashed border-line py-16 text-xs text-fg-faint">
-              {progress?.building
-                ? `正在统计会话用量 ${progress.done} / ${progress.total}…`
-                : 'No usage yet. Complete an AI session to see statistics.'}
+          {progress?.building && (
+            <Alert
+              type="info"
+              content={`正在统计会话用量 ${progress.done} / ${progress.total}，先展示已统计的部分…`}
+            />
+          )}
+          <OverviewVisuals
+            overview={overview}
+            metric={metric}
+            onMetricChange={setMetric}
+            onSelectModel={selectModel}
+            onSelectProject={selectProject}
+          />
+          <StatsPanel
+            title="精确明细"
+            extra={
+              report === 'activity'
+                ? '日历按年份独立展示，不受顶部区间影响'
+                : '与上方图表使用同一统计区间'
+            }
+            className="stats-details"
+          >
+            <div id="stats-details" className="stats-detail-tabs">
+              <Segmented
+                size="compact"
+                value={report}
+                options={REPORT_OPTIONS}
+                ariaLabel="用量明细"
+                onChange={setReport}
+              />
             </div>
-          ) : (
-            <>
-              {progress?.building && (
-                <div className="rounded-[5px] border border-line bg-panel px-3 py-2 text-[11px] text-fg-faint">
-                  正在统计会话用量 {progress.done} / {progress.total}，先展示已统计的部分…
-                </div>
-              )}
-              <OverviewCard
-                snap={snap}
+            {(modelFilter !== null || projectFilter !== null) && (
+              <div className="stats-detail-toolbar">
+                <>
+                  <span className="stats-meta">
+                    会话筛选：
+                    {modelFilter ??
+                      overview.projects.find((row) => row.id === projectFilter)?.label}
+                    ，上方指标仍为全区间
+                  </span>
+                  <Button
+                    size="compact"
+                    variant="ghost"
+                    onClick={() => {
+                      setSelectedModel(null)
+                      setSelectedProject(null)
+                    }}
+                  >
+                    清除筛选
+                  </Button>
+                </>
+              </div>
+            )}
+            {report === 'sessions' &&
+              (filteredSessions.length ? (
+                <BySessionCard
+                  key={`${JSON.stringify(range)}:${modelFilter}:${projectFilter}`}
+                  scoped={filteredSessions}
+                  onDetail={setDetailSessionId}
+                />
+              ) : (
+                <Empty description="当前筛选下没有会话用量" />
+              ))}
+            {report === 'sources' &&
+              (activeScoped.length ? (
+                <BySourceCard scoped={activeScoped} />
+              ) : (
+                <Empty description="当前区间没有来源用量" />
+              ))}
+            {report === 'models' && (
+              <BreakdownReport
+                rows={overview.models}
+                type="models"
+                total={overview.totals.totalTokens}
+                selected={modelFilter}
+                onSelect={(id) => {
+                  setSelectedModel(id)
+                  setSelectedProject(null)
+                  showReport('sessions')
+                }}
+              />
+            )}
+            {report === 'projects' && (
+              <BreakdownReport
+                rows={overview.projects}
+                type="projects"
+                total={overview.totals.totalTokens}
+                selected={projectFilter}
+                onSelect={selectProject}
+              />
+            )}
+            {report === 'speed' && <ModelPerformanceCard scoped={activeScoped} />}
+            {report === 'activity' && (
+              <ActivityReport
+                sessions={sessions}
                 range={range}
-                onSelectDay={onSelectDay}
+                onSelectDay={(day) => setRange({ day })}
                 calendar={calendar}
               />
-              <ModelPerformanceCard scoped={activeScoped} />
-              <ByModelCard scoped={activeScoped} />
-              <BySourceCard scoped={activeScoped} />
-              <ByProjectCard
-                scoped={activeScoped}
-                visibleRows={visibleRows}
-                onShowMore={() => setVisibleRows((v) => v + PROJECT_BATCH)}
-              />
-              <BySessionCard scoped={sessionScoped} onDetail={setDetailSessionId} />
-            </>
-          )}
+            )}
+          </StatsPanel>
         </div>
       </div>
       {detailSessionId && (
