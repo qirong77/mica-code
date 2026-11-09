@@ -2,8 +2,8 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { JsonEditor } from '../components/JsonEditor.js';
 import { PageFrame } from '../components/PageFrame.js';
 import { ProviderEditor } from '../components/ProviderEditor.js';
-import { SelectMenu } from '../components/SelectMenu.js';
-import { Alert, Button, SaveStatus, SettingRow, SettingsGroup } from '../components/Ui.js';
+import { ArcoSettings, Button, Input, Select } from '../components/ArcoSettings.js';
+import { Alert, SaveStatus, SettingRow, SettingsGroup } from '../components/Ui.js';
 import { readConfigFile, testProvider, writeConfigFile } from '../api.js';
 import { appIcons } from '../icons.js';
 import {
@@ -22,6 +22,7 @@ import {
 } from '../configDraft.js';
 import type { ConfigWebFilePayload } from '../../src/shared/types.js';
 import { useAutoSave } from '../useAutoSave.js';
+import { filterSelectOptions } from '../components/selectMenuModel.js';
 
 /**
  * config.json 的配置页。
@@ -34,6 +35,14 @@ import { useAutoSave } from '../useAutoSave.js';
  * 页面上照旧提示哪里要修——自动保存的前提是别把一份会让 CLI 起不来的配置落盘。
  */
 export function ConfigPage() {
+  return (
+    <ArcoSettings>
+      <ConfigPageContent />
+    </ArcoSettings>
+  );
+}
+
+function ConfigPageContent() {
   const [draft, setDraft] = useState<ConfigDraft | null>(null);
   const [savedJson, setSavedJson] = useState('');
   const [jsonText, setJsonText] = useState('');
@@ -260,13 +269,16 @@ export function ConfigPage() {
             >
               {errors.get('defaultModel') ? <Alert message={errors.get('defaultModel')!} /> : null}
               <SettingRow label="服务商" htmlFor="default-model-provider" error={errors.get('defaultModel.provider')}>
-                <SelectMenu
+                <Select
                   id="default-model-provider"
                   value={defaultModel.provider}
                   options={providerSelectOptions}
-                  fallbackLabel={defaultModel.provider ? `${defaultModel.provider}（已不存在）` : undefined}
-                  invalid={errors.has('defaultModel.provider')}
-                  ariaLabel="默认服务商"
+                  renderFormat={() =>
+                    providerSelectOptions.find((option) => option.value === defaultModel.provider)?.label ??
+                    `${defaultModel.provider}（已不存在）`
+                  }
+                  error={errors.has('defaultModel.provider')}
+                  aria-label="默认服务商"
                   onChange={(provider) => {
                     const selected = providerOptions.find((option) => option.id === provider);
                     applyDraft(
@@ -281,20 +293,24 @@ export function ConfigPage() {
                 hint="选择该服务商下的模型。"
                 error={errors.get('defaultModel.model')}
               >
-                <SelectMenu
+                <Select
                   id="default-model-name"
-                  value={defaultModel.model}
+                  value={defaultModel.model || undefined}
                   options={modelOptions}
                   disabled={!defaultModel.provider || modelOptions.length === 0}
                   placeholder={defaultModel.provider ? '暂无可选模型' : '请先选择服务商'}
-                  fallbackLabel={defaultModel.model ? `${defaultModel.model}（已不存在）` : undefined}
-                  invalid={errors.has('defaultModel.model')}
-                  ariaLabel="默认模型"
-                  filterable
-                  filterPlaceholder="搜索模型"
-                  onChange={(model) =>
-                    applyDraft(writeDefaultModelDraft(draft, { ...defaultModel, model }))
+                  renderFormat={() =>
+                    modelOptions.find((option) => option.value === defaultModel.model)?.label ??
+                    `${defaultModel.model}（已不存在）`
                   }
+                  error={errors.has('defaultModel.model')}
+                  aria-label="默认模型"
+                  showSearch
+                  filterOption={(query, option) =>
+                    filterSelectOptions([{ value: String((option.props as { value: unknown }).value) }], query).length >
+                    0
+                  }
+                  onChange={(model) => applyDraft(writeDefaultModelDraft(draft, { ...defaultModel, model }))}
                 />
               </SettingRow>
               <SettingRow
@@ -303,17 +319,15 @@ export function ConfigPage() {
                 hint="可选，留空使用模型默认值；填写该模型支持的 effort。"
                 error={errors.get('defaultModel.effort')}
               >
-                <input
+                <Input
                   id="default-model-effort"
-                  className={`text-input${errors.has('defaultModel.effort') ? ' text-input-invalid' : ''}`}
+                  error={errors.has('defaultModel.effort')}
                   value={defaultModel.effort}
                   disabled={!defaultModel.provider}
                   spellCheck={false}
                   placeholder="使用模型默认值"
                   aria-invalid={errors.has('defaultModel.effort')}
-                  onChange={(event) =>
-                    applyDraft(writeDefaultModelDraft(draft, { ...defaultModel, effort: event.target.value }))
-                  }
+                  onChange={(effort) => applyDraft(writeDefaultModelDraft(draft, { ...defaultModel, effort }))}
                 />
               </SettingRow>
             </SettingsGroup>

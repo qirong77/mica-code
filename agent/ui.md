@@ -13,6 +13,7 @@
 - 两个宿主都整页打开：桌面端点左下角设置按钮、左上角插件菜单，都以覆盖整窗的一层渲染 `<App>`（`section` 定位到 Config 或 Plugins、`pluginId` 定位到插件详情，`onClose` 渲染左上角返回）。页面内导航由侧栏切换，不做弹窗内嵌。
 - 新页面只用既有积木：`PageFrame`、`Button`、`Tag`、`Switch`、`CollapsiblePanel`、`SettingsGroup`、`SettingRow`、`SplitView`、`ControlEndpointList`；文案走 `labels.ts`。
 - 三块骨架：`PageFrame`（窄页头 + 内容区）、`SettingsGroup` + `SettingRow`（一页一块面，行间分隔线）、`SplitView`（左列表 + 右详情）。
+- Arco 渐进试验目前仅覆盖「配置」页（`ConfigPage` / `ProviderEditor`）：基础控件从 `components/ArcoSettings.tsx` 引入，`arco-settings.css` 按需加载控件样式并在局部容器映射主题，弹层留在该容器内。不替换页面骨架、导航或共享 `Ui.tsx`，不影响其它设置页及聊天界面。
 - 折叠按容器宽度（`@container page (max-width: 860px)`），不按视口。
 - Config 页只按字段编辑 providers；`mcpServers` 与 `capabilityDefaults` 不在这页编辑——前者在 MCP 页按字段填，后者跳到 Capabilities 页。
 - MCP 页没有左列表：`mcpServers` 的协议与字段是固定的，一页就一个 `SettingsGroup`，一个 server 一张可折叠的 `entry-row`（与服务商同一套行），折叠行显示名称 / 连接方式 / 命令或地址 / 连接状态，展开接字段行。类型用 `Segmented`，本地进程填命令 / 参数 / 环境变量 / 工作目录 / 标准错误，HTTP 填地址 / 请求头；切类型会删掉另一侧的已知键（文件里同时留着 `command` 与 `url` 的条目说不清是哪种）。连接状态与工具列表只属于磁盘上那份配置，类型换掉后不再显示。右上角「编辑 JSON」是**整份** `mcpServers`（也接受文档里抄来的 `{ "mcpServers": { … } }`），与表单是同一份内容的两种形态；转换唯一实现是 `web/mcpDraft.ts`。

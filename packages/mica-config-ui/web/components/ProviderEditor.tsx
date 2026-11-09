@@ -3,8 +3,8 @@ import { appIcons } from '../icons.js';
 import { providerProtocolLabel } from '../labels.js';
 import { PROVIDER_PROTOCOL_VALUES, readProviderDraft, type ProviderDraft } from '../configDraft.js';
 import type { ConfigWebProviderTest, ConfigWebProviderTestInput } from '../../src/shared/types.js';
-import { Button, SettingRow } from './Ui.js';
-import { SecretInput } from './SecretInput.js';
+import { SettingRow } from './Ui.js';
+import { Button, Input, Radio, Tag } from './ArcoSettings.js';
 
 type ProviderEditorProps = {
   raw: unknown;
@@ -46,9 +46,11 @@ export function ProviderEditor({
   const fields = readProviderDraft(raw);
   const [modelInput, setModelInput] = useState('');
   const [testing, setTesting] = useState(false);
+  const [keyRevealed, setKeyRevealed] = useState(false);
   const [testResult, setTestResult] = useState<ConfigWebProviderTest | null>(null);
   const TrashIcon = appIcons.trash;
   const ChevronIcon = appIcons.chevronRight;
+  const EyeIcon = keyRevealed ? appIcons.hide : appIcons.show;
   const open = expanded || hasError;
 
   function patch(next: Partial<ProviderDraft>) {
@@ -102,7 +104,10 @@ export function ProviderEditor({
           className="entry-row-toggle"
           aria-expanded={open}
           title={open ? '收起' : '展开编辑'}
-          onClick={onToggleExpanded}
+          onClick={() => {
+            setKeyRevealed(false);
+            onToggleExpanded();
+          }}
         >
           <ChevronIcon size={13} className="entry-row-chevron" aria-hidden="true" />
           <span className="entry-row-name" title={fields.id}>
@@ -116,9 +121,9 @@ export function ProviderEditor({
         {hasError ? <span className="entry-row-flag">待修正</span> : null}
         <Button
           icon={<TrashIcon size={14} />}
-          variant="ghost"
+          type="text"
           title={removable ? '删除这个服务商' : '至少保留一个服务商'}
-          ariaLabel="删除服务商"
+          aria-label="删除服务商"
           disabled={!removable || disabled}
           onClick={onRemove}
         />
@@ -127,58 +132,68 @@ export function ProviderEditor({
       {open ? (
         <div className="entry-row-body">
           <SettingRow label="名称" hint="会话里按这个名字引用" error={errorFor('id')}>
-            <input
-              className={invalidClass(errorFor('id'))}
+            <Input
+              error={Boolean(errorFor('id'))}
               value={fields.id}
               disabled={disabled}
               spellCheck={false}
               placeholder="例如 deepseek"
               aria-label={`服务商 ${index + 1} 名称`}
               aria-invalid={Boolean(errorFor('id'))}
-              onChange={(event) => patch({ id: event.target.value })}
+              onChange={(id) => patch({ id })}
             />
           </SettingRow>
 
           <SettingRow label="API Base" error={errorFor('api_base')}>
-            <input
-              className={invalidClass(errorFor('api_base'))}
+            <Input
+              error={Boolean(errorFor('api_base'))}
               value={fields.apiBase}
               disabled={disabled}
               spellCheck={false}
               placeholder="https://api.example.com"
               aria-label={`服务商 ${index + 1} API Base`}
               aria-invalid={Boolean(errorFor('api_base'))}
-              onChange={(event) => patch({ apiBase: event.target.value })}
+              onChange={(apiBase) => patch({ apiBase })}
             />
           </SettingRow>
 
           <SettingRow label="API Key" hint="留空表示不需要鉴权" error={errorFor('api_key')}>
-            <SecretInput
+            <Input.Password
               value={fields.apiKey}
               disabled={disabled}
               placeholder="sk-…"
-              ariaLabel={`服务商 ${index + 1} API Key`}
-              invalid={Boolean(errorFor('api_key'))}
+              aria-label={`服务商 ${index + 1} API Key`}
+              error={Boolean(errorFor('api_key'))}
+              autoComplete="off"
+              spellCheck={false}
+              visibility={keyRevealed}
+              visibilityToggle={false}
+              suffix={
+                <Button
+                  className="settings-secret-toggle"
+                  type="text"
+                  title={keyRevealed ? '隐藏明文' : '显示明文'}
+                  aria-label={keyRevealed ? '隐藏明文' : '显示明文'}
+                  aria-pressed={keyRevealed}
+                  disabled={disabled}
+                  icon={<EyeIcon size={14} />}
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={() => setKeyRevealed((current) => !current)}
+                />
+              }
               onChange={(apiKey) => patch({ apiKey })}
             />
           </SettingRow>
 
           <SettingRow label="协议" error={errorFor('protocol')}>
-            <div className="config-segmented" role="radiogroup" aria-label={`服务商 ${index + 1} 协议`}>
-              {PROVIDER_PROTOCOL_VALUES.map((value) => (
-                <button
-                  key={value}
-                  type="button"
-                  role="radio"
-                  aria-checked={fields.protocol === value}
-                  className={`config-segment${fields.protocol === value ? ' is-active' : ''}`}
-                  disabled={disabled}
-                  onClick={() => patch({ protocol: value })}
-                >
-                  {providerProtocolLabel(value)}
-                </button>
-              ))}
-            </div>
+            <Radio.Group
+              type="button"
+              value={fields.protocol}
+              disabled={disabled}
+              aria-label={`服务商 ${index + 1} 协议`}
+              options={PROVIDER_PROTOCOL_VALUES.map((value) => ({ value, label: providerProtocolLabel(value) }))}
+              onChange={(protocol) => patch({ protocol })}
+            />
           </SettingRow>
 
           <SettingRow
@@ -195,21 +210,17 @@ export function ProviderEditor({
             ) : (
               <div className="config-chip-list">
                 {fields.models.map((model) => (
-                  <span className="config-chip" key={model}>
-                    <span className="config-chip-label" title={model}>
-                      {model}
-                    </span>
-                    <button
-                      type="button"
-                      className="config-chip-remove"
-                      title={`移除 ${model}`}
-                      aria-label={`移除模型 ${model}`}
-                      disabled={disabled}
-                      onClick={() => removeModel(model)}
-                    >
-                      ×
-                    </button>
-                  </span>
+                  <Tag
+                    key={model}
+                    title={model}
+                    bordered
+                    closable={!disabled}
+                    visible
+                    __closeIconProps={{ 'aria-label': `移除模型 ${model}`, title: `移除 ${model}` }}
+                    onClose={() => removeModel(model)}
+                  >
+                    {model}
+                  </Tag>
                 ))}
               </div>
             )}
@@ -220,14 +231,13 @@ export function ProviderEditor({
                 addModel();
               }}
             >
-              <input
-                className="text-input"
+              <Input
                 value={modelInput}
                 disabled={disabled}
                 spellCheck={false}
                 placeholder="输入模型名后回车添加"
                 aria-label={`服务商 ${index + 1} 新增模型`}
-                onChange={(event) => setModelInput(event.target.value)}
+                onChange={setModelInput}
               />
               <Button disabled={disabled || !modelInput.trim()} onClick={addModel}>
                 添加
@@ -267,10 +277,6 @@ function summaryText(fields: ProviderDraft): string {
   const base = fields.apiBase.trim().replace(/^https?:\/\//, '');
   const models = fields.models.length > 0 ? `${fields.models.length} 个模型` : '未列模型';
   return base ? `${base} · ${models}` : models;
-}
-
-function invalidClass(message?: string): string {
-  return message ? 'text-input text-input-invalid' : 'text-input';
 }
 
 /** 试连结果压成一行：成功给耗时与模型，失败给执行器说的那句话。 */
