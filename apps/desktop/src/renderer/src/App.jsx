@@ -106,6 +106,7 @@ import {
 } from './ui-state'
 import {
   EDITOR_TERMINAL_KEY,
+  chatTerminalVisible,
   isTerminalToggleShortcut,
   toggleEditorTerminalOpen
 } from './editor-terminal'
@@ -694,9 +695,13 @@ export default function App() {
   // 编辑器那套见 EditorTerminal（开关与它在同一份界面状态里）。
   const editorTerminal = useUiStateValue(EDITOR_TERMINAL_KEY, null)
   const editorTerminalOpen = editorTerminal?.open === true
-  const terminalVisible = terminalOpen && view !== 'files'
+  // 会话终端只在对话里出现：统计页和编辑器一样是整窗的一层（`viewOwnsWindow`），把侧栏
+  // 都让出去了，却把底部终端带过去的话——那一格是「按会话记住的展开状态」，只要在对话里
+  // 开过终端，每次点 Stats 都会默认压着一条终端在图表下面。判定见 `chatTerminalVisible`。
+  const terminalVisible = chatTerminalVisible(view, terminalOpen)
   /** 顶栏终端图标与 Ctrl+` 此刻管的是哪一个：编辑器视图里是编辑器终端。 */
-  const activeTerminalOpen = view === 'files' ? editorTerminalOpen : terminalVisible
+  const activeTerminalOpen =
+    view === 'files' ? editorTerminalOpen : view === 'chat' ? terminalVisible : false
   // 宽度状态变化时同步到根节点的变量（拖动分隔条期间由拖拽处理直接改写同一变量）
   useLayoutEffect(() => {
     setLayoutVar(SIDEBAR_WIDTH_VAR, `${sidebarHidden ? 0 : sidebarWidth}px`)
@@ -2533,8 +2538,10 @@ export default function App() {
   // Ctrl+` 显示/隐藏底部终端面板（顶栏终端图标是同一个入口）。
   // 编辑器视图里同一条快捷键归编辑器自己的终端，所以那个视图里这里不装监听——
   // 两个面板各自管各自的显隐，不用在一个地方判断「现在该切谁」。
+  // 统计页里也不装：那页没有会话终端可切，装上只会把展开状态改成 true，什么都不显示，
+  // 却在回到对话时突然多出一条终端。
   useEffect(() => {
-    if (view === 'files') return undefined
+    if (view !== 'chat') return undefined
     const onKey = (event) => {
       if (!isTerminalToggleShortcut(event)) return
       event.preventDefault()
@@ -2929,17 +2936,20 @@ export default function App() {
                   </ArcoAction>
                 )
               })}
-              <ArcoAction
-                iconOnly
-                type="button"
-                title={activeTerminalOpen ? '收起终端 (Ctrl+`)' : '展开终端 (Ctrl+`)'}
-                aria-label={activeTerminalOpen ? '收起终端' : '展开终端'}
-                aria-pressed={activeTerminalOpen}
-                className="grid size-6 place-items-center transition-colors"
-                onClick={toggleActiveTerminal}
-              >
-                <IconTerminal2 size={14} />
-              </ArcoAction>
+              {/* 统计页没有终端可切（见 `terminalVisible`）：留着这枚图标只会点了没反应。 */}
+              {view !== 'stats' && (
+                <ArcoAction
+                  iconOnly
+                  type="button"
+                  title={activeTerminalOpen ? '收起终端 (Ctrl+`)' : '展开终端 (Ctrl+`)'}
+                  aria-label={activeTerminalOpen ? '收起终端' : '展开终端'}
+                  aria-pressed={activeTerminalOpen}
+                  className="grid size-6 place-items-center transition-colors"
+                  onClick={toggleActiveTerminal}
+                >
+                  <IconTerminal2 size={14} />
+                </ArcoAction>
+              )}
               <ArcoAction
                 type="button"
                 iconOnly={!gitBadge}

@@ -9,6 +9,7 @@ import { StatsPanel } from './StatsPanel'
 import { buildOverview } from './overview'
 import { SessionDetailModal } from './SessionDetailModal'
 import { bucketByDay, isDayRange, modelSpeed, scopeSession } from './scope'
+import { ProjectChart } from './usage-charts'
 import {
   USAGE_KIND_COLORS as SOURCE_COLORS,
   USAGE_KIND_ORDER as SOURCE_ORDER
@@ -67,14 +68,20 @@ const CALENDAR_RAMP = [
   'var(--color-fg-strong)'
 ]
 
+// 项目堆叠条的分段顺序与配色沿用来源口径（主对话 → 子代理 → 插件 → 内核），
+// 与「来源明细」表、会话详情里的图例是同一份定义。
+const PROJECT_PARTS = SOURCE_ORDER.map((kind) => ({
+  key: kind,
+  label: SOURCE_KIND_LABELS[kind],
+  color: SOURCE_COLORS[kind]
+}))
+
 const OVERLINE_CLASS = 'text-[13px] font-medium text-fg-strong'
+// 明细区只留「按会话 / 按模型」：来源、项目、模型速度与活跃日历都已是独立模块，
+// 不再和它们挤在同一排页签里（曾经的「点一下才看得见」正是这页最别扭的地方）。
 const REPORT_OPTIONS = [
   { value: 'sessions', label: '会话明细' },
-  { value: 'sources', label: '来源明细' },
-  { value: 'models', label: '模型明细' },
-  { value: 'projects', label: '项目明细' },
-  { value: 'speed', label: '模型速度' },
-  { value: 'activity', label: '活跃日历' }
+  { value: 'models', label: '模型明细' }
 ]
 
 function basename(cwd) {
@@ -105,7 +112,7 @@ function dayShort(day) {
   return `${Number(d[1])}/${Number(d[2])}`
 }
 
-function ActivityReport({ sessions, range, onSelectDay, calendar }) {
+function ActivityModule({ sessions, range, onSelectDay, calendar }) {
   const busiest = useMemo(
     () =>
       [
@@ -155,21 +162,23 @@ function ActivityReport({ sessions, range, onSelectDay, calendar }) {
   }
 
   return (
-    <div>
-      <div className="p-4">
-        <header className="mb-4 flex items-center justify-between gap-2">
-          <h2 className={OVERLINE_CLASS}>活跃日历</h2>
-          <SelectMenu
-            size="compact"
-            value={calendar.year === null ? 'trailing' : String(calendar.year)}
-            options={[
-              { value: 'trailing', label: '近 12 个月' },
-              ...calendar.years.map((y) => ({ value: String(y), label: String(y) }))
-            ]}
-            ariaLabel="Contributions year"
-            onChange={(next) => calendar.onYear(next === 'trailing' ? null : Number(next))}
-          />
-        </header>
+    <StatsPanel
+      title="活跃日历"
+      extra={
+        <SelectMenu
+          size="compact"
+          value={calendar.year === null ? 'trailing' : String(calendar.year)}
+          options={[
+            { value: 'trailing', label: '近 12 个月' },
+            ...calendar.years.map((y) => ({ value: String(y), label: String(y) }))
+          ]}
+          ariaLabel="Contributions year"
+          onChange={(next) => calendar.onYear(next === 'trailing' ? null : Number(next))}
+        />
+      }
+      className="stats-activity-module"
+    >
+      <div>
         <CalendarHeatmap
           weeks={calendarWeeks}
           levelOf={levelOf}
@@ -211,20 +220,20 @@ function ActivityReport({ sessions, range, onSelectDay, calendar }) {
           </span>
         </div>
       </div>
-    </div>
+    </StatsPanel>
   )
 }
 
-function ModelPerformanceCard({ scoped }) {
+function ModelSpeedModule({ scoped }) {
   const [metric, setMetric] = useState('responseWait')
   const rows = useMemo(() => modelSpeed(scoped, metric), [scoped, metric])
   const formatValue = (value) =>
     metric === 'responseWait' ? `${(value / 1000).toFixed(2)} s` : `${value.toFixed(1)} tokens/s`
   const unitText = metric === 'responseWait' ? '秒 · 越低越快' : 'tokens/s · 估算 · 越高越快'
   return (
-    <div>
-      <header className="flex flex-wrap items-center justify-between gap-2">
-        <h2 className={OVERLINE_CLASS}>模型速度</h2>
+    <StatsPanel
+      title="模型速度"
+      extra={
         <Segmented
           size="compact"
           value={metric}
@@ -235,8 +244,9 @@ function ModelPerformanceCard({ scoped }) {
           ariaLabel="模型速度指标"
           onChange={setMetric}
         />
-      </header>
-      <p className="mt-1 text-[11px] text-fg-dim">
+      }
+    >
+      <p className="text-[11px] text-fg-dim">
         {metric === 'responseWait'
           ? '请求开始到首次内容的平均等待，包含重试。'
           : '扣除推理与首个 token 后，按正文首末增量间隔估算；仅采纳至少 32 个正文 tokens、持续 0.5 秒的无工具请求。'}{' '}
@@ -249,7 +259,7 @@ function ModelPerformanceCard({ scoped }) {
       ) : (
         <SpeedBars rows={rows} metric={metric} formatValue={formatValue} unit={unitText} />
       )}
-    </div>
+    </StatsPanel>
   )
 }
 
@@ -286,7 +296,7 @@ const SOURCE_COLUMNS = [
   { key: 'share', label: '占比', width: '15%', align: 'right', sortable: true }
 ]
 
-function BySourceCard({ scoped }) {
+function SourceModule({ scoped }) {
   const plugins = usePluginsDetails()
   const pluginNames = useMemo(
     () => new Map(plugins.map((plugin) => [plugin.id, plugin.name])),
@@ -344,103 +354,167 @@ function BySourceCard({ scoped }) {
     [rows, pluginNames, pluginDescriptions, sort]
   )
 
-  if (rows.length === 0) return <Empty description="当前区间没有来源用量" />
   const maxShare =
     flattened.rows.length > 0 ? flattened.rows.reduce((m, r) => Math.max(m, r.share), 0) : 0
 
   return (
-    <div>
-      <header className="mb-2 flex items-baseline justify-between gap-2">
-        <h2 className={OVERLINE_CLASS}>来源用量</h2>
-        <span className="shrink-0 text-[11px] text-fg-faint tabular-nums">
-          {flattened.groups} 个来源 · {tokensShort(flattened.total)} tokens
-        </span>
-      </header>
-      <div className="mica-config-ui is-embed">
-        <DataTable
-          ariaLabel="按来源用量"
-          columns={SOURCE_COLUMNS}
-          rows={flattened.rows}
-          rowKey={(row) => row.key}
-          pageSize={0}
-          sort={sort}
-          onSortChange={(key) =>
-            setSort((current) =>
-              current.key === key ? { key, desc: !current.desc } : { key, desc: true }
-            )
-          }
-          renderCells={(row) => [
-            <div
-              key="source"
-              className={`min-w-0 ${row.depth > 0 ? 'ml-2 border-l border-line-soft pl-2.5' : ''}`}
-            >
-              <div className="flex min-w-0 items-center gap-1.5">
+    <StatsPanel
+      title="来源明细"
+      extra={
+        rows.length > 0 ? (
+          <span className="tabular-nums">
+            {flattened.groups} 个来源 · {tokensShort(flattened.total)} tokens
+          </span>
+        ) : (
+          '按来源归组'
+        )
+      }
+    >
+      {rows.length === 0 ? (
+        <Empty description="当前区间没有来源用量" />
+      ) : (
+        <>
+          <div className="mica-config-ui is-embed">
+            <DataTable
+              ariaLabel="按来源用量"
+              columns={SOURCE_COLUMNS}
+              rows={flattened.rows}
+              rowKey={(row) => row.key}
+              pageSize={0}
+              sort={sort}
+              onSortChange={(key) =>
+                setSort((current) =>
+                  current.key === key ? { key, desc: !current.desc } : { key, desc: true }
+                )
+              }
+              renderCells={(row) => [
+                <div
+                  key="source"
+                  className={`min-w-0 ${row.depth > 0 ? 'ml-2 border-l border-line-soft pl-2.5' : ''}`}
+                >
+                  <div className="flex min-w-0 items-center gap-1.5">
+                    <span
+                      aria-hidden
+                      className="size-2 shrink-0 rounded-full"
+                      style={{ background: row.color }}
+                    />
+                    <span
+                      className={`min-w-0 truncate text-xs ${
+                        row.isGroup ? 'font-medium text-fg-strong' : 'text-fg-muted'
+                      }`}
+                      title={row.title}
+                    >
+                      {row.title}
+                    </span>
+                  </div>
+                  <span
+                    className="mt-0.5 block truncate pl-3.5 text-[11px] text-fg-faint"
+                    title={row.detail}
+                  >
+                    {row.detail}
+                  </span>
+                </div>,
+                <span key="kind" className="min-w-0" title={row.kindHint}>
+                  <Tag>{row.kindLabel}</Tag>
+                </span>,
+                <span key="requests" className="font-mono text-[11px] text-fg-muted tabular-nums">
+                  {row.requests.toLocaleString()}
+                </span>,
+                <span key="input" className="font-mono text-[11px] text-fg-muted tabular-nums">
+                  {tokensShort(row.inputTokens)}
+                </span>,
+                <span key="output" className="font-mono text-[11px] text-fg-muted tabular-nums">
+                  {tokensShort(row.outputTokens)}
+                </span>,
+                <div key="share" className="flex items-center justify-end gap-2">
+                  <div className="h-[5px] min-w-0 flex-1 overflow-hidden rounded-full bg-panel-hi">
+                    <div
+                      className="h-full rounded-full"
+                      style={{
+                        width: `${maxShare > 0 ? (row.share / maxShare) * 100 : 0}%`,
+                        background: row.color
+                      }}
+                    />
+                  </div>
+                  <span className="w-10 shrink-0 text-right font-mono text-[11px] text-fg-faint tabular-nums">
+                    {(row.share * 100).toFixed(1)}%
+                  </span>
+                </div>
+              ]}
+            />
+          </div>
+          <ul className="mt-3 flex flex-col gap-1 border-t border-line-soft pt-2.5 text-[11px] leading-relaxed text-fg-faint">
+            {SOURCE_ORDER.map((kind) => (
+              <li key={kind} className="flex gap-1.5">
                 <span
                   aria-hidden
-                  className="size-2 shrink-0 rounded-full"
-                  style={{ background: row.color }}
+                  className="mt-[5px] size-1.5 shrink-0 rounded-full"
+                  style={{ background: SOURCE_COLORS[kind] }}
                 />
-                <span
-                  className={`min-w-0 truncate text-xs ${
-                    row.isGroup ? 'font-medium text-fg-strong' : 'text-fg-muted'
-                  }`}
-                  title={row.title}
-                >
-                  {row.title}
+                <span className="min-w-0">
+                  <span className="text-fg-muted">{SOURCE_KIND_LABELS[kind]}</span>
+                  {` — ${SOURCE_KIND_HINTS[kind]}`}
                 </span>
-              </div>
-              <span
-                className="mt-0.5 block truncate pl-3.5 text-[11px] text-fg-faint"
-                title={row.detail}
-              >
-                {row.detail}
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+    </StatsPanel>
+  )
+}
+
+/** 项目明细里画多少条堆叠条：再多就靠下面的表看，图只负责「一眼看出谁最贵、钱花在谁身上」。 */
+const PROJECT_CHART_ROWS = 12
+
+/**
+ * 项目明细：上图下表。
+ *
+ * 图回答「哪个项目最贵、贵在谁身上」——横条按来源四段堆叠，横向比长度比读两列数字快；
+ * 表回答「到底多少」——会话、请求、Tokens、占比可排序，点项目名即可把下面的会话明细
+ * 收到那一个项目上。只用表就得逐个读数字找最大，只用图又拿不到精确值与会话数。
+ */
+function ProjectModule({ rows, total, selected, onSelect }) {
+  const chartRows = rows.slice(0, PROJECT_CHART_ROWS)
+  return (
+    <StatsPanel
+      title="项目明细"
+      extra={`按来源堆叠 · Tokens${rows.length > chartRows.length ? ` · 图中前 ${chartRows.length} / ${rows.length}` : ''}`}
+      className="stats-project-module"
+    >
+      {rows.length === 0 ? (
+        <Empty description="当前区间没有项目用量" />
+      ) : (
+        <>
+          <ProjectChart
+            rows={chartRows}
+            parts={PROJECT_PARTS}
+            formatValue={tokensShort}
+            onSelect={onSelect}
+          />
+          <div className="stats-inline-legend" aria-label="项目用量来源">
+            {PROJECT_PARTS.map((part) => (
+              <span key={part.key}>
+                <i aria-hidden="true" style={{ background: part.color }} />
+                {part.label}
               </span>
-            </div>,
-            <span key="kind" className="min-w-0" title={row.kindHint}>
-              <Tag>{row.kindLabel}</Tag>
-            </span>,
-            <span key="requests" className="font-mono text-[11px] text-fg-muted tabular-nums">
-              {row.requests.toLocaleString()}
-            </span>,
-            <span key="input" className="font-mono text-[11px] text-fg-muted tabular-nums">
-              {tokensShort(row.inputTokens)}
-            </span>,
-            <span key="output" className="font-mono text-[11px] text-fg-muted tabular-nums">
-              {tokensShort(row.outputTokens)}
-            </span>,
-            <div key="share" className="flex items-center justify-end gap-2">
-              <div className="h-[5px] min-w-0 flex-1 overflow-hidden rounded-full bg-panel-hi">
-                <div
-                  className="h-full rounded-full"
-                  style={{
-                    width: `${maxShare > 0 ? (row.share / maxShare) * 100 : 0}%`,
-                    background: row.color
-                  }}
-                />
-              </div>
-              <span className="w-10 shrink-0 text-right font-mono text-[11px] text-fg-faint tabular-nums">
-                {(row.share * 100).toFixed(1)}%
-              </span>
-            </div>
-          ]}
-        />
-      </div>
-      <ul className="mt-3 flex flex-col gap-1 border-t border-line-soft pt-2.5 text-[11px] leading-relaxed text-fg-faint">
-        {SOURCE_ORDER.map((kind) => (
-          <li key={kind} className="flex gap-1.5">
-            <span
-              aria-hidden
-              className="mt-[5px] size-1.5 shrink-0 rounded-full"
-              style={{ background: SOURCE_COLORS[kind] }}
+            ))}
+          </div>
+          <p className="stats-note">
+            点项目切到它的会话明细；长尾项目在下面的表里，排序与占比按全区间算。
+          </p>
+          <div className="stats-project-table">
+            <BreakdownReport
+              rows={rows}
+              type="projects"
+              total={total}
+              selected={selected}
+              onSelect={onSelect}
             />
-            <span className="min-w-0">
-              <span className="text-fg-muted">{SOURCE_KIND_LABELS[kind]}</span>
-              {` — ${SOURCE_KIND_HINTS[kind]}`}
-            </span>
-          </li>
-        ))}
-      </ul>
-    </div>
+          </div>
+        </>
+      )}
+    </StatsPanel>
   )
 }
 
@@ -649,8 +723,9 @@ function BySessionCard({ scoped, onDetail }) {
 }
 
 export function StatsView({ visible }) {
-  // 默认看今天：统计页打开时关心的是「刚才这一轮花了多少」，近 30 天的总量是决策时才切过去看的。
-  const [range, setRange] = useState('today')
+  // 默认看近 7 天：只看今天会让活跃日历与模型速度大半空着（周末、刚换机器、只在昨天干过活
+  // 都读不出东西），而近 7 天仍能回答「这几天花了多少」。要精确到某一轮就切「今天」。
+  const [range, setRange] = useState('7d')
   const [snap, setSnap] = useState(null)
   const [metric, setMetric] = useState('tokens')
   const [report, setReport] = useState('sessions')
@@ -755,10 +830,12 @@ export function StatsView({ visible }) {
     setSelectedProject(null)
     showReport('models')
   }
+  // 项目现在只有「筛会话」一种去向：点一个项目就把它下面的会话明细拉出来。再点一次
+  // 同一个项目＝取消筛选，否则点了同一行没有任何反馈。
   const selectProject = (id) => {
-    setSelectedProject(id)
+    setSelectedProject(id === projectFilter ? null : id)
     setSelectedModel(null)
-    showReport(id === null ? 'projects' : 'sessions')
+    showReport('sessions')
   }
   const rangeText = isDayRange(range)
     ? range.day
@@ -813,17 +890,30 @@ export function StatsView({ visible }) {
             metric={metric}
             onMetricChange={setMetric}
             onSelectModel={selectModel}
-            onSelectProject={selectProject}
-          />
-          <StatsPanel
-            title="精确明细"
-            extra={
-              report === 'activity'
-                ? '日历按年份独立展示，不受顶部区间影响'
-                : '与上方图表使用同一统计区间'
+            afterMetrics={
+              <ActivityModule
+                sessions={sessions}
+                range={range}
+                onSelectDay={(day) => setRange({ day })}
+                calendar={calendar}
+              />
             }
-            className="stats-details"
-          >
+          />
+          {/* banner 之后依次是三个各自独立的模块：模型速度 → 项目 → 来源。它们原先挤在
+              「精确明细」的页签里，点一下才看得见一个；现在一屏铺开，只是把需要横向比较
+              的表格留在最下面的明细区。活跃日历不在这里——它在 KPI 条下面（见上面的
+              `afterMetrics`），和四项 KPI 同属「区间总量」那一层。 */}
+          <div className="stats-modules">
+            <ModelSpeedModule scoped={activeScoped} />
+            <ProjectModule
+              rows={overview.projects}
+              total={overview.totals.totalTokens}
+              selected={projectFilter}
+              onSelect={selectProject}
+            />
+            <SourceModule scoped={activeScoped} />
+          </div>
+          <StatsPanel title="精确明细" extra="与上方图表使用同一统计区间" className="stats-details">
             <div id="stats-details" className="stats-detail-tabs">
               <Segmented
                 size="compact"
@@ -865,12 +955,6 @@ export function StatsView({ visible }) {
               ) : (
                 <Empty description="当前筛选下没有会话用量" />
               ))}
-            {report === 'sources' &&
-              (activeScoped.length ? (
-                <BySourceCard scoped={activeScoped} />
-              ) : (
-                <Empty description="当前区间没有来源用量" />
-              ))}
             {report === 'models' && (
               <BreakdownReport
                 rows={overview.models}
@@ -882,24 +966,6 @@ export function StatsView({ visible }) {
                   setSelectedProject(null)
                   showReport('sessions')
                 }}
-              />
-            )}
-            {report === 'projects' && (
-              <BreakdownReport
-                rows={overview.projects}
-                type="projects"
-                total={overview.totals.totalTokens}
-                selected={projectFilter}
-                onSelect={selectProject}
-              />
-            )}
-            {report === 'speed' && <ModelPerformanceCard scoped={activeScoped} />}
-            {report === 'activity' && (
-              <ActivityReport
-                sessions={sessions}
-                range={range}
-                onSelectDay={(day) => setRange({ day })}
-                calendar={calendar}
               />
             )}
           </StatsPanel>

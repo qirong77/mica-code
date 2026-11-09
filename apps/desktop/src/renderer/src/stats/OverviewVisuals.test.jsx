@@ -35,14 +35,14 @@ const overview = {
   ]
 }
 const noop = () => {}
-const render = (data = overview, metric = 'tokens') =>
+const render = (data = overview, metric = 'tokens', extra = {}) =>
   renderToStaticMarkup(
     createElement(OverviewVisuals, {
       overview: data,
       metric,
       onMetricChange: noop,
       onSelectModel: noop,
-      onSelectProject: noop
+      ...extra
     })
   )
 
@@ -95,7 +95,7 @@ describe('OverviewVisuals', () => {
     expect(overview.models.map((row) => row.id)).toEqual(['large', 'fast'])
   })
 
-  it('limits the overview to six models and seven projects but keeps complete-detail actions', () => {
+  it('limits the model ranking to six rows and leaves projects to the detail module', () => {
     const data = {
       ...overview,
       models: Array.from({ length: 8 }, (_, index) => ({
@@ -118,17 +118,14 @@ describe('OverviewVisuals', () => {
     const html = render(data)
     expect(html.match(/stats-rank-action/g)).toHaveLength(6)
     expect(html).toContain('展示 6 / 8 个模型')
-    expect(html).toContain('展示 7 / 9 个项目')
     expect(html).toContain('查看全部模型')
-    expect(html).toContain('查看全部项目')
     expect(html).not.toContain('Model 6')
-    expect(html).not.toContain('Project 7')
     expect(data.models).toHaveLength(8)
     expect(data.projects).toHaveLength(9)
-    expect(html).toContain('主对话')
-    expect(html).toContain('子代理')
-    expect(html).toContain('插件')
-    expect(html).toContain('内核后台')
+    // banner 里只有 KPI、趋势、Token 构成与模型排行；项目堆叠图下沉成独立的「项目明细」
+    // 模块，这里再画一遍就等于同一份数据在页面上出现两次。
+    expect(html).not.toContain('项目贡献')
+    expect(html).not.toContain('Project 0')
   })
 
   it('keeps date selection local and describes the multi-day range', () => {
@@ -161,11 +158,12 @@ describe('OverviewVisuals', () => {
       models: [],
       projects: []
     })
-    expect(html.match(/class="arco-empty ui-empty"/g)).toHaveLength(4)
+    // banner 里剩三块会空的地方：每日用量、Token 构成、模型分布。
+    expect(html.match(/class="arco-empty ui-empty"/g)).toHaveLength(3)
     expect(html).toContain('所选区间没有每日用量')
     expect(html).toContain('所选区间没有 Token 用量')
     expect(html).toContain('所选区间没有模型用量')
-    expect(html).toContain('所选区间没有项目用量')
+    expect(html).toContain('缓存占总量 —；缓存命中率 —')
     expect(html).toContain('缓存占总量 —；缓存命中率 —')
     expect(html).not.toContain('%')
     expect(html).not.toContain('stats-chart-donut')
@@ -187,6 +185,16 @@ describe('OverviewVisuals', () => {
     })
     expect(html).toContain('缓存占总量 0.0%；缓存命中率 —')
     expect(html).toContain('输出 · 100,000 Tokens · 占全部 100.0%')
+  })
+
+  it('slots extra content directly under the KPI strip, before trend and token charts', () => {
+    const html = render(overview, 'tokens', { afterMetrics: 'AFTER_METRICS_SLOT' })
+    const kpi = html.indexOf('stats-metrics-panel')
+    const slot = html.indexOf('AFTER_METRICS_SLOT')
+    const trend = html.indexOf('stats-chart-trend')
+    expect(kpi).toBeGreaterThan(-1)
+    expect(slot).toBeGreaterThan(kpi)
+    expect(trend).toBeGreaterThan(slot)
   })
 
   it('exports the reusable Arco panel with title, extra, content and stats scope', () => {

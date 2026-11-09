@@ -1,21 +1,15 @@
 import { useEffect, useState } from 'react'
 import Statistic from '@arco-design/web-react/es/Statistic'
 import { Button, Empty, Segmented } from '@mica-config-ui/web'
-import { USAGE_SOURCE_LABELS } from '@packages/mica-web-shared/usage-source.js'
 import { StatsPanel } from './StatsPanel'
-import { DonutChart, ProjectChart, TrendChart } from './usage-charts'
-import { USAGE_KIND_COLORS, USAGE_KIND_ORDER, USAGE_TOKEN_PARTS } from './usage-series'
+import { DonutChart, TrendChart } from './usage-charts'
+import { USAGE_TOKEN_PARTS } from './usage-series'
 
 const TOKEN_FIELDS = {
   cached: 'cachedInputTokens',
   uncached: 'uncachedInputTokens',
   output: 'outputTokens'
 }
-const SOURCE_PARTS = USAGE_KIND_ORDER.map((key) => ({
-  key,
-  label: USAGE_SOURCE_LABELS[key],
-  color: USAGE_KIND_COLORS[key]
-}))
 const METRIC_OPTIONS = [
   { value: 'tokens', label: 'Tokens' },
   { value: 'requests', label: '请求' }
@@ -275,55 +269,15 @@ function ModelRanking({ rows, metric, total, onSelect }) {
   )
 }
 
-function ProjectContribution({ rows, onSelect }) {
-  const visible = rows.slice(0, 7)
-  return (
-    <StatsPanel title="项目贡献" extra="按来源堆叠 · Tokens">
-      {visible.length ? (
-        <>
-          <ProjectChart
-            rows={visible}
-            parts={SOURCE_PARTS}
-            formatValue={tokens}
-            onSelect={onSelect}
-          />
-          <div className="stats-inline-legend" aria-label="项目用量来源">
-            {SOURCE_PARTS.map((part) => (
-              <span key={part.key}>
-                <i aria-hidden="true" style={{ background: part.color }} />
-                {part.label}
-              </span>
-            ))}
-          </div>
-          <p className="stats-note">点击项目查看会话明细；完整项目及长尾用量保留在明细中。</p>
-          <div className="stats-panel-footer">
-            <span className="stats-meta">
-              展示 {visible.length} / {count(rows.length)} 个项目
-            </span>
-            <Button variant="ghost" size="compact" onClick={() => onSelect(null)}>
-              查看全部项目
-            </Button>
-          </div>
-        </>
-      ) : (
-        <div className="stats-chart-empty">
-          <Empty description="所选区间没有项目用量" />
-        </div>
-      )}
-    </StatsPanel>
-  )
-}
-
-export function OverviewVisuals({
-  overview,
-  metric,
-  onMetricChange,
-  onSelectModel,
-  onSelectProject
-}) {
+/**
+ * `afterMetrics` 插在 KPI 条与趋势区之间：活跃日历是「什么时候在干活」的总览，和
+ * 四项 KPI 是同一层的问题（都是区间总量），排在趋势/构成之前比压到页面下半部分合适。
+ * 它由 StatsView 传进来，因为这个组件不认识日历的数据来源。
+ */
+export function OverviewVisuals({ overview, metric, onMetricChange, onSelectModel, afterMetrics }) {
   const [selectedDay, setSelectedDay] = useState(null)
   const [selectedToken, setSelectedToken] = useState(null)
-  const { totals, days, models, projects } = overview
+  const { totals, days, models } = overview
   const hasUsage = totals.requests > 0 || totals.totalTokens > 0
   const tokenRows = USAGE_TOKEN_PARTS.map((part) => ({
     id: part.key,
@@ -345,12 +299,10 @@ export function OverviewVisuals({
   const sortedModels = hasUsage
     ? [...models].sort((a, b) => b[metric] - a[metric] || a.label.localeCompare(b.label))
     : []
-  const sortedProjects = hasUsage
-    ? [...projects].sort((a, b) => b.tokens - a.tokens || a.label.localeCompare(b.label))
-    : []
   return (
     <div className="stats-overview">
       <MetricStrip totals={totals} />
+      {afterMetrics}
       <div className="stats-main-grid">
         <Trend
           days={days}
@@ -367,15 +319,14 @@ export function OverviewVisuals({
           onSelect={(key) => setSelectedToken(selectedToken === key ? null : key)}
         />
       </div>
-      <div className="stats-two-columns">
-        <ModelRanking
-          rows={sortedModels}
-          metric={metric}
-          total={metric === 'requests' ? totals.requests : totals.totalTokens}
-          onSelect={onSelectModel}
-        />
-        <ProjectContribution rows={sortedProjects} onSelect={onSelectProject} />
-      </div>
+      {/* 项目贡献图已经下沉成独立的「项目明细」模块（图表 + 表），banner 这一层只留
+          模型排行——同一份项目堆叠图在这页出现两次只会让人以为看漏了什么。 */}
+      <ModelRanking
+        rows={sortedModels}
+        metric={metric}
+        total={metric === 'requests' ? totals.requests : totals.totalTokens}
+        onSelect={onSelectModel}
+      />
     </div>
   )
 }

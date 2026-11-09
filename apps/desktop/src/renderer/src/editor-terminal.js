@@ -31,6 +31,15 @@ export function isTerminalToggleShortcut(event) {
   )
 }
 
+/**
+ * 对话底部终端此刻是否可见。展开状态是**按会话**记的（`terminalOpenByChat`），所以不能
+ * 只看那一位：编辑器与统计页都是整窗的一层，各自有自己的终端（统计页一个都没有）。只要
+ * 在对话里开过终端，不按视图收窄就会每次点 Stats 都默认压一条终端在图表下面。
+ */
+export function chatTerminalVisible(view, terminalOpen) {
+  return view === 'chat' && terminalOpen === true
+}
+
 function viewportHeight() {
   return typeof window === 'undefined' ? 0 : Number(window.innerHeight) || 0
 }

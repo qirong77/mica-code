@@ -409,6 +409,29 @@
   background: var(--color-fg-faint);
 }
 
+.stats-modules {
+  /* 与 `.stats-overview` 同名的容器：卡片内的窄屏规则（表头换行、内边距）
+     在这些模块里也要生效，所以它们自己也得是一条容器。 */
+  container: stats-overview / inline-size;
+  display: grid;
+  gap: 20px;
+  min-width: 0;
+  margin-top: 20px;
+}
+
+.stats-modules > .arco-card {
+  margin: 0;
+}
+
+/* 项目明细是「上图下表」：图和表之间要能看出是两块内容，但同属一张卡，
+   所以只在中间加一条浅线，不再另起一张卡把两者劈开。 */
+.stats-project-module .stats-project-table {
+  min-width: 0;
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--color-line-soft);
+}
+
 .stats-details {
   min-width: 0;
   margin-top: 20px;

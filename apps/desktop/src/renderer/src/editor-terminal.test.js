@@ -3,6 +3,7 @@ import {
   DEFAULT_EDITOR_TERMINAL_HEIGHT,
   MIN_EDITOR_TERMINAL_HEIGHT,
   activeTabAfterClose,
+  chatTerminalVisible,
   clampEditorTerminalHeight,
   closeTabConfirmText,
   closeWindowConfirmText,
@@ -43,6 +44,20 @@ describe('isTerminalToggleShortcut', () => {
     expect(isTerminalToggleShortcut(keydown({ ctrlKey: true, code: 'KeyT' }))).toBe(false)
     expect(isTerminalToggleShortcut(keydown({ ctrlKey: true, repeat: true }))).toBe(false)
     expect(isTerminalToggleShortcut(null)).toBe(false)
+  })
+})
+
+describe('chatTerminalVisible', () => {
+  it('shows the session terminal only in the chat view', () => {
+    expect(chatTerminalVisible('chat', true)).toBe(true)
+    // 展开状态按会话记着，但统计页/编辑器没有会话终端的位置。
+    expect(chatTerminalVisible('stats', true)).toBe(false)
+    expect(chatTerminalVisible('files', true)).toBe(false)
+  })
+
+  it('stays hidden while the session has not opened its terminal', () => {
+    expect(chatTerminalVisible('chat', false)).toBe(false)
+    expect(chatTerminalVisible('chat', undefined)).toBe(false)
   })
 })
 
