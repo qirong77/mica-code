@@ -429,7 +429,7 @@ function SourceModule({ scoped }) {
                 <div key="share" className="flex items-center justify-end gap-2">
                   <div className="h-[5px] min-w-0 flex-1 overflow-hidden rounded-full bg-panel-hi">
                     <div
-                      className="h-full rounded-full"
+                      className="motion-bar h-full rounded-full"
                       style={{
                         width: `${maxShare > 0 ? (row.share / maxShare) * 100 : 0}%`,
                         background: row.color
@@ -545,36 +545,40 @@ function BreakdownReport({ rows, type, total, selected, onSelect }) {
     [rows, sort]
   )
   return (
-    <div className="mica-config-ui is-embed">
-      <DataTable
-        ariaLabel={type === 'models' ? '按模型用量' : '按项目用量'}
-        columns={BREAKDOWN_COLUMNS}
-        rows={sorted}
-        rowKey={(row) => row.id}
-        pageSize={10}
-        sort={sort}
-        onSortChange={(key) =>
-          setSort((current) => ({ key, desc: current.key === key ? !current.desc : true }))
-        }
-        renderCells={(row) => [
-          <Button
-            key="name"
-            variant="ghost"
-            size="compact"
-            pressed={selected === row.id}
-            title={row.cwd || row.label}
-            onClick={() => onSelect(row.id)}
-          >
-            <span className="block truncate">{row.label}</span>
-          </Button>,
-          <span key="sessions">{row.sessions.toLocaleString()}</span>,
-          <span key="requests">{row.requests.toLocaleString()}</span>,
-          <span key="tokens" title={row.tokens.toLocaleString()}>
-            {tokensShort(row.tokens)}
-          </span>,
-          <span key="share">{total > 0 ? `${((row.tokens / total) * 100).toFixed(1)}%` : '—'}</span>
-        ]}
-      />
+    <div className="motion-swap-in">
+      <div className="mica-config-ui is-embed">
+        <DataTable
+          ariaLabel={type === 'models' ? '按模型用量' : '按项目用量'}
+          columns={BREAKDOWN_COLUMNS}
+          rows={sorted}
+          rowKey={(row) => row.id}
+          pageSize={10}
+          sort={sort}
+          onSortChange={(key) =>
+            setSort((current) => ({ key, desc: current.key === key ? !current.desc : true }))
+          }
+          renderCells={(row) => [
+            <Button
+              key="name"
+              variant="ghost"
+              size="compact"
+              pressed={selected === row.id}
+              title={row.cwd || row.label}
+              onClick={() => onSelect(row.id)}
+            >
+              <span className="block truncate">{row.label}</span>
+            </Button>,
+            <span key="sessions">{row.sessions.toLocaleString()}</span>,
+            <span key="requests">{row.requests.toLocaleString()}</span>,
+            <span key="tokens" title={row.tokens.toLocaleString()}>
+              {tokensShort(row.tokens)}
+            </span>,
+            <span key="share">
+              {total > 0 ? `${((row.tokens / total) * 100).toFixed(1)}%` : '—'}
+            </span>
+          ]}
+        />
+      </div>
     </div>
   )
 }
@@ -640,7 +644,7 @@ function BySessionCard({ scoped, onDetail }) {
   const maxTokens = Math.max(...sorted.map((s) => s.totalTokens), 0)
 
   return (
-    <div>
+    <div className="motion-swap-in">
       <header className="mb-2 flex items-baseline justify-between gap-2">
         <h2 className={OVERLINE_CLASS}>会话用量</h2>
         <span className="shrink-0 text-[11px] text-fg-faint">{sorted.length} 个会话</span>
@@ -695,7 +699,7 @@ function BySessionCard({ scoped, onDetail }) {
             >
               <span
                 aria-hidden
-                className="absolute inset-y-0 right-0 rounded-[2px] bg-overlay"
+                className="motion-bar-right absolute inset-y-0 right-0 rounded-[2px] bg-overlay"
                 style={{ width: `${maxTokens > 0 ? (s.totalTokens / maxTokens) * 100 : 0}%` }}
               />
               <span className="relative">{tokensShort(s.totalTokens)}</span>

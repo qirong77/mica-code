@@ -56,7 +56,7 @@ function NotificationCard({ item }) {
   return (
     // 整条垂直居中：圆点、文字与右侧按钮同一条中轴。两行文字（正文 + 说明）时
     // 按钮跟着居中，不要贴在第一行上——那样看起来像是掉上去的。
-    <div className="no-drag pointer-events-auto flex w-fit max-w-[min(560px,100%)] items-center gap-2.5 rounded-md border border-line bg-panel px-3 py-2 text-xs text-fg-strong shadow-lg">
+    <div className="notice-card no-drag pointer-events-auto flex w-fit max-w-[min(560px,100%)] items-center gap-2.5 rounded-md border border-line bg-panel px-3 py-2 text-xs text-fg-strong shadow-lg">
       <span
         className={`h-1.5 w-1.5 shrink-0 rounded-full ${LEVEL_DOTS[item.level] || LEVEL_DOTS.info}`}
         aria-hidden="true"

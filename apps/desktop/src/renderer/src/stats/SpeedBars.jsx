@@ -46,7 +46,7 @@ export function SpeedBars({ rows, metric, formatValue, unit }) {
                   aria-hidden="true"
                 >
                   <div
-                    className="h-full rounded-full bg-info"
+                    className="motion-bar h-full rounded-full bg-info"
                     style={{ width: `${ratio * 100}%` }}
                   />
                 </div>

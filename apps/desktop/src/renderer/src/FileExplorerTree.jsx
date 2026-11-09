@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef } from 'react'
 import { Input } from '@mica-config-ui/web'
 import { IconChevronRight } from '@tabler/icons-react'
+import Collapse from './Collapse'
 import { FileSystemIcon } from './FileIcon'
 import { longPressHandlers } from './hooks'
 import { relativeToRoot, statusColor, statusLabel } from './git-decorations'
@@ -200,7 +201,7 @@ function TreeRows(props) {
                 }}
               >
                 <span
-                  className={`grid size-4 shrink-0 place-items-center text-fg-muted ${node.expanded ? 'rotate-90' : ''}`}
+                  className={`grid size-4 shrink-0 place-items-center text-fg-muted transition-transform ${node.expanded ? 'rotate-90' : ''}`}
                 >
                   {directory && <IconChevronRight size={14} />}
                 </span>
@@ -241,28 +242,30 @@ function TreeRows(props) {
                 />
               </div>
             )}
-            {directory && node.expanded && (
-              <div role="group" className="relative">
-                <span
-                  aria-hidden="true"
-                  className="pointer-events-none absolute inset-y-0 w-px bg-overlay-strong"
-                  style={{ left: TREE_ROW_INSET + 8 + depth * TREE_INDENT }}
-                />
-                <TreeRows
-                  {...props}
-                  nodes={node.children}
-                  directoryPath={node.path}
-                  depth={depth + 1}
-                />
-                {node.error ? (
-                  <div
-                    className="py-1 pr-2 text-[11px] text-danger/85"
-                    style={{ paddingLeft: 57 + (depth + 1) * TREE_INDENT }}
-                  >
-                    无法读取：{node.error}
-                  </div>
-                ) : null}
-              </div>
+            {directory && (
+              <Collapse open={node.expanded}>
+                <div role="group" className="relative">
+                  <span
+                    aria-hidden="true"
+                    className="pointer-events-none absolute inset-y-0 w-px bg-overlay-strong"
+                    style={{ left: TREE_ROW_INSET + 8 + depth * TREE_INDENT }}
+                  />
+                  <TreeRows
+                    {...props}
+                    nodes={node.children}
+                    directoryPath={node.path}
+                    depth={depth + 1}
+                  />
+                  {node.error ? (
+                    <div
+                      className="py-1 pr-2 text-[11px] text-danger/85"
+                      style={{ paddingLeft: 57 + (depth + 1) * TREE_INDENT }}
+                    >
+                      无法读取：{node.error}
+                    </div>
+                  ) : null}
+                </div>
+              </Collapse>
             )}
           </div>
         )

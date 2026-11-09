@@ -1659,7 +1659,7 @@ export const FilesView = forwardRef(function FilesView(
   return (
     <section
       ref={viewRef}
-      className={`relative min-h-0 flex-1 bg-canvas no-drag ${visible ? 'flex' : 'hidden'}`}
+      className={`files-view relative min-h-0 flex-1 bg-canvas no-drag ${visible ? 'flex' : 'hidden'}`}
     >
       <nav
         className={`w-12 shrink-0 flex-col items-center border-r border-line bg-panel py-1 ${

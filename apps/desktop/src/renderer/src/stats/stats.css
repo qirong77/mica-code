@@ -83,6 +83,25 @@
   border-color: var(--color-line);
   border-radius: 6px;
   background: var(--color-panel);
+  /* 进页面时卡片按阅读顺序依次落位（延迟见下面的 `:nth-child`）。
+     曲线与时长取 app.css 的动效 token，切页时的淡入由 `.stats-view` 那条规则负责。 */
+  animation: motion-rise-in var(--motion-slow) var(--ease-soft) backwards;
+}
+
+/* 同一屏里的模块错开 28ms：整块同时淡入读起来像画面闪了一下。 */
+.stats-modules > :nth-child(2),
+.stats-overview > :nth-child(2) {
+  animation-delay: 28ms;
+}
+
+.stats-modules > :nth-child(3),
+.stats-overview > :nth-child(3) {
+  animation-delay: 56ms;
+}
+
+.stats-modules > :nth-child(4),
+.stats-overview > :nth-child(4) {
+  animation-delay: 84ms;
 }
 
 .stats-panel > .arco-card-header {

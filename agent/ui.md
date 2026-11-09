@@ -44,6 +44,24 @@
 - 因此亮色有五个专属 token 不能回退成通用灰阶：`--color-nav-fg`（侧栏/菜单行）、`--color-bubble`（用户消息带）、`--color-inline-code{,-bg,-border}`（行内代码药丸）、`--color-heat-empty`（热力图空格：亮色 canvas 是纯白，铺在 panel 卡片上等于没有网格）。`theme-tokens.test.js` 钉住了这些锚点，值要改就一起改测试并写明理由。
 - 提问（`ask` 插件）有一支**自己的识别色** `--color-ask` + 压在它实心底上的字色 `--color-ask-contrast`：卡片问号徽标、选中选项、「确定」按钮、输入框聚焦边框，以及侧栏/快速打开里「等你做一个选择」的圆点全用它。**不要退回主题强调色**——强调色在浅色主题里就是蓝色，会和未读蓝点、主按钮混在一起，一笔等你点选的卡片就认不出来。六个主题各取自家调色板的青（Darcula ansiCyan / Catppuccin teal / Tokyo Night ansiCyan / DSH 深青），亮底主题要压深到白字 ≥4.5:1。`theme-tokens.test.js` 校验 token 存在、对比度、`--color-ask` 不等于 `--color-accent`，以及侧栏不再出现 `bg-accent chat-dot-unread` 组合。
 
+## 动效
+
+- 全站一套 token：`assets/app.css` 的 `@theme` 里定义 `--default-transition-duration` / `--default-transition-timing-function`（Tailwind 的 `transition-*` 工具类默认取这两项，JSX 里已有的 `transition-colors` 因此自动跟随）与 `--ease-soft` / `--ease-emphasized` / `--ease-exit`；`:root` 里定义 `--motion-fast`（90ms，按压与悬浮）/ `--motion-base`（140ms，浮层与切页）/ `--motion-slow`（200ms，整块入场）。
+- 入场只写在一个地方：`app.css` 末尾的「动效」段。`@keyframes motion-pop-in`（浮层，4px + 0.98）、`motion-rise-in`（切页与卡片，5px）、`motion-toast-in`（顶部通知）、`motion-fade-in`（设置页、终端面板）。新面板要入场就在那里加它的类名，别在组件文件里另写 keyframes。
+- 入场靠 `animation` 而不是 `transition`：元素挂载即播，`display: none → flex` 切回可见时也会重播，所以 `App.jsx` 里那些常驻实例（对话 / 统计 / 文件靠 `visible` 切 display）不需要 JS 配合。除了折叠（见下一条），退场一律不做——退场要留 DOM 等动画跑完，每处卸载都得改成延迟卸载，代价大于收益。
+- **折叠 / 展开只用 `renderer/src/Collapse.jsx`**，不要各写一套 `max-height` 或量高度：它用 `grid-template-rows: 0fr ↔ 1fr` 让浏览器自己解算内容高度（`app.css` 的 `.motion-collapse`），收起时延迟 160ms 再卸载内容，展开时先以 0fr 挂上一帧再放开。树（文件树目录、会话分组、Git 面板根）、侧栏分区、回合日志都走它；给新面板加折叠时包一层 `<Collapse open={...}>` 即可。收起过程中内容带 `aria-hidden` 且不接收点击。文件树的懒加载依赖「收起时内容不挂载」，别把 `Collapse` 换成常驻 DOM。
+- 可旋转的箭头（`rotate-90` 切换）要带 `transition-transform`：Tailwind v4 把 `rotate-90` 编译成独立的 `rotate` 属性，而 `transition-transform` 的 `transition-property` 含 `rotate`，两者才配得上；只写 `rotate-90` 是瞬间翻转。
+- 页签 / 筛选切换后的内容用 `.motion-swap-in`（淡入 + 抬 3px，140ms）：统计页的会话明细、模型明细各带一份。它只在元素**新挂载**时播——同类型元素复用同一个 DOM 节点时不会重播，所以换内容的分支要真正换组件或加 `key`。
+- 图表里的数据条用 `.motion-bar`（从 `scaleX(0)` 长到目标宽度，200ms；右对齐的底纹条用 `.motion-bar-right`）。目标宽度仍然由行内 `style` 给出，动画只负责「从没有到有」；不要改成过渡 `width`，一屏几十条会逐帧重排。
+- 列表行、树行、菜单项、页签的悬浮 / 选中 / 拖拽变淡由 `app.css` 里 `[role='treeitem']` / `option` / `menuitem` / `tab` 的统过渡覆盖（90ms），新树行只要写对 `role` 就自动有；不要给每行再加一遍 `transition-colors`。
+- 只动 `opacity` / `transform` / 颜色。宽高、位置、间距不参与过渡：终端面板高度、侧栏宽度、对话滚动位置都由 JS 量出来写进样式，过渡它们会在量到的瞬间打架（xterm 只淡入、不做位移）。
+- 浮层的 `transform-origin` 跟着锚点：`.chat-popover` 是 bottom right，`.chat-command-palette` 是 bottom center，`.quick-pick-panel` 是 top center。统一成 center 会让它们像从中间弹出来。
+- 按压反馈只给 `.arco-btn:not(.mica-arco-row)`：整行按钮缩一下会让整行文字跟着抖，那种场景本来就是背景色在反馈。
+- 统计页的卡片入场（`.stats-panel` + `.stats-modules` / `.stats-overview` 的 `:nth-child` 28ms 步进）写在 `stats/stats.css`，keyframes 仍取 `app.css` 的 `motion-rise-in`。
+- 弹窗动效收在 `arco-settings.css` 末尾：Arco 默认 400ms、从 0.5 倍带 1.3 过冲，改成 200ms 软曲线、从 0.96 起。Arco 的规则在 `layer(mica-arco)` 里，覆盖它的规则写在分层之外，不需要 `!important`。
+- 配置页（`packages/mica-config-ui/web/styles.css`）不加载 `app.css`，拿不到 `--motion-*`：那里的时长与曲线写同一条曲线的字面量 `cubic-bezier(0.22, 1, 0.36, 1)`。
+- `prefers-reduced-motion: reduce` 有一条全局兜底（`app.css` 动效段末尾），把动画与过渡压到 1ms 并清掉延迟；新增动效不用各自再写一次。
+
 ## 界面审查清单（新增页面、面板、弹窗必查）
 
 - 顶部临时提示走 `renderer/src/notify.js` + `NotificationHost.jsx`：`notify({ key, text, detail, level, timeout, actions })`，同 key 原地更新，最多三条，`sticky` 置顶；需要「页面刷完再提示」用 `queueAfterReload`。不要另外写浮层。

@@ -4478,12 +4478,17 @@ html[data-theme='tokyo-night-light'] .mica-config-ui {
     background: var(--panel);
     transition:
       border-color 110ms ease,
-      background 110ms ease;
+      background 110ms ease,
+      transform 140ms cubic-bezier(0.22, 1, 0.36, 1),
+      box-shadow 140ms cubic-bezier(0.22, 1, 0.36, 1);
   }
 
   .plugin-card:hover {
     border-color: var(--line-strong);
     background: var(--panel-hover);
+    /* 抬起 1px：整片网格里鼠标停在哪张卡上一眼就能看出，又不会让相邻卡片跟着位移。 */
+    transform: translateY(-1px);
+    box-shadow: 0 6px 16px rgb(0 0 0 / 16%);
   }
 
   .plugin-card:focus-within {

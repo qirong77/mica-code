@@ -1,4 +1,5 @@
 import { confirmAction } from './desktop-dialog'
+import Collapse from './Collapse'
 import {
   Suspense,
   useCallback,
@@ -2444,7 +2445,9 @@ function TurnLogDock({
           ))}
         </div>
       )}
-      {!contentCollapsed && (
+      {/* 收起时内容要留到高度过渡播完才卸载（`Collapse` 负责），否则这一块是瞬间
+          消失、标题行却还在原地的"跳变"。 */}
+      <Collapse open={!contentCollapsed}>
         <div
           ref={scrollRef}
           className="chat-turn-log-scroll"
@@ -2474,7 +2477,7 @@ function TurnLogDock({
             <div className="chat-process-empty">等待思考与工具活动…</div>
           ) : null}
         </div>
-      )}
+      </Collapse>
     </section>
   )
 }

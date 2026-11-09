@@ -108,7 +108,24 @@
   --color-inline-code-bg: transparent;
   --color-inline-code-border: transparent;
 
+  /* 动效 —— 全站一条曲线。Tailwind 的 `transition-*` 工具类默认取下面这两项，
+     所以 JSX 里那些 `transition-colors` 不用逐个改就换了手感（默认值是
+     ease-in-out，起步偏慢，悬浮反馈读起来像「慢半拍」）。 */
+  --default-transition-duration: 140ms;
+  --default-transition-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+  /* 出入场的曲线：soft 用于浮层与切页（快进慢停），emphasized 留给整块入场。 */
+  --ease-soft: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-emphasized: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-exit: cubic-bezier(0.4, 0, 1, 1);
+
   --radius-ui: 6px;
+}
+
+/* 动效时长只在这里定义，组件与 stats.css 直接引用；曲线取上面的 `--ease-*`。 */
+:root {
+  --motion-fast: 90ms;
+  --motion-base: 140ms;
+  --motion-slow: 200ms;
 }
 
 /*
@@ -7345,4 +7362,278 @@ html body #root {
 .chat-loop-task .arco-textarea {
   min-height: 72px;
   max-height: 148px;
+}
+
+/* ------------------------------------------------------------------ 动效
+
+   目标是「按下有回应、切页有交代」，不是让界面自己跳舞。三条约束：
+
+   - 只动 opacity / transform / 颜色。宽高、位置、间距一律不参与过渡——终端面板高度、
+     侧栏宽度、对话滚动位置都是 JS 量出来再写进样式的，过渡它们会在量到的瞬间打架。
+   - 时长与曲线只取 `--motion-*` 与 `--ease-*`，不写字面量。手感档（按压、悬浮）用
+     `--motion-fast`，浮层与切页用 `--motion-base`，整块入场用 `--motion-slow`。
+   - 入场用 `animation`：元素挂载即播，`display: none → flex` 切回可见时也会重播，
+     因此切页不需要 JS 配合。退场一律不做——退场要留 DOM 等动画跑完，那样每处卸载
+     都得改成有状态的延迟卸载，代价远大于收益。
+
+   末尾的 `prefers-reduced-motion` 兜底覆盖全站，包括下面各处的入场动画。 */
+
+/* 填充模式一律 `backwards`（见下面每条规则）：它在延迟期套上第一帧，播完就交还给元素
+   自身的样式。`forwards` / `both` 不行——transform 动画结束后计算值停在
+   `matrix(1, 0, 0, 1, 0, 0)`（即使 `to` 写了 `none`，插值结果仍是矩阵），这个"单位矩阵"
+   会给内部 `position: fixed` 的后代重建包含块：对话区里那个浮动菜单会被改判为相对
+   对话区定位。 */
+
+/* 浮层从锚点方向长出来：位移 4px + 缩到 0.98。 */
+@keyframes motion-pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px) scale(0.98);
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* 切页与卡片入场：只抬 5px，再高就会在长列表里看出"整块在动"。 */
+@keyframes motion-rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(5px);
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* 通知从窗口顶边落下来。 */
+@keyframes motion-toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(-7px) scale(0.98);
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes motion-fade-in {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+/* 切页：对话 / 统计 / 文件三块常驻实例靠 display 切换（见 App.jsx 的 `visible`），
+   重新显示时浏览器会重播动画，读起来是"换了一页"而不是"画面瞬间换了内容"。 */
+.chat-view:not(.hidden),
+.stats-view:not(.hidden),
+.files-view:not(.hidden) {
+  animation: motion-rise-in var(--motion-base) var(--ease-soft) backwards;
+}
+
+/* 整窗盖住主界面的设置页 */
+.config-page-overlay {
+  animation: motion-fade-in var(--motion-base) var(--ease-soft) backwards;
+}
+
+/* 浮层：输入框上方的模型/定时任务面板、命令与补全面板、快捷菜单、quick pick。
+   `transform-origin` 跟着各自的锚点走，统一成 center 会让它们像"从中间弹出来"。 */
+.chat-popover,
+.chat-command-palette,
+.floating-menu,
+.quick-pick-panel {
+  animation: motion-pop-in var(--motion-base) var(--ease-soft) backwards;
+}
+
+.chat-popover {
+  transform-origin: bottom right;
+}
+
+.chat-command-palette {
+  transform-origin: bottom center;
+}
+
+.quick-pick-panel {
+  transform-origin: top center;
+}
+
+/* 顶部通知 */
+.notice-card {
+  animation: motion-toast-in var(--motion-base) var(--ease-soft) backwards;
+}
+
+/* 底部终端面板：xterm 在显示时会重算行列，所以只淡入，不做位移 */
+.terminal-panel:not(.hidden) {
+  animation: motion-fade-in var(--motion-fast) var(--ease-soft) backwards;
+}
+
+/* 回合日志停靠区：每轮开始时挂上、轮次结束再收走，淡入比"突然顶出来一条"安静 */
+.chat-turn-log {
+  animation: motion-fade-in var(--motion-fast) var(--ease-soft) backwards;
+}
+
+/* 新消息：流式内容是在同一条消息里长大的，只有真正新起一条时才挂载一次，
+   所以这条不会在每次增量时重播。90ms 只够看出"出现了"，历史很长时也不会
+   变成一片渐显的波浪。 */
+.chat-message {
+  animation: motion-fade-in var(--motion-fast) var(--ease-soft) backwards;
+}
+
+/* 对话内查找条：从右上角落下来，与它贴在对话区右上角的位置一致。 */
+.chat-find {
+  transform-origin: top right;
+  animation: motion-pop-in var(--motion-base) var(--ease-soft) backwards;
+}
+
+/* 自动整理摘要：它是在一轮回答中途插进来的，出现时把下面的内容顶下去，
+   淡入 + 抬 4px 比"凭空多出一块"容易跟上。 */
+.chat-digest-notice {
+  animation: motion-rise-in var(--motion-base) var(--ease-soft) backwards;
+}
+
+/* 按压反馈。只给非整行的 arco 按钮加缩放：整行按钮（`mica-arco-row`）缩一下会让
+   整行文字跟着抖，那种场景本来就是背景色在反馈。 */
+.arco-btn:not(.mica-arco-row) {
+  transition:
+    background-color var(--motion-fast) var(--ease-soft),
+    border-color var(--motion-fast) var(--ease-soft),
+    color var(--motion-fast) var(--ease-soft),
+    opacity var(--motion-fast) var(--ease-soft),
+    transform var(--motion-fast) var(--ease-soft);
+}
+
+.arco-btn:not(.mica-arco-row):not(:disabled):active {
+  transform: scale(0.96);
+}
+
+/* 列表行与选项：这几处的悬浮 / 选中态原本是瞬间换色。 */
+.quick-pick-row,
+.session-settings-nav-item,
+.chat-ask-option {
+  transition:
+    background-color var(--motion-base) var(--ease-soft),
+    border-color var(--motion-base) var(--ease-soft),
+    color var(--motion-base) var(--ease-soft);
+}
+
+/* ---------------------------------------------------------- 折叠 / 展开
+
+   `height: auto` 不能过渡；用 JS 量高度再写 px，内容一变或窗口一缩就留下旧值。
+   `grid-template-rows: 0fr ↔ 1fr` 由浏览器自己解算内容高度，展开与收起两个方向
+   都成立，也不需要任何测量。见 `Collapse.jsx`（它负责收起时的延迟卸载）。
+
+   裁剪用 `overflow: hidden` 且**常驻**：树行与面板行的焦点环都是 inset 的，不会被切。
+   收起过程中禁止命中，避免还能点到正在消失的行。 */
+.motion-collapse {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows var(--motion-base) var(--ease-soft);
+}
+
+.motion-collapse.is-expanded {
+  grid-template-rows: 1fr;
+}
+
+.motion-collapse-clip {
+  min-height: 0;
+  overflow: hidden;
+}
+
+.motion-collapse:not(.is-expanded) .motion-collapse-clip {
+  pointer-events: none;
+}
+
+/* 回合日志里这层是 flex 的一个子项：保住原来可被压低的尺寸行为，窗口很矮时
+   仍然是日志区先让位，而不是把对话顶出去。 */
+.chat-turn-log > .motion-collapse {
+  min-height: 0;
+  flex: 0 1 auto;
+}
+
+/* -------------------------------------------------------------- 内容切换
+
+   页签换一份内容时给一个"到了"的交代。只抬 3px：这里换的是表格/明细这类成块的
+   内容，位移再大就会读成整块在动。 */
+@keyframes motion-swap-in {
+  from {
+    opacity: 0;
+    transform: translateY(3px);
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.motion-swap-in {
+  animation: motion-swap-in var(--motion-base) var(--ease-soft) backwards;
+}
+
+/* ------------------------------------------------------------ 数据条增长
+
+   排行 / 速度 / 占比条：进页面时从 0 拉到目标宽度。用 `scaleX` 而不是宽度——
+   宽度过渡要逐帧布局，一屏几十条就是几十次 reflow。目标宽度仍由行内 style 决定，
+   动画只负责"从没有到有"。 */
+@keyframes motion-bar-grow {
+  from {
+    transform: scaleX(0);
+  }
+}
+
+.motion-bar {
+  transform-origin: left center;
+  animation: motion-bar-grow var(--motion-slow) var(--ease-soft) backwards;
+}
+
+/* 右对齐的底纹条（数字下面那一层）从右往左长，与它的锚点方向一致。 */
+.motion-bar-right {
+  transform-origin: right center;
+  animation: motion-bar-grow var(--motion-slow) var(--ease-soft) backwards;
+}
+
+/* ---------------------------------------------------- 树行与选项的悬浮反馈
+
+   文件树、Git 对比、搜索结果的行原本是瞬间换底色。`[role=treeitem]` 一次覆盖
+   这些树；拖拽中的 `opacity-40` 也因此变成渐隐，而不是"啪"地变半透明。 */
+[role='treeitem'],
+[role='option'],
+[role='menuitem'],
+[role='tab'] {
+  transition:
+    background-color var(--motion-fast) var(--ease-soft),
+    color var(--motion-fast) var(--ease-soft),
+    opacity var(--motion-fast) var(--ease-soft);
+}
+
+/* 设置页每次打开都重新挂载（`SettingsView` 只在打开时渲染），淡入比"整页瞬间
+   换掉"更像换了一页。只淡入不位移：这层里有 Arco 的弹层，位移会给它重建包含块。 */
+.mica-config-shell {
+  animation: motion-fade-in var(--motion-base) var(--ease-soft) backwards;
+}
+
+/* 系统要求减少动态效果时一律关掉：包括上面所有入场与按压反馈。
+   `animation-duration` 留 1ms 而不是 none —— 靠动画结束回调推进的逻辑（加载指示器等）
+   仍然会走到下一帧。 */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-delay: 0s !important;
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    transition-delay: 0s !important;
+    transition-duration: 1ms !important;
+    scroll-behavior: auto !important;
+  }
 }

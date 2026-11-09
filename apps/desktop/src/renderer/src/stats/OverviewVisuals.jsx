@@ -236,7 +236,10 @@ function ModelRanking({ rows, metric, total, onSelect }) {
                     <strong>{format(row[metric])}</strong>
                   </span>
                   <span className="stats-rank-track" aria-hidden="true">
-                    <span style={{ width: `${(row[metric] / largest) * 100}%` }} />
+                    <span
+                      className="motion-bar"
+                      style={{ width: `${(row[metric] / largest) * 100}%` }}
+                    />
                   </span>
                   <span className="stats-rank-line stats-meta">
                     <span>{count(row.sessions)} 个会话</span>

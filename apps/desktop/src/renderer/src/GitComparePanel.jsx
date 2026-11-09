@@ -19,6 +19,7 @@ import {
 } from '@tabler/icons-react'
 import { FileSystemIcon } from './FileIcon'
 import { ArcoAction, Checkbox, Input } from '@mica-config-ui/web'
+import Collapse from './Collapse'
 import { FloatingMenu, MenuItem, MenuSeparator } from './FloatingMenu'
 import { GitComparePicker } from './GitComparePicker'
 import { statusColor, statusLabel } from './git-decorations'
@@ -121,7 +122,12 @@ function CompareRow({
         />
       ))}
       <span className="grid size-4 shrink-0 place-items-center text-fg-muted">
-        {directory && <IconChevronRight size={14} className={closed ? '' : 'rotate-90'} />}
+        {directory && (
+          <IconChevronRight
+            size={14}
+            className={`transition-transform ${closed ? '' : 'rotate-90'}`}
+          />
+        )}
       </span>
       {preferences.showCheckboxes && <ReviewCheckbox row={row} onToggle={onToggleReviewed} />}
       {directory || preferences.iconStyle === 'file' ? (
@@ -661,7 +667,7 @@ export function GitComparePanel({
         >
           <IconChevronRight
             size={14}
-            className={`shrink-0 text-fg-muted ${rootCollapsed ? '' : 'rotate-90'}`}
+            className={`shrink-0 text-fg-muted transition-transform ${rootCollapsed ? '' : 'rotate-90'}`}
           />
           <IconGitBranch size={12} className="shrink-0 text-fg-dim" />
           <span className="min-w-0 flex-1 truncate text-[11px] text-fg-soft">
@@ -738,7 +744,7 @@ export function GitComparePanel({
             </ArcoAction>
           </div>
         ) : (
-          !rootCollapsed && (
+          <Collapse open={!rootCollapsed}>
             <div
               ref={treeRef}
               role="tree"
@@ -775,7 +781,7 @@ export function GitComparePanel({
                 />
               ))}
             </div>
-          )
+          </Collapse>
         )}
       </div>
       <footer

@@ -48,7 +48,7 @@ export function FloatingMenu({
   return (
     <div
       ref={ref}
-      className="fixed z-[10000] rounded-md border border-line bg-panel/98 p-1 shadow-2xl backdrop-blur"
+      className="floating-menu fixed z-[10000] rounded-md border border-line bg-panel/98 p-1 shadow-2xl backdrop-blur"
       style={{ left: pos.x, top: pos.y, minWidth }}
       role="menu"
       onPointerDown={(event) => event.stopPropagation()}

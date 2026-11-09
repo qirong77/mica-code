@@ -3076,7 +3076,7 @@ export default function App() {
             <section
               ref={terminalPanelRef}
               aria-label="终端面板"
-              className={`relative flex shrink-0 flex-col overflow-hidden bg-panel ${
+              className={`terminal-panel relative flex shrink-0 flex-col overflow-hidden bg-panel ${
                 terminalVisible ? '' : 'hidden'
               }`}
               style={{ height: terminalHeight }}
@@ -3300,7 +3300,7 @@ export default function App() {
       {/* 设置 / 插件：盖住整个窗口的一层。留一条顶部拖动条，否则整页打开后窗口没法拖
           （macOS 的交通灯是系统画在页面之上的，不受这层影响）。 */}
       {configPage && (
-        <div className="fixed inset-0 z-[9500] flex flex-col bg-canvas">
+        <div className="config-page-overlay fixed inset-0 z-[9500] flex flex-col bg-canvas">
           {/* 桌面端留一条拖动条：整页盖住窗口后没有别处可以拖（macOS 的交通灯由系统画在
               页面之上，不受这层影响）。手机上没有窗口可拖，省掉这条空档。 */}
           {!isMobile && (

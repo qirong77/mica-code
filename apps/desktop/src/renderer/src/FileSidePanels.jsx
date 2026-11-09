@@ -9,6 +9,7 @@ import {
   IconX
 } from '@tabler/icons-react'
 import { ArcoAction, Input } from '@mica-config-ui/web'
+import Collapse from './Collapse'
 import { FileSystemIcon } from './FileIcon'
 import { createSearchRequestId } from './search-request'
 import {
@@ -27,7 +28,7 @@ const PANEL_TITLE = 'min-w-0 flex-1 truncate text-[13px] font-semibold text-fg-s
 const PANEL_ACTION =
   'grid size-6 shrink-0 place-items-center rounded-sm text-fg-muted hover:bg-overlay hover:text-fg-max'
 // 列表行：22px 高、4px 圆角（VS Code 的列表行悬浮块），悬浮底色比面板更暗。
-const ROW_BASE = 'flex h-[22px] w-full items-center rounded text-left'
+const ROW_BASE = 'flex h-[22px] w-full items-center rounded text-left transition-colors'
 const FIELD_BASE =
   'h-[26px] w-full'
 
@@ -265,7 +266,7 @@ export function SearchPanel({ root, onOpenFile, activePath }) {
                 onClick={() => toggleGroup(group.path)}
               >
                 <span
-                  className={`grid size-4 shrink-0 place-items-center text-fg-muted ${closed ? '' : 'rotate-90'}`}
+                  className={`grid size-4 shrink-0 place-items-center text-fg-muted transition-transform ${closed ? '' : 'rotate-90'}`}
                 >
                   <IconChevronRight size={14} />
                 </span>
@@ -280,25 +281,28 @@ export function SearchPanel({ root, onOpenFile, activePath }) {
                   {group.matches.length}
                 </span>
               </button>
-              {!closed &&
-                group.matches.map((match, index) => (
-                  <button
-                    key={`${match.line}-${index}`}
-                    type="button"
-                    title={`${match.path}:${match.line}`}
-                    className={`${ROW_BASE} pr-1.5 font-mono text-[12px] hover:bg-list-hover ${
-                      activePath === match.path
-                        ? 'text-fg-max'
-                        : 'text-fg-soft hover:text-fg-strong'
-                    }`}
-                    style={{ paddingLeft: 22 }}
-                    onClick={() => onOpenFile(match.path, { line: match.line })}
-                  >
-                    <span className="min-w-0 flex-1 truncate">
-                      <Highlight text={match.preview} range={match.highlight} />
-                    </span>
-                  </button>
-                ))}
+              <Collapse open={!closed}>
+                <div>
+                  {group.matches.map((match, index) => (
+                    <button
+                      key={`${match.line}-${index}`}
+                      type="button"
+                      title={`${match.path}:${match.line}`}
+                      className={`${ROW_BASE} pr-1.5 font-mono text-[12px] hover:bg-list-hover ${
+                        activePath === match.path
+                          ? 'text-fg-max'
+                          : 'text-fg-soft hover:text-fg-strong'
+                      }`}
+                      style={{ paddingLeft: 22 }}
+                      onClick={() => onOpenFile(match.path, { line: match.line })}
+                    >
+                      <span className="min-w-0 flex-1 truncate">
+                        <Highlight text={match.preview} range={match.highlight} />
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </Collapse>
             </div>
           )
         })}
@@ -557,7 +561,7 @@ export function GitPanel({
                   >
                     <IconChevronRight
                       size={14}
-                      className={collapsed.has(section.key) ? '' : 'rotate-90'}
+                      className={`transition-transform ${collapsed.has(section.key) ? '' : 'rotate-90'}`}
                     />
                     <span className="min-w-0 flex-1">{section.label}</span>
                     <span className="text-[11px] tabular-nums">{section.files.length}</span>
@@ -593,8 +597,8 @@ export function GitPanel({
                     </span>
                   )}
                 </div>
-                {!collapsed.has(section.key) &&
-                  section.files.map((file) => (
+                <Collapse open={!collapsed.has(section.key)}>
+                  {section.files.map((file) => (
                     <GitFileRow
                       key={`${section.key}:${file.path}`}
                       file={file}
@@ -608,11 +612,10 @@ export function GitPanel({
                       showDirectory
                     />
                   ))}
-                {!collapsed.has(section.key) &&
-                  section.key === 'changes' &&
-                  !section.files.length && (
+                  {section.key === 'changes' && !section.files.length && (
                     <div className="px-5 py-2 text-[12px] text-fg-muted">工作区没有文件变化</div>
                   )}
+                </Collapse>
               </Fragment>
             ))}
       </div>

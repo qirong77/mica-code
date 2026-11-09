@@ -20,6 +20,7 @@ import {
   IconX
 } from '@tabler/icons-react'
 import { activeTimeLabel, relativeTimeShort } from './relative-time'
+import Collapse from './Collapse'
 import { loopForNode, loopProgressLabel, loopStatusLabel, loopTooltip } from './loop-command'
 import { collectGroupStates, liveSessionRowState, mergeRowStates } from './session-state'
 import {
@@ -1804,7 +1805,11 @@ export function SessionTree({
             </span>
           ) : null}
         </div>
-        {open && childRows.length > 0 && <ul className="flex flex-col gap-px">{childRows}</ul>}
+        {childRows.length > 0 && (
+          <Collapse open={open}>
+            <ul className="flex flex-col gap-px">{childRows}</ul>
+          </Collapse>
+        )}
       </li>
     )
   }
