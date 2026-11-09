@@ -164,6 +164,44 @@ function createHarness(options = {}) {
 }
 
 describe('incremental session scanner', () => {
+  test('real filesystem warm scans yield and observe external changes while preserving array identity', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mica-stats-async-'))
+    temporaryDirectories.push(dir)
+    for (let i = 0; i < 80; i += 1) {
+      writeFileSync(join(dir, `${i}.json`), JSON.stringify(fixture(String(i))))
+    }
+    const scanner = createStatsScanner({
+      directory: () => dir,
+      readJson: async (file) => JSON.parse(readFileSync(file, 'utf8'))
+    })
+    const first = await scanner.scanMeta()
+    let yielded = false
+    const warm = scanner.scanMeta()
+    setImmediate(() => { yielded = true })
+    expect(await warm).toBe(first)
+    expect(yielded).toBe(true)
+
+    writeFileSync(join(dir, 'new.json'), JSON.stringify(fixture('new')))
+    const added = await scanner.scanMeta()
+    expect(added).not.toBe(first)
+    expect(added.some((row) => row.id === 'new')).toBe(true)
+
+    writeFileSync(join(dir, 'new.json'), JSON.stringify(fixture('new', { title: 'Changed externally' })))
+    const changed = await scanner.scanMeta()
+    expect(changed).not.toBe(added)
+    expect(changed.find((row) => row.id === 'new').title).toBe('Changed externally')
+
+    renameSync(join(dir, 'new.json'), join(dir, 'renamed.json'))
+    const renamed = await scanner.scanMeta()
+    expect(renamed).not.toBe(changed)
+    expect(renamed.filter((row) => row.id === 'new')).toHaveLength(1)
+    unlinkSync(join(dir, 'renamed.json'))
+    const removed = await scanner.scanMeta()
+    expect(removed).not.toBe(renamed)
+    expect(removed.some((row) => row.id === 'new')).toBe(false)
+    expect(await scanner.scanMeta()).toBe(removed)
+  })
+
   test('projects parentSessionId only for sessions that have one', async () => {
     const harness = createHarness()
     harness.files.write('child', fixture('child', { parentSessionId: '  parent-1  ' }))

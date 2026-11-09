@@ -35,6 +35,9 @@ import {
 import { blameLine } from './git-blame'
 import { getCommit, getLog } from './git-log'
 import { releaseWatchers, unwatchRepository, watchRepository } from './git-watch'
+import { logger, SLOW_MS } from './log'
+
+const gitLog = logger('git')
 
 /** 徽标自己那一层缓存：比全树扫描的 5s 长，配合「先回旧值、后台重算」。 */
 const CHANGE_COUNTS_TTL_MS = 20_000
@@ -178,9 +181,20 @@ async function getChangeCounts(cwd, { refresh = false, invalidate = false } = {}
  * 所以检出之后立刻读到的就是新分支名，不需要额外打点。
  */
 async function getStatus(cwd) {
-  const root = repositoryRootOf(cwd)
-  if (!root) return getWorkspaceStatus(cwd)
-  return cachedWorktreeRead(root, 'workspace-status', () => getWorkspaceStatus(root))
+  const started = Date.now()
+  const diagnostics = { cache: 'uncached' }
+  let rootMs = 0
+  try {
+    const root = repositoryRootOf(cwd)
+    rootMs = Date.now() - started
+    if (!root) return await getWorkspaceStatus(cwd)
+    return await cachedWorktreeRead(root, 'workspace-status', () => getWorkspaceStatus(root), {
+      diagnostics
+    })
+  } finally {
+    const ms = Date.now() - started
+    if (ms >= SLOW_MS) gitLog.warn('status-detail', { ms, rootMs, cache: diagnostics.cache })
+  }
 }
 async function resolveRef(cwd, ref, kinds = ['branch', 'tag']) {
   const refs = await getRefs(cwd)

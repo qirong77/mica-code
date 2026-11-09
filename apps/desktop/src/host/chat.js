@@ -1,3 +1,4 @@
+import { createPanelTiming } from './panel-timing'
 import { clipboard, ipcMain } from 'electron'
 import { prewarmFileMentions } from '@packages/mica-file-mentions/index.js'
 import { readBtwState } from '@packages/mica-common/btwState.js'
@@ -956,6 +957,11 @@ const HOST_SESSION_MENU_TIMEOUT_MS = 180_000
  */
 const PANEL_VIEW_REUSE_MS = 3_000
 const panelViewCache = createPanelViewCache({ reuseMs: PANEL_VIEW_REUSE_MS })
+
+
+const panelTiming = createPanelTiming({
+  log: (fields) => logger('chat').info('plugin-panel.view-slow', fields)
+})
 function hostTaskRequest(run, method, params, { timeoutMs = HOST_TASK_REQUEST_TIMEOUT_MS } = {}) {
   return requestHostTask(run, method, params, { timeoutMs, send: sendCodexRequest })
 }
@@ -1182,6 +1188,7 @@ function handleHostOutput(id, run, chunk) {
     } catch {
       continue
     }
+    if (run.firstHostOutputAt == null) run.firstHostOutputAt = performance.now()
     noteHostMessageActivity(run, message)
     if ('method' in message) {
       handleHostNotification(id, run, message)
@@ -2355,18 +2362,35 @@ export function registerChatIpc() {
   }
 
   const requestPanelView = (event, payload, id, pluginId, actionFields = null) => {
+    const timing = actionFields ? null : panelTiming.start()
+    const existing = !!runs.get(id)?.child?.stdin?.writable
     const ensured = ensureCapabilityRun(id, event, {
       sessionId: payload?.sessionId,
       cwd: payload?.cwd
     })
-    if (!ensured.run) return { ok: false, error: ensured.error }
-    return hostTaskRequest(
+    if (!ensured.run) {
+      timing?.dispatched(null, existing)(false)
+      return { ok: false, error: ensured.error }
+    }
+    const finishTiming = timing?.dispatched(ensured.run, existing)
+    const request = hostTaskRequest(
       ensured.run,
       actionFields ? 'mica/pluginPanel/action' : 'mica/pluginPanel/view',
       { pluginId, ...(actionFields || {}) },
       { timeoutMs: HOST_PANEL_REQUEST_TIMEOUT_MS }
       // 载荷在信封的 `result` 里；渲染层读的是 `{ ok, view }` / `{ ok, error }`。
     ).then(unwrapHostResult)
+    if (!finishTiming) return request
+    return request.then(
+      (result) => {
+        finishTiming?.(result?.ok)
+        return result
+      },
+      (error) => {
+        finishTiming?.(false)
+        throw error
+      }
+    )
   }
 
   ipcMain.handle('chat:plugin-panel-view', (event, payload = {}) =>

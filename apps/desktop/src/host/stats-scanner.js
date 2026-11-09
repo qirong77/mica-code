@@ -18,6 +18,8 @@ import {
 const INDEX_VERSION = 10
 /** 每批解析多少个会话文件就让出一次事件循环。 */
 const BATCH_FILES = 16
+/** Limit concurrent filesystem requests so a large directory cannot flood the thread pool. */
+const STAT_BATCH_FILES = 32
 /** 小文件解析及统计计算每批的主线程预算（毫秒）；大会话 JSON 在 worker 内解析。 */
 const BATCH_BUDGET_MS = 12
 /**
@@ -274,6 +276,15 @@ export function createStatsScanner({
     }
   }
 
+  async function scanSignature(file) {
+    if (fileSystem !== nodeFs) return signatureOf(file)
+    try {
+      return sessionFileIdentity(await nodeFs.promises.stat(file, { bigint: true }))
+    } catch {
+      return null
+    }
+  }
+
   async function loadIndex() {
     if (indexLoaded) return
     indexLoaded = true
@@ -421,7 +432,10 @@ export function createStatsScanner({
     const dir = directory()
     let names
     try {
-      names = fileSystem.readdirSync(dir).filter((name) => name.endsWith('.json'))
+      const directoryNames = fileSystem === nodeFs
+        ? await nodeFs.promises.readdir(dir)
+        : fileSystem.readdirSync(dir)
+      names = directoryNames.filter((name) => name.endsWith('.json'))
     } catch (error) {
       if (error?.code === 'ENOENT') {
         if (entries.size > 0) {
@@ -454,48 +468,54 @@ export function createStatsScanner({
     // 应当立刻出现在列表里，后者也要刷新计数——但没变过的老文件频繁变化的只有 mtime，
     // 它们不该反复触发页面重读（见下方 cleared 的说明）。
     let added = 0
-    for (const name of names) {
-      const file = join(dir, name)
-      const signature = signatureOf(file)
-      if (!signature) {
-        if (entries.delete(file)) {
-          ownersDirty = true
-          indexDirty = true
-          invalidateRows()
-        }
-        continue
-      }
-      const entry = entries.get(file)
-      if (entry?.signature === signature) continue
-      if (!entry) added += 1
-      if (
-        entry &&
-        Number(signature.split(':')[2]) > LARGE_FILE_BYTES &&
-        Date.now() - (entry.parsedAt || 0) < LARGE_RUNNING_REPARSE_MS &&
-        isRunningSession(fileSystem, file)
-      ) {
-        continue
-      }
-      // 大会话跑完一轮后签名就变了。整份重算要 1s 以上，而侧栏要的
-      // 标题 / 时间 / turnState 都在文件头里：先用文件头更新元信息，
-      // 用量统计等 LARGE_STATS_REPARSE_MS 之后再整份算。
-      if (
-        entry?.stats &&
-        Number(signature.split(':')[2]) > LARGE_FILE_BYTES &&
-        Date.now() - (entry.parsedAt || 0) < LARGE_STATS_REPARSE_MS
-      ) {
-        const headMeta = readHeadMeta(fileSystem, file)
-        if (headMeta) {
-          // 头信息没变就不要动缓存：否则每次轮询都会让侧栏重算并重写索引。
-          if (metaChanged(entry.meta, headMeta)) {
-            entries.set(file, { ...entry, meta: headMeta })
-            invalidateRows()
+    for (let offset = 0; offset < names.length; offset += STAT_BATCH_FILES) {
+      const files = names.slice(offset, offset + STAT_BATCH_FILES).map((name) => join(dir, name))
+      const signatures = await Promise.all(files.map(scanSignature))
+      for (let i = 0; i < files.length; i += 1) {
+        const file = files[i]
+        const signature = signatures[i]
+        if (!signature) {
+          if (entries.delete(file)) {
+            ownersDirty = true
             indexDirty = true
+            invalidateRows()
           }
           continue
         }
+        const entry = entries.get(file)
+        if (entry?.signature === signature) continue
+        if (!entry) added += 1
+        if (
+          entry &&
+          Number(signature.split(':')[2]) > LARGE_FILE_BYTES &&
+          Date.now() - (entry.parsedAt || 0) < LARGE_RUNNING_REPARSE_MS &&
+          isRunningSession(fileSystem, file)
+        ) {
+          continue
+        }
+        // 大会话跑完一轮后签名就变了。整份重算要 1s 以上，而侧栏要的
+        // 标题 / 时间 / turnState 都在文件头里：先用文件头更新元信息，
+        // 用量统计等 LARGE_STATS_REPARSE_MS 之后再整份算。
+        if (
+          entry?.stats &&
+          Number(signature.split(':')[2]) > LARGE_FILE_BYTES &&
+          Date.now() - (entry.parsedAt || 0) < LARGE_STATS_REPARSE_MS
+        ) {
+          const headMeta = readHeadMeta(fileSystem, file)
+          if (headMeta) {
+            // 头信息没变就不要动缓存：否则每次轮询都会让侧栏重算并重写索引。
+            if (metaChanged(entry.meta, headMeta)) {
+              entries.set(file, { ...entry, meta: headMeta })
+              invalidateRows()
+              indexDirty = true
+            }
+            continue
+          }
+        }
+        pending.push({ file, signature })
       }
-      pending.push({ file, signature })
+      // Injected synchronous filesystems also yield between batches.
+      if (fileSystem !== nodeFs && offset + STAT_BATCH_FILES < names.length) await yieldToEventLoop()
     }
     pending.sort((a, b) => (a.file < b.file ? 1 : a.file > b.file ? -1 : 0))
 

@@ -206,7 +206,7 @@ function optionalFile(file) {
  * `refresh: true` 用于用户主动点刷新：跳过缓存和在途读取。
  * `invalidate: true` 用于自动变化通知：跳过缓存，但仍合并同一代的在途读取。
  */
-export async function cachedWorktreeRead(root, key, run, { refresh = false, invalidate = false } = {}) {
+export async function cachedWorktreeRead(root, key, run, { refresh = false, invalidate = false, diagnostics } = {}) {
   root = worktreeRoot(root)
   const signature = headSignature(root)
   const epoch = worktreeEpochOf(root)
@@ -220,14 +220,21 @@ export async function cachedWorktreeRead(root, key, run, { refresh = false, inva
     cached.epoch === epoch &&
     Date.now() - (cached.values.get(key)?.at ?? 0) < ttlOf(key)
   ) {
-    if (cached.values.has(key)) return cached.values.get(key).value
+    if (cached.values.has(key)) {
+      if (diagnostics) diagnostics.cache = 'hit'
+      return cached.values.get(key).value
+    }
   }
   // `refresh: true` 是用户主动点刷新：既不读缓存，也不搭别人那次还没跑完的顺风车。
   const inFlightKey = `${root}\u0000${key}`
   if (!refresh) {
     const pending = worktreeInFlight.get(inFlightKey)
-    if (pending && pending.signature === signature && pending.epoch === epoch) return pending.promise
+    if (pending && pending.signature === signature && pending.epoch === epoch) {
+      if (diagnostics) diagnostics.cache = 'wait'
+      return pending.promise
+    }
   }
+  if (diagnostics) diagnostics.cache = 'miss'
   const pending = { signature, epoch, promise: null }
   pending.promise = (async () => {
     const startedAt = Date.now()

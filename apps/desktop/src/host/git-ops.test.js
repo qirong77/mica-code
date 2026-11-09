@@ -39,6 +39,27 @@ async function setup() {
 
 const status = (dir) => git(dir, ['status', '--porcelain=v1', '--untracked-files=all'])
 
+it('reports cache miss, shared wait and hit without changing results', async () => {
+  const dir = await setup()
+  try {
+    let release
+    const gate = new Promise((resolve) => { release = resolve })
+    const miss = {}
+    const wait = {}
+    const hit = {}
+    let runs = 0
+    const run = async () => { runs += 1; await gate; return 'value' }
+    const first = cachedWorktreeRead(dir, 'diagnostic-test', run, { diagnostics: miss })
+    const second = cachedWorktreeRead(dir, 'diagnostic-test', run, { diagnostics: wait })
+    release()
+    expect(await Promise.all([first, second])).toEqual(['value', 'value'])
+    expect(await cachedWorktreeRead(dir, 'diagnostic-test', run, { diagnostics: hit })).toBe('value')
+    expect([miss.cache, wait.cache, hit.cache, runs]).toEqual(['miss', 'wait', 'hit', 1])
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
 describe('stageFile / unstageFile', () => {
   let dir
   beforeEach(async () => {
