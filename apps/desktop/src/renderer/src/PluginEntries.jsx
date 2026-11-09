@@ -188,7 +188,7 @@ function PluginEntryRow({ entry, onOpenPage, session }) {
           type="button"
           aria-expanded={open}
           title={`${entry.label}（${entry.id} 插件）`}
-          className="flex h-7 w-full items-center gap-2 px-2.5 text-left text-[13px] transition-colors"
+          className="flex h-7 w-full items-center gap-2 px-2.5 mica-arco-row text-left text-[13px] transition-colors"
           onClick={
             isPage
               ? () => onOpenPage(entry)

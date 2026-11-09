@@ -340,6 +340,17 @@ html[data-appearance='light'] body.mica-arco-theme {
   flex: none;
 }
 
+/* 整行按钮（图标 + 文字、内容靠左）不继承上面的居中：Arco 的对齐规则没有放进 layer，
+   Tailwind 的 justify-* 落在 utilities 层、压不住它，只能在这里用更高特异性按回去。
+   行按钮的图标与文字间距同样交给调用方的 gap，不叠 Arco 那 6px。 */
+:where(body.mica-arco-theme, .mica-config-ui) .arco-btn.mica-arco-row {
+  justify-content: flex-start;
+}
+
+:where(body.mica-arco-theme, .mica-config-ui) .arco-btn.mica-arco-row > svg + span {
+  margin-left: 0;
+}
+
 :where(body.mica-arco-theme, .mica-config-ui) .ui-button-icon {
   display: inline-flex;
   flex: none;

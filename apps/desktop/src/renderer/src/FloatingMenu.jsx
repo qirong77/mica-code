@@ -70,7 +70,7 @@ export function MenuItem({ icon: Icon, label, hint, title, danger, disabled, onC
       disabled={disabled}
       title={title}
       tone={danger ? 'danger' : undefined}
-      className="flex h-7 w-full items-center gap-2 px-2 text-left text-[13px]"
+      className="flex h-7 w-full items-center gap-2 px-2 mica-arco-row text-left text-[13px]"
       onClick={onClick}
     >
       {/* 图标槽固定占位：插件给的条目没有图标名，少一个图标不该让行高或缩进变样，

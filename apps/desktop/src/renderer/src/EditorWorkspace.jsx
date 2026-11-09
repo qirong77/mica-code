@@ -172,7 +172,7 @@ export const EditorWorkspace = forwardRef(function EditorWorkspace(
           <ArcoAction
             ref={branchAnchorRef}
             type="button"
-            className={`-ml-1.5 flex items-center gap-1.5 text-left ${
+            className={`-ml-1.5 flex items-center gap-1.5 mica-arco-row text-left ${
               cwd ? 'max-w-[45%] shrink-0' : 'min-w-0'
             }`}
             style={{ height: '100%', paddingInline: 6, fontSize: 12 }}

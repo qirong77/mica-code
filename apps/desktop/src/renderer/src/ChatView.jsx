@@ -2669,7 +2669,7 @@ function ChatContextMenu({ menu, onAction, onClose, commitRunning = false, plugi
             role="menuitem"
             disabled={item.disabled}
             title={item.title}
-            className={`flex h-7 w-full items-center gap-2 px-2 text-left text-[13px] disabled:opacity-35 ${item.danger ? '' : ' '}`}
+            className={`flex h-7 w-full items-center gap-2 px-2 mica-arco-row text-left text-[13px] disabled:opacity-35 ${item.danger ? '' : ' '}`}
             onClick={() => onAction(item.id)}
           >
             <span className="grid w-4 shrink-0 place-items-center">

@@ -2665,7 +2665,7 @@ export default function App() {
               <ArcoAction
                 type="button"
                 title="New Session"
-                className="flex h-7 w-full items-center gap-2 px-2.5 text-left text-[13px] transition-colors"
+                className="flex h-7 w-full items-center gap-2 px-2.5 mica-arco-row text-left text-[13px] transition-colors"
                 onClick={() => {
                   closeMobileDrawer()
                   createSession()
@@ -2678,7 +2678,7 @@ export default function App() {
                 type="button"
                 aria-pressed={view === 'stats'}
                 title="查看使用统计"
-                className="flex h-7 w-full items-center gap-2 px-2.5 text-left text-[13px] font-medium transition-colors"
+                className="flex h-7 w-full items-center gap-2 px-2.5 mica-arco-row text-left text-[13px] font-medium transition-colors"
                 onClick={() => {
                   closeMobileDrawer()
                   setView('stats')
@@ -2690,7 +2690,7 @@ export default function App() {
               <ArcoAction
                 type="button"
                 title="打开 Mica 设置"
-                className="flex h-7 w-full items-center gap-2 px-2.5 text-left text-[13px] font-medium transition-colors"
+                className="flex h-7 w-full items-center gap-2 px-2.5 mica-arco-row text-left text-[13px] font-medium transition-colors"
                 onClick={() => {
                   closeMobileDrawer()
                   openConfigPage('config')
@@ -2715,7 +2715,7 @@ export default function App() {
                     ? `${pluginAttention.pluginName}：${pluginAttention.text}`
                     : '插件（查看已装载的插件与它们的设置）'
                 }
-                className="flex h-7 w-full items-center gap-2 px-2.5 text-left text-[13px] font-medium transition-colors"
+                className="flex h-7 w-full items-center gap-2 px-2.5 mica-arco-row text-left text-[13px] font-medium transition-colors"
                 onClick={() => {
                   closeMobileDrawer()
                   // 点开就算看过了：同一对「本机版 vs 中转机版」只点一次（插件那边点动作也会撤）。
@@ -3198,7 +3198,7 @@ export default function App() {
                 aria-haspopup="dialog"
                 aria-expanded={branchPickerOpen}
                 // 有路径时给分支名封顶并把宽度让给路径；没有路径就用满可用宽度。
-                className={`-ml-1.5 flex h-full items-center gap-1.5 px-1.5 text-left ${
+                className={`-ml-1.5 flex h-full items-center gap-1.5 px-1.5 mica-arco-row text-left ${
                   activeCwd ? 'max-w-[45%] shrink-0' : 'min-w-0'
                 }`}
                 onClick={() => setBranchPickerOpen(true)}

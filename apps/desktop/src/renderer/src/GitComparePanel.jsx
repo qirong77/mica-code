@@ -563,7 +563,7 @@ export function GitComparePanel({
       <div className="mx-2 mb-1 shrink-0 overflow-hidden rounded-sm border border-line-soft bg-overlay-subtle">
         <ArcoAction
           type="button"
-          className="flex h-8 w-full min-w-0 items-center gap-2 px-2 text-left focus-visible:outline focus-visible:outline-1 focus-visible:outline-accent disabled:opacity-40"
+          className="flex h-8 w-full min-w-0 items-center gap-2 px-2 mica-arco-row text-left focus-visible:outline focus-visible:outline-1 focus-visible:outline-accent disabled:opacity-40"
           disabled={!cwd || !onCompareHeadChange}
           title={`当前分支：${headName} · 点击选择分支、标签或提交`}
           aria-label={`当前分支：${headName}`}
@@ -581,7 +581,7 @@ export function GitComparePanel({
         <div className="h-px bg-line-soft" />
         <ArcoAction
           type="button"
-          className="flex h-8 w-full min-w-0 items-center gap-2 px-2 text-left focus-visible:outline focus-visible:outline-1 focus-visible:outline-accent disabled:opacity-40"
+          className="flex h-8 w-full min-w-0 items-center gap-2 px-2 mica-arco-row text-left focus-visible:outline focus-visible:outline-1 focus-visible:outline-accent disabled:opacity-40"
           disabled={!cwd || !onCompareBaseChange}
           title={`目标分支：${baseName} · 点击选择分支、标签或提交`}
           aria-label={`目标分支：${baseName}`}
