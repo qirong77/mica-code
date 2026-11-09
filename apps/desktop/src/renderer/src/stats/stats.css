@@ -339,13 +339,13 @@
 
 .stats-ranking {
   display: grid;
-  gap: 8px;
+  gap: 4px;
   min-width: 0;
 }
 
 .stats-rank-action.arco-btn {
   height: auto;
-  padding: 10px 8px;
+  padding: 6px 8px;
   text-align: left;
   white-space: normal;
 }
@@ -369,7 +369,7 @@
   display: grid;
   flex: 1;
   min-width: 0;
-  gap: 8px;
+  gap: 5px;
 }
 
 .stats-rank-line {
@@ -396,7 +396,7 @@
 
 .stats-rank-track {
   display: block;
-  height: 6px;
+  height: 4px;
   overflow: hidden;
   border-radius: 2px;
   background: var(--color-fill-2);
@@ -427,9 +427,19 @@
    所以只在中间加一条浅线，不再另起一张卡把两者劈开。 */
 .stats-project-module .stats-project-table {
   min-width: 0;
-  margin-top: 16px;
-  padding-top: 14px;
+  margin-top: 12px;
+  padding-top: 12px;
   border-top: 1px solid var(--color-line-soft);
+}
+
+/* 图、来源图例、说明、表四层挤在一张卡里，默认的 12–14px 叠加起来会把卡片
+   拉得很空，这里给项目模块自己的节奏收一点。 */
+.stats-project-module .stats-inline-legend {
+  margin-top: 4px;
+}
+
+.stats-project-module .stats-note {
+  margin-top: 8px;
 }
 
 .stats-details {
@@ -488,6 +498,15 @@
 .stats-table-number {
   font-weight: 500;
   font-variant-numeric: tabular-nums;
+}
+
+/* 模型排行在宽卡片里排两列：单列时模型名贴着卡片左边、数值贴着右边，
+   中间空出一千多像素，六个模型就占满一屏。窄卡片退回单列。 */
+@container stats-overview (min-width: 880px) {
+  .stats-ranking {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 4px 16px;
+  }
 }
 
 @container stats-overview (max-width: 860px) {

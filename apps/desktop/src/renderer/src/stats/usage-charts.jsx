@@ -235,7 +235,9 @@ export function ProjectChart({ rows, parts = [], formatValue, onSelect }) {
   return (
     <ChartSurface
       kind="projects"
-      height={Math.max(216, data.length * 42 + 36)}
+      // 高度跟着条数走：项目少时固定高度会把三条数据摊在一大片空白里，
+      // 条数多时又挤不下，所以给一个能让「条与条之间」看起来一致的每行步长。
+      height={Math.max(112, data.length * 34 + 24)}
       description={describeValues(
         data.map((row) => ({ label: row.label, value: row.total })),
         'Tokens',
