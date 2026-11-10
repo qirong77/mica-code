@@ -107,9 +107,56 @@ it('keeps commands queued after a settings reload and a completed parked poll', 
   current.commands.push({ id: 'first' });
   functions.wakePoll(current);
   expect(response.end).toHaveBeenCalledTimes(1);
+  expect(JSON.parse(response.end.mock.calls[0][0].toString())).toMatchObject({
+    commands: [{ id: 'first' }],
+    intervalMs: 0,
+  });
   // A second command arriving before the bridge's next poll must remain queued.
   current.commands.push({ id: 'second' });
   functions.wakePoll(current);
   expect(current.commands).toEqual([{ id: 'second' }]);
   expect(vi.getTimerCount()).toBe(0);
+});
+
+it('immediately repolls after queued commands or accepted and duplicate events, while idle polls stay parked', async () => {
+  const source = readFileSync(new URL('./relay/relay.mjs', import.meta.url), 'utf8');
+  const handler = source.slice(source.indexOf('function broadcastEvents('), source.indexOf('function parkWait('));
+  const state = {
+    lastPollTs: 0,
+    lastPollAt: Date.now(),
+    commands: [] as Array<{ id: string }>,
+    pending: new Map(),
+    phones: new Set(),
+    seenEventBatches: new Set<string>(),
+    retryResultIds: new Set(),
+    resultWakePending: false,
+  };
+  let body: Record<string, unknown> = {};
+  const respondPoll = vi.fn();
+  const parkPoll = vi.fn();
+  const handlePoll = runInNewContext(`${handler}; handlePoll`, {
+    openAny: () => ({ state, body: { ...body, ts: Date.now() } }),
+    readRaw: async () => Buffer.alloc(0),
+    REPLAY_WINDOW_MS: 60_000,
+    AGENT_STALE_MS: 60_000,
+    respondPoll,
+    parkPoll,
+  }) as (req: unknown, res: unknown) => Promise<void>;
+  const response = {};
+
+  state.commands.push({ id: 'queued' });
+  await handlePoll({}, response);
+  expect(respondPoll).toHaveBeenLastCalledWith(response, state, [{ id: 'queued' }], 0, false);
+
+  body = { eventBatchId: 'batch-1', events: [{ channel: 'terminal:data' }] };
+  await handlePoll({}, response);
+  expect(respondPoll).toHaveBeenLastCalledWith(response, state, [], 0, false);
+  await handlePoll({}, response);
+  expect(respondPoll).toHaveBeenCalledTimes(3);
+  expect(respondPoll).toHaveBeenLastCalledWith(response, state, [], 0, false);
+
+  body = {};
+  await handlePoll({}, response);
+  expect(respondPoll).toHaveBeenCalledTimes(3);
+  expect(parkPoll).toHaveBeenCalledWith(response, state, false);
 });

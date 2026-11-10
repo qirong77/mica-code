@@ -10,5 +10,5 @@
   "priority": 30,
   "mica": { "apiVersion": 1 },
   "requires": [],
-  "desktop": { "entry": { "label": "Connections" } }
+  "desktop": { "entry": { "label": "Connections" }, "clientData": true }
 }

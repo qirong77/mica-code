@@ -530,7 +530,14 @@ export function summary(api) { return api.currentHost() } // 可选：入口行�
   （`apps/desktop/src/renderer/src/PluginEntries.jsx`）负责。
 - 宿主按插件 id 用 `import.meta.glob('@plugins/*/desktop.jsx')` 找模块，所以**不需要在宿主里
   登记**——加一个桌面入口只改插件目录。
-- 模块拿到的 `api` 有两组：**插件自己的数据**与**当前会话**。
+- 模块拿到的 `api` 包括插件数据、当前会话及原生客户端能力。
+- 客户端能力：`currentTarget()` 保留完整页面入口（含中转机令牌），`client` 在普通浏览器为 null；
+  原生桌面提供 `client.context()` → `{ localHost }`、`client.probe(address)`、`client.open(url)`、
+  `client.local()`（恢复并聚焦原本机窗口），以及 `client.readData/writeData`（本机同一份插件数据，
+  读取版本及写入 `expectedVersion` 与下述数据 API 相同）。数据访问要求本机随包清单声明
+  `desktop.clientData: true` 且插件未停用；远端页面不能靠自己的清单取得本机其它插件数据。
+  能力由外壳的 `mica-client:` 协议提供，无通用 IPC、无 preload，不受当前页面所在机器影响。
+  Connections 显式使用这份本机清单，因此切换机器后保留同一组连接；`access` 继续控制当前运行时。
 - 插件数据：`currentHost()`（页面所在运行时的 origin）、`probe(address)`
   （探活一个地址，页面跨源读不到结果，由运行时代查）、`readData()` / `writeData(value, options?)`
   （插件自己的 `$MICA_HOME/plugin-data/<id>/data.json`，宿主不解析结构）、`open(url)`

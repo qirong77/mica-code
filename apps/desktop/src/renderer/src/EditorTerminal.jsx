@@ -17,7 +17,6 @@ import {
   activeTabAfterClose,
   clampEditorTerminalHeight,
   closeTabConfirmText,
-  closeWindowConfirmText,
   createEditorTerminalTab,
   editorTerminalHeightLimit,
   isTerminalToggleShortcut,
@@ -218,26 +217,7 @@ export const EditorTerminal = forwardRef(function EditorTerminal({ cwd, hidden =
     [activeId, commitTabs, disposeTabs, runningEntries]
   )
 
-  // 关这个窗口之前，外壳会问一句（见 main/index.js）：有程序在跑就二次确认，确认后先把
-  // shell 收掉——PTY 活在运行时里，页面没了它不会自己结束。
-  useEffect(() => {
-    const handler = async () => {
-      const list = tabsRef.current
-      if (!list.length) return true
-      const running = await runningEntries(list)
-      if (running.length && !await confirmAction(closeWindowConfirmText(running))) return false
-      commitTabs([])
-      setActiveId(null)
-      await disposeTabs(list)
-      return true
-    }
-    window.__micaConfirmClose = handler
-    return () => {
-      if (window.__micaConfirmClose === handler) delete window.__micaConfirmClose
-    }
-  }, [commitTabs, disposeTabs, runningEntries])
-
-  // 刷新 / 页面被换掉时 PTY 不该留在运行时里当孤儿（关窗口那条路已经收过了，这里幂等）。
+  // 隐藏窗口保留 PTY；刷新 / 页面被换掉时再释放运行时里的 shell。
   useEffect(() => {
     const onPageHide = () => {
       const list = tabsRef.current

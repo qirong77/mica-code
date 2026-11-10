@@ -1,4 +1,5 @@
 import { isElectronShell } from './shell-env'
+import { createClientContextApi } from './client-context'
 
 /**
  * 插件的前端模块能用的宿主能力。
@@ -80,6 +81,10 @@ export function createPluginHostApi(pluginId, session = null) {
       openPath: (path) => launcherControl('openPath', path)
     },
     currentHost: () => currentRuntimeAddress(),
+    /** 完整页面入口保留中转机的机器身份；currentHost 仍只回答 origin。 */
+    currentTarget: () => String(window.location?.href || currentRuntimeAddress()),
+    /** 原生客户端拥有的插件数据、探活与窗口切换；浏览器里为 null。 */
+    client: createClientContextApi(pluginId),
     /** 这个地址上是不是一台 Mica 运行时：跨源探测页面做不了，由运行时代查。 */
     probe: (address) => host.probe(String(address ?? '')),
     /** 插件自己的数据及内容版本。写入时可带 expectedVersion，冲突后重读并重放修改。 */

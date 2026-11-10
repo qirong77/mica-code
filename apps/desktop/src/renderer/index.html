@@ -12,7 +12,7 @@
     />
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: file:; worker-src 'self' blob:"
+      content="default-src 'self'; connect-src 'self' mica-client:; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: file:; worker-src 'self' blob:"
     />
     <!-- 图标用相对路径：Electron 走 file:// 加载、局域网走 http，两种方式都能命中
          renderer 根目录下的产物（由 scripts/generate-icons.py 生成）。 -->
@@ -21,6 +21,8 @@
     <link rel="apple-touch-icon" sizes="180x180" href="./apple-touch-icon.png" />
     <link rel="manifest" href="./manifest.webmanifest" />
     <meta name="theme-color" content="#2b2b2b" />
+    <!-- 文件名就是协议版本；修改脚本内容时使用新的文件名，避免旧缓存与新入口混用。 -->
+    <script async src="/env-boot-v1.js"></script>
     <!-- 首帧主题：同步反序列化之前的主题选择，避免亮色用户先看到一帧暗色。
          classic script（CSP script-src 'self' 放行同源脚本），必须放在样式与模块脚本之前。 -->
     <script src="./theme-boot.js"></script>

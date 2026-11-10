@@ -1,7 +1,7 @@
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PluginContext } from '@packages/mica-plugin/PluginContext.js';
 import type { PluginSkillDefinition } from '@packages/mica-plugin/PluginDesktop.js';
 import setup from './index.js';
@@ -120,5 +120,30 @@ describe('mobile-relay plugin setup', () => {
 
     expect(captured.health).toEqual([]);
     expect(captured.skill).not.toBeNull();
+  });
+
+  it('records configuration actions and their rejected async results without values', async () => {
+    const ctx = fakeContext(dataDir, { skill: null, health: [] });
+    const handlers = new Map<string, (args: { values: Record<string, string> }) => Promise<unknown>>();
+    const info = vi.fn();
+    ctx.logger.info = info;
+    ctx.actions = {
+      register: (key: string, handler: (args: { values: Record<string, string> }) => Promise<unknown>) => {
+        handlers.set(key, handler);
+        return { dispose: () => {} };
+      },
+    } as unknown as PluginContext['actions'];
+    setup(ctx);
+    await expect(handlers.get('register')!({ values: { enrollKey: 'secret-key' } })).rejects.toThrow();
+    const records = info.mock.calls.filter(([event]) => event === 'plugin:experience');
+    expect(records).toHaveLength(2);
+    expect(records[0]?.[1]).toMatchObject({ event: 'click', action: 'settings:register' });
+    expect(records[1]?.[1]).toMatchObject({
+      event: 'failure',
+      action: 'settings:register',
+      outcome: 'error',
+      durationMs: expect.any(Number),
+    });
+    expect(JSON.stringify(records)).not.toContain('secret-key');
   });
 });

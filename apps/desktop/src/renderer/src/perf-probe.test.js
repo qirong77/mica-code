@@ -242,3 +242,19 @@ describe('startPerfProbe', () => {
     expect(harness.win.__micaPerf).toBeUndefined()
   })
 })
+
+it('启动耗时随下一次采样上报一次，并在写入失败后保留', async () => {
+  const harness = createHarness({ fetchResult: { ok: false, status: 500 } })
+  const probe = startPerfProbe(harness.win, harness.doc)
+  harness.win.__micaStartupTiming = { route: 'app', main: 30, api: 100, uiState: 160, commit: 200 }
+  harness.advance(1000)
+  harness.tick(1000)
+  expect(sampleOf(probe).startup.commit).toBe(200)
+  expect(harness.win.__micaStartupTiming).toBeUndefined()
+  await probe.flush()
+  expect(probe.report().filter((sample) => sample.startup)).toHaveLength(1)
+  harness.advance(1000)
+  harness.tick(1000)
+  expect(sampleOf(probe).startup).toBeUndefined()
+  probe.stop()
+})

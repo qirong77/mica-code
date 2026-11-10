@@ -62,10 +62,12 @@ beforeEach(() => {
 });
 afterEach(() => vi.unstubAllGlobals());
 
-async function fixture() {
+async function fixture(options: { current?: string; target?: string; client?: any } = {}) {
   let disk = rememberPeer(emptyPeerStore(), '10.0.0.2');
   const api = {
-    currentHost: () => 'http://127.0.0.1:8787',
+    currentHost: () => options.current ?? 'http://127.0.0.1:8787',
+    currentTarget: () => options.target ?? options.current ?? 'http://127.0.0.1:8787',
+    client: options.client,
     readData: vi.fn(async () => ({ value: disk, version: 'one' })),
     writeData: vi.fn(async (next: PeerStore) => {
       disk = next;
@@ -88,7 +90,7 @@ async function fixture() {
     return tree;
   };
   render();
-  await vi.waitFor(() => expect(api.readData).toHaveBeenCalledTimes(1));
+  await vi.waitFor(() => expect((api.client ?? api).readData).toHaveBeenCalledTimes(1));
   return { api, render };
 }
 
@@ -133,12 +135,13 @@ describe('connection card callbacks', () => {
   it('opens an ordinary webpage without adding it to the connection list', async () => {
     const { api, render } = await fixture();
     const tree = render();
-    const input = elements(tree).find((element) => element.type === 'input' && element.props.placeholder?.includes('网页地址'))!;
+    const input = elements(tree).find((element) => element.props.placeholder?.includes('网页地址'))!;
 
-    input.props.onChange({ target: { value: 'https://www.zhihu.com/' } });
+    input.props.onChange('https://www.zhihu.com/');
     const updatedTree = render();
     const updatedConnect = elements(updatedTree).find(
-      (element) => typeof element.type !== 'string' && element.type?.name === 'Button' && element.props.children === '连接',
+      (element) =>
+        typeof element.type !== 'string' && element.type?.name === 'Button' && element.props.children === '连接',
     )!;
     updatedConnect.props.onClick();
 
@@ -198,16 +201,93 @@ it('serializes remote-access saves and preserves a password edited while a save 
   const input = () => elements(render()).find((element) => element.props['aria-label'] === '访问口令')!;
   render();
   await vi.waitFor(() => expect(input()).toBeTruthy());
-  input().props.onChange({ target: { value: 'first' } });
+  input().props.onChange('first');
   const saving = input();
   const pending = deferred<{ enabled: boolean; password: string }>();
   api.access.set.mockReturnValueOnce(pending.promise);
   saving.props.onBlur();
   saving.props.onBlur();
   const writes = api.access.set.mock.calls.length;
-  input().props.onChange({ target: { value: 'newer draft' } });
+  input().props.onChange('newer draft');
   pending.resolve({ enabled: true, password: 'first' });
   await vi.waitFor(() => expect(JSON.stringify(render())).toContain('已保存'));
   expect(writes).toBe(1);
   expect(input().props.value).toBe('newer draft');
+});
+
+function clientFixture(peers: string[]) {
+  let disk = peers.reduce((store, peer) => rememberPeer(store, peer), emptyPeerStore());
+  return {
+    context: vi.fn(async () => ({ localHost: 'http://127.0.0.1:9911' })),
+    readData: vi.fn(async () => ({ value: disk, version: 'client' })),
+    writeData: vi.fn(async (next: PeerStore) => {
+      disk = next;
+      return { ok: true };
+    }),
+    probe: vi.fn(async (address: string) => ({ ok: true, url: address, access: 'password' })),
+    open: vi.fn(async () => {}),
+    local: vi.fn(async () => {}),
+  };
+}
+const peerButtons = (tree: unknown) =>
+  elements(tree).filter(
+    (element) => element.type === 'button' && element.props.className?.includes('text-left disabled:opacity-60'),
+  );
+
+describe('client connections across runtime windows', () => {
+  const a = 'http://10.0.0.1:8787';
+  const b = 'http://10.0.0.2:8787';
+  const c = 'http://10.0.0.3:8787';
+
+  it('shows B, C and Local on A using the client list instead of remote data', async () => {
+    const client = clientFixture([c, b, a]);
+    const { api, render } = await fixture({ current: a, client });
+    expect(peerButtons(render()).map((button) => JSON.stringify(button))).toEqual([
+      expect.stringContaining(b),
+      expect.stringContaining(c),
+    ]);
+    const local = elements(render()).find(
+      (element) => element.type === 'button' && JSON.stringify(element).includes('Local'),
+    )!;
+    expect(local).toBeDefined();
+    local.props.onClick();
+    local.props.onClick();
+    await vi.waitFor(() => expect(client.local).toHaveBeenCalledTimes(1));
+    expect(client.probe).not.toHaveBeenCalled();
+    expect(client.writeData).not.toHaveBeenCalled();
+    expect(api.readData).not.toHaveBeenCalled();
+    expect(api.writeData).not.toHaveBeenCalled();
+    expect(api.open).not.toHaveBeenCalled();
+  });
+
+  it('probes and remembers B on the client, then switches through the shell', async () => {
+    const client = clientFixture([c, b, a]);
+    const { api, render } = await fixture({ current: a, client });
+    peerButtons(render())[0]!.props.onClick();
+    await vi.waitFor(() => expect(client.open).toHaveBeenCalledWith(b));
+    expect(client.probe).toHaveBeenCalledWith(b);
+    expect(client.writeData.mock.calls.at(-1)?.[0].peers[0]?.url).toBe(b);
+    expect(api.probe).not.toHaveBeenCalled();
+    expect(api.writeData).not.toHaveBeenCalled();
+  });
+
+  it('identifies relay A by token and leaves relay B available on the same origin', async () => {
+    const relayA = 'https://relay.example/?t=machine-a&session=one';
+    const relayB = 'https://relay.example/?t=machine-b&session=two';
+    const client = clientFixture([relayB, relayA]);
+    const { render } = await fixture({ current: 'https://relay.example', target: relayA, client });
+    expect(peerButtons(render())).toHaveLength(1);
+    peerButtons(render())[0]!.props.onClick();
+    await vi.waitFor(() => expect(client.open).toHaveBeenCalledWith(relayB));
+  });
+
+  it('does not show a Local return action on the actual local port', async () => {
+    const client = clientFixture([a, b, c]);
+    const { render } = await fixture({ current: 'http://127.0.0.1:9911', client });
+    await vi.waitFor(() => expect(client.context).toHaveBeenCalledTimes(1));
+    expect(peerButtons(render())).toHaveLength(3);
+    expect(
+      elements(render()).some((element) => element.type === 'button' && JSON.stringify(element).includes('Local')),
+    ).toBe(false);
+  });
 });

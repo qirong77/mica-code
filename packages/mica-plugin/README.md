@@ -9,6 +9,10 @@ lease 并应用配置后、保存用户输入前执行，可通过事件上的 `
 
 ## 主要能力
 
+- 客户端插件数据授权：清单 `desktop.clientData`（默认 false，解析为 `PluginManifest.desktopClientData`）
+  允许随包插件的前端通过 `api.client.readData/writeData` 访问启动桌面客户端的本机数据。
+  授权由本机外壳按随包清单和启停状态检查，远程页面不决定访问范围；原有数据 API 仍访问当前运行时。
+
 - 随包系统启动器：清单 `desktop.launcher` 声明全局快捷键和独立浮窗，界面为插件
   `desktop.jsx` 的 `Launcher`，后端为 `launcher.js` 的 `createLauncher(context)`，
   类型见 `PluginLauncher.ts`。桌面运行时按插件持有唯一实例，不依赖会话；context 提供

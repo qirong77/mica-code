@@ -89,6 +89,7 @@ function manifest(requires: string[]) {
     desktopEntry: null,
     desktopPage: null,
     desktopComposer: false,
+    desktopClientData: false,
     desktopLauncher: null,
     status: [],
     actions: [],

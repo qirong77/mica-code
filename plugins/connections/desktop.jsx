@@ -1,7 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Monitor, Pencil, Trash2 } from 'lucide-react';
 import { Alert, Button, ConfigSwitch as Switch, Input, Tag } from '@mica-config-ui/web';
-import { DEFAULT_RUNTIME_URL, isLoopbackRuntime, normalizeEntryAddress, relayTokenOf, runtimeLabel } from '@packages/mica-web-shared/index.js';
+import {
+  DEFAULT_RUNTIME_URL,
+  isLoopbackRuntime,
+  normalizeEntryAddress,
+  relayTokenOf,
+  runtimeLabel,
+} from '@packages/mica-web-shared/index.js';
 import { MAX_PEER_NOTE_LENGTH, emptyPeerStore, findPeer, peerRows, rememberPeer, samePeer, setPeerNote } from './peers';
 import { createPeerPersistence } from './persistence';
 
@@ -32,8 +38,8 @@ function isOrdinaryWebAddress(value) {
  * Connections 的卡片：连接到另一台机器上的 Mica 运行时。
  *
  * 页面由哪台运行时托管就代表在用哪台，所以「切过去」= 打开那个地址：外壳里弹一个新
- * 窗口，浏览器里开新标签页。连过的地址记在插件自己的数据文件里（`plugin-data/connections`），
- * 于是这台机器上的任何窗口都能点回去，不必再抄一遍 IP；记不住 IP 的话每条可以起个备注。
+ * 窗口，浏览器里开新标签页。桌面端清单始终来自启动客户端的本机（`api.client`），
+ * 远程窗口也用同一份清单；浏览器则从当前运行时读插件数据。
  *
  * 宿主只提供三样东西（见 `api`）：探活、打开地址、读写这份数据。探活必须由运行时代劳
  * ——页面跨源 `fetch` 读不到结果。
@@ -54,13 +60,14 @@ export default function ConnectionsCard({ api, onClose }) {
   // 正在改备注的那条（地址），空串表示没在编辑
   const [noteTarget, setNoteTarget] = useState('');
   const [noteDraft, setNoteDraft] = useState('');
-  const persistence = useMemo(() => createPeerPersistence(api), [api]);
+  const persistence = useMemo(() => createPeerPersistence(api.client ?? api), [api]);
+  const [localHost, setLocalHost] = useState('');
 
-  const current = api.currentHost();
-  // 已经在回环地址上就说明人就在这台机器上，「本机」这个回程入口没有意义（页面可能跑在
-  // 非默认端口上，那时回环默认地址甚至不是当前这台）
-  const showLocal = !isLoopbackRuntime(current);
-  const rows = peerRows(current, store);
+  const currentTarget = api.currentTarget?.() || api.currentHost();
+  const current = relayTokenOf(currentTarget) ? currentTarget : api.currentHost();
+  // 客户端返回真实本机页面地址（含开发端口或端口回退）；浏览器按回环地址判断。
+  const showLocal = localHost ? !samePeer(current, localHost) : !isLoopbackRuntime(current);
+  const rows = peerRows(current, store, localHost || undefined);
   const currentEntry = findPeer(store, current);
 
   const storeRef = useRef(store);
@@ -82,6 +89,22 @@ export default function ConnectionsCard({ api, onClose }) {
       alive = false;
     };
   }, [persistence]);
+
+  useEffect(() => {
+    if (!api.client) return undefined;
+    let alive = true;
+    void api.client
+      .context()
+      .then((context) => {
+        if (alive) setLocalHost(context.localHost);
+      })
+      .catch((caught) => {
+        if (alive) setError(caught?.message || String(caught));
+      });
+    return () => {
+      alive = false;
+    };
+  }, [api]);
 
   /** 写入成功后更新清单，避免界面把失败的保存显示成成功。 */
   const update = async (updater) => {
@@ -160,7 +183,7 @@ export default function ConnectionsCard({ api, onClose }) {
         onClose?.();
         return;
       }
-      const result = await api.probe(target);
+      const result = await (api.client ?? api).probe(target);
       // 普通网页也可以从这里打开：探活收到的不是 Mica 响应时，不写入 Connections 清单。
       if (result?.kind === 'web' && result.url) {
         api.open(result.url);
@@ -179,7 +202,7 @@ export default function ConnectionsCard({ api, onClose }) {
         }
         // 名字取中转机回报的机器名，作为这条记录的默认备注（用户改过就不动）
         await update((previous) => rememberPeer(previous, result.url, result.label));
-        api.open(result.url);
+        await (api.client ?? api).open(result.url);
         onClose?.();
         return;
       }
@@ -195,8 +218,25 @@ export default function ConnectionsCard({ api, onClose }) {
       if (!samePeer(result.url, current)) {
         // 探通了才记：地址已经规范成 origin，下次直接从这里点回去
         await update((previous) => rememberPeer(previous, result.url));
-        api.open(result.url);
+        await (api.client ?? api).open(result.url);
       }
+      onClose?.();
+    } catch (caught) {
+      setError(caught?.message || String(caught));
+    } finally {
+      connecting.current = false;
+      setBusy('');
+    }
+  };
+
+  const returnLocal = async () => {
+    if (!api.client) return connect(DEFAULT_RUNTIME_URL);
+    if (connecting.current) return;
+    connecting.current = true;
+    setBusy('local');
+    setError('');
+    try {
+      await api.client.local();
       onClose?.();
     } catch (caught) {
       setError(caught?.message || String(caught));
@@ -277,12 +317,12 @@ export default function ConnectionsCard({ api, onClose }) {
           type="button"
           disabled={Boolean(busy)}
           className="mb-2 flex h-8 w-full items-center gap-2 rounded-sm border border-dashed border-line bg-overlay-subtle px-2.5 text-left text-xs text-fg-soft hover:border-line-strong hover:text-fg-max disabled:text-fg-ghost"
-          onClick={() => void connect(DEFAULT_RUNTIME_URL)}
+          onClick={() => void returnLocal()}
         >
           <Monitor size={13} className="shrink-0" />
-          <span className="shrink-0">本机</span>
-          <span className="min-w-0 flex-1 truncate text-[10px] text-fg-dim">{DEFAULT_RUNTIME_URL}</span>
-          {busy === DEFAULT_RUNTIME_URL && <Tag tone="blue">连接中…</Tag>}
+          <span className="shrink-0">Local</span>
+          <span className="min-w-0 flex-1 truncate text-[10px] text-fg-dim">{localHost || DEFAULT_RUNTIME_URL}</span>
+          {(busy === 'local' || busy === DEFAULT_RUNTIME_URL) && <Tag tone="blue">连接中…</Tag>}
         </button>
       )}
 

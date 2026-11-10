@@ -65,7 +65,9 @@ export function startPerfProbe(win, doc) {
   if (!win || !doc || win.__micaPerf) return win?.__micaPerf || null
 
   // 同一会话可以在多个窗口打开。页面身份独立于 sid，也随刷新重建。
-  const pageId = win.crypto?.randomUUID?.() || `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
+  const pageId =
+    win.crypto?.randomUUID?.() ||
+    `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
   const pending = []
   let stopLongTask = null
   let timer = null
@@ -137,8 +139,11 @@ export function startPerfProbe(win, doc) {
       domTick = 0
     }
     domTick += 1
+    const startup = win.__micaStartupTiming
+    if (startup) delete win.__micaStartupTiming
     push({
       at: Date.now(),
+      ...(startup ? { startup } : {}),
       pageId,
       lag: lag == null ? null : round(lag),
       long: round(longMax),

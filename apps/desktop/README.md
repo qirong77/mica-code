@@ -622,9 +622,24 @@ The sidebar does not hard-code capabilities. A plugin declares `desktop.entry` i
 
 `open` 分支按 user agent（`shell-env.js` 的 `isElectronShell`）：外壳里把导航交给主进程（`location.assign`，被 `will-navigate` 拦成新窗口），浏览器里 `window.open(url, '_blank')` 再掐掉 `window.opener`——刻意不用 `noopener` 特性串，它会让 `window.open` 恒返回 `null`，把「被拦截」和「外壳里没有窗口」混成一种情况；被拦截时退回本标签页。
 
-The first consumer is the official `connections` plugin（侧栏里的「连接」）: it lists the current runtime, the runtimes you have connected to and an address field, and it persists that list in its own data file (`$MICA_HOME/plugin-data/connections/data.json`) instead of `localStorage` — so every window served by the same runtime sees the same list. 探活仍然只有运行时做得了（`src/host/runtime-probe-core.js` 打目标上的 `GET /api/health`，跨源 `fetch` 在页面里读不到响应），地址规范化、回环判断与显示名在 `mica-web-shared/runtime-address` 里写一份。A page is served by whichever runtime hosts it, so "which runtime am I on" is just `location.origin` — nothing is proxied and no cross-origin call is made.
+Connections 的桌面窗口共用启动客户端的本机清单（`$MICA_HOME/plugin-data/connections/data.json`）：
+本机有 A、B、C，打开 A 后，当前标识是 A，切换项仍为 B、C、Local；A 保存的 E、D 不参与这份清单。
+清单声明 `desktop.clientData: true`，通过 `api.client.readData/writeData` 读写本机同一文件；
+`client.probe/open/local` 从客户端探活、复用或打开目标窗口、直接聚焦原本机窗口。
+`client.context()` 给出真实本机页面地址（包含开发端口或回退端口）；`currentTarget()` 保留中转链接的令牌身份。
+普通浏览器的 `client` 为 null，继续使用当前运行时的清单。访问策略 `api.access` 始终控制当前连接的运行时。
 
-The container owns the navigation policy and one window per server (`src/main/index.js`). `will-navigate` lets a window's own origin (and the local page) navigate in place, hands the navigation to the window that already shows that server (focused, not reloaded), otherwise opens a new window when `/api/health` of the target reports `app: 'mica-code-app'`, and sends everything else to the system browser. Each window keeps its own state — `did-navigate` re-points that window's unread-badge subscription at the origin it shows and appends `— host:port` to its title, and the dock badge reflects the focused window. The first window is the local one and closing it only hides it; windows opened for other machines close for real. The app always starts on the local runtime (there is no "last server" record to restore). Because the server you switch to may be running an older bundle with no switcher of its own, **⇧⌘M** (shell level, `before-input-event`) always brings the local window to the front (loading it into the current window if it is gone), and the boot-error page offers 返回本机 whenever the current origin is not loopback — that click reloads the local page rather than focusing a window when the error page _is_ the local window, so it stays a recovery action.
+客户端能力由 `main/client-context.js` 的 `mica-client://host` 协议提供，不增加 preload 或通用 IPC。
+协议只注册到默认 session，受控浏览器的独立 partition 不注册；每个请求验证发起 origin 是否同时匹配外壳认可的入口及窗口当前地址，重定向不扩大授权
+（Electron 39 使用 Chromium 校验过的 referrer），本机插件数据只开放给本机随包清单显式授权且未停用的插件。
+页面 CSP 仅额外允许 `connect-src mica-client:`。本机和远端页面都需使用新版产物；旧远端页面仍可用 **⇧⌘M** 返回本机。
+
+The container owns navigation and one window per runtime (`src/main/index.js`), using origin plus relay token
+for relay entries. Switching to an existing target restores and focuses its window without reloading it.
+Closing a runtime window hides it. Remote windows retain their page state for **two hours continuously hidden**,
+then `main/window-retention.js` destroys them to release resources. Showing one cancels its expiry; hiding it
+again starts a new two-hour period. The local primary window stays resident, and quitting the app closes all
+windows normally. Each window keeps its own runtime title and unread subscription.
 
 ### What the page does differently from a native app
 

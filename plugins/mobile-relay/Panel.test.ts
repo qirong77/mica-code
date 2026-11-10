@@ -69,6 +69,54 @@ describe('mobile-relay panel', () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
+  it('records user actions and asynchronous failures without recording inputs or refreshes', async () => {
+    const ctx = fakeContext({ relayUrl: 'https://secret.example', token: 'secret-token-value' });
+    const handler = createPanelHandler(ctx, dir);
+    handler.view({ role: 'default' });
+    handler.view({ role: 'default' });
+    expect(ctx.logger.info).not.toHaveBeenCalled();
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('secret network detail')));
+    try {
+      await expect(handler.action({ action: 'test', values: { enrollKey: 'secret-enrollment' } })).rejects.toThrow(
+        '连不上',
+      );
+      const records = vi.mocked(ctx.logger.info).mock.calls;
+      expect(records).toHaveLength(2);
+      expect(records[0]?.[1]).toMatchObject({
+        event: 'click',
+        action: 'panel:test',
+        surface: 'panel',
+        pluginVersion: '1.9.0',
+      });
+      expect(records[1]?.[1]).toMatchObject({
+        event: 'check',
+        action: 'panel:test',
+        outcome: 'error',
+        durationMs: expect.any(Number),
+      });
+      expect(JSON.stringify(records)).not.toContain('secret');
+      await handler.action({ action: 'show' });
+      expect(vi.mocked(ctx.logger.info).mock.calls[3]?.[1]).toMatchObject({
+        event: 'update',
+        outcome: 'success',
+        action: 'panel:show',
+      });
+      await expect(handler.action({ action: 'secret-unknown' })).rejects.toThrow();
+      expect(vi.mocked(ctx.logger.info).mock.calls).toHaveLength(4);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('honors telemetry changes immediately', async () => {
+    const ctx = fakeContext();
+    const handler = createPanelHandler(ctx, dir);
+    await handler.action({ action: 'show' });
+    ctx.settings.set({ telemetry: 'false' });
+    await handler.action({ action: 'show' });
+    expect(ctx.logger.info).toHaveBeenCalledTimes(2);
+  });
+
   it('opens the latest actual request log without replacing connection drafts', async () => {
     vi.stubEnv('MICA_LOG_DIR', dir);
     writeFileSync(join(dir, 'relay-requests-20261105-2.jsonl'), '{}\n');

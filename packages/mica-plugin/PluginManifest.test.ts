@@ -130,6 +130,32 @@ describe('parsePluginManifest desktop composer', () => {
   );
 });
 
+describe('parsePluginManifest desktop client data', () => {
+  it.each([undefined, {}, { entry: {} }, { composer: true }, { clientData: false }])(
+    'defaults client data access to false: %j', (desktop) => {
+      const result = parsePluginManifest(base({ desktop }));
+      expect(result.ok).toBe(true);
+      if (result.ok) expect(result.manifest.desktopClientData).toBe(false);
+    },
+  );
+
+  it.each([{ clientData: true }, { clientData: true, entry: {}, page: true, composer: true }])(
+    'accepts explicit client data access independently of desktop UI: %j', (desktop) => {
+      const result = parsePluginManifest(base({ desktop }));
+      expect(result.ok).toBe(true);
+      if (result.ok) expect(result.manifest.desktopClientData).toBe(true);
+    },
+  );
+
+  it.each([null, 'true', 'false', '', 0, 1, [], {}].map((clientData) => ({ clientData })))(
+    'rejects nonboolean client data declarations: %j', ({ clientData }) => {
+      expect(parsePluginManifest(base({ desktop: { clientData } }))).toEqual({
+        ok: false, error: 'desktop.clientData 必须是布尔值',
+      });
+    },
+  );
+});
+
 describe('parsePluginManifest desktop launcher', () => {
   const parse = (launcher: unknown) => parsePluginManifest(base({ desktop: { launcher } }));
 

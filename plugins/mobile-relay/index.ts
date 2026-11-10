@@ -1,6 +1,7 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { PluginContext } from '@packages/mica-plugin/index.js';
+import { createPluginExperience } from '@packages/mica-plugin/index.js';
 import { micaSkills } from '@packages/mica-skills/index.js';
 import SKILL_MD from './skill/SKILL.md' with { type: 'text' };
 import { registerBridgeSupervisor } from './BridgeSupervisor.js';
@@ -9,6 +10,7 @@ import { guidePageSync, rendererDirFor, skillPathFor } from './PageSyncAction.js
 import { acknowledgePageNotice } from './PageNotice.js';
 import { MobileRelayTool } from './MobileRelayTool.js';
 import { registerMachine } from './registerMachine.js';
+import manifest from './plugin.json' with { type: 'json' };
 
 const SKILL_NAME = 'mobile-relay';
 
@@ -92,16 +94,36 @@ export default function setup(ctx: PluginContext): void {
 function registerActions(ctx: PluginContext, dataDir: string | null): void {
   const actions = ctx.actions;
   if (!actions) return;
-  actions.register('register', async ({ values }) => registerMachine(ctx, values, dataDir));
-  actions.register('sync-page', async () => {
-    // 用户点了这一下就算看过那条提示：同一对「本机版 vs 中转机版」不再让侧栏挂红点。
-    // 落后本身仍写在「运行状态 → 页面」里，需要时面板里还能再点一次更新。
-    acknowledgePageNotice(dataDir);
-    return guidePageSync({
-      skillPath: skillPathFor(dataDir),
-      rendererDir: rendererDirFor(ctx),
-    });
-  });
+  const experience = createPluginExperience(ctx, manifest.version);
+  async function trackAction<T>(
+    action: 'settings:register' | 'settings:sync-page',
+    run: () => Promise<T> | T,
+  ): Promise<T> {
+    const started = Date.now();
+    experience.track('click', { surface: 'panel', action });
+    try {
+      const result = await run();
+      experience.track('update', { surface: 'panel', action, outcome: 'success', durationMs: Date.now() - started });
+      return result;
+    } catch (error) {
+      experience.track('failure', { surface: 'panel', action, outcome: 'error', durationMs: Date.now() - started });
+      throw error;
+    }
+  }
+  actions.register('register', async ({ values }) =>
+    trackAction('settings:register', () => registerMachine(ctx, values, dataDir)),
+  );
+  actions.register('sync-page', async () =>
+    trackAction('settings:sync-page', () => {
+      // 用户点了这一下就算看过那条提示：同一对「本机版 vs 中转机版」不再让侧栏挂红点。
+      // 落后本身仍写在「运行状态 → 页面」里，需要时面板里还能再点一次更新。
+      acknowledgePageNotice(dataDir);
+      return guidePageSync({
+        skillPath: skillPathFor(dataDir),
+        rendererDir: rendererDirFor(ctx),
+      });
+    }),
+  );
 }
 
 /**

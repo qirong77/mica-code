@@ -1,6 +1,7 @@
 import { mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { resolveLogDir } from '@packages/mica-config/brand.js';
+import { createPluginExperience } from '@packages/mica-plugin/index.js';
 import type { PluginContext } from '@packages/mica-plugin/index.js';
 import type {
   PluginPanelAction,
@@ -15,6 +16,7 @@ import { findRendererDir, readDeployState, runSetup } from './DeployRunner.js';
 import { guidePageSync, rendererDirFor, skillPathFor } from './PageSyncAction.js';
 import { machineIdentity } from './Registrar.js';
 import { registerMachine } from './registerMachine.js';
+import manifest from './plugin.json' with { type: 'json' };
 
 /**
  * 对话右侧那块面板：看现在通没通、接中转机、首次部署，全部点按钮完成。
@@ -350,92 +352,120 @@ function phoneDialog(ctx: PluginContext): PluginPanelActionResult {
 }
 
 export function createPanelHandler(ctx: PluginContext, dataDir: string | null): PluginPanelHandler {
+  const experience = createPluginExperience(ctx, manifest.version);
+  const actions = new Set(['show', 'request-logs', 'ask-agent', 'test', 'register', 'sync-page', 'apply']);
   return {
     view() {
       return buildPanelView(ctx, dataDir);
     },
 
     async action({ action, values }) {
-      if (!dataDir) throw new Error('没有插件数据目录，检查 MICA_HOME 是否可写');
-
-      // 入口动作（清单 `desktop.panel.open`）：点了「手机访问」只要一个二维码，不打开抽屉。
-      // 它必须在 saveDrafts 之前返回——页面没有表单可提交，落一次草稿会把用户填了一半的
-      // 中转地址与 SSH 全部清空。
-      if (action === 'show') return phoneDialog(ctx);
-
-      if (action === 'request-logs') {
-        const dir = resolveLogDir();
-        mkdirSync(dir, { recursive: true });
-        const files = readdirSync(dir, { withFileTypes: true })
-          .filter((entry) => entry.isFile())
-          .map((entry) => ({
-            name: entry.name,
-            match: /^relay-requests-(\d{8})(?:-([1-9]\d{0,8}))?\.jsonl$/.exec(entry.name),
-          }))
-          .filter((entry) => entry.match)
-          .sort(
-            (a, b) => a.match![1]!.localeCompare(b.match![1]!) || Number(a.match![2] || 0) - Number(b.match![2] || 0),
-          );
-        return { openPath: { path: files.length ? join(dir, files.at(-1)!.name) : dir } };
+      const trackedAction = actions.has(action) ? `panel:${action}` : undefined;
+      const started = Date.now();
+      if (trackedAction) experience.track('click', { surface: 'panel', action: trackedAction });
+      try {
+        const result = await runAction();
+        if (trackedAction)
+          experience.track(action === 'test' ? 'check' : 'update', {
+            surface: 'panel',
+            action: trackedAction,
+            outcome: 'success',
+            durationMs: Date.now() - started,
+          });
+        return result;
+      } catch (error) {
+        if (trackedAction)
+          experience.track(action === 'test' ? 'check' : 'failure', {
+            surface: 'panel',
+            action: trackedAction,
+            outcome: 'error',
+            durationMs: Date.now() - started,
+          });
+        throw error;
       }
 
-      const drafts = saveDrafts(dataDir, values ?? {});
+      async function runAction(): Promise<PluginPanelActionResult> {
+        if (!dataDir) throw new Error('没有插件数据目录，检查 MICA_HOME 是否可写');
 
-      if (action === 'ask-agent') {
-        const runtime = ctx.runtime;
-        if (!runtime) throw new Error('当前宿主不能发起会话');
-        const host = drafts.sshHost || '中转机';
-        await runtime.submit(
-          `用 mobile-relay-setup skill 帮我把手机访问配好：中转机是 ${host}。` +
-            '仓库里没有页面产物就先构建，再跑 setup.mjs 完成部署，并把地址与口令写回插件设置。',
-        );
-        return { message: '已交给 agent，进展看对话' };
-      }
+        // 入口动作（清单 `desktop.panel.open`）：点了「手机访问」只要一个二维码，不打开抽屉。
+        // 它必须在 saveDrafts 之前返回——页面没有表单可提交，落一次草稿会把用户填了一半的
+        // 中转地址与 SSH 全部清空。
+        if (action === 'show') return phoneDialog(ctx);
 
-      if (action === 'test') {
-        const url = String(ctx.settings.get().relayUrl ?? '')
-          .trim()
-          .replace(/\/+$/, '');
-        if (!url) throw new Error('还没配置中转地址');
-        try {
-          const response = await fetch(`${url}/api/health`, { signal: AbortSignal.timeout(5_000) });
-          if (!response.ok) throw new Error(`中转机返回 ${response.status}`);
-          return { message: '中转机可达' };
-        } catch (error) {
-          throw new Error(`连不上：${error instanceof Error ? error.message : String(error)}`);
+        if (action === 'request-logs') {
+          const dir = resolveLogDir();
+          mkdirSync(dir, { recursive: true });
+          const files = readdirSync(dir, { withFileTypes: true })
+            .filter((entry) => entry.isFile())
+            .map((entry) => ({
+              name: entry.name,
+              match: /^relay-requests-(\d{8})(?:-([1-9]\d{0,8}))?\.jsonl$/.exec(entry.name),
+            }))
+            .filter((entry) => entry.match)
+            .sort(
+              (a, b) => a.match![1]!.localeCompare(b.match![1]!) || Number(a.match![2] || 0) - Number(b.match![2] || 0),
+            );
+          return { openPath: { path: files.length ? join(dir, files.at(-1)!.name) : dir } };
         }
-      }
 
-      if (action === 'register') {
-        const relayUrl = drafts.relayUrl || String(ctx.settings.get().relayUrl ?? '').trim();
-        return registerMachine(ctx, { relayUrl, enrollKey: drafts.enrollKey, label: drafts.label }, dataDir);
-      }
+        const drafts = saveDrafts(dataDir, values ?? {});
 
-      if (action === 'sync-page') {
-        // 只把提示词交给宿主：新会话、输入框、按不按回车都由页面与用户决定。
-        return guidePageSync({ skillPath: skillPathFor(dataDir), rendererDir: rendererDirFor(ctx) });
-      }
+        if (action === 'ask-agent') {
+          const runtime = ctx.runtime;
+          if (!runtime) throw new Error('当前宿主不能发起会话');
+          const host = drafts.sshHost || '中转机';
+          await runtime.submit(
+            `用 mobile-relay-setup skill 帮我把手机访问配好：中转机是 ${host}。` +
+              '仓库里没有页面产物就先构建，再跑 setup.mjs 完成部署，并把地址与口令写回插件设置。',
+          );
+          return { message: '已交给 agent，进展看对话' };
+        }
 
-      if (action === 'apply') {
-        if (!drafts.sshHost.trim()) throw new Error('先填中转机 SSH（形如 root@1.2.3.4）');
-        const state = await runSetup(
-          ctx,
-          dataDir,
-          {
-            host: drafts.sshHost,
-            sshPort: drafts.sshPort,
-            label: drafts.label || undefined,
-            renderer: drafts.renderer || undefined,
-          },
-          () => {
-            // 进度落盘在 deploy.json，宿主下一次取视图就会读到
-          },
-        );
-        if (state.phase === 'ok') return { message: '完成，手机链接见「状态」一节' };
-        throw new Error(state.lines[state.lines.length - 1] || '部署失败，看「过程」一节');
-      }
+        if (action === 'test') {
+          const url = String(ctx.settings.get().relayUrl ?? '')
+            .trim()
+            .replace(/\/+$/, '');
+          if (!url) throw new Error('还没配置中转地址');
+          try {
+            const response = await fetch(`${url}/api/health`, { signal: AbortSignal.timeout(5_000) });
+            if (!response.ok) throw new Error(`中转机返回 ${response.status}`);
+            return { message: '中转机可达' };
+          } catch (error) {
+            throw new Error(`连不上：${error instanceof Error ? error.message : String(error)}`);
+          }
+        }
 
-      throw new Error(`未知动作：${action}`);
+        if (action === 'register') {
+          const relayUrl = drafts.relayUrl || String(ctx.settings.get().relayUrl ?? '').trim();
+          return await registerMachine(ctx, { relayUrl, enrollKey: drafts.enrollKey, label: drafts.label }, dataDir);
+        }
+
+        if (action === 'sync-page') {
+          // 只把提示词交给宿主：新会话、输入框、按不按回车都由页面与用户决定。
+          return guidePageSync({ skillPath: skillPathFor(dataDir), rendererDir: rendererDirFor(ctx) });
+        }
+
+        if (action === 'apply') {
+          if (!drafts.sshHost.trim()) throw new Error('先填中转机 SSH（形如 root@1.2.3.4）');
+          const state = await runSetup(
+            ctx,
+            dataDir,
+            {
+              host: drafts.sshHost,
+              sshPort: drafts.sshPort,
+              label: drafts.label || undefined,
+              renderer: drafts.renderer || undefined,
+            },
+            () => {
+              // 进度落盘在 deploy.json，宿主下一次取视图就会读到
+            },
+          );
+          if (state.phase === 'ok') return { message: '完成，手机链接见「状态」一节' };
+          throw new Error(state.lines[state.lines.length - 1] || '部署失败，看「过程」一节');
+        }
+
+        throw new Error(`未知动作：${action}`);
+      }
     },
   };
 }

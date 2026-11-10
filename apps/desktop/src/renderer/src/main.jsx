@@ -5,12 +5,9 @@ import {
   setConfigWebEditor,
   setConfigWebThemeHost
 } from '@mica-config-ui/web'
-import App from './App'
 import { DesktopDialogHost } from './desktop-dialog'
 import { NotificationHost } from './NotificationHost'
 import { ErrorBoundary } from './ErrorBoundary'
-import ShareIndex from './ShareIndex'
-import { PluginLauncher } from './PluginLauncher'
 import '../assets/app.css'
 import { LocalJsonEditor } from './config-web-editor'
 import { ensureMicaApi } from './transport'
@@ -18,10 +15,15 @@ import { ensureUiState, subscribeUiState, uiStateKeys } from './ui-state'
 import {
   THEME_UI_STATE_KEY,
   DEFAULT_RUNTIME_URL,
-  isLoopbackRuntime
+  isLoopbackRuntime,
+  isSharePath
 } from '@packages/mica-web-shared/index.js'
 import { readAppUrl } from './app-url'
 import { createDesktopConfigWebClient } from './config-web'
+import { createStartupTiming } from './startup-timing'
+
+const startup = createStartupTiming(window)
+startup.mark('main')
 
 document.body.classList.add('mica-arco-theme')
 
@@ -79,6 +81,7 @@ const quickButtonsDemo =
 // 外观验收页（`?quick-buttons-demo=1`）是纯静态的：只画按钮与预览卡片，不读会话、不发请求。
 // 它在 `ensureMicaApi()` 之前渲染，才能在静态服务下打开，也不会先闪一屏连不上运行时的提示。
 if (quickButtonsDemo) {
+  startup.setView('demo')
   void import('./QuickButtonsPreviewDemo')
     .then(({ default: Demo }) => {
       createRoot(document.getElementById('root')).render(
@@ -88,69 +91,93 @@ if (quickButtonsDemo) {
       )
       dismissBootPlaceholder()
     })
-    .catch((error) => renderBootError(error))
+    .catch((error) => renderBootError(error, true))
 }
 
-if (!quickButtonsDemo)
-  ensureMicaApi()
-    .catch((error) => {
-      console.error('初始化 mica 接口失败', error)
-      renderBootError(error)
-      return null
-    })
-    .then((api) => {
-      if (!api) return
-      // 界面状态（草稿/工作区/面板布局/主题偏好）来自运行时：先取回来再渲染，第一帧就是
-      // 上一次留下的样子，不用先画一个空界面再对齐。取不到不阻断启动——只是回到默认界面，
-      // 比整页停在一个错误提示上可用。
-      return ensureUiState()
-        .catch((error) => console.error('初始化界面状态失败', error))
-        .then(() => {
-          // 运行时保存的偏好比首帧缓存权威：以它为准重新上色，并让其他窗口的修改
-          // （ui-state 广播）继续跟随。分享页也走这条路径，看到的是同一套配色。
-          syncThemeFromUiState(uiStateKeys()[THEME_UI_STATE_KEY])
-          subscribeUiState(() => syncThemeFromUiState(uiStateKeys()[THEME_UI_STATE_KEY]))
+if (!quickButtonsDemo) {
+  // 在等待运行时环境与共享状态的同时加载对应页面；首次渲染仍必须等状态快照。
+  const params = new URLSearchParams(window.location.search)
+  const expectedView =
+    params.get('pluginLauncher') && !isSharePath(window.location.pathname)
+      ? 'launcher'
+      : isSharePath(window.location.pathname) && !readAppUrl(window.location.search).sessionId
+        ? 'share'
+        : 'app'
+  const modules = new Map()
+  const loadView = (view) => {
+    if (!modules.has(view)) {
+      const promise = (
+        view === 'launcher'
+          ? import('./PluginLauncher')
+          : view === 'share'
+            ? import('./ShareIndex')
+            : import('./App')
+      ).then(
+        (module) => ({ module, loadedAt: window.performance.now() }),
+        (error) => ({ error })
+      )
+      modules.set(view, promise)
+    }
+    return modules.get(view)
+  }
+  void loadView(expectedView)
 
-          const launcherId = new URLSearchParams(window.location.search).get('pluginLauncher')
-          if (launcherId && !api.shareView) {
-            createRoot(document.getElementById('root')).render(
-              <ErrorBoundary>
-                <ArcoProvider>
-                  <PluginLauncher pluginId={launcherId} />
-                </ArcoProvider>
-              </ErrorBoundary>
-            )
-            dismissBootPlaceholder()
-            return
-          }
+  void (async () => {
+    const api = await ensureMicaApi()
+    startup.mark('api')
+    try {
+      await ensureUiState()
+    } catch (error) {
+      console.error('初始化界面状态失败', error)
+    }
+    startup.mark('uiState')
+    syncThemeFromUiState(uiStateKeys()[THEME_UI_STATE_KEY])
+    subscribeUiState(() => syncThemeFromUiState(uiStateKeys()[THEME_UI_STATE_KEY]))
 
-          // `/share` 本身是「分享链接列表」：这一页不需要工作区/草稿那些界面状态，也不该按
-          // 「没有打开的会话」去开一条新会话，所以在渲染 App 之前就分出去。带 `?session=<id>`
-          // 时仍旧渲染 App（只是不画左侧会话列表，见 App.jsx 的 shareView）。
-          if (api.shareView && !readAppUrl(window.location.search).sessionId) {
-            createRoot(document.getElementById('root')).render(
-              <ErrorBoundary>
-                <ArcoProvider>
-                  <ShareIndex />
-                  <DesktopDialogHost />
-                </ArcoProvider>
-              </ErrorBoundary>
-            )
-            dismissBootPlaceholder()
-            return
-          }
-          createRoot(document.getElementById('root')).render(
-            <ErrorBoundary>
-              <ArcoProvider>
-                <NotificationHost />
-                <App />
-                <DesktopDialogHost />
-              </ArcoProvider>
-            </ErrorBoundary>
-          )
-          dismissBootPlaceholder()
-        })
-    })
+    const launcherId = params.get('pluginLauncher')
+    const view =
+      launcherId && !api.shareView
+        ? 'launcher'
+        : api.shareView && !readAppUrl(window.location.search).sessionId
+          ? 'share'
+          : 'app'
+    const { module, error, loadedAt } = await loadView(view)
+    if (error) {
+      console.error('加载页面资源失败', error)
+      startup.setView('error')
+      renderBootError(error, true)
+      return
+    }
+    startup.mark('viewReady')
+    startup.setTime('viewLoaded', loadedAt)
+    startup.setView(view)
+    const content =
+      view === 'launcher' ? (
+        <module.PluginLauncher pluginId={launcherId} />
+      ) : view === 'share' ? (
+        <>
+          <module.default />
+          <DesktopDialogHost />
+        </>
+      ) : (
+        <>
+          <NotificationHost />
+          <module.default />
+          <DesktopDialogHost />
+        </>
+      )
+    createRoot(document.getElementById('root')).render(
+      <ErrorBoundary>
+        <ArcoProvider>{content}</ArcoProvider>
+      </ErrorBoundary>
+    )
+    dismissBootPlaceholder()
+  })().catch((error) => {
+    console.error('启动 Mica 失败', error)
+    startup.setView('error')
+    renderBootError(error)
+  })
+}
 
 /**
  * 摘掉 index.html 里的启动占位（首帧底色 + 「正在载入…」）。React 18 的首次提交是
@@ -158,31 +185,38 @@ if (!quickButtonsDemo)
  */
 function dismissBootPlaceholder() {
   const boot = document.getElementById('boot')
-  if (!boot) return
+  if (!boot) {
+    startup.finish()
+    return
+  }
   const root = document.getElementById('root')
   if (!root || root.childElementCount > 0) {
     boot.remove()
+    startup.finish()
     return
   }
   const observer = new MutationObserver(() => {
     if (root.childElementCount === 0) return
     observer.disconnect()
     boot.remove()
+    startup.finish()
   })
   observer.observe(root, { childList: true })
 }
 
-function renderBootError(error) {
+function renderBootError(error, resourceFailure = false) {
   const root = document.getElementById('root')
   if (!root) return
   const box = document.createElement('div')
   box.className = 'flex h-full flex-col items-center justify-center gap-2 p-8 text-center'
   const title = document.createElement('p')
   title.className = 'text-sm text-[var(--chat-text)]'
-  title.textContent = '无法连接 Mica Code 运行时'
+  title.textContent = resourceFailure ? '无法加载页面资源' : '无法连接 Mica Code 运行时'
   const hint = document.createElement('p')
   hint.className = 'text-xs text-[var(--chat-text-dim)]'
-  hint.textContent = '请确认运行时进程仍在运行（npm run start:web 或重新启动应用）。'
+  hint.textContent = resourceFailure
+    ? '请检查网络连接，然后刷新页面重试。'
+    : '请确认运行时进程仍在运行（npm run start:web 或重新启动应用）。'
   const detail = document.createElement('p')
   detail.className = 'max-w-md text-[11px] text-[var(--chat-text-dim)]'
   detail.textContent = String(error?.message || error)

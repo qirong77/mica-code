@@ -28,7 +28,7 @@ import {
   writeFileSync
 } from 'node:fs'
 import { execFileSync } from 'node:child_process'
-import { readFile } from 'node:fs/promises'
+import { readFile, readdir, rename, rm, stat, utimes, writeFile } from 'node:fs/promises'
 import {
   createCipheriv,
   createDecipheriv,
@@ -40,7 +40,8 @@ import {
   randomBytes
 } from 'node:crypto'
 import { extname, join, normalize } from 'node:path'
-import { brotliCompressSync, constants as zlibConstants, gzipSync, gunzipSync } from 'node:zlib'
+import { promisify } from 'node:util'
+import { brotliCompress, constants as zlibConstants, gzip, gzipSync, gunzipSync } from 'node:zlib'
 
 const PORT = Number(process.env.RELAY_PORT || 9200)
 /** 默认只绑回环：公网入口只有 nginx 那一个，本进程不直接暴露。 */
@@ -515,9 +516,21 @@ function computePageVersion() {
 }
 
 let pageVersion = computePageVersion()
+// 发布后即使文件的大小和时间戳完全相同，也不能沿用旧资源的验证器。
+let assetGeneration = randomBytes(12).toString('hex')
+let indexCache = null
 
 /** 预压缩文件名后缀。命中时直接发，不必为每个请求现场压一遍。 */
-const PRECOMPRESSED = ['.br', '.gz']
+const compressBrotli = promisify(brotliCompress)
+const compressGzip = promisify(gzip)
+
+// 启动补压和发布共用目录，串行执行以免发布重命名目录时补压写进新版本。
+let assetWork = Promise.resolve()
+function queueAssetWork(work) {
+  const result = assetWork.then(work)
+  assetWork = result.catch(() => {})
+  return result
+}
 
 /**
  * 给静态产物生成 `.br` / `.gz`。
@@ -525,56 +538,101 @@ const PRECOMPRESSED = ['.br', '.gz']
  * 发布是低频动作，压缩一次就够；请求时现场 `gzipSync` 会把整个进程卡住
  * （monaco 那块 3.5MB，手机恰好在拉就明显卡顿）。
  */
-function precompress(dir) {
-  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+async function precompress(dir) {
+  for (const entry of await readdir(dir, { withFileTypes: true })) {
     const absolute = join(dir, entry.name)
     if (entry.isDirectory()) {
-      precompress(absolute)
+      await precompress(absolute)
       continue
     }
     const ext = extname(entry.name).toLowerCase()
     if (!COMPRESSIBLE.has(ext)) continue
     let info
     try {
-      info = statSync(absolute)
+      info = await stat(absolute)
     } catch {
       continue
     }
     if (!info.isFile() || info.size > 4 * 1024 * 1024) continue
-    const raw = readFileSync(absolute)
+    let raw
     // 大文件用低档：q9 对 3.5MB 要十几秒，q5 只慢一点、体积差不到 1%。
     const quality = info.size > 512 * 1024 ? 5 : 9
     for (const [suffix, packed] of [
-      ['.br', () => brotliCompressSync(raw, { params: { [zlibConstants.BROTLI_PARAM_QUALITY]: quality } })],
-      ['.gz', () => gzipSync(raw, { level: 9 })]
+      ['.br', (input) => compressBrotli(input, { params: { [zlibConstants.BROTLI_PARAM_QUALITY]: quality } })],
+      ['.gz', (input) => compressGzip(input, { level: 9 })]
     ]) {
       const target = absolute + suffix
       try {
-        if (existsSync(target) && statSync(target).mtimeMs >= info.mtimeMs) continue
+        if ((await stat(target)).mtimeMs >= info.mtimeMs) continue
       } catch {
         // 读不到旧产物就重压
       }
-      writeFileSync(target, packed())
+      raw ??= await readFile(absolute)
+      const temp = `${target}.${process.pid}.${randomBytes(6).toString('hex')}.tmp`
+      try {
+        await writeFile(temp, await packed(raw))
+        // 上传包可能来自时钟领先的机器；新副本至少与源文件一样新。
+        const stamp = new Date(Math.max(Date.now(), Math.ceil(info.mtimeMs) + 1))
+        await utimes(temp, stamp, stamp)
+        await rename(temp, target)
+      } finally {
+        await rm(temp, { force: true })
+      }
     }
   }
 }
 
-/** 按 `accept-encoding` 挑一份预压缩产物；没有就返回 null，退回原文件。 */
-function precompressedFor(req, absolute, ext) {
-  if (!COMPRESSIBLE.has(ext)) return null
-  const accepts = String(req.headers['accept-encoding'] || '')
-  for (const suffix of PRECOMPRESSED) {
-    const encoding = suffix === '.br' ? 'br' : 'gzip'
-    if (!accepts.includes(encoding)) continue
-    const candidate = absolute + suffix
-    if (!existsSync(candidate)) continue
-    try {
-      return { path: candidate, encoding, size: statSync(candidate).size }
-    } catch {
-      return null
+/** 显式 q 值优先于通配符；identity 默认可用，除非被明确排除。 */
+function encodingPreferences(req) {
+  const header = req.headers['accept-encoding']
+  const values = new Map()
+  if (typeof header === 'string') {
+    for (const part of header.split(',')) {
+      const [name, ...params] = part.trim().toLowerCase().split(';')
+      if (!name) continue
+      let quality = 1
+      for (const param of params) {
+        const match = /^\s*q\s*=\s*(0(?:\.\d{0,3})?|1(?:\.0{0,3})?)\s*$/.exec(param)
+        if (!match) { quality = 0; break }
+        quality = Number(match[1])
+      }
+      values.set(name, quality)
     }
   }
-  return null
+  const wildcard = values.get('*')
+  return {
+    br: values.get('br') ?? wildcard ?? 0,
+    gzip: values.get('gzip') ?? wildcard ?? 0,
+    identity: values.get('identity') ?? (wildcard === 0 ? 0 : 1)
+  }
+}
+
+function chooseEncoding(preferences, available) {
+  return ['br', 'gzip', 'identity']
+    .filter((encoding) => available.includes(encoding) && preferences[encoding] > 0)
+    .sort((a, b) => preferences[b] - preferences[a])[0] || null
+}
+
+function matchesEtag(header, etag) {
+  if (typeof header !== 'string') return false
+  const weakValue = (tag) => tag.trim().replace(/^W\//, '')
+  return header.split(',').some((tag) => tag.trim() === '*' || weakValue(tag) === weakValue(etag))
+}
+
+/** 仅使用比源文件新的预压缩文件。 */
+function precompressedFor(absolute, ext, sourceInfo) {
+  const available = {}
+  if (!COMPRESSIBLE.has(ext)) return available
+  for (const [encoding, suffix] of [['br', '.br'], ['gzip', '.gz']]) {
+    const candidate = absolute + suffix
+    try {
+      const info = statSync(candidate)
+      if (info.isFile() && info.mtimeMs >= sourceInfo.mtimeMs) available[encoding] = { path: candidate, size: info.size }
+    } catch {
+      // 补压尚未完成，或没有对应的压缩产物。
+    }
+  }
+  return available
 }
 
 function sendJson(res, status, body) {
@@ -833,7 +891,7 @@ async function handlePoll(req, res) {
   hinted.resultWakePending = false
   const hasResults = Array.isArray(body.results) && body.results.length > 0
   if (batch.length || acceptedEvents || wake || hasResults || hinted.retryResultIds.size || hinted.seenEventBatches.has(body.eventBatchId)) {
-    respondPoll(res, hinted, batch, wake || hasResults || hinted.retryResultIds.size ? 0 : 300, servedFreshly)
+    respondPoll(res, hinted, batch, 0, servedFreshly)
     return
   }
   // 没活干时把这次轮询挂起，而不是立刻回一个空响应：页面上的按键/提交一到
@@ -882,7 +940,7 @@ function parkPoll(res, state, resetCache) {
     state.parked = null
     clearTimeout(timer)
     // 空响应让桥立刻发起下一次轮询，下一次继续挂着：请求数不变，延迟最小
-    respondPoll(res, state, batch, batch.length ? 300 : 0, resetCache)
+    respondPoll(res, state, batch, 0, resetCache)
   }
   const timer = setTimeout(() => done([]), wait)
   timer.unref?.()
@@ -1146,11 +1204,25 @@ function stripAppleDouble(dir) {
  * 手机在发布过程中拿到的始终是完整的一份（旧的或新的），不会看到半个目录。
  */
 const MAX_PUBLISH_BYTES = 96 * 1024 * 1024
+// 异步压缩期间请求可以并发到达，限制排队的上传包数量，避免小内存机器耗尽内存。
+const MAX_PUBLISH_REQUESTS = 2
+let publishRequests = 0
 
 async function handlePublish(req, res) {
-  const body = await readRaw(req, MAX_PUBLISH_BYTES)
-  if (!body.length) return sendJson(res, 400, { ok: false, error: '空包' })
+  if (publishRequests >= MAX_PUBLISH_REQUESTS) {
+    return sendJson(res, 503, { ok: false, error: '页面更新繁忙，请稍后重试' })
+  }
+  publishRequests += 1
+  try {
+    const body = await readRaw(req, MAX_PUBLISH_BYTES)
+    if (!body.length) return sendJson(res, 400, { ok: false, error: '空包' })
+    return await queueAssetWork(() => publish(body, res))
+  } finally {
+    publishRequests -= 1
+  }
+}
 
+async function publish(body, res) {
   const next = `${ROOT}.next`
   const previous = `${ROOT}.prev`
   rmSync(next, { recursive: true, force: true })
@@ -1172,7 +1244,12 @@ async function handlePublish(req, res) {
   const junk = stripAppleDouble(next)
   if (junk) console.log(`[relay] 丢弃 ${junk} 个 ._ 资源分叉`)
 
-  precompress(next)
+  try {
+    await precompress(next)
+  } catch (error) {
+    rmSync(next, { recursive: true, force: true })
+    throw error
+  }
   try {
     rmSync(previous, { recursive: true, force: true })
     renameSync(ROOT, previous)
@@ -1185,6 +1262,8 @@ async function handlePublish(req, res) {
   }
   rmSync(previous, { recursive: true, force: true })
   pageVersion = computePageVersion()
+  assetGeneration = randomBytes(12).toString('hex')
+  indexCache = null
   console.log(`[relay] 页面已更新 ${pageVersion}`)
   return sendJson(res, 200, { ok: true, pageVersion })
 }
@@ -1192,20 +1271,52 @@ async function handlePublish(req, res) {
 async function serveIndex(req, res) {
   const absolute = join(ROOT, 'index.html')
   if (!existsSync(absolute)) return sendJson(res, 404, { ok: false, error: 'renderer 未部署' })
-  const html = readFileSync(absolute, 'utf8').replace(
-    '</body>',
-    '  <script src="/relay-awake.js" defer></script>\n</body>'
-  )
-  const packed = gzipSync(Buffer.from(html))
-  const acceptsGzip = String(req.headers['accept-encoding'] || '').includes('gzip')
-  res.writeHead(200, {
+  const info = statSync(absolute)
+  const generation = assetGeneration
+  const key = `${generation}:${info.size}:${info.mtimeMs}:${info.ctimeMs}`
+  if (!indexCache || indexCache.key !== key) {
+    const promise = (async () => {
+      const source = await readFile(absolute, 'utf8')
+      const identity = Buffer.from(source.replace('</body>', '  <script src="/relay-awake.js" defer></script>\n</body>'))
+      const [br, gzipBody] = await Promise.all([
+        compressBrotli(identity, { params: { [zlibConstants.BROTLI_PARAM_QUALITY]: 5 } }),
+        compressGzip(identity)
+      ])
+      const etag = `W/"${createHash('sha256').update(identity).digest('hex')}"`
+      return { identity, br, gzip: gzipBody, etag }
+    })()
+    indexCache = { key, promise }
+    promise.catch(() => { if (indexCache?.promise === promise) indexCache = null })
+  }
+  let page
+  try {
+    page = await indexCache.promise
+  } catch (error) {
+    // 切换页面时旧目录可能已被删除；只有代次变化时才重读。
+    if (assetGeneration !== generation) return serveIndex(req, res)
+    throw error
+  }
+  // 发布可能在异步压缩 HTML 期间完成；不要在切换后返回引用旧资源的页面。
+  if (!indexCache || indexCache.key !== key) return serveIndex(req, res)
+  const encoding = chooseEncoding(encodingPreferences(req), ['br', 'gzip', 'identity'])
+  if (!encoding) {
+    res.writeHead(406, { 'cache-control': 'no-store', vary: 'accept-encoding, cookie' })
+    return res.end()
+  }
+  const headers = {
     'content-type': 'text/html; charset=utf-8',
-    'cache-control': 'no-cache',
-    vary: 'accept-encoding',
-    ...(acceptsGzip ? { 'content-encoding': 'gzip' } : {}),
-    'content-length': acceptsGzip ? packed.length : Buffer.byteLength(html)
-  })
-  res.end(acceptsGzip ? packed : html)
+    'cache-control': 'private, no-cache',
+    vary: 'accept-encoding, cookie',
+    etag: page.etag
+  }
+  if (matchesEtag(req.headers['if-none-match'], page.etag)) {
+    res.writeHead(304, headers)
+    return res.end()
+  }
+  if (encoding !== 'identity') headers['content-encoding'] = encoding
+  headers['content-length'] = page[encoding].length
+  res.writeHead(200, headers)
+  res.end(page[encoding])
 }
 
 async function serveStatic(req, res, url, state) {
@@ -1235,31 +1346,30 @@ async function serveStatic(req, res, url, state) {
   const info = statSync(absolute)
   const ext = extname(absolute).toLowerCase()
   const type = MIME[ext] || 'application/octet-stream'
-  const etag = `W/"${info.size.toString(16)}-${Math.floor(info.mtimeMs).toString(16)}"`
-  if (req.headers['if-none-match'] === etag) {
-    res.writeHead(304, { etag })
-    return res.end()
-  }
-
-  const immutable = pathname.startsWith('/assets/')
+  const etag = `W/"${assetGeneration}-${info.size.toString(16)}-${Math.floor(info.mtimeMs).toString(16)}-${Math.floor(info.ctimeMs).toString(16)}"`
+  const immutable = pathname.startsWith('/assets/') && /-[a-zA-Z0-9_-]{8,}\.[^/]+$/.test(pathname)
   const headers = {
     'content-type': type,
     etag,
-    'cache-control': immutable ? 'public, max-age=31536000, immutable' : 'no-cache'
+    'cache-control': immutable ? 'public, max-age=31536000, immutable' : isPublicAsset(pathname) ? 'no-cache' : 'private, no-cache'
   }
 
-  const pre = precompressedFor(req, absolute, ext)
-  if (pre) {
-    headers['content-encoding'] = pre.encoding
-    headers['content-length'] = pre.size
-    headers.vary = 'accept-encoding'
-    res.writeHead(200, headers)
-    return createReadStream(pre.path).pipe(res)
+  if (COMPRESSIBLE.has(ext)) headers.vary = 'accept-encoding'
+  const available = precompressedFor(absolute, ext, info)
+  const encoding = chooseEncoding(encodingPreferences(req), [...Object.keys(available), 'identity'])
+  if (!encoding) {
+    res.writeHead(406, { 'cache-control': 'no-store', vary: 'accept-encoding' })
+    return res.end()
   }
-
-  headers['content-length'] = info.size
+  if (matchesEtag(req.headers['if-none-match'], etag)) {
+    res.writeHead(304, headers)
+    return res.end()
+  }
+  const selected = available[encoding]
+  if (selected) headers['content-encoding'] = encoding
+  headers['content-length'] = selected ? selected.size : info.size
   res.writeHead(200, headers)
-  createReadStream(absolute).pipe(res)
+  createReadStream(selected ? selected.path : absolute).pipe(res)
 }
 
 async function route(req, res) {
@@ -1350,11 +1460,7 @@ server.listen(PORT, BIND, () => {
     `[relay] http://${BIND}:${PORT}  root=${ROOT}  agents=${agents.size}  （TLS 由前置 nginx 终结）`
   )
   // 老部署里没有预压缩产物：启动后补一遍，别拖慢首次就绪。
-  setImmediate(() => {
-    try {
-      if (existsSync(ROOT)) precompress(ROOT)
-    } catch (error) {
-      console.error('[relay] 预压缩失败', error?.message || error)
-    }
-  })
+  queueAssetWork(async () => {
+    if (existsSync(ROOT)) await precompress(ROOT)
+  }).catch((error) => console.error('[relay] 预压缩失败', error?.message || error))
 })

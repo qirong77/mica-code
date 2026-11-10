@@ -1,6 +1,6 @@
 # 会话体验卡与本地埋点
 
-会话体验插件使用宿主统一的摘要卡片与详情面板，复用主题令牌和共享 Button。卡片只在有内容时出现，支持收起；完整信息仍可从插件面板查看。能力面由 `mica-plugin` 提供（`PluginPanelView.cards` 与 `createPluginExperience()`），官方插件目录里当前没有使用者。
+会话体验插件使用宿主统一的摘要卡片与详情面板，复用主题令牌和共享 Button。卡片只在有内容时出现，支持收起；完整信息仍可从插件面板查看。能力面由 `mica-plugin` 提供（`PluginPanelView.cards` 与 `createPluginExperience()`）；mobile-relay 使用统一事件记录插件操作。
 
 卡片不额外调用模型：展示内容由插件自己持久化，不会从每条聊天消息自动猜测任务状态。
 

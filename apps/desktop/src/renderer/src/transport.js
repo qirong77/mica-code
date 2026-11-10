@@ -665,7 +665,17 @@ export async function ensureMicaApi() {
   if (typeof window === 'undefined') return null
   if (window.mica) return window.mica
 
-  const response = await fetch('/api/env', { cache: 'no-store' })
+  // 早期脚本可能仍在加载：先认领启动权，避免它随后再发一次请求。
+  const boot = window.__micaEnvBootV1
+  window.__micaEnvBootV1 = { claimed: true }
+  let response
+  if (boot?.result) {
+    const result = await boot.result
+    if (result.failed) throw result.error
+    response = result.response
+  } else {
+    response = await fetch('/api/env', { cache: 'no-store' })
+  }
   if (response.status === 403)
     throw new AccessDeniedError('跨源请求被拒绝（请用运行时打印的地址打开页面）', { status: 403 })
   if (!response.ok) throw new Error('无法连接 Mica Code 服务端')

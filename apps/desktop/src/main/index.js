@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, globalShortcut, nativeTheme, screen, shell } from 'electron'
+import { app, BrowserWindow, dialog, globalShortcut, nativeTheme, protocol, screen, shell } from 'electron'
 import { spawn } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync, statSync, watch } from 'node:fs'
 import { join } from 'node:path'
@@ -28,6 +28,10 @@ import { officialPluginManifests } from '@packages/mica-official-plugins/manifes
 import { readDisabledPluginIds, resolvePluginStatePath } from '@packages/mica-plugin/PluginState.js'
 import { createPluginLaunchers } from './plugin-launchers.js'
 import { isDevToolsShortcut } from './devtools-shortcut.js'
+import { CLIENT_SCHEME, createClientContextHandler, isClientOriginAllowed } from './client-context.js'
+import { resolveMicaHome } from '@packages/mica-config/index.js'
+import { readPluginData, writePluginData } from '../host/plugin-data-store.js'
+import { retainHiddenWindow } from './window-retention.js'
 
 /**
  * Electron 外壳。
@@ -42,6 +46,13 @@ import { isDevToolsShortcut } from './devtools-shortcut.js'
  */
 
 const RUNTIME_ENTRY = join(__dirname, '../server/index.mjs')
+
+// 客户端能力只注册在应用窗口的默认 session；受控浏览器的独立 partition 没有这条通道。
+// 仍受页面 CSP 与 CORS 约束，不向远程页面暴露通用 IPC 或文件系统。
+protocol.registerSchemesAsPrivileged([{
+  scheme: CLIENT_SCHEME,
+  privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true }
+}])
 
 /**
  * 一份「外部进程读得到」的页面产物目录。
@@ -96,38 +107,6 @@ async function deliverDesktopIntent(intent) {
     await new Promise((resolve) => setTimeout(resolve, 100))
   }
   throw new Error('主窗口尚未就绪，请稍后重试')
-}
-
-/**
- * 关窗前的二次确认：页面可以挂 `window.__micaConfirmClose`，返回 `false`（或 resolve 成
- * `false`）表示「先别关」。外壳不知道页面里有什么，也不该知道——编辑器窗口里的终端就是
- * 靠它问一句「还有程序在跑，确定关闭吗」。
- *
- * 页面没挂这个函数或抛错时放行；等待用户答复期间不能自动关闭窗口。
- */
-const CLOSE_GUARD_PROBE = `(() => {
-  const guard = window.__micaConfirmClose
-  if (typeof guard !== 'function') return true
-  try {
-    return Promise.resolve(guard()).then(
-      (answer) => answer !== false,
-      () => true
-    )
-  } catch (error) {
-    return true
-  }
-})()`
-
-async function confirmWindowClose(state) {
-  const contents = state.win.webContents
-  if (state.win.isDestroyed() || contents.isDestroyed()) return true
-  try {
-    const answer = await contents.executeJavaScript(CLOSE_GUARD_PROBE)
-    return answer !== false
-  } catch {
-    // 页面还没加载完 / 已经崩了：没有可问的东西
-    return true
-  }
 }
 
 /**
@@ -290,6 +269,8 @@ function applyWindowTitle(state) {
 
 async function loadPage(state, url) {
   if (!state || state.win.isDestroyed()) return
+  // 仅外壳主动加载的入口授予客户端能力；页面自己的重定向不能扩大授权来源。
+  state.clientOrigin = originOf(url)
   try {
     await state.win.loadURL(url)
   } catch (error) {
@@ -467,7 +448,8 @@ async function navigateToServer(state, target) {
       return
     }
     // 自己就是本机页面（启动失败页上的「返回本机」）时重新加载，别让这一下变成空点
-    await loadPage(state, localPageUrl)
+    if (state) await loadPage(state, localPageUrl)
+    else createWindow(localPageUrl, { primary: true })
     return
   }
   if (!origin) {
@@ -525,7 +507,8 @@ function backToLocalPage(state) {
     return
   }
   if (!localPageUrl) return
-  void loadPage(state, localPageUrl)
+  if (state) void loadPage(state, localPageUrl)
+  else createWindow(localPageUrl, { primary: true })
 }
 
 /* ---------------------------------------------------------------- 原生体验 */
@@ -709,7 +692,7 @@ function toggleDevTools(contents) {
 
 /**
  * 开一个窗口装载 `url`。`primary` 是启动时那个本机窗口：关掉它只是隐藏（应用继续留在
- * dock 里），其余窗口（切过去的那几台）关掉就真的关掉，不会攒下一堆看不见的窗口。
+ * dock 里），其余运行时窗口隐藏后保活两小时；再次显示取消回收，下次隐藏重新计时。
  */
 function createWindow(url, { primary = false } = {}) {
   const isMac = process.platform === 'darwin'
@@ -740,20 +723,19 @@ function createWindow(url, { primary = false } = {}) {
     win,
     primary,
     server: originOf(url),
+    clientOrigin: originOf(url),
     // 中转机入口的窗口身份（origin + t）；直连别的机器时为空
     entryKey: relayEntryKey(url),
     local: false,
     apiUrl: '',
     unread: 0,
-    // 关窗前问过页面、并且页面同意关闭（见 close 事件）
-    closeApproved: false,
-    closeAsking: false,
     stopBadgeWatcher: null,
     title: 'Mica Code',
     suffix: ''
   }
   windows.add(state)
   if (primary) primaryWindow = state
+  else retainHiddenWindow(win)
 
   if (isMac) {
     win.setSheetOffset(HEADER_HEIGHT_PX)
@@ -764,24 +746,9 @@ function createWindow(url, { primary = false } = {}) {
   })
 
   win.on('close', (event) => {
-    if (!quitting && primary) {
-      event.preventDefault()
-      win.hide()
-      return
-    }
-    // 页面里可能有东西不想被一声不响地关掉（编辑器窗口的终端还在跑命令）。外壳不知道
-    // 那是终端，也不该知道：它只问一句页面的 `window.__micaConfirmClose`。退出应用时
-    // 不问——问一句就可能把 ⌘Q 卡在「有一个窗口不肯关」上。
-    if (quitting || state.closeApproved) return
+    if (quitting) return
     event.preventDefault()
-    if (state.closeAsking) return
-    state.closeAsking = true
-    confirmWindowClose(state).then((approved) => {
-      state.closeAsking = false
-      if (!approved || win.isDestroyed()) return
-      state.closeApproved = true
-      win.close()
-    })
+    win.hide()
   })
 
   win.on('closed', () => {
@@ -1054,6 +1021,18 @@ app.whenReady().then(async () => {
   }
 
   localPageUrl = devPageUrl || runtime.url
+  const clientHome = process.env.MICA_HOME || resolveMicaHome()
+  protocol.handle(CLIENT_SCHEME, createClientContextHandler({
+    isAllowedOrigin: (origin) => isClientOriginAllowed(windows, origin),
+    manifests: officialPluginManifests,
+    readDisabled: () => readDisabledPluginIds(),
+    readData: (pluginId) => readPluginData(clientHome, pluginId),
+    writeData: (pluginId, value, options) => writePluginData(clientHome, pluginId, value, options),
+    probe: probeRemoteRuntime,
+    open: (url) => navigateToServer(null, url),
+    local: () => backToLocalPage(null),
+    localHost: () => localPageUrl
+  }))
   // 只开本机窗口：另一台机器上的服务器各占一个新窗口，由页面里「切换 Mica 服务器」当场开
   createWindow(localPageUrl, { primary: true })
   pluginLaunchers = createPluginLaunchers({

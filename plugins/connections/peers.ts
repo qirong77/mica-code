@@ -141,15 +141,16 @@ export function findPeer(store: PeerStore, url: unknown): PeerEntry | null {
  * 当前这台由卡片单独一行标出来，所以不在清单里重复；当前不在本机时，「本机」那个默认
  * 地址也不出现——它已经作为「回到本机」固定在卡片上，列在这里只是同一行写两遍。
  */
-export function peerRows(current: unknown, store: PeerStore): PeerEntry[] {
+export function peerRows(current: unknown, store: PeerStore, localHost?: string): PeerEntry[] {
   const target = normalizeRuntimeAddress(current);
   const entry = normalizeEntryAddress(current);
-  const showLocal = !target || !isLoopbackRuntime(target);
+  const showLocal = localHost ? !samePeer(current, localHost) : !target || !isLoopbackRuntime(target);
   return normalizePeerStore(store).peers.filter((peer) => {
     // 用原始 current 而不是补过端口的 target：页面由中转机托管时它就是那个 origin，
     // 补成 `:8787` 会跟清单里的链接对不上。
     if (entry && samePeer(peer.url, entry)) return false;
-    if (showLocal && isSameRuntime(peer.url, DEFAULT_RUNTIME_URL)) return false;
+    if (showLocal && (isSameRuntime(peer.url, DEFAULT_RUNTIME_URL) || (localHost && samePeer(peer.url, localHost))))
+      return false;
     return true;
   });
 }

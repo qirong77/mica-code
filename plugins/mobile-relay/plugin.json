@@ -40,6 +40,13 @@
   ],
   "settings": [
     {
+      "key": "telemetry",
+      "label": "本地使用统计",
+      "type": "switch",
+      "default": "true",
+      "description": "在本地插件日志记录按钮操作、结果和耗时；不记录地址、口令或输入内容"
+    },
+    {
       "key": "enabled",
       "label": "启用手机访问",
       "type": "switch",
