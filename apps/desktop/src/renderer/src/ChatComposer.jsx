@@ -43,7 +43,7 @@ export default function ChatComposer({
         rows={1}
         spellCheck={false}
         autoCapitalize="off"
-        autoCorrect="off"
+        autoCorrect="on"
         autoComplete="off"
         aria-label="对话输入"
         onChange={(event) => onChange?.(event.currentTarget.value)}

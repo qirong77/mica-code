@@ -20,12 +20,12 @@ describe('ChatComposer', () => {
       rows: 1,
       spellCheck: false,
       autoCapitalize: 'off',
-      autoCorrect: 'off',
+      autoCorrect: 'on',
       autoComplete: 'off',
       'aria-label': '对话输入'
     })
     expect(renderToStaticMarkup(createElement(ChatComposer, props))).toBe(
-      '<div class="chat-composer-input"><textarea placeholder="Write here" rows="1" spellCheck="false" autoCapitalize="off" autoCorrect="off" autoComplete="off" aria-label="对话输入">hello\n你好 👩‍💻</textarea><span class="chat-composer-cursor" aria-hidden="true" hidden=""></span></div>'
+      '<div class="chat-composer-input"><textarea placeholder="Write here" rows="1" spellCheck="false" autoCapitalize="off" autoCorrect="on" autoComplete="off" aria-label="对话输入">hello\n你好 👩‍💻</textarea><span class="chat-composer-cursor" aria-hidden="true" hidden=""></span></div>'
     )
     const empty = renderToStaticMarkup(createElement(ChatComposer, { ...props, value: '' }))
     expect(empty).toContain('placeholder="Write here"')
