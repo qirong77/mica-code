@@ -463,22 +463,22 @@ describe('app.css 颜色 token 主题契约', () => {
   it('用户消息带与亮色次级文字接到各自的 token', () => {
     expect(css).toMatch(/--chat-user:\s*var\(--color-bubble\)/)
     expect(css).toMatch(
-      /html\[data-appearance='light'\] \.chat-view,[\s\S]{0,120}--chat-muted:\s*var\(--color-fg-dim\)/
+      /html\[data-appearance='light'\] \.chat-view,[\s\S]{0,120}--chat-muted:\s*var\(--color-fg-muted\)/
     )
   })
 
   /**
-   * 过程文字（工具行、思考、时间戳）在 DSH 里是 label-tertiary：比正文低两档，
-   * 「做过什么」退到背景里、只有回答留在前景。取 label-secondary 会明显比 DeepSeek 重。
+   * 过程文字仍用 DSH 色板，但不再把小字压到 tertiary：工具名等内容必须可读。
    */
-  it('亮色过程文字取 label-tertiary，不跟着正文走', () => {
+  it('亮色过程文字取可读的 secondary，辅助信息再退一档', () => {
     const body = blockFor(
       cleanCss,
       /^html\[data-appearance='light'\] \.chat-view,\s*\nhtml\[data-appearance='light'\] \.chat-modal-arco-wrap\s*\{/m
     )
     expect(body).not.toBeNull()
-    expect(body).toContain('--chat-muted: var(--color-fg-dim)')
-    expect(body).toContain('--chat-subtle: var(--color-fg-faint)')
+    expect(body).toContain('--chat-muted: var(--color-fg-muted)')
+    expect(body).toContain('--chat-subtle: var(--color-fg-dim)')
+    expect(contrastRatio(lightHexToken('fg-muted'), '#ffffff')).toBeGreaterThanOrEqual(4.5)
   })
 
   /**

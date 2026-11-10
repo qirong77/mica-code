@@ -42,7 +42,7 @@ function ConfirmDialog({ request }: { request: ConfirmDialogRequest }) {
             {request.cancelText ?? '取消'}
           </Button>
           <Button
-            variant={request.danger ? 'danger' : 'primary'}
+            variant={request.danger ? 'danger' : 'accent'}
             autoFocus={!request.danger}
             onClick={() => dialogStore.settle(true)}
           >
@@ -82,7 +82,7 @@ function PromptDialog({ request }: { request: PromptDialogRequest }) {
         </label>
         <div className="dialog-actions">
           <Button onClick={cancel}>{request.cancelText ?? '取消'}</Button>
-          <Button variant="primary" disabled={!canSubmit} onClick={submit}>
+          <Button variant="accent" disabled={!canSubmit} onClick={submit}>
             {request.confirmText ?? '确定'}
           </Button>
         </div>

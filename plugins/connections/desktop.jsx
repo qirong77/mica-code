@@ -273,10 +273,7 @@ export default function ConnectionsCard({ api, onClose }) {
       <div className="mb-2.5 rounded-sm border border-line bg-overlay-subtle">
         <div className="group/peer flex items-center gap-2 px-2.5 py-1.5">
           <Monitor size={14} className="shrink-0 text-fg-muted" />
-          <span className="min-w-0 flex-1">
-            <span className="block truncate text-[11px] text-fg-dim">{displayAddress(current)}</span>
-            {currentEntry?.note && <span className="block truncate text-[11px] text-fg-soft">{currentEntry.note}</span>}
-          </span>
+          <PeerIdentity address={displayAddress(current)} name={currentEntry?.note} />
           <Tag tone="green">当前</Tag>
           {currentEntry && (
             <>
@@ -301,8 +298,7 @@ export default function ConnectionsCard({ api, onClose }) {
               className="min-w-0 flex-1 text-left disabled:opacity-60"
               onClick={() => void connect(entry.url)}
             >
-              <span className="block truncate text-[11px] text-fg-dim">{displayAddress(entry.url)}</span>
-              {entry.note && <span className="block truncate text-[11px] text-fg-soft">{entry.note}</span>}
+              <PeerIdentity address={displayAddress(entry.url)} name={entry.note} />
             </button>
             {busy === entry.url && <Tag tone="blue">连接中…</Tag>}
             <NoteEditButton onClick={() => startNoteEdit(entry.url)} />
@@ -316,12 +312,11 @@ export default function ConnectionsCard({ api, onClose }) {
         <button
           type="button"
           disabled={Boolean(busy)}
-          className="mb-2 flex h-8 w-full items-center gap-2 rounded-sm border border-dashed border-line bg-overlay-subtle px-2.5 text-left text-xs text-fg-soft hover:border-line-strong hover:text-fg-max disabled:text-fg-ghost"
+          className="mb-2 flex w-full items-center gap-2 rounded-sm border border-dashed border-line bg-overlay-subtle px-2.5 py-1.5 text-left text-fg-soft hover:border-line-strong hover:text-fg-max disabled:text-fg-ghost"
           onClick={() => void returnLocal()}
         >
-          <Monitor size={13} className="shrink-0" />
-          <span className="shrink-0">Local</span>
-          <span className="min-w-0 flex-1 truncate text-[10px] text-fg-dim">{localHost || DEFAULT_RUNTIME_URL}</span>
+          <Monitor size={14} className="shrink-0 text-fg-muted" />
+          <PeerIdentity address={localHost || DEFAULT_RUNTIME_URL} name="Local" />
           {(busy === 'local' || busy === DEFAULT_RUNTIME_URL) && <Tag tone="blue">连接中…</Tag>}
         </button>
       )}
@@ -463,6 +458,15 @@ function RemoteAccess({ api }) {
       {!state && !error && <p className="text-[10px] text-fg-faint">读取中…</p>}
       {error && <Alert message={error} />}
     </div>
+  );
+}
+
+function PeerIdentity({ address, name }) {
+  return (
+    <span className="block min-w-0 flex-1">
+      <span className="block truncate text-[11px] text-fg-dim">{address}</span>
+      {name && <span className="block truncate text-[11px] text-fg-soft">{name}</span>}
+    </span>
   );
 }
 

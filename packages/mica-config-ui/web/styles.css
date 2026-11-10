@@ -48,7 +48,7 @@
   --text-micro: 0.6875rem; /* 11px — micro overlines, tabular meta */
   --text-label: 0.75rem; /* 12px — section labels, badges */
   --text-aux: 0.75rem; /* 12px — secondary body, tabs */
-  --text-body: 0.8125rem; /* 13px — primary body text, buttons (base) */
+  --text-body: 0.875rem; /* 14px — Arco small controls and primary body text */
   --text-subhead: 0.875rem; /* 14px — emphasized rows */
   --text-title: 1rem; /* 16px — section titles */
   --text-heading: 1.125rem; /* 18px — page headers */
@@ -58,16 +58,15 @@
     sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace;
 
-  /* Radius ladder — compact scalar (code-by-wire runs 0.3). */
-  --radius-scalar: 0.3;
-  --radius-sm: calc(var(--radius-scalar) * 0.5rem); /* 2.4px */
-  --radius-md: calc(var(--radius-scalar) * 0.625rem); /* 3px */
-  --radius-lg: calc(var(--radius-scalar) * 0.75rem); /* 3.6px */
-  --radius-xl: calc(var(--radius-scalar) * 1rem); /* 4.8px */
+  /* Align the shell with Arco's 2 / 4 / 8px radius ladder. */
+  --radius-sm: 2px;
+  --radius-md: 4px;
+  --radius-lg: 8px;
+  --radius-xl: 12px;
 
   /* 单行控件（输入框 / 分段按钮 / 行内小按钮）共用这一个高度。
      一处改动就同步整页：同桌摆放的控件高度不一致，读起来就是没对齐。 */
-  --control-h: 30px;
+  --control-h: 28px;
   width: 100%;
   height: 100%;
   min-height: 0;
@@ -84,7 +83,7 @@
 }
 
 /* 亮色皮肤：只覆盖颜色变量与 color-scheme，尺寸、间距、字体沿用暗色那一套。
-   取值对齐 DeepSeek harness 的亮色 token（见 temp/theme-token-mapping.md）；
+   基础色板沿用 DeepSeek harness；说明文字加深，禁用态由 Arco 适配层单独派生。
    新增颜色变量必须同步写进这一块，appearance-tokens.test.ts 会拦漏项。 */
 html[data-theme='light'] .mica-config-ui {
   color-scheme: light;
@@ -98,7 +97,7 @@ html[data-theme='light'] .mica-config-ui {
   --line-strong: #00000029;
   --text: #0f1115; /* label-primary：与桌面端正文同一个近黑 */
   --text-soft: #61666b;
-  --text-faint: #979da6;
+  --text-faint: #61666b;
   --accent: #4176e6;
   --accent-hover: #2563eb;
   --blue: #4176e6;
@@ -863,9 +862,9 @@ html[data-theme='tokyo-night-light'] .mica-config-ui {
   }
 
   .setting-row-hint {
-    color: var(--text-faint);
-    font-size: 11.5px;
-    line-height: 1.45;
+    color: var(--text-soft);
+    font-size: var(--text-aux);
+    line-height: 1.6;
   }
 
   .setting-row-control {

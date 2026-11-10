@@ -6,16 +6,17 @@
 
 每套探针一个子目录，自成一体（自己的 `index.html` + `main.jsx` + `vite.config.mjs`，必要时加一个替身模块）：
 
-| 目录             | 看什么                                                                             |
-| ---------------- | ---------------------------------------------------------------------------------- |
-| `client-context/` | HTTPS 严格 CSP / fetch 失败时的原生客户端数据与 Local 返回原窗口回归 |
-| `config-ui/`     | 会话设置弹窗的「插件」一节；`config-ui-shim.tsx` 替身 `@mica-config-ui/web`        |
-| `config-buttons/` | 真实 ConfigPage + 示例配置，复现桌面 Tailwind 与 Arco 图标按钮的层叠布局 |
-| `global-search/` | 全局搜索启动器的真实共享 Arco 输入框、结果列表与焦点样式；`#probe-out` 打出计算样式 |
-| `reply-digest/`  | 长回复摘要插件的产出：真实对话行 + `digest` notice 卡，右侧按 `digest.ts` 实时判定 |
-| `stats-design/` | Stats 图表新版：用量全景 / 来源环形分析 / 项目矩形地图，共享示例数据与主题 |
-| `digest-design/` | 长回复摘要的三版 Arco 容器对照，置于模拟对话流中 |
-| `stats-export/` | 将对照探针导出为不依赖服务的单文件 HTML |
+| 目录              | 看什么                                                                              |
+| ----------------- | ----------------------------------------------------------------------------------- |
+| `client-context/` | HTTPS 严格 CSP / fetch 失败时的原生客户端数据与 Local 返回原窗口回归                |
+| `config-ui/`      | 会话设置弹窗的「插件」一节；`config-ui-shim.tsx` 替身 `@mica-config-ui/web`         |
+| `config-buttons/` | 真实 ConfigPage + 示例配置，复现桌面 Tailwind 与 Arco 图标按钮的层叠布局            |
+| `arco-light/`     | 浅色 Arco 一致性预览：真实配置页、控件状态、主题切换与确认/输入弹窗，仅内存示例     |
+| `global-search/`  | 全局搜索启动器的真实共享 Arco 输入框、结果列表与焦点样式；`#probe-out` 打出计算样式 |
+| `reply-digest/`   | 长回复摘要插件的产出：真实对话行 + `digest` notice 卡，右侧按 `digest.ts` 实时判定  |
+| `stats-design/`   | Stats 图表新版：用量全景 / 来源环形分析 / 项目矩形地图，共享示例数据与主题          |
+| `digest-design/`  | 长回复摘要的三版 Arco 容器对照，置于模拟对话流中                                    |
+| `stats-export/`   | 将对照探针导出为不依赖服务的单文件 HTML                                             |
 
 ## 运行
 
@@ -24,6 +25,7 @@ cd apps/desktop
 npx vite --config .probe/global-search/vite.config.mjs   # http://127.0.0.1:5231
 npx vite --config .probe/config-ui/vite.config.mjs       # http://127.0.0.1:5199
 npx vite --config .probe/config-buttons/vite.config.mjs  # http://127.0.0.1:5235
+npx vite --config .probe/arco-light/vite.config.mjs      # http://127.0.0.1:5236
 npx vite --config .probe/reply-digest/vite.config.mjs    # http://127.0.0.1:5232
 npx vite --config .probe/stats-design/vite.config.mjs    # http://127.0.0.1:5233
 npx vite --config .probe/digest-design/vite.config.mjs   # http://127.0.0.1:5234

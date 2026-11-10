@@ -187,4 +187,25 @@ describe('Arco 配置页试验', () => {
     expect(css).toMatch(/\.mica-arco-action\.arco-btn-text[^{}]+\{\s*color: inherit;/);
     expect(css).toContain("@import '@arco-design/web-react/es/Popover/style/index.css' layer(mica-arco)");
   });
+
+  it('次要信息和禁用值使用独立语义，浅色实心按钮不直接复用链接蓝', () => {
+    const css = readFileSync(new URL('../arco-settings.css', import.meta.url), 'utf8');
+    expect(css).toContain('--color-text-3: var(--mica-arco-text-faint)');
+    expect(css).toContain('--color-text-4: var(--mica-arco-text-disabled)');
+    const light = css.match(
+      /html\[data-appearance='light'\] :is\(body\.mica-arco-theme, \.mica-config-ui\)\s*\{([^}]+)\}/,
+    )?.[1];
+    expect(light).toContain('--mica-arco-text-faint: var(--mica-arco-text-soft)');
+    expect(light).toContain('--mica-arco-text-disabled: color-mix(');
+    expect(light).toContain('--mica-arco-accent-solid: color-mix(in srgb, var(--mica-arco-accent) 90%, #000)');
+    expect(css).toContain('--primary-6: from var(--mica-arco-accent-solid) r g b');
+  });
+
+  it('标准控件由 Arco small / mini 负责尺寸，不再按设置页容器重写按钮和输入高度', () => {
+    const css = readFileSync(new URL('../arco-settings.css', import.meta.url), 'utf8');
+    expect(css).not.toContain('.arco-btn:not(.arco-btn-size-mini)');
+    expect(css).not.toMatch(/\.arco-input,\s*\.arco-input-inner-wrapper,\s*\.arco-select-single/);
+    expect(css).not.toMatch(/\.arco-radio-button\s*\{/);
+    expect(css).not.toMatch(/\.arco-select-popup\s*\{/);
+  });
 });

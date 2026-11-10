@@ -12,8 +12,9 @@ vi.mock('react', async (original) => ({
   useRef: (initial: unknown) => ({ current: initial === null ? state.card : initial }),
 }));
 const cleanups: (() => void)[] = [];
-afterEach(() => {
+afterEach(async () => {
   while (cleanups.length) cleanups.pop()!();
+  await Promise.resolve();
   state.effects = [];
   state.card = null;
   vi.unstubAllGlobals();
@@ -52,7 +53,7 @@ describe('nested config modal keyboard behavior', () => {
     expect(outer).toHaveBeenCalledOnce();
   });
 
-  it('focuses the close control and keeps forward/backward Tab inside the portal', () => {
+  it('delegates focus and Tab containment to Arco instead of a second DOM trap', () => {
     const press = setup();
     const close = { focus: vi.fn() };
     state.card = {
@@ -60,12 +61,14 @@ describe('nested config modal keyboard behavior', () => {
       querySelectorAll: () => [close],
       contains: () => true,
     };
-    mount(vi.fn(), true);
-    expect(close.focus).toHaveBeenCalledOnce();
+    const element = mount(vi.fn(), true);
+    expect(element.props.children.props.focusLock).toBe(true);
+    expect(element.props.children.props.autoFocus).toBe(true);
+    expect(close.focus).not.toHaveBeenCalled();
     vi.stubGlobal('document', { activeElement: close });
-    expect(press('Tab').defaultPrevented).toBe(true);
-    expect(press('Tab', true).defaultPrevented).toBe(true);
-    expect(close.focus).toHaveBeenCalledTimes(3);
+    expect(press('Tab').defaultPrevented).toBe(false);
+    expect(press('Tab', true).defaultPrevented).toBe(false);
+    expect(close.focus).not.toHaveBeenCalled();
   });
 
   it('keeps the descendant on top when React mounts child effects before parent effects', () => {
@@ -83,7 +86,7 @@ describe('nested config modal keyboard behavior', () => {
     expect(outer).not.toHaveBeenCalled();
   });
 
-  it('restores the connected trigger after a portal is unmounted', () => {
+  it('restores the connected trigger after a portal is unmounted', async () => {
     setup();
     class Focusable {
       isConnected = true;
@@ -94,6 +97,7 @@ describe('nested config modal keyboard behavior', () => {
     vi.stubGlobal('document', { activeElement: trigger });
     mount(vi.fn(), true);
     cleanups.pop()!();
+    await Promise.resolve();
     expect(trigger.focus).toHaveBeenCalledOnce();
   });
 
@@ -105,11 +109,11 @@ describe('nested config modal keyboard behavior', () => {
     expect(element.props.className).toBe('mica-config-ui is-embed modal-portal');
     const modal = element.props.children;
     expect(modal.props.escToExit).toBe(false);
-    expect(modal.props.focusLock).toBe(false);
+    expect(modal.props.focusLock).toBe(true);
     expect(modal.props.footer).toBeNull();
     expect(modal.props.getPopupContainer()).toBe(state.card);
     expect(modal.props.modalRender('dialog').props['data-mica-config-modal']).toBe(true);
-    modal.props.afterOpen();
-    expect(close.focus).toHaveBeenCalledTimes(2);
+    expect(modal.props.afterOpen).toBeUndefined();
+    expect(close.focus).not.toHaveBeenCalled();
   });
 });

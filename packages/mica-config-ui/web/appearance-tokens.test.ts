@@ -54,6 +54,15 @@ function themeTokens(id: string): Map<string, string> {
 }
 
 describe('config-ui 亮色皮肤 token 覆盖', () => {
+  it('浅色说明使用可读灰阶，并保留 Arco 的 small 控件密度', () => {
+    expect(lightTokens.get('--text-faint')).toBe('#61666b');
+    expect(darkTokens.get('--control-h')).toBe('28px');
+    expect(darkTokens.get('--text-body')).toBe('0.875rem');
+    const hint = blockAfter('  .setting-row-hint {');
+    expect(hint).toContain('color: var(--text-soft)');
+    expect(hint).toContain('font-size: var(--text-aux)');
+  });
+
   it('暗色块里的每个颜色 token 在亮色块里都有覆盖', () => {
     const colorTokens = [...darkTokens].filter(([, value]) => COLOR_VALUE.test(value)).map(([name]) => name);
     // 暗色块确实有一整套颜色 token：解析写错（比如正则不匹配）时先在这里失败。
@@ -157,10 +166,9 @@ describe('config-ui 亮色皮肤 token 覆盖', () => {
 
       expect(preview.get('--preview-bg'), `${theme.id} 预览底色`).toBe(tokens.get('--bg'));
       // 预览里那块「抬起来的面板」取 panel 或 panel-muted：哪个和自己的底色差得开就用哪个。
-      expect(
-        [tokens.get('--panel'), tokens.get('--panel-muted')],
-        `${theme.id} 预览面板色`
-      ).toContain(preview.get('--preview-panel'));
+      expect([tokens.get('--panel'), tokens.get('--panel-muted')], `${theme.id} 预览面板色`).toContain(
+        preview.get('--preview-panel'),
+      );
       expect(preview.get('--preview-line'), `${theme.id} 预览分隔线`).toBe(tokens.get('--line'));
       expect(preview.get('--preview-text'), `${theme.id} 预览正文色`).toBe(tokens.get('--text-soft'));
       expect(preview.get('--preview-accent'), `${theme.id} 预览强调色`).toBe(tokens.get('--accent'));

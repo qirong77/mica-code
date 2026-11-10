@@ -25,7 +25,7 @@ type ButtonProps = Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'onClick' | 'on
    * 别让每一行都挂一个红框按钮。
    */
   variant?: 'primary' | 'accent' | 'danger' | 'default' | 'ghost' | 'danger-ghost';
-  /** `compact` 是密集工具栏里的尺寸（24px 高、11px 字），与 `SelectMenu` / `DateField` 对齐。 */
+  /** `compact` 使用 Arco mini（24px 高、12px 字）；默认 small（28px 高、14px 字）。 */
   size?: 'default' | 'compact';
   /** 撑满一行：列表里的「加载更早」这类整行按钮。 */
   fullWidth?: boolean;

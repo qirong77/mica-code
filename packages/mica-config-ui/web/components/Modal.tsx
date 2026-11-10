@@ -22,8 +22,10 @@ export function Modal({
   const CloseIcon = appIcons.close;
   const closeRef = useRef(onClose);
   closeRef.current = onClose;
-  const cardRef = useRef<HTMLDivElement>(null);
   const hostRef = useRef<HTMLDivElement>(null);
+  // Snapshot before portalled children mount: their Input/Button autoFocus can
+  // already have run by the time this component's passive effect is installed.
+  const previousFocusRef = useRef(typeof document === 'undefined' ? null : document.activeElement);
 
   useEffect(() => {
     const entry = { host: hostRef.current };
@@ -32,8 +34,6 @@ export function Modal({
     );
     if (descendantIndex < 0) modalStack.push(entry);
     else modalStack.splice(descendantIndex, 0, entry);
-    const previousFocus = document.activeElement;
-    if (portal) cardRef.current?.querySelector<HTMLButtonElement>('.modal-close')?.focus();
     const closeOnEscape = (event: KeyboardEvent) => {
       if (modalStack[modalStack.length - 1] !== entry) return;
       if (event.key === 'Escape') {
@@ -41,28 +41,28 @@ export function Modal({
         event.stopImmediatePropagation();
         closeRef.current();
       }
-      if (portal && event.key === 'Tab') {
-        const controls = cardRef.current?.querySelectorAll<HTMLElement>(
-          'button:not(:disabled), a[href], input:not(:disabled), textarea:not(:disabled), [tabindex="0"]',
-        );
-        const first = controls?.[0];
-        const last = controls?.[controls.length - 1];
-        if (
-          first &&
-          last &&
-          (!cardRef.current?.contains(document.activeElement) ||
-            (event.shiftKey ? document.activeElement === first : document.activeElement === last))
-        ) {
-          event.preventDefault();
-          (event.shiftKey ? last : first).focus();
-        }
-      }
     };
     window.addEventListener('keydown', closeOnEscape, true);
     return () => {
       window.removeEventListener('keydown', closeOnEscape, true);
+      const wasTopmost = modalStack[modalStack.length - 1] === entry;
       modalStack.splice(modalStack.indexOf(entry), 1);
-      if (portal && previousFocus instanceof HTMLElement && previousFocus.isConnected) previousFocus.focus();
+      const previousFocus = previousFocusRef.current;
+      const remainingTop = modalStack[modalStack.length - 1];
+      // Arco's FocusLock does not enable returnFocus. Only the top dialog may
+      // restore its opener; removing a covered dialog must not steal focus.
+      // Wait for the child FocusLock to unregister before focusing outside it.
+      if (wasTopmost) {
+        queueMicrotask(() => {
+          if (
+            modalStack[modalStack.length - 1] === remainingTop &&
+            previousFocus instanceof HTMLElement &&
+            previousFocus.isConnected
+          ) {
+            previousFocus.focus();
+          }
+        });
+      }
     };
   }, [portal]);
 
@@ -76,21 +76,21 @@ export function Modal({
         style={{ width: wide ? 880 : 680, maxWidth: 'calc(100% - 48px)' }}
         wrapClassName="modal-arco-backdrop"
         escToExit={false}
-        focusLock={false}
-        autoFocus={false}
+        // Arco's react-focus-lock respects an already focused child (including
+        // Input autoFocus) and tracks React portals used by dropdowns/popovers.
+        // A DOM-only Tab trap would incorrectly pull those popups back inside.
+        focusLock
+        autoFocus
         getPopupContainer={() => hostRef.current!}
         getChildrenPopupContainer={(node) => node.closest('.mica-config-ui') ?? node.parentElement ?? node}
         onCancel={onClose}
-        afterOpen={() => {
-          if (portal) cardRef.current?.querySelector<HTMLButtonElement>('.modal-close')?.focus();
-        }}
         closeIcon={
           <button type="button" className="modal-close" aria-label="关闭">
             <CloseIcon size={15} aria-hidden="true" />
           </button>
         }
         modalRender={(modal) => (
-          <div ref={cardRef} className="modal-arco-content" data-mica-config-modal>
+          <div className="modal-arco-content" data-mica-config-modal>
             {modal}
           </div>
         )}

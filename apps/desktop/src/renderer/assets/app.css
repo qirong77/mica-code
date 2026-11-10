@@ -919,15 +919,12 @@ body.is-resizing.is-resizing-terminal {
   --chat-row-marker-width: 18px;
 }
 
-/* 亮色里的次级文字（工具行、思考、时间戳、欢迎页）直接用 DSH 的 label 档位：
-   暗色的 `color-mix(fg-max 42%)` 在白底上只剩约 3:1，正是「灰得发虚」的来源。
-   档位对齐 DSH 的 TurnProcessNodeView / TurnTriggerNodeView：工具行与过程行是
-   label-tertiary(#81858c)，不是 label-secondary——比正文低两档才是 DeepSeek 的
-   「过程文字退到背景里」的观感。 */
+/* 亮色过程文字承担工具名、思考等可读内容，用 secondary（默认浅色 #61666b，
+   白底 5.8:1）；时间等辅助信息再退一档。保留 DSH 色板，不再照搬其低对比过程档位。 */
 html[data-appearance='light'] .chat-view,
 html[data-appearance='light'] .chat-modal-arco-wrap {
-  --chat-muted: var(--color-fg-dim); /* #81858c — label-tertiary */
-  --chat-subtle: var(--color-fg-faint); /* #979da6 — 再退一档 */
+  --chat-muted: var(--color-fg-muted);
+  --chat-subtle: var(--color-fg-dim);
 }
 
 .chat-conversation-layout {
