@@ -1,12 +1,10 @@
 ---
 import BaseLayout from '../layouts/BaseLayout.astro';
 import Icon from '../components/Icon.astro';
+import PreviewTabs from '../components/PreviewTabs';
 import '../styles/home.css';
-import benchmark from '../../public/benchmark-data.json';
 const base = import.meta.env.BASE_URL;
 const install = 'curl -fsSL https://github.com/qirong77/mica-code/releases/latest/download/install.sh | sh';
-const checks = benchmark.tasks.reduce((sum, task) => sum + task.checks, 0);
-const mica = benchmark.results.find((result) => result.name === 'Mica Code')!;
 const workflows = [
   {
     icon: 'search',
@@ -66,7 +64,7 @@ const extensions = [
   <div class="launch-area">
     <section class="hero container">
       <a class="hero-pill" href="https://github.com/qirong77/mica-code">
-        <span class="status-dot"></span>开源 AI 编程工作区<span class="pill-divider">/</span>认识 Mica
+        <span class="status-dot"></span>源码公开的 AI 编程工作区<span class="pill-divider">/</span>认识 Mica
         <Icon name="arrow" size={13} />
       </a>
       <h1>
@@ -111,31 +109,7 @@ const extensions = [
     </section>
     <section class="product-preview container" aria-label="产品预览">
       <div class="preview-toolbar">
-        <div class="preview-tabs" role="tablist" aria-label="工作区预览">
-          <button
-            id="tab-workspace"
-            type="button"
-            role="tab"
-            aria-selected="true"
-            aria-controls="preview-workspace"
-            data-preview="workspace"
-          >
-            <Icon name="monitor" size={15} />
-            工作区
-          </button>
-          <button
-            id="tab-trace"
-            type="button"
-            role="tab"
-            aria-selected="false"
-            aria-controls="preview-trace"
-            tabindex="-1"
-            data-preview="trace"
-          >
-            <Icon name="terminal" size={15} />
-            执行过程
-          </button>
-        </div>
+        <PreviewTabs client:load />
         <span class="preview-live">
           <span class="status-dot"></span>真实界面 · 示例项目
         </span>
@@ -227,10 +201,16 @@ const extensions = [
         </article>
       ))}
     </div>
-    <a class="text-link section-link" href={`${base}docs/workflows/`}>
-      看看一次开发任务如何推进
-      <Icon name="arrow" size={15} />
-    </a>
+    <div class="section-links">
+      <a class="text-link" href={`${base}docs/workflows/`}>
+        看看一次开发任务如何推进
+        <Icon name="arrow" size={15} />
+      </a>
+      <a class="text-link" href={`${base}docs/demos/`}>
+        查看完整实战演示
+        <Icon name="arrow" size={15} />
+      </a>
+    </div>
   </section>
 
   <section class="cache-section" id="cache">
@@ -376,65 +356,6 @@ const extensions = [
     </div>
   </section>
 
-  <section class="benchmark-section" id="benchmark">
-    <div class="container">
-      <div class="section-heading">
-        <div>
-          <p class="eyebrow">05 / MEASURE, THEN IMPROVE</p>
-          <h2>把表现放进具体任务里。</h2>
-        </div>
-        <a class="text-link" href={`${base}docs/benchmark/`}>
-          评测方法与数据范围
-          <Icon name="external" size={14} />
-        </a>
-      </div>
-      <p class="benchmark-intro">
-        在 {benchmark.tasks.length} 项 DeepSWE v1.1 任务上，以 {checks} 个自定义自动化检查观察 agent
-        表现。以下为项目自主评测快照。
-      </p>
-      <div class="benchmark-stats">
-        <div>
-          <strong>
-            {((mica.passed / checks) * 100).toFixed(1)}
-            <small>%</small>
-          </strong>
-          <span>检查项通过率</span>
-        </div>
-        <div>
-          <strong>
-            {mica.cachePercent.toFixed(1)}
-            <small>%</small>
-          </strong>
-          <span>输入缓存命中率</span>
-        </div>
-        <div>
-          <strong>
-            {benchmark.tasks.length}
-            <small> TASKS</small>
-          </strong>
-          <span>DeepSWE 任务子集</span>
-        </div>
-        <div class="benchmark-context">
-          <span class="mono-label">MODEL CONFIGURATION</span>
-          <strong>{benchmark.source.modelConfiguration}</strong>
-          <a href={`${base}benchmark-data.json`}>下载汇总数据 ↗</a>
-        </div>
-      </div>
-      <figure class="benchmark-chart">
-        <img
-          src={`${base}screenshots/eval-benchmark.svg`}
-          width="1180"
-          height="276"
-          alt="五款 agent 的检查项通过率、缓存命中率、耗时与模型请求数对比，图表通过率轴从95%开始"
-          loading="lazy"
-        />
-      </figure>
-      <p class="benchmark-note">
-        按任务汇总重复运行的中位数。检查项通过率与任务完成率含义不同；评分与效率样本分别聚合，完整统计口径见评测方法。
-      </p>
-    </div>
-  </section>
-
   <section class="closing container">
     <p class="eyebrow">BUILT IN THE OPEN. READY FOR YOUR NEXT IDEA.</p>
     <h2>下一步，开始构建。</h2>
@@ -465,30 +386,6 @@ const extensions = [
         installButton.classList.remove('copied');
         installButton.setAttribute('aria-label', '复制 Mica CLI 安装命令');
       }, 2200);
-    });
-    const tabs = [...document.querySelectorAll<HTMLButtonElement>('[data-preview]')];
-    const activate = (tab: HTMLButtonElement) => {
-      tabs.forEach((item) => {
-        const selected = item === tab;
-        item.setAttribute('aria-selected', String(selected));
-        item.tabIndex = selected ? 0 : -1;
-        document.getElementById(item.getAttribute('aria-controls')!)!.hidden = !selected;
-      });
-    };
-    tabs.forEach((tab, index) => {
-      tab.addEventListener('click', () => activate(tab));
-      tab.addEventListener('keydown', (event) => {
-        if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
-        event.preventDefault();
-        const next =
-          event.key === 'Home'
-            ? tabs[0]
-            : event.key === 'End'
-              ? tabs[tabs.length - 1]
-              : tabs[(index + (event.key === 'ArrowLeft' ? -1 : 1) + tabs.length) % tabs.length];
-        activate(next);
-        next.focus();
-      });
     });
   </script>
 </BaseLayout>

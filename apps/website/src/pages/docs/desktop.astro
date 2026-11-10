@@ -4,16 +4,23 @@ import CodeBlock from '../../components/CodeBlock.astro';
 const base = import.meta.env.BASE_URL;
 const desktop = `# 在 mica-code 仓库根目录开始
 bun install
-bun run build
+MICA_NO_RC=1 \\
+  MICA_INSTALL_PACKAGE_DIR="$HOME/.local/lib/mica-dev" \\
+  MICA_INSTALL_DIR="$HOME/.local/bin/mica-dev" \\
+  bun run build
 cd apps/desktop
 npm install
-npm run dev`;
+MICA_CLI_PATH="$HOME/.local/bin/mica-dev/mica" npm run dev`;
 const web = `# 在 mica-code 仓库根目录开始
 bun install
 cd apps/desktop
 npm install
-npm run build
-npm run start:web -- --host 127.0.0.1 --port 8787 --no-share`;
+MICA_NO_RC=1 \\
+  MICA_INSTALL_PACKAGE_DIR="$HOME/.local/lib/mica-dev" \\
+  MICA_INSTALL_DIR="$HOME/.local/bin/mica-dev" \\
+  npm run build
+MICA_CLI_PATH="$HOME/.local/bin/mica-dev/mica" \\
+  npm run start:web -- --host 127.0.0.1 --port 8787 --no-share`;
 ---
 
 <DocLayout
@@ -77,8 +84,17 @@ npm run start:web -- --host 127.0.0.1 --port 8787 --no-share`;
   </p>
   <CodeBlock code={desktop} />
   <p>
-    <code>bun run build</code> 会构建并安装 CLI。桌面默认调用已安装的 <code>mica</code>
-    ，所以首次开发启动前需要先完成这一步。<code>npm run dev</code> 随后构建 Web 服务并启动 Electron 与 Vite。
+    <code>bun run build</code> 会构建并安装 CLI；<code>npm run dev</code> 随后构建 Web 服务并启动 Electron 与 Vite。
+    以上命令将源码 CLI 安装到独立路径，并通过 <code>MICA_CLI_PATH</code> 启动桌面。未指定安装路径时，构建会更新{' '}
+    <code>~/.local/lib/mica</code> 与 <code>~/.local/bin/mica</code>，可能覆盖已有的发布版入口，也可能修改 shell 的 PATH
+    配置。
+  </p>
+  <p>
+    <code>npm run build</code>、<code>serve:web</code> 和下方打包命令也会构建并安装
+    CLI；如需保持隔离，执行这些命令时同样设置
+    <code>MICA_NO_RC</code>、<code>MICA_INSTALL_PACKAGE_DIR</code> 和 <code>MICA_INSTALL_DIR</code>
+    ，并在启动运行时时设置
+    <code>MICA_CLI_PATH</code>。
   </p>
   <p>
     打开 <strong>Settings</strong> 配置模型，然后选择项目目录。终端与桌面共享 <code>MICA_HOME</code>{' '}

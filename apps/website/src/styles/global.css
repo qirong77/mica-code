@@ -27,25 +27,25 @@
 }
 :root[data-theme='light'] {
   color-scheme: light;
-  --bg: #fafbfc;
-  --surface: #f1f4f7;
+  --bg: #f8fafc;
+  --surface: #f0f5f8;
   --surface-raised: #fff;
-  --surface-hover: #e9eff4;
-  --text: #172536;
-  --muted: #53657a;
-  --faint: #61758b;
-  --line: #dce4ec;
-  --line-strong: #bccbd9;
-  --accent: #087d96;
-  --accent-strong: #056b82;
-  --accent-soft: #e0f1f5;
-  --primary: #173b4d;
+  --surface-hover: #e8f1f5;
+  --text: #142738;
+  --muted: #4c6274;
+  --faint: #61788a;
+  --line: #dce7ed;
+  --line-strong: #c5d6df;
+  --accent: #08768a;
+  --accent-strong: #075c70;
+  --accent-soft: #e3f3f4;
+  --primary: #123c4f;
   --primary-text: #fff;
-  --code-bg: #f2f5f8;
+  --code-bg: #f4f8fa;
   --code-text: #223d53;
   --green: #21734f;
-  --nav-bg: #fafbfce8;
-  --shadow: 0 20px 80px #152a4010;
+  --nav-bg: #f8fafceb;
+  --shadow: 0 18px 60px #365d7014;
 }
 * {
   box-sizing: border-box;
@@ -221,6 +221,14 @@ pre.astro-code {
   background: var(--nav-bg);
   backdrop-filter: blur(18px);
 }
+.site-nav::after {
+  content: '';
+  position: absolute;
+  inset: auto 0 -1px;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, #4ca2ae2e 50%, transparent);
+  pointer-events: none;
+}
 .nav-inner {
   max-width: 1440px;
   height: 72px;
@@ -274,10 +282,12 @@ pre.astro-code {
   padding-left: 28px;
   border-left: 1px solid var(--line);
 }
-.icon-button {
+.icon-button,
+body .theme-toggle.arco-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  flex-shrink: 0;
   width: 35px;
   height: 35px;
   padding: 0;
@@ -286,9 +296,15 @@ pre.astro-code {
   background: transparent;
   color: var(--muted);
 }
-.icon-button:hover {
-  color: var(--text);
+.icon-button:hover,
+body .theme-toggle.arco-btn:hover {
+  border-color: var(--line);
   background: var(--surface-hover);
+  color: var(--text);
+}
+body .theme-toggle.arco-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 4px;
 }
 .theme-moon,
 [data-theme='light'] .theme-sun {
@@ -305,7 +321,7 @@ pre.astro-code {
   min-height: 46px;
   padding: 10px 21px;
   border: 1px solid var(--line-strong);
-  border-radius: 7px;
+  border-radius: 9px;
   background: transparent;
   color: var(--text);
   font-size: 13px;
@@ -324,6 +340,7 @@ pre.astro-code {
   background: var(--primary);
   border-color: var(--primary);
   color: var(--primary-text);
+  box-shadow: 0 4px 12px #123c4f1c;
 }
 .btn-primary:hover {
   background: var(--accent-strong);

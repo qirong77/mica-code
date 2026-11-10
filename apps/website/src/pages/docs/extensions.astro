@@ -201,8 +201,7 @@ const roleExample = `你是一名代码审查者。
   <CodeBlock code={roleExample} lang="text" />
   <p>
     自定义角色与插件提供的角色都会追加到只读的默认正文之后，同属系统提示词，不替换通用约束；项目指令与其他适用规则仍会载入。
-    终端使用 <code>/role</code> 选择，空闲时也可用{' '}
-    <code>Shift+Tab</code> 循环切换；桌面端从输入区角色入口选择。
+    终端使用 <code>/role</code> 选择，空闲时也可用 <code>Shift+Tab</code> 循环切换；桌面端从输入区角色入口选择。
   </p>
   <CodeBlock code={'mica exec --role reviewer "审查当前工作区的改动，给出可定位的问题"'} lang="bash" />
   <p>

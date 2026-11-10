@@ -1,6 +1,7 @@
 ---
 import BaseLayout from './BaseLayout.astro';
 import Icon from '../components/Icon.astro';
+import DocsSearch from '../components/DocsSearch';
 import { docGroups, docPages } from '../content/docs';
 import '../styles/docs.css';
 interface Props {
@@ -23,11 +24,15 @@ const group = docGroups.find((section) => section.items.some((page) => page.key 
         <Icon name="book" size={17} />
         使用文档<span>GUIDES</span>
       </a>
-      <button class="search-trigger" type="button" aria-haspopup="dialog">
-        <Icon name="search" size={15} />
-        <span>搜索文档…</span>
-        <kbd>⌘ K</kbd>
-      </button>
+      <DocsSearch client:only="react" pages={docPages} base={base} />
+      <noscript>
+        <style>
+          .search-trigger {
+            display: none !important;
+          }
+        </style>
+        <span class="search-no-js">开启 JavaScript 后可搜索文档</span>
+      </noscript>
       <details class="doc-navigation" open>
         <summary>
           浏览文档
@@ -120,22 +125,6 @@ const group = docGroups.find((section) => section.items.some((page) => page.key 
       </a>
     </aside>
   </div>
-  <dialog class="search-dialog" aria-label="搜索文档">
-    <div class="search-heading">
-      <label for="docs-query">
-        <Icon name="search" size={17} />
-        搜索文档
-      </label>
-      <button type="button" class="search-close" aria-label="关闭搜索">
-        Esc
-      </button>
-    </div>
-    <input id="docs-query" type="search" placeholder="搜索模型、插件、远程访问…" autocomplete="off" />
-    <div id="search-results" class="search-results" aria-live="polite"></div>
-    <div class="search-footer" role="status">
-      搜索标题与正文 · ↑ ↓ 选择 · Enter 打开
-    </div>
-  </dialog>
   <script>
     import '../scripts/docs';
   </script>

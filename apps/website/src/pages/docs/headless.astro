@@ -12,7 +12,7 @@ const appRequests = `{"id":1,"method":"initialize"}
 {"id":2,"method":"thread/start","params":{"cwd":"/absolute/path/to/project"}}
 {"id":3,"method":"turn/start","params":{"input":[{"type":"text","text":"解释项目的测试入口"}]}}`;
 const steerRequest = `{"id":4,"method":"turn/steer","params":{"expectedTurnId":"ACTIVE_TURN_ID","input":[{"type":"text","text":"也检查一下集成测试"}],"clientMessageId":"follow-up-1"}}
-{"id":5,"method":"turn/interrupt","params":{}}`;
+{"id":5,"method":"turn/interrupt","params":{"turnId":"ACTIVE_TURN_ID"}}`;
 ---
 
 <DocLayout
@@ -121,8 +121,8 @@ const steerRequest = `{"id":4,"method":"turn/steer","params":{"expectedTurnId":"
             <code>--variant &lt;effort&gt;</code>
           </td>
           <td>
-            选择模型自己声明的档位（取值见 <code>mica models --json</code> 的 <code>efforts</code>
-            ）。档位名不做换算，模型不声明档位时不发推理参数。
+            选择模型声明的档位（取值见 <code>mica models --json</code> 的 <code>efforts</code>）。
+            <code>exec</code> 严格校验显式值，不支持该值或没有声明档位都会报错；不需要指定时省略此参数。
           </td>
         </tr>
         <tr>
@@ -176,16 +176,31 @@ const steerRequest = `{"id":4,"method":"turn/steer","params":{"expectedTurnId":"
   </p>
   <CodeBlock code={execEvents} lang="json" />
   <p>
-    事件包括 <code>thread.started</code>、<code>turn.started</code>、<code>item.started</code>、
-    <code>item.updated</code>、<code>item.completed</code>、<code>turn.completed</code> 和 <code>error</code>。按 item
-    ID 更新展示；工具使用 <code>command_execution</code> 类型，最终回复使用 <code>agent_message</code>，思考使用{' '}
-    <code>reasoning</code>。
+    当前投影发送 <code>thread.started</code>、<code>turn.started</code>、<code>item.started</code>、
+    <code>item.updated</code>、<code>item.completed</code>、<code>turn.completed</code> 和 <code>error</code>。
+    <code>agent_message</code> 更新中的 <code>text</code> 是本次已累计的文本，应替换显示而不是逐条拼接；
+    它可包含工具调用前后的文本，也可能保留重试时已输出的文本，不一定只是最终答复。启用 <code>--thinking</code> 后的{' '}
+    <code>reasoning</code> 更新是思考片段。
   </p>
   <p>
-    使用 <code>thread.started.thread_id</code>{' '}
-    关联已保存会话。只有成功结束才应将任务视为完成；同时检查进程退出码和错误事件，保留失败日志。
+    所有工具调用都投影为 <code>command_execution</code>，其中 <code>command</code> 是工具名与截断后的参数摘要，
+    并非一定是 shell 命令；结果输出会截断，完成事件的 <code>exit_code: 0</code> 是投影占位值，不能用来判断实际命令成功。
+    没有原始工具 ID 时会生成 ID，开始与结束不保证可配对。该接口也不输出完整子代理事件或子代理用量。
+  </p>
+  <p>
+    <code>turn.completed.usage</code> 的 <code>input_tokens</code> 不含缓存读取量，后者单独计入{' '}
+    <code>cached_input_tokens</code>；当前投影中的 <code>cache_write_input_tokens</code> 和{' '}
+    <code>reasoning_output_tokens</code> 是零值占位，不能据此推断服务的实际用量。
+  </p>
+  <p>
+    使用 <code>thread.started.thread_id</code> 关联会话；带 <code>--no-save</code> 时不能据此恢复本次会话。 只有收到{' '}
+    <code>turn.completed</code> 且进程成功退出，才能认为运行正常完成；同时处理 <code>error</code>、缺失结束事件、
+    中断和非零退出码。运行完成不代表每个工具都成功或任务已通过验证，仍需检查结果与实际测试。
   </p>
   <CodeBlock code={'mica exec --json "检查项目依赖和测试入口" > events.jsonl 2> diagnostics.log'} lang="bash" />
+  <p>
+    包含可运行消费示例和校验步骤的完整工作流见 <a href={`${base}docs/demos/#自动化事件`}>实战演示</a>。
+  </p>
 
   <h2>持续会话：app-server</h2>
   <CodeBlock code={'mica app-server --dir ./your-project --thinking'} lang="bash" />
@@ -255,7 +270,9 @@ const steerRequest = `{"id":4,"method":"turn/steer","params":{"expectedTurnId":"
           <td>
             <code>turn/interrupt</code>
           </td>
-          <td>中止当前任务，随后等待结束通知。</td>
+          <td>
+            携带当前 <code>turnId</code> 中止任务，随后等待结束通知。
+          </td>
         </tr>
       </tbody>
     </table>

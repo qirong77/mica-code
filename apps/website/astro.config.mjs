@@ -1,5 +1,6 @@
 // @ts-check
 import { defineConfig } from 'astro/config';
+import react from '@astrojs/react';
 
 // GitHub Pages 构建时由 workflow 把 configure-pages 的 base_path output 注入
 // PAGES_BASE_PATH（如 /mica-code）；本地 dev / preview 不设置该变量，base 为 /。
@@ -14,5 +15,16 @@ export default defineConfig({
   site: 'https://qirong77.github.io/',
   base,
   output: 'static',
+  integrations: [react()],
+  // Prebundle Arco's individual ESM entrypoints for Vite's dev server.
+  vite: {
+    optimizeDeps: {
+      include: [
+        '@arco-design/web-react/es/Button',
+        '@arco-design/web-react/es/Modal',
+        '@arco-design/web-react/es/Input',
+      ],
+    },
+  },
   devToolbar: { enabled: false },
 });

@@ -44,10 +44,21 @@ const diagrams = [
           <p class="arch-desc">{d.desc}</p>
           <div class="arch-frame">
             <iframe
-              src={`${base}architecture/${d.file}?theme=dark`}
+              src={`${base}architecture/${d.file}?theme=light`}
+              data-architecture-frame
               title={`Mica Code ${d.title}架构图`}
               loading="lazy"
             />
+            <script is:inline>
+              (() => {
+                const frame = document.currentScript.previousElementSibling;
+                if (document.documentElement.dataset.theme === 'dark') {
+                  const url = new URL(frame.src);
+                  url.searchParams.set('theme', 'dark');
+                  frame.src = url.href;
+                }
+              })();
+            </script>
           </div>
           <p class="arch-foot">
             规格源文件：
@@ -59,4 +70,27 @@ const diagrams = [
       ))}
     </section>
   </div>
+  <script>
+    window.addEventListener('mica:theme-change', () => {
+      document.querySelectorAll<HTMLIFrameElement>('[data-architecture-frame]').forEach((frame) => {
+        const theme = document.documentElement.dataset.theme;
+        const url = new URL(frame.src);
+        url.searchParams.set('theme', theme === 'dark' ? 'dark' : 'light');
+        // If the map has loaded, use its own theme control and preserve its state.
+        try {
+          const doc = frame.contentDocument;
+          const toggle = doc?.getElementById('btn-theme');
+          if (doc?.documentElement.dataset.theme && toggle) {
+            if (doc.documentElement.dataset.theme !== theme) toggle.click();
+            // Update the iframe URL without reloading, so future reloads retain the site theme.
+            frame.contentWindow?.history.replaceState(null, '', url);
+            return;
+          }
+        } catch {
+          // Fall back to reloading when the frame cannot be accessed.
+        }
+        frame.src = url.href;
+      });
+    });
+  </script>
 </BaseLayout>

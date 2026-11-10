@@ -39,6 +39,13 @@ const base = import.meta.env.BASE_URL;
       </span>
     </a>
   </div>
+  <aside class="callout callout-subtle">
+    <strong>从一个完整任务上手</strong>
+    <p>
+      <a href={`${base}docs/demos/`}>实战演示</a>
+      提供可自行搭建的示例项目，依次练习代码审查、修复与验证、子代理协作和自动化事件消费。
+    </p>
+  </aside>
   {docGroups.map((group) => (
     <section>
       <h2>{group.label}</h2>

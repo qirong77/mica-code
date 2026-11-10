@@ -10,6 +10,7 @@ export const docGroups = [
   {
     label: '日常工作',
     items: [
+      { key: 'demos', title: '实战演示', description: '在隔离项目中练习审查、修改、协作与自动化事件消费。' },
       { key: 'workflows', title: '日常开发流程', description: '推进长任务，保留上下文，协调多个 agent。' },
       { key: 'commands', title: '命令与快捷键', description: '终端命令、运行中操作与键盘参考。' },
       { key: 'remote-access', title: '远程与手机访问', description: '连接开发机，理解分享链接与访问权限。' },
@@ -27,7 +28,6 @@ export const docGroups = [
     items: [
       { key: 'headless', title: '自动化与协议', description: 'mica exec、JSONL 和 app-server 集成。' },
       { key: 'architecture', title: '架构概览', description: '运行时、应用边界与源码导览。' },
-      { key: 'benchmark', title: '评测方法', description: 'DeepSWE 任务来源、指标定义与结果范围。' },
     ],
   },
 ];

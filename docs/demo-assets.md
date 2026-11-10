@@ -55,9 +55,19 @@ node "$DEMO_REPO/apps/desktop/out/server/index.mjs"
 
 当前 `apps/desktop/vite.server.config.mjs` 将 `src/server/index.js` 构建为 **`out/server/index.mjs`**，不是 `out/server/index.js`。请按实际产物扩展名启动。这个进程使用 Node 和 Electron shim，不启动 Electron。不要用 `npm run dev` 或 `electron-vite preview` 拍摄。
 
-缺少产物时先在仓库根目录补齐构建：CLI 是 `bun run build`，Node Web 运行时是 `npm --prefix apps/desktop run build:server`；renderer 可在 `apps/desktop` 执行 `npx electron-vite build --ignoreConfigWarning`，这是构建命令，不会启动 Electron。构建完成后重新复制 CLI 到演示 `bin/`。不要用这些构建命令替换上面的 Node 启动命令。
+优先复用已有且与源码匹配的构建产物。缺少产物时先检查构建脚本的副作用：CLI 的 `bun run build` 会执行安装脚本，`MICA_HOME` 本身不控制安装目标。若需使用它，先将 `MICA_INSTALL_DIR="$DEMO_ROOT/install/bin"`、`MICA_INSTALL_PACKAGE_DIR="$DEMO_ROOT/install/lib"` 和 `MICA_NO_RC=1` 加入命令环境，避免覆盖用户 CLI 或修改 shell 配置，并核对输出位置。Node Web 运行时可用 `npm --prefix apps/desktop run build:server`，renderer 可在 `apps/desktop` 执行 `npx electron-vite build --ignoreConfigWarning`。构建完成后重新复制 CLI 到演示 `bin/`。这些构建命令不会替代上面的 Node 启动命令。
 
 用浏览器打开 `http://127.0.0.1:8899`。`MICA_HOME`、`MICA_DESKTOP_USER_DATA`、`MICA_DESKTOP_PORT`、`MICA_CLI_PATH`、`MICA_LOG_DIR` 必须同时设置，避免使用个人会话、已安装的旧 CLI 或默认端口。显式指定 `MICA_DESKTOP_RENDERER`，避免继承已运行桌面实例的旧资源路径。若端口已被占用，更换端口并核对启动日志中的实际地址，不要连到已有实例。
+
+截图统一使用亮色主题。在独立实例就绪后，向其 `ui-state:patch` 发送 `theme` 键，核对 HTTP 包装层及 handler 的返回值，再打开页面确认最终渲染属性：
+
+```bash
+curl -sS -H 'content-type: application/json' \
+  -d '{"channel":"ui-state:patch","payload":{"theme":"light"}}' \
+  "http://127.0.0.1:$MICA_DESKTOP_PORT/api/invoke"
+```
+
+首次切换应返回 `{"ok":true,"result":{"ok":true,"changed":{"theme":"light"}}}`；已经设置为亮色时 `changed` 可为空对象。浏览器中确认 `document.documentElement.dataset.theme` 和 `document.documentElement.dataset.appearance` 均为 `light`，不能只凭接口成功判断截图主题。
 
 ## 3. 通过真实 chat:start 启动演示
 
@@ -115,10 +125,12 @@ NODE
 | 画面 | 根 README 产物 | 官网产物 | 建议内容 |
 | --- | --- | --- | --- |
 | 桌面工作区 | `images/app-chat.png` | `apps/website/public/screenshots/chat.png` | 会话侧栏、任务结果与真实测试终端；1440×900 |
-| 执行过程 | `images/app-turn-log.png` | `apps/website/public/screenshots/turn-log.png` | 展开计划、补丁及真实 `node --test` 输出；1600×1000 |
-| 手机布局 | `images/app-mobile.png` | `apps/website/public/screenshots/mobile.png` | 同一会话的窄屏布局；390×844 |
+| 执行过程 | `images/app-turn-log.png` | `apps/website/public/screenshots/turn-log.png` | 展开真实工具过程并打开测试调用详情，显示测试结果；1600×1000 |
+| 手机布局 | `images/app-mobile.png` | `apps/website/public/screenshots/mobile.png` | 同一主会话的窄屏布局和测试结果；390×844 |
 
-每个画面以真实浏览器截图为源，对应 README 和官网使用同一张图。截图前确认没有个人路径、凭证、其他项目和旧的示例结果。图片说明应注明本地脚本演示与用量占位值。终端验证可执行 `node --test && git --no-pager diff --stat`，避免 Git 分页器遮住测试结果。手机画面使用 390×844 移动视口重新加载页面，等侧栏收起动画完成后截图；不需要开启中转插件或暴露远程入口。
+每个画面以真实浏览器截图为源，对应 README 和官网使用同一张图。截图前确认没有个人路径、凭证、其他项目和旧的示例结果；使用较短的临时演示目录可减少状态栏路径占用。图片说明应注明本地脚本演示与用量占位值。终端验证可执行 `node --test && git --no-pager diff --stat`，避免 Git 分页器遮住测试结果。执行过程画面可将过程面板移到底部、拖高面板，再打开 `node --test` 工具详情并滚到 5 项测试结果。手机画面使用 390×844 窄屏视口重新加载页面，等侧栏收起动画完成后截图；可适当收窄终端面板，显示真实测试汇总。不需要开启中转插件或暴露远程入口。
+
+按表中尺寸设置浏览器视口并截图；若 Retina 屏幕以 2 倍设备像素输出，可将整张截图等比缩小到表中尺寸，不裁剪或拼接界面。将同一画面复制到两处后，用 `cmp images/app-chat.png apps/website/public/screenshots/chat.png` 等命令逐对核对字节一致。
 
 截图结束后，在独立 workspace 执行 `node --test` 与 `git diff --check` 复核。确认 5 项测试通过，`git status --short` 仅有两个示例源码/测试文件变更。主仓库不会被演示工具改动；它只接收本页列出的截图产物。
 

@@ -1,0 +1,201 @@
+---
+import DocLayout from '../../layouts/DocLayout.astro';
+import CodeBlock from '../../components/CodeBlock.astro';
+const base = import.meta.env.BASE_URL;
+
+const setup = `DEMO_DIR="$(mktemp -d)"
+cd "$DEMO_DIR"
+
+cat > subtotal.mjs <<'EOF'
+export function subtotal(prices) {
+  return prices.reduce((sum, price) => sum + price, 0);
+}
+EOF
+
+cat > subtotal.test.mjs <<'EOF'
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { subtotal } from './subtotal.mjs';
+
+test('empty list', () => assert.equal(subtotal([]), 0));
+test('whole and decimal prices', () => assert.equal(subtotal([12, 3.45]), 15.45));
+test('decimal precision', () => assert.equal(subtotal([0.1, 0.2]), 0.3));
+EOF
+
+git init -q
+git add subtotal.mjs subtotal.test.mjs
+printf 'Demo project: %s\\n' "$DEMO_DIR"`;
+
+const reviewPrompt = `请只读审查 subtotal.mjs 和现有测试，不修改文件。
+输入约定：价格非负，最多两位小数。运行 node --test subtotal.test.mjs，
+报告发现的问题、触发输入、文件位置和实际测试结果；区分未验证的推测。不要改动 Git 暂存区。`;
+
+const fixPrompt = `修复刚才发现的金额精度问题，保留函数签名和空数组行为。
+价格按非负、最多两位小数处理；不要通过删除断言掩盖失败，也不要改动 Git 暂存区。
+补充必要的边界测试，运行 node --test subtotal.test.mjs，
+检查最终 diff，说明修改、实际验证结果和仍未覆盖的情况。`;
+
+const delegatePrompt = `请使用子代理并行做两个只读检查，不要修改文件：
+1. 审查 subtotal.mjs 对非负、最多两位小数价格的处理，报告具体触发条件。
+2. 审查 subtotal.test.mjs 的边界覆盖，提出可执行的测试建议。
+等待两项结果后，核对原文件与实际测试，再汇总有证据的结论；
+如果子代理不可用，请说明并在主会话完成检查。`;
+
+const eventDemo = String.raw`LOG_DIR="$(mktemp -d)"
+if mica exec --json --no-save --max-turns 12 \
+  '只读检查 subtotal.mjs 和 subtotal.test.mjs，概述金额精度风险和现有测试；不要修改文件。' \
+  > "$LOG_DIR/events.jsonl" 2> "$LOG_DIR/diagnostics.log"; then
+  exec_status=0
+else
+  exec_status=$?
+fi
+
+if node - "$LOG_DIR/events.jsonl" "$exec_status" <<'NODE'
+const { readFileSync } = require('node:fs');
+const file = process.argv[2];
+const exitStatus = Number(process.argv[3]);
+let completed = false;
+let text = '';
+const errors = [];
+
+for (const [index, line] of readFileSync(file, 'utf8').split('\n').entries()) {
+  if (!line.trim()) continue;
+  let event;
+  try {
+    event = JSON.parse(line);
+  } catch {
+    errors.push('Invalid JSON on line ' + (index + 1));
+    continue;
+  }
+  if (!event || typeof event !== 'object') {
+    errors.push('Invalid event on line ' + (index + 1));
+    continue;
+  }
+  if (event.type === 'item.completed' && event.item?.type === 'agent_message') {
+    text = event.item.text; // 完整累计文本；替换而不是追加
+  }
+  if (event.type === 'turn.completed') completed = true;
+  if (event.type === 'error') errors.push(event.message || 'Unknown error');
+  if (event.type === 'turn.failed') errors.push(event.error?.message || 'Turn failed');
+}
+
+if (exitStatus !== 0) errors.push('Process exit code: ' + exitStatus);
+if (!completed) errors.push('Missing turn.completed');
+if (errors.length) {
+  console.error(errors.join('\n'));
+  process.exitCode = 1;
+} else {
+  console.log(text || '(No agent text)');
+}
+NODE
+then
+  parse_status=0
+else
+  parse_status=$?
+fi
+printf 'Events and diagnostics: %s\n' "$LOG_DIR"
+(exit "$parse_status")`;
+---
+
+<DocLayout
+  title="实战演示"
+  active="demos"
+  description="在隔离项目中练习代码审查、修复验证、子代理协作，以及消费自动化 JSONL 事件。"
+>
+  <h1>实战演示</h1>
+  <p class="lead">从一段有测试的代码出发，依次审查、修改、验证，再把检查任务交给子代理或自动化脚本。</p>
+  <aside class="callout callout-subtle">
+    <strong>环境与结果</strong>
+    <p>
+      需要 Git、Node.js 22+、POSIX shell 和已配置可用模型的 Mica CLI。模型请求可能产生费用。
+      这些示例供你亲自运行；模型回复和验证结果以实际输出为准，本页不预设模型会如何修复。
+    </p>
+  </aside>
+
+  <h2 id="准备示例项目">准备示例项目</h2>
+  <p>
+    以下命令在系统临时目录创建一个独立项目，用 Git
+    暂存原始文件作为比较基线，不创建提交。函数直接相加浮点数，测试包含金额精度边界。
+    保留终端中打印的路径；桌面端可以选择这个目录作为工作区。
+  </p>
+  <CodeBlock code={setup} lang="bash" />
+  <p>先在该目录执行测试，观察初始失败，再启动 Mica：</p>
+  <CodeBlock code={'node --test subtotal.test.mjs\nmica'} lang="bash" />
+  <p>
+    <code>node --test</code> 对初始的 <code>0.1 + 0.2</code> 精度断言会返回非零退出码，这是示例的起点。
+    后续示例都在这个目录执行；暂存区存的是原始文件，<code>git diff</code> 展示之后对已跟踪文件的修改。
+    使用源码入口时，按<a href={`${base}docs/getting-started/#从源码运行`}>源码运行说明</a>从此目录启动。
+  </p>
+
+  <h2 id="只读审查">演示一：只读审查</h2>
+  <p>
+    <strong>输入：</strong>在终端或桌面对话中发送以下请求。它限定审查范围和输入约定，并要求报告可验证的证据。
+  </p>
+  <CodeBlock code={reviewPrompt} lang="text" />
+  <p>
+    <strong>过程：</strong>查看 Mica 阅读的文件和实际运行的测试。收到回复后，对照代码、失败的断言和测试输出核实；运行{' '}
+    <code>git status --short</code>、<code>git diff</code> 和 <code>git diff --cached</code> 检查工作区及暂存区。
+  </p>
+  <p>
+    <strong>验收：</strong>结果应能定位精度问题并说明测试是否运行成功或失败。只读是任务要求，不是文件权限隔离；
+    如需强制禁止写入，请使用受限环境并检查工作区是否发生变化。
+  </p>
+
+  <h2 id="修复与验证">演示二：修复并验证</h2>
+  <p>
+    <strong>输入：</strong>在同一会话继续发送以下请求，让模型使用刚才的检查上下文。
+  </p>
+  <CodeBlock code={fixPrompt} lang="text" />
+  <p>
+    <strong>过程：</strong>等待任务完成，阅读修改和测试记录。也可以退出或另开终端，在示例目录自行复核：
+  </p>
+  <CodeBlock
+    code={
+      'node --test subtotal.test.mjs\ngit diff -- subtotal.mjs subtotal.test.mjs\ngit diff --cached -- subtotal.mjs subtotal.test.mjs\ngit status --short'
+    }
+    lang="bash"
+  />
+  <p>
+    <strong>验收：</strong>以实际测试退出码、修改内容和未覆盖场景为准。确认新增测试没有掩盖原有断言；若验证失败，
+    将具体输出交回同一会话继续处理。这里的价格约定只覆盖非负、最多两位小数的输入，不代表通用财务计算方案。
+  </p>
+
+  <h2 id="子代理协作">演示三：并行审阅</h2>
+  <p>
+    <strong>前提：</strong>启用 <code>subagent</code> 插件及对应会话能力。两项检查均为只读，适合在修复前或修复后执行；
+    在当前会话发送：
+  </p>
+  <CodeBlock code={delegatePrompt} lang="text" />
+  <p>
+    <strong>过程：</strong>终端可用 <code>/task</code> 查看运行状态；桌面端可查看子代理详情。
+    主会话需要等待结果并核对证据，子代理返回文本本身不等于验证通过。
+  </p>
+  <p>
+    <strong>验收：</strong>检查汇总是否包含各项结论、文件位置和实际验证状态。子代理共享工作区：如将来分配写入任务，
+    先划分互不重叠的文件范围，或使用独立工作区。详情见<a href={`${base}docs/workflows/`}>协作方式</a>。
+  </p>
+
+  <h2 id="自动化事件">演示四：消费自动化事件</h2>
+  <p>
+    <strong>前提：</strong>示例目录仍在当前 shell，<code>mica models</code> 能看到已配置的模型。
+    此示例发起一次只读检查，将 JSONL 和诊断日志保存在另一个临时目录，再用 Node.js 在进程结束后逐行解析。
+    <code>--no-save</code> 不保存会话，但不禁止工具读写，提示词也不是强制的只读权限。
+  </p>
+  <CodeBlock code={eventDemo} lang="bash" />
+  <p>
+    <strong>过程：</strong>解析器记录 <code>agent_message</code> 的完成文本，检查 <code>error</code>
+    、结束事件与进程退出码。 若运行失败，查看打印出的目录中的 <code>diagnostics.log</code> 和 <code>events.jsonl</code>
+    。这些文件可能包含项目内容， 按本地工作数据管理。
+  </p>
+  <p>
+    <strong>验收：</strong>退出码为零且有 <code>turn.completed</code> 表示运行正常结束，不等于代码或测试通过；
+    仍需核对回复、实际文件与测试。大量输出或实时界面应改用逐行流式读取；不要把工具投影中的占位退出码当作命令执行结果。
+    字段语义、错误处理和 app-server 的持续会话见<a href={`${base}docs/headless/`}>自动化与协议</a>。
+  </p>
+
+  <h2>继续探索</h2>
+  <p>
+    在自己的项目中，先写清工作目录、允许的修改范围和验证命令，再参考<a href={`${base}docs/workflows/`}>日常开发流程</a>
+    管理长任务。需要复用审查步骤时，可以把它整理成<a href={`${base}docs/extensions/#添加一个-skill`}>项目 Skill</a>。
+  </p>
+</DocLayout>

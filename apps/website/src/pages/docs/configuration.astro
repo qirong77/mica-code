@@ -48,8 +48,8 @@ mica exec --model "openai/YOUR_MODEL_ID" --no-save "概述当前项目结构"`;
 >
   <h1>模型与配置</h1>
   <p class="lead">
-    Mica 通过 provider 连接模型服务。每个 provider 指定 API
-    地址、认证方式和协议；模型可以由服务动态列出，也可以手动配置。
+    Mica 通过 provider 连接模型服务。每个 provider 指定 API 地址、认证方式、协议和可选模型。模型 ID
+    由使用者在服务商配置中填写。
   </p>
 
   <h2>配置文件与入口</h2>
@@ -65,20 +65,21 @@ mica exec --model "openai/YOUR_MODEL_ID" --no-save "概述当前项目结构"`;
 
   <h2>连接模型服务</h2>
   <h3>Chat Completions 示例</h3>
-  <p>下面使用仓库默认提供的 DeepSeek API 地址，通过模型列表接口获取可选模型：</p>
+  <p>下面使用仓库默认提供的 DeepSeek API 地址，并显式列出可选模型：</p>
   <CodeBlock code={providerExample} lang="json" />
 
   <h3>Responses 示例</h3>
   <p>
     连接支持 OpenAI Responses 的服务时，显式选择 <code>openai_responses</code>
-    。动态列表中仍需选择支持该协议和工具调用的模型。
+    。在 <code>models</code> 中填写账户可用、支持该协议和工具调用的模型。
   </p>
   <CodeBlock code={responsesExample} lang="json" />
 
-  <h3>兼容服务与固定模型列表</h3>
+  <h3>兼容服务与模型列表</h3>
   <p>
-    将以下对象加入 <code>providers</code> 数组，并替换 API 地址、凭证和模型 ID。对没有模型列表接口的服务，使用{' '}
-    <code>models</code>；服务不接受推理强度参数时，将 <code>supportsEffort</code> 设为 <code>false</code>。
+    将以下对象加入 <code>providers</code> 数组，并替换 API 地址、凭证和模型
+    ID。无论服务是否提供模型列表接口，都要显式配置 <code>models</code>；服务不接受推理强度参数时，将{' '}
+    <code>supportsEffort</code> 设为 <code>false</code>。
   </p>
   <CodeBlock code={compatibleExample} lang="json" />
 
@@ -87,12 +88,15 @@ mica exec --model "openai/YOUR_MODEL_ID" --no-save "概述当前项目结构"`;
     在配置页的“新会话默认模型”中设置服务商、模型和 effort，或在配置文件顶层添加
     <code>defaultModel</code>。例如：
   </p>
-  <CodeBlock code={JSON.stringify({ defaultModel: { provider: 'openai', model: 'gpt-5.4', effort: 'high' } }, null, 2)} lang="json" />
+  <CodeBlock
+    code={JSON.stringify({ defaultModel: { provider: 'openai', model: 'gpt-5.5', effort: 'high' } }, null, 2)}
+    lang="json"
+  />
   <p>
-    <code>provider</code> 必须是已配置的服务商 ID，<code>model</code> 是该服务商的模型 ID。
-    <code>effort</code> 可省略，此时使用模型默认档位；填写时使用模型支持的真实档位名。
-    不设置 <code>defaultModel</code> 时，自动使用第一个服务商的第一个模型；动态模型列表使用接口返回的第一项。
-    新会话不再继承上次使用或当前目录记忆的模型与 effort。恢复会话沿用会话自己的设置，显式选择仍优先。
+    <code>provider</code> 必须是已配置的服务商 ID，<code>model</code> 必须存在于该服务商的 <code>models</code> 列表。
+    <code>effort</code> 可省略，此时使用模型默认档位；填写时使用模型支持的真实档位名。 不设置 <code>defaultModel</code>{' '}
+    时，自动使用第一个服务商配置的第一个模型。 新会话不再继承上次使用或当前目录记忆的模型与
+    effort。恢复会话沿用会话自己的设置，显式选择仍优先。
   </p>
 
   <h3>Provider 字段参考</h3>
@@ -150,6 +154,14 @@ mica exec --model "openai/YOUR_MODEL_ID" --no-save "概述当前项目结构"`;
             设为 <code>false</code> 时不向服务发送推理强度参数。
           </td>
         </tr>
+        <tr>
+          <td>
+            <code>effortLevels</code>
+          </td>
+          <td>
+            模型元数据未知时，按服务端真实支持的顺序声明档位，例如 <code>["low", "medium", "high"]</code>。
+          </td>
+        </tr>
       </tbody>
     </table>
   </div>
@@ -167,14 +179,24 @@ mica exec --model "openai/YOUR_MODEL_ID" --no-save "概述当前项目结构"`;
     不做档位换算，也不会给不支持推理参数的模型凑出五档。 自建网关或私有部署的模型名如果不在 models.dev 里，可在该
     provider 上写 <code>effortLevels</code> 声明服务端真实接受的档位。桌面端在输入区的模型面板中完成同样的操作。
   </p>
+  <p>
+    models.dev
+    用于补充模型能力和档位等元数据，不负责从你的服务商拉取模型列表；有已知模型元数据时，以模型声明的档位为准。
+  </p>
   <CodeBlock code={'mica models\nmica models --json'} lang="bash" />
   <p>
     上面的命令列出 <code>provider/model</code> ID；JSON 输出还包含可用推理强度。使用该 ID 指定一次自动化任务的模型：
   </p>
-  <CodeBlock code={'mica exec --model "PROVIDER_ID/MODEL_ID" --variant medium "解释项目的测试策略"'} lang="bash" />
+  <CodeBlock code={'mica exec --model "PROVIDER_ID/MODEL_ID" "解释项目的测试策略"'} lang="bash" />
   <p>
-    模型与推理强度的选择会保存为本地使用偏好；写在 <code>config.json</code> 顶层的 <code>model</code> 或{' '}
-    <code>effort</code> 在保存时会被丢弃。已有对话切换 API 协议受到限制；需要切换协议时新建会话。
+    需要指定强度时，先查看该模型在 <code>mica models --json</code> 输出中的 <code>efforts</code>，再添加例如{' '}
+    <code>--variant high</code>。<code>mica exec</code>{' '}
+    对显式强度严格校验：值不合法、模型没有该档位或没有声明档位时会报错；
+    没有可选档位时省略此参数。未知模型若确实支持强度，可按服务端支持情况配置 <code>effortLevels</code>。
+  </p>
+  <p>
+    会话内选择保存在会话状态；新会话默认值由 <code>defaultModel</code> 决定。写在 <code>config.json</code> 顶层的{' '}
+    <code>model</code> 或 <code>effort</code> 在保存时会被丢弃。已有对话切换 API 协议受到限制；需要切换协议时新建会话。
   </p>
 
   <h2>在自动化中使用环境变量</h2>
@@ -185,7 +207,8 @@ mica exec --model "openai/YOUR_MODEL_ID" --no-save "概述当前项目结构"`;
   <CodeBlock code={envExample} lang="bash" />
   <p>
     这种方式仅在配置中的所有 provider 都没有非空 API key，且没有 ID 为 <code>openai</code> 的 provider
-    时生效。使用独立的 <code>MICA_HOME</code> 可以避免已有配置影响任务。由环境变量创建的 provider 不会写回配置文件。
+    时生效。使用独立的 <code>MICA_HOME</code> 可以避免已有配置影响任务。由环境变量创建的 provider 不会写回配置文件，
+    也不会自动获取模型列表；调用时应像上例一样通过 <code>--model</code> 指定模型。
   </p>
   <div class="table-wrap">
     <table>
@@ -253,7 +276,8 @@ mica exec --model "openai/YOUR_MODEL_ID" --no-save "概述当前项目结构"`;
   <h2>排查连接问题</h2>
   <ul>
     <li>
-      模型列表为空：在配置页的「服务商」里手动填入至少一个模型名，或直接写 <code>providers[].models</code>；保存后可用「测试连接」先确认一次。
+      模型列表为空：在配置页的「服务商」里手动填入至少一个模型名，或直接写 <code>providers[].models</code>
+      ；保存后可用「测试连接」先确认一次。
     </li>
     <li>认证失败：检查当前 provider 的 key 与 API 地址，环境变量不会覆盖已有的带凭证配置。</li>
     <li>

@@ -37,6 +37,13 @@ jobs:
         with:
           bun-version: latest
 
+      # The Astro React integration requires Node >= 22.23.4; do not rely on
+      # the runner's preinstalled Node version.
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
       - name: Install dependencies
         working-directory: apps/website
         run: bun install --frozen-lockfile

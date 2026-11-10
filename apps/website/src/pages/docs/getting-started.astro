@@ -8,6 +8,9 @@ const source = `git clone https://github.com/qirong77/mica-code.git
 cd mica-code
 bun install
 bun run dev`;
+const sourceProject = `# 将路径替换为本机的项目目录和 mica-code 仓库绝对路径
+cd /path/to/your-project
+bun run /path/to/mica-code/apps/cli/src/index.ts`;
 const firstTask = `阅读项目结构和测试配置，找出测试入口。
 先说明你准备怎么改，再为一个边界情况补充测试，运行验证并汇报结果。`;
 ---
@@ -26,6 +29,10 @@ const firstTask = `阅读项目结构和测试配置，找出测试入口。
       Bun。想使用图形工作区，可以直接看<a href={`${base}docs/desktop/`}>桌面与浏览器指南</a>。
     </p>
   </aside>
+  <p>
+    本文档以当前仓库源码为准；已发布 CLI 的功能可能有所不同。可以通过 <code>mica --version</code> 查看版本，并对照
+    <a href="https://github.com/qirong77/mica-code/releases">Release 说明</a>。
+  </p>
 
   <h2 id="安装-cli">1. 安装 CLI</h2>
   <p>macOS 与 Linux 使用预构建安装器，支持 Apple Silicon、Intel Mac，以及 ARM64 / x64 Linux：</p>
@@ -47,8 +54,15 @@ const firstTask = `阅读项目结构和测试配置，找出测试入口。
   <p>需要参与开发或使用 Windows 时，通过源码入口启动：</p>
   <CodeBlock code={source} />
   <p>
-    <code>bun run dev</code> 直接运行终端 TUI。macOS / Linux 开发者也可用 <code>bun run build</code> 构建并安装本机
-    CLI，之后在任意项目中使用 <code>mica</code>。
+    上面的 <code>bun run dev</code> 在源码仓库中启动终端 TUI，因此默认工作目录也是该仓库。要从源码在另一个项目中工作，
+    先进入目标项目，再通过绝对路径启动入口：
+  </p>
+  <CodeBlock code={sourceProject} />
+  <p>上面是 POSIX shell 写法；Windows 用户可在 PowerShell 中换成本机的项目目录和源码入口绝对路径。</p>
+  <p>
+    macOS / Linux 开发者也可在源码仓库运行 <code>bun run build</code> 构建并安装 CLI，之后在任意项目中使用{' '}
+    <code>mica</code>。构建的安装步骤默认写入 <code>~/.local/lib/mica</code>、<code>~/.local/bin</code>， 并可能更新
+    shell 的 PATH 配置。
   </p>
   <p>
     发布安装器目前提供 macOS / Linux 包；源码构建的自动安装步骤会生成 POSIX launcher，Windows 请使用上面的源码运行入口。
@@ -56,7 +70,8 @@ const firstTask = `阅读项目结构和测试配置，找出测试入口。
 
   <h2 id="连接模型">2. 连接模型</h2>
   <p>
-    在项目目录启动 Mica，再通过终端里的 <code>/config</code> 打开配置页：
+    安装 CLI 后在项目目录启动 Mica，再通过终端里的 <code>/config</code>{' '}
+    打开配置页。如果使用源码入口，沿用上面指定目标项目的启动方式：
   </p>
   <CodeBlock code={'cd your-project\nmica'} />
   <ol class="steps">
@@ -69,8 +84,8 @@ const firstTask = `阅读项目结构和测试配置，找出测试入口。
       Responses。按服务实际支持的接口填写。
     </li>
     <li>
-      <strong>选择模型。</strong>回到终端，用 <code>/model</code> 选择 provider 和模型。服务没有模型列表接口时，可以在
-      provider 中填写固定的 <code>models</code>。
+      <strong>配置并选择模型。</strong>在 provider 中填写服务提供的模型 ID（<code>models</code>），再回到终端用{' '}
+      <code>/model</code> 选择。Mica 不会从服务商自动拉取可选模型。
     </li>
   </ol>
   <p>

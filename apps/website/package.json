@@ -11,10 +11,17 @@
     "format:check": "prettier --check src astro.config.mjs package.json"
   },
   "dependencies": {
-    "astro": "^7.1.6"
+    "@arco-design/web-react": "2.66.18",
+    "@astrojs/react": "^7.1.5",
+    "astro": "^7.1.6",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
   },
   "devDependencies": {
     "@astrojs/check": "^0.9.12",
+    "@types/node": "^24.0.0",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.3",
     "prettier": "^3.9.10",
     "prettier-plugin-astro": "^1.1.2",
     "typescript": "^5.9.0"
