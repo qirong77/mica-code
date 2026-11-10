@@ -39,7 +39,7 @@ Mica 是一个可以实际动手的 coding agent：阅读项目、修改代码�
 文档以当前仓库源码为准；已发布 CLI 的功能可能有所不同，可用 `mica --version` 查看版本并对照 [Release 说明](https://github.com/qirong77/mica-code/releases)。
 
 <p align="center">
-  <img src="./images/app-chat.png" width="1100" alt="Mica 工作区：在示例项目中查看任务过程、代码与验证结果">
+  <img src="./images/app-chat.png?v=3bcd4ffe" width="1100" alt="Mica 工作区：在示例项目中查看任务过程、代码与验证结果">
 </p>
 <p align="center"><sub>截图来自真实运行时与隔离示例项目；模型响应由本地脚本生成，图中用量为演示值。<a href="./docs/demo-assets.md">了解截图的复现方式</a></sub></p>
 
@@ -93,7 +93,7 @@ mica
 项目分组和历史会话、代码编辑器、Git diff、工作区终端、回合日志与用量统计，都可以在同一处查看。桌面应用提供受控浏览器与终端窗口；独立 Web 工作区也提供对话、文件、Git 和工作区终端。
 
 <p align="center">
-  <img src="./images/app-turn-log.png" width="1100" alt="Mica 执行记录：示例任务中的工具调用、代码修改与测试输出">
+  <img src="./images/app-turn-log.png?v=0f5503ca" width="1100" alt="Mica 执行记录：示例任务中的工具调用、代码修改与测试输出">
 </p>
 <p align="center"><sub>演示使用真实运行时和工具；模型响应由本地脚本生成，用量为演示值。</sub></p>
 
@@ -134,7 +134,7 @@ MICA_CLI_PATH="$HOME/.local/bin/mica-dev/mica" \
 <details>
   <summary>查看手机布局</summary>
   <p align="center">
-    <img src="./images/app-mobile.png" width="280" alt="Mica 手机布局：查看示例任务的进度与结果">
+    <img src="./images/app-mobile.png?v=1482d98f" width="280" alt="Mica 手机布局：查看示例任务的进度与结果">
   </p>
   <p align="center"><sub>隔离示例项目与脚本化模型响应，图中用量为演示值。</sub></p>
 </details>

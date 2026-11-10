@@ -132,6 +132,8 @@ NODE
 
 按表中尺寸设置浏览器视口并截图；若 Retina 屏幕以 2 倍设备像素输出，可将整张截图等比缩小到表中尺寸，不裁剪或拼接界面。将同一画面复制到两处后，用 `cmp images/app-chat.png apps/website/public/screenshots/chat.png` 等命令逐对核对字节一致。
 
+更新截图时，使用 `shasum -a 256 images/app-chat.png` 等命令计算文件摘要，并将 README 和官网对应图片地址中 `?v=` 的值更新为摘要的前 8 位。图片文件名保持不变，带版本的地址让浏览器在发布后立即获取新画面。
+
 截图结束后，在独立 workspace 执行 `node --test` 与 `git diff --check` 复核。确认 5 项测试通过，`git status --short` 仅有两个示例源码/测试文件变更。主仓库不会被演示工具改动；它只接收本页列出的截图产物。
 
 停止两个后台进程后，可保留临时目录供复查。重拍时优先创建新的临时目录；如确需重置，运行 `node scripts/prepare-doc-demo.mjs "$DEMO_ROOT" --reset`。该操作只接受带有本脚本标记的演示目录，重建 `home/`、`data/`、`logs/` 和 `workspace/`，随后重新启动模拟服务和 Web 运行时。不得在运行中的演示实例上重置。
