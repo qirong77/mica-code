@@ -1,0 +1,296 @@
+{
+  "@lexical/hashtag": [
+    "."
+  ],
+  "@lexical/devtools-core": [
+    "."
+  ],
+  "@lexical/extension": [
+    "./AutoFocusExtension",
+    "./AutoFocusExtension.js",
+    "./BlockIdExtension",
+    "./BlockIdExtension.js",
+    "./ClearEditorExtension",
+    "./ClearEditorExtension.js",
+    "./ClickAfterLastBlockExtension",
+    "./ClickAfterLastBlockExtension.js",
+    "./DecoratorTextExtension",
+    "./DecoratorTextExtension.js",
+    "./EditorStateExtension",
+    "./EditorStateExtension.js",
+    "./HMRExtension",
+    "./HMRExtension.js",
+    "./HorizontalRuleExtension",
+    "./HorizontalRuleExtension.js",
+    "./IMEExtension",
+    "./IMEExtension.js",
+    "./InitialStateExtension",
+    "./InitialStateExtension.js",
+    "./KeyboardShortcutsExtension",
+    "./KeyboardShortcutsExtension.js",
+    "./LexicalBuilder",
+    "./LexicalBuilder.js",
+    "./NestedEditorExtension",
+    "./NestedEditorExtension.js",
+    "./NodeSelectionDataSelectedExtension",
+    "./NodeSelectionDataSelectedExtension.js",
+    "./NodeSelectionExtension",
+    "./NodeSelectionExtension.js",
+    "./NodeStructureExtension",
+    "./NodeStructureExtension.js",
+    "./NormalizeInlineElementsExtension",
+    "./NormalizeInlineElementsExtension.js",
+    "./NormalizeTripleClickSelectionExtension",
+    "./NormalizeTripleClickSelectionExtension.js",
+    "./PreventSelectAllExtension",
+    "./PreventSelectAllExtension.js",
+    "./RootElementExtension",
+    "./RootElementExtension.js",
+    "./SelectBlockExtension",
+    "./SelectBlockExtension.js",
+    "./SelectionAlwaysOnDisplayExtension",
+    "./SelectionAlwaysOnDisplayExtension.js",
+    "./TabIndentationExtension",
+    "./TabIndentationExtension.js",
+    "./WatchEditableExtension",
+    "./WatchEditableExtension.js",
+    "./config",
+    "./config.js",
+    "./getExtensionDependency",
+    "./getExtensionDependency.js",
+    "./getExtensionDependencyFromEditor",
+    "./getExtensionDependencyFromEditor.js",
+    "./getPeerDependencyFromEditor",
+    "./getPeerDependencyFromEditor.js",
+    ".",
+    "./namedSignals",
+    "./namedSignals.js",
+    "./signals",
+    "./signals.js",
+    "./watchedSignal",
+    "./watchedSignal.js"
+  ],
+  "@lexical/file": [
+    "."
+  ],
+  "@lexical/markdown": [
+    "."
+  ],
+  "@lexical/yjs": [
+    "."
+  ],
+  "@lexical/plain-text": [
+    "."
+  ],
+  "@lexical/internal": [
+    "./createDevError",
+    "./createDevError.js",
+    "./createError",
+    "./createError.js",
+    "./createProdError",
+    "./createProdError.js",
+    "./devInvariant",
+    "./devInvariant.js",
+    "./formatDevErrorMessage",
+    "./formatDevErrorMessage.js",
+    "./formatDevWarningMessage",
+    "./formatDevWarningMessage.js",
+    "./formatProdErrorMessage",
+    "./formatProdErrorMessage.js",
+    "./formatProdWarningMessage",
+    "./formatProdWarningMessage.js",
+    "./invariant",
+    "./invariant.js",
+    "./version",
+    "./version.js",
+    "./warnOnlyOnce",
+    "./warnOnlyOnce.js"
+  ],
+  "@lexical/mark": [
+    "."
+  ],
+  "@lexical/code": [
+    "."
+  ],
+  "@lexical/utils": [
+    "."
+  ],
+  "@lexical/html": [
+    "./BlockIdHTMLExtension",
+    "./BlockIdHTMLExtension.js",
+    "."
+  ],
+  "@lexical/code-prism": [
+    "."
+  ],
+  "@lexical/code-core": [
+    "."
+  ],
+  "@lexical/overflow": [
+    "."
+  ],
+  "@lexical/link": [
+    "."
+  ],
+  "@lexical/table": [
+    "."
+  ],
+  "@lexical/list": [
+    "."
+  ],
+  "@lexical/history": [
+    "."
+  ],
+  "@lexical/dragon": [
+    "."
+  ],
+  "@lexical/rich-text": [
+    "."
+  ],
+  "@lexical/a11y": [
+    "."
+  ],
+  "@lexical/headless": [
+    "./HeadlessExtension",
+    "./HeadlessExtension.js",
+    "./dom",
+    "."
+  ],
+  "@lexical/selection": [
+    "."
+  ],
+  "@lexical/text": [
+    "."
+  ],
+  "@lexical/react": [
+    "./ExtensionComponent",
+    "./ExtensionComponent.js",
+    "./LexicalAutoEmbedPlugin",
+    "./LexicalAutoEmbedPlugin.js",
+    "./LexicalAutoEmbedPluginUtils",
+    "./LexicalAutoEmbedPluginUtils.js",
+    "./LexicalAutoFocusPlugin",
+    "./LexicalAutoFocusPlugin.js",
+    "./LexicalAutoLinkPlugin",
+    "./LexicalAutoLinkPlugin.js",
+    "./LexicalBlockWithAlignableContents",
+    "./LexicalBlockWithAlignableContents.js",
+    "./LexicalCharacterLimitPlugin",
+    "./LexicalCharacterLimitPlugin.js",
+    "./LexicalCheckListPlugin",
+    "./LexicalCheckListPlugin.js",
+    "./LexicalClearEditorPlugin",
+    "./LexicalClearEditorPlugin.js",
+    "./LexicalClickableLinkPlugin",
+    "./LexicalClickableLinkPlugin.js",
+    "./LexicalCollaborationContext",
+    "./LexicalCollaborationContext.js",
+    "./LexicalCollaborationContextUtils",
+    "./LexicalCollaborationContextUtils.js",
+    "./LexicalCollaborationPlugin",
+    "./LexicalCollaborationPlugin.js",
+    "./LexicalComposer",
+    "./LexicalComposer.js",
+    "./LexicalComposerContext",
+    "./LexicalComposerContext.js",
+    "./LexicalContentEditable",
+    "./LexicalContentEditable.js",
+    "./LexicalDecoratorBlockNode",
+    "./LexicalDecoratorBlockNode.js",
+    "./LexicalDraggableBlockPlugin",
+    "./LexicalDraggableBlockPlugin.js",
+    "./LexicalEditorRefPlugin",
+    "./LexicalEditorRefPlugin.js",
+    "./LexicalErrorBoundary",
+    "./LexicalErrorBoundary.js",
+    "./LexicalExtensionComposer",
+    "./LexicalExtensionComposer.js",
+    "./LexicalExtensionEditorComposer",
+    "./LexicalExtensionEditorComposer.js",
+    "./LexicalHashtagPlugin",
+    "./LexicalHashtagPlugin.js",
+    "./LexicalHistoryPlugin",
+    "./LexicalHistoryPlugin.js",
+    "./LexicalHorizontalRuleNode",
+    "./LexicalHorizontalRuleNode.js",
+    "./LexicalHorizontalRulePlugin",
+    "./LexicalHorizontalRulePlugin.js",
+    "./LexicalLinkPlugin",
+    "./LexicalLinkPlugin.js",
+    "./LexicalListPlugin",
+    "./LexicalListPlugin.js",
+    "./LexicalMarkdownShortcutPlugin",
+    "./LexicalMarkdownShortcutPlugin.js",
+    "./LexicalMenuOption",
+    "./LexicalMenuOption.js",
+    "./LexicalNestedComposer",
+    "./LexicalNestedComposer.js",
+    "./LexicalNodeContextMenuPlugin",
+    "./LexicalNodeContextMenuPlugin.js",
+    "./LexicalNodeEventPlugin",
+    "./LexicalNodeEventPlugin.js",
+    "./LexicalNodeMenuPlugin",
+    "./LexicalNodeMenuPlugin.js",
+    "./LexicalOnChangePlugin",
+    "./LexicalOnChangePlugin.js",
+    "./LexicalPlainTextPlugin",
+    "./LexicalPlainTextPlugin.js",
+    "./LexicalRichTextPlugin",
+    "./LexicalRichTextPlugin.js",
+    "./LexicalSelectionAlwaysOnDisplay",
+    "./LexicalSelectionAlwaysOnDisplay.js",
+    "./LexicalTabIndentationPlugin",
+    "./LexicalTabIndentationPlugin.js",
+    "./LexicalTableOfContentsPlugin",
+    "./LexicalTableOfContentsPlugin.js",
+    "./LexicalTablePlugin",
+    "./LexicalTablePlugin.js",
+    "./LexicalTreeView",
+    "./LexicalTreeView.js",
+    "./LexicalTypeaheadMenuPlugin",
+    "./LexicalTypeaheadMenuPlugin.js",
+    "./LexicalTypeaheadMenuPluginUtils",
+    "./LexicalTypeaheadMenuPluginUtils.js",
+    "./ReactExtension",
+    "./ReactExtension.js",
+    "./ReactPluginHostExtension",
+    "./ReactPluginHostExtension.js",
+    "./ReactProviderExtension",
+    "./ReactProviderExtension.js",
+    "./TreeViewExtension",
+    "./TreeViewExtension.js",
+    "./useExtensionComponent",
+    "./useExtensionComponent.js",
+    "./useExtensionSignalValue",
+    "./useExtensionSignalValue.js",
+    "./useLexicalAriaLiveRegion",
+    "./useLexicalAriaLiveRegion.js",
+    "./useLexicalEditable",
+    "./useLexicalEditable.js",
+    "./useLexicalFocusManagerRef",
+    "./useLexicalFocusManagerRef.js",
+    "./useLexicalFocusTrapRef",
+    "./useLexicalFocusTrapRef.js",
+    "./useLexicalIsTextContentEmpty",
+    "./useLexicalIsTextContentEmpty.js",
+    "./useLexicalNodeSelection",
+    "./useLexicalNodeSelection.js",
+    "./useLexicalRovingTabIndexRef",
+    "./useLexicalRovingTabIndexRef.js",
+    "./useLexicalSlotRef",
+    "./useLexicalSlotRef.js",
+    "./useLexicalSubscription",
+    "./useLexicalSubscription.js",
+    "./useLexicalTextEntity",
+    "./useLexicalTextEntity.js"
+  ],
+  "@lexical/code-shiki": [
+    "."
+  ],
+  "@lexical/clipboard": [
+    "."
+  ],
+  "lexical": [
+    "."
+  ]
+}

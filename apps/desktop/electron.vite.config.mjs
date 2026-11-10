@@ -4,6 +4,7 @@ import { RUNTIME_PORT_ENV, parseRuntimePort } from '../../packages/mica-web-shar
 import react from '@vitejs/plugin-react'
 import { resolve } from 'path'
 import { fileIconAssets } from './scripts/file-icon-assets.mjs'
+import { pluginWebAssets } from './scripts/plugin-web-assets.mjs'
 
 /**
  * 应用的运行时是 Web 页面（由 vite.server.config.mjs 构建的 out/server 托管），
@@ -80,7 +81,7 @@ export default defineConfig({
     }
   },
   renderer: {
-    plugins: [tablerIconDeepImports(), fileIconAssets(), react(), tailwindcss()],
+    plugins: [tablerIconDeepImports(), fileIconAssets(), pluginWebAssets(), react(), tailwindcss()],
     resolve: {
       // packages/mica-config-ui 的源码从仓库根 node_modules 解析 react，页面脚本则从
       // apps/desktop/node_modules 解析，两份物理路径不同的 react 会被当成两个实例打进包：

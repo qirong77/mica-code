@@ -25,5 +25,5 @@
     "packages/mica-file-mentions",
     "packages/@anthropic/ink/src"
   ],
-  "exclude": ["**/dist", "**/node_modules"]
+  "exclude": ["**/dist", "**/node_modules", "plugins/notebook/editor"]
 }

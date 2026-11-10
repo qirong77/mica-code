@@ -244,3 +244,9 @@ macOS 浮窗只取键盘焦点、不连带唤起主应用；原生窗口策略�
 - skill 是含 `SKILL.md` 的目录；内容不能覆盖安全规则、系统指令和当前用户请求。
 - 联网：`web_search` 由 `plugins/web-search` 提供（设置 `searxngUrl` → `SEARXNG_URL` → `http://127.0.0.1:8080`，实例须开 JSON，结果缓存 5 分钟）；`web_fetch` 是内置工具。
 - 最新、官方、API、价格、法规这类可变事实先联网查证；无法查证时明确说明。
+
+### 独立文档与隔离页面资源
+
+前端 `api.documents.read(key)` / `write(key,value,{expectedVersion})` 使用现有 plugin-host 数据通道的可选 `key`，落在插件 `documents/<key>.json`（6 MiB，严格损坏检查、路径标识校验、CAS 与原子写）；无 `key` 的 `data.json` 保持 256 KiB。整页 `api.page.beforeClose(handler)` 可在返回前等待保存，`false` 保持页面。
+
+随包插件可提供 `web-build.mjs`，桌面 `scripts/plugin-web-assets.mjs` 通用构建到 renderer 的 `plugin-web/<id>/`，开发临时产物在 `temp/plugin-web-dev/`。此静态目录支持 CORS 供 opaque sandbox 加载，宿主 API 不开放。Notebook 是首个使用方：核心代码只在 `plugins/notebook/editor/src/`，固定版本 CDN 库不混入本地运行时，主题使用同一份 `mica-config-ui/web/arco-settings.css` 而不是复制皮肤。其独立 TypeScript 检查见插件 README。

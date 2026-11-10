@@ -11,6 +11,7 @@ import globalSearchSetup from '../../plugins/global-search/index.js';
 import harnessReviewSetup from '../../plugins/harness-review/index.js';
 import memorySetup from '../../plugins/memory/index.js';
 import mobileRelaySetup from '../../plugins/mobile-relay/index.js';
+import notebookSetup from '../../plugins/notebook/index.js';
 import quickButtonsSetup from '../../plugins/quick-buttons/index.js';
 import replyDigestSetup from '../../plugins/reply-digest/index.js';
 import scheduleSetup from '../../plugins/schedule/index.js';
@@ -58,6 +59,7 @@ const officialSetups: Record<string, MicaPlugin['setup']> = {
   evolution: evolutionSetup,
   'global-search': globalSearchSetup,
   'mobile-relay': mobileRelaySetup,
+  notebook: notebookSetup,
   'quick-buttons': quickButtonsSetup,
   'reply-digest': replyDigestSetup,
   schedule: scheduleSetup,

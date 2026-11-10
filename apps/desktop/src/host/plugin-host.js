@@ -22,8 +22,8 @@ import { controlPluginLauncher } from './system-checks.js'
  * - `plugin-host:probe`：探活某个地址上是不是一台 Mica Code 运行时。页面跨源
  *   `fetch('http://other:8787/api/health')` 受 CORS 限制读不到结果，所以由运行时去问。
  * - `plugin-host:read-data` / `plugin-host:write-data`：读写插件自己的那份数据文件
- *   （`$MICA_HOME/plugin-data/<pluginId>/data.json`）。页面没有文件系统，插件的清单、
- *   连接、草稿都只能落在这里；内容由插件自己定义，宿主不解析、不改写。
+ *   （`$MICA_HOME/plugin-data/<pluginId>/data.json`，带 key 则是 `documents/<key>.json`）。
+ *   页面没有文件系统；内容由插件自己定义，宿主不解析、不改写。
  * - `plugin-host:access-get` / `plugin-host:access-set`：运行时的**远程访问策略**（是否
  *   要求口令、口令是什么）。这是宿主自己的能力，不属于某个插件——任何要解释或调整「别的
  *   机器怎么进这台机器」的插件都读同一份，宿主的请求分派也读同一份。
@@ -73,15 +73,17 @@ export function registerPluginHostIpc() {
   })
   ipcMain.handle('plugin-host:probe', (_event, payload) => probeRuntime(payload?.address))
 
-  ipcMain.handle('plugin-host:read-data', (_event, payload) =>
-    readPluginData(micaHome(), payload?.pluginId)
-  )
+  ipcMain.handle('plugin-host:read-data', (_event, payload) => {
+    const options = Object.hasOwn(payload ?? {}, 'key') ? { key: payload.key } : {}
+    return readPluginData(micaHome(), payload?.pluginId, options)
+  })
 
   // 失败直接抛：`POST /api/invoke` 会把 Error 的 message 变成 `{ ok: false, error }`。
   ipcMain.handle('plugin-host:write-data', (_event, payload) => {
     const options = Object.hasOwn(payload ?? {}, 'expectedVersion')
       ? { expectedVersion: payload.expectedVersion }
       : {}
+    if (Object.hasOwn(payload ?? {}, 'key')) options.key = payload.key
     return writePluginData(micaHome(), payload?.pluginId, payload?.value, options)
   })
 

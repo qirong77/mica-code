@@ -17,6 +17,13 @@
 
 面板视图可返回 `cards`（每插件最多 3 张）：`{ id, title, summary?, detail?, tone?, revision, actions?, impressionAction? }`。卡片动作 `{ id, label, key?, tone? }` 复用面板动作通道；`key` 应携带版本并由插件校验，拒绝旧界面执行新内容。`impressionAction` 仅用于记录实际展示，不应产生用户可见操作。清单声明 `desktop.panel.dynamicShortcuts: true` 让快捷区获取卡片视图。卡片里显示摘要，详细清单仍放 `sections`。
 
+## Notebook 本地笔记本
+
+随包 `notebook` 在侧栏提供 Notebook 整页：目录树、本地富文本与表格编辑，和会话笔记相互独立。
+核心编辑器在 `plugins/notebook/editor/src/`，第三方依赖固定版本从 CDN 运行时加载；数据在
+`plugin-data/notebook/data.json` 与 `documents/<id>.json`。首次打开需要 CDN 网络。
+具体能力、限制与开发方式见 [Notebook](./notebook/README.md)。
+
 ## 目录结构
 
 ```
@@ -1005,3 +1012,19 @@ const child = spawn(micaExecutable, ['app-server', '--dir', cwd, '--parent', thi
 ### Web 基础控件
 
 插件界面从 `@mica-config-ui/web` 复用 Arco Design React 基础控件：`Button`、`Switch`、`Checkbox`、`SelectMenu`、`DateField`、`Tag`、`Input`、`InputNumber` 等。普通输入的 `onChange` 接收值，不是 DOM event；完整 App 的 `ArcoProvider` 与 `body.mica-arco-theme` 为基础控件及 Portal 提供统一主题；内嵌设置布局才套 `.mica-config-ui is-embed`。普通工具栏动作可用 `ArcoAction`（原生事件与 ref 透传，纯图标传 `iconOnly`），富内容悬浮卡片使用共享 `ArcoPopover`，不要用旧皮肤覆盖 Arco。不要在插件中自绘第二份基础控件；业务布局、专用编辑器与拖拽交互保持原有实现。模型通过 quick-buttons 建立的按钮默认使用主题强调色；其它插件的普通静态入口仍用中性色。
+
+### 插件独立文档与隔离 Web 页面
+
+前端 `api.documents.read(key)` / `write(key, value, { expectedVersion })` 访问插件自己的
+`$MICA_HOME/plugin-data/<id>/documents/<key>.json`，6 MiB UTF-8 JSON 上限；`key` 只接受
+安全标识符，不接受目录、`..` 或符号链接。现有 `readData/writeData` 仍是 256 KiB 的
+`data.json`，不改变其语义。读取缺失文档返回 `{ value: null, version: null }`，正文损坏显式报错。
+写入使用同一份跨进程锁、CAS 与原子替换，冲突后插件保留草稿；宿主不解析文档业务结构。
+
+整页可以注册 `api.page.beforeClose(async () => boolean)`，返回 `false` 阻止宿主返回按钮关闭，
+返回的取消函数用于卸载。保存失败不应通过关闭页面静默丢弃内容。
+
+需要隔离第三方运行时的随包插件可提供 `web-build.mjs` 的 default `async build({ outDir })`。
+桌面通用构建器发现后输出到 `plugin-web/<id>/`；此静态目录开放跨源读取以支持 opaque-origin
+sandbox 模块，不对宿主 API 开放 CORS。插件在自己的 `desktop.jsx` 管理 iframe、消息认证、
+CDN 版本与 CSP，宿主不写具体插件分支。UI 仍复用宿主共享主题与控件适配，不能借隔离再维护一套皮肤。

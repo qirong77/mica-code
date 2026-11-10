@@ -82,3 +82,7 @@ npm run start:web          # 运行已构建的 Web 运行时
 - 对外文案不依赖个人路径与未公开项目；不写虚构成果或无证据排行。
 - 命令表必须与代码一致（`ALLOW_DURING_TURN_COMMANDS` 与 `allowDuringTurn`），新增/删除命令同步 README、命令页与 `packages/mica-builtin-commands/README.md`。
 - 截图必须可复现：脚本化 mock provider（`scripts/demo-mock-provider.mjs`）→ 隔离 demo home → 运行时 → `chat:start` → 受控浏览器截图。产物固定三个，内容只用示例数据。
+
+## 隔离插件 Web 运行时
+
+桌面 renderer 的 `pluginWebAssets()` 自动构建提供 `plugins/*/web-build.mjs` 的随包插件，静态文件进入 `out/renderer/plugin-web/<id>/`。Notebook 编辑器单独管理开发依赖与类型检查（`plugins/notebook/editor` 下 `npm ci --ignore-scripts`、`npm run typecheck`），第三方库在运行时由 CDN 加载，主仓库 `typecheck` 不重复检查这份独立项目。隔离调试只向 `temp/` 或 `/private/tmp` 输出，不覆盖已安装应用。

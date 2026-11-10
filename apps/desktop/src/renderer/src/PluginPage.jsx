@@ -1,8 +1,9 @@
 import { ArcoAction } from '@mica-config-ui/web'
-import { Suspense, useMemo } from 'react'
+import { Suspense, useMemo, useRef } from 'react'
 import { IconArrowLeft } from '@tabler/icons-react'
 import { createPluginHostApi } from './plugin-host'
 import { useIsMobile } from './hooks'
+import { notify } from './notify'
 
 /**
  * 插件整页（清单 `desktop.page`）。
@@ -15,8 +16,28 @@ import { useIsMobile } from './hooks'
  */
 export function PluginPage({ entry, onClose }) {
   const isMobile = useIsMobile()
-  const api = useMemo(() => createPluginHostApi(entry.id), [entry.id])
+  const beforeClose = useMemo(() => new Set(), [entry.id])
+  const closing = useRef(false)
+  const api = useMemo(() => ({
+    ...createPluginHostApi(entry.id),
+    page: {
+      beforeClose(handler) {
+        beforeClose.add(handler)
+        return () => beforeClose.delete(handler)
+      }
+    }
+  }), [entry.id, beforeClose])
   const Page = entry.module.Page ?? entry.module.default
+  const close = async () => {
+    if (closing.current) return
+    closing.current = true
+    try {
+      for (const handler of beforeClose) if ((await handler()) === false) return
+      onClose()
+    } catch (error) {
+      notify({ key: `plugin-page-close:${entry.id}`, text: '页面暂时无法关闭', detail: error?.message || String(error), level: 'error' })
+    } finally { closing.current = false }
+  }
 
   return (
     <div className="fixed inset-0 z-[9500] flex flex-col bg-canvas">
@@ -35,7 +56,7 @@ export function PluginPage({ entry, onClose }) {
             title="返回对话"
             aria-label="返回对话"
             className="flex h-6 shrink-0 items-center gap-1 px-1.5 transition-colors "
-            onClick={onClose}
+            onClick={close}
           >
             <IconArrowLeft size={13} />
             <span className="text-xs">返回对话</span>
@@ -53,7 +74,7 @@ export function PluginPage({ entry, onClose }) {
               <div className="grid h-full place-items-center text-xs text-fg-muted">正在加载…</div>
             }
           >
-            <Page api={api} onClose={onClose} />
+            <Page api={api} onClose={close} />
           </Suspense>
         </div>
       </div>

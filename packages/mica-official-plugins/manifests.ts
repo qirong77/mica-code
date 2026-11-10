@@ -11,6 +11,7 @@ import globalSearchManifest from '../../plugins/global-search/plugin.json';
 import harnessReviewManifest from '../../plugins/harness-review/plugin.json';
 import memoryManifest from '../../plugins/memory/plugin.json';
 import mobileRelayManifest from '../../plugins/mobile-relay/plugin.json';
+import notebookManifest from '../../plugins/notebook/plugin.json';
 import quickButtonsManifest from '../../plugins/quick-buttons/plugin.json';
 import replyDigestManifest from '../../plugins/reply-digest/plugin.json';
 import scheduleManifest from '../../plugins/schedule/plugin.json';
@@ -58,6 +59,7 @@ export const officialPluginManifests: PluginManifest[] = [
   readManifest(evolutionManifest),
   readManifest(globalSearchManifest),
   readManifest(mobileRelayManifest),
+  readManifest(notebookManifest),
   readManifest(quickButtonsManifest),
   readManifest(replyDigestManifest),
   readManifest(scheduleManifest),

@@ -54,12 +54,19 @@ export function openRuntimeTarget(url, { userAgent, open, assign } = {}) {
 
 /**
  * 交给插件 `desktop.jsx` 的那份 api。`pluginId` 由宿主注入，插件不必自己拼——它也
- * 拼不对：数据文件按插件 id 落在 `$MICA_HOME/plugin-data/<id>/data.json`。
+ * 拼不对：配置与独立文档都落在 `$MICA_HOME/plugin-data/<id>/` 下。
  */
 export function createPluginHostApi(pluginId, session = null) {
   const host = window.mica?.pluginHost
   const chat = window.mica?.chat
   const target = session ? { sessionId: session.sessionId || null, cwd: session.cwd || null } : null
+  const documentOptions = (key, options) => {
+    // undefined/function 等在 JSON 传输里会被丢掉，不能让文档请求意外落到 data.json。
+    if (typeof key !== 'string' || !key) throw new Error('插件文档 key 必须是非空字符串')
+    return options && Object.hasOwn(options, 'expectedVersion')
+      ? { key, expectedVersion: options.expectedVersion }
+      : { key }
+  }
   const launcherControl = (action, path) => {
     if (isElectronShell(navigator.userAgent)) return host.launcherControl(pluginId, action, path)
     if (action === 'status') return Promise.resolve({ native: false, registered: false })
@@ -90,6 +97,12 @@ export function createPluginHostApi(pluginId, session = null) {
     /** 插件自己的数据及内容版本。写入时可带 expectedVersion，冲突后重读并重放修改。 */
     readData: () => host.readData(pluginId),
     writeData: (value, options) => host.writeData(pluginId, value, options),
+    /** 独立本地文档，共享版本 CAS 语义，不占用小配置 data.json 的额度。 */
+    documents: {
+      read: async (key) => host.readData(pluginId, documentOptions(key)),
+      write: async (key, value, options) =>
+        host.writeData(pluginId, value, documentOptions(key, options))
+    },
     /**
      * 运行时的远程访问策略：别的机器要进这台机器时要不要口令、口令是什么、别人从哪个
      * 地址进来（`addresses`）。这是宿主自己的能力，不是插件的私有数据——请求分派用的是

@@ -1,0 +1,202 @@
+.table-selection-handles {
+  position: fixed;
+  inset: 0;
+  z-index: 75;
+  overflow: hidden;
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-select: none;
+  color: var(--color-text-3);
+  font-family: inherit;
+}
+
+.table-selection-rail {
+  position: absolute;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.table-selection-handle-slot {
+  position: absolute;
+  pointer-events: none;
+}
+
+.table-selection-handle,
+.table-selection-all,
+.table-selection-handle-grip {
+  box-sizing: border-box;
+  appearance: none;
+  -webkit-appearance: none;
+  position: absolute;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+  min-height: 0;
+  border: 1px solid var(--color-border-2, #e5e6eb);
+  border-radius: 3px;
+  background: var(--color-fill-1, #f7f8fa);
+  color: var(--color-text-3, #86909c);
+  font: inherit;
+  line-height: 1;
+  pointer-events: auto;
+  cursor: pointer;
+  touch-action: none;
+  transition: background-color 120ms, border-color 120ms, color 120ms;
+}
+
+.table-selection-handle {
+  inset: 0;
+}
+
+.table-selection-handle.is-column {
+  margin-inline: 1px;
+}
+
+.table-selection-handle.is-row {
+  margin-block: 1px;
+}
+
+.table-selection-handle.is-column.has-grip {
+  padding-right: 18px;
+}
+
+.table-selection-handle.is-row.has-grip {
+  padding-bottom: 18px;
+}
+
+.table-selection-handle:hover,
+.table-selection-all:hover {
+  background: rgb(var(--primary-1, 232, 243, 255));
+  border-color: rgb(var(--primary-3, 148, 191, 255));
+  color: rgb(var(--primary-6, 22, 93, 255));
+}
+
+.table-selection-handle.is-active,
+.table-selection-all.is-active {
+  background: rgb(var(--primary-1, 232, 243, 255));
+  border-color: rgb(var(--primary-3, 148, 191, 255));
+  color: rgb(var(--primary-6, 22, 93, 255));
+}
+
+.table-selection-handle:focus-visible,
+.table-selection-all:focus-visible,
+.table-selection-handle-grip:focus-visible {
+  outline: 2px solid rgb(var(--primary-6, 22, 93, 255));
+  outline-offset: -2px;
+}
+
+.table-selection-handle-mark {
+  width: 10px;
+  height: 2px;
+  border-radius: 2px;
+  background: currentColor;
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+.table-selection-handle.is-row .table-selection-handle-mark {
+  width: 2px;
+  height: 10px;
+}
+
+.table-selection-handle-count {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  font-size: 9px;
+  font-weight: 600;
+  line-height: 10px;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+}
+
+.table-selection-handle.is-row .table-selection-handle-count {
+  writing-mode: vertical-rl;
+  text-orientation: mixed;
+}
+
+.table-selection-handle-grip {
+  z-index: 1;
+  border-color: transparent;
+  background: rgb(var(--primary-1, 232, 243, 255));
+  color: rgb(var(--primary-5, 64, 128, 255));
+  cursor: grab;
+  touch-action: auto;
+}
+
+.table-selection-handle-grip.is-column {
+  width: 18px;
+  height: 12px;
+}
+
+.table-selection-handle-grip.is-row {
+  width: 12px;
+  height: 18px;
+}
+
+.table-selection-handle-grip .arco-icon {
+  width: 12px;
+  height: 12px;
+  pointer-events: none;
+}
+
+.table-selection-handle-grip:hover {
+  background: rgb(var(--primary-2, 190, 218, 255));
+  color: rgb(var(--primary-6, 22, 93, 255));
+}
+
+.table-selection-handle-grip:active {
+  cursor: grabbing;
+}
+
+.table-selection-all {
+  background: var(--color-bg-2, #fff);
+}
+
+.table-selection-all svg {
+  pointer-events: none;
+}
+
+.table-selection-drop-line {
+  position: absolute;
+  z-index: 2;
+  border-radius: 2px;
+  background: rgb(var(--primary-6, 22, 93, 255));
+  box-shadow: 0 0 0 1px var(--color-bg-2, #fff);
+  pointer-events: none;
+}
+
+.table-selection-drop-line::before {
+  content: '';
+  position: absolute;
+  left: -2px;
+  top: -2px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: inherit;
+}
+
+.table-selection-screen-reader {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+  pointer-events: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .table-selection-handle,
+  .table-selection-all,
+  .table-selection-handle-grip {
+    transition: none;
+  }
+}

@@ -4,6 +4,8 @@
 
 ## 包说明
 
+桌面插件前端的 `api.documents.read/write` 在各自 `plugin-data/<id>/documents/` 中保存带版本的独立 JSON 文档（6 MiB，CAS 和原子写），配置用 `readData/writeData`（256 KiB）保持不变；整页可用 `api.page.beforeClose` 等待保存后再返回。细节见 [插件文档](../plugins/README.md#插件独立文档与隔离-web-页面)。
+
 插件动作输入 `PluginActionInput.cwd` 来自发起方工作区（可省略），配置页 `ConfigWebApp.actionCwd` 与
 `runPluginAction(id, action, values, cwd)` 在 HTTP / IPC / CLI 间传递，不从服务进程推断。
 `mica-plugin` 的 `createPluginStatus()` 纯函数生成装配快照，`ctx.pluginStatus?.()` 读取当前 manager
