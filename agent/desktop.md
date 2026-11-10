@@ -6,7 +6,10 @@
   和独立浮窗；`host/plugin-launcher-runtime.js` 按目录挂载随包插件自己的后端，
   `renderer/src/PluginLauncher.jsx` 挂载插件 `Launcher`，不启动聊天。原生动作复用
   私有系统 socket `/plugin-launcher`；打开文件/目录经主窗口 `__micaDesktopAction`
-  进入 `openFileInView`，设置进入插件详情。插件停用后释放快捷键、销毁浮窗并 dispose 后端。
+  进入 `openFileInView`，设置进入插件详情。macOS 浮窗使用非激活式 `panel`：只接收键盘焦点，
+  不激活主应用；它自带跨 Space / 全屏显示，不再调用会改变整个应用进程类型的
+  `setVisibleOnAllWorkspaces`。只有打开路径 / 设置才经主窗口接管。插件停用后释放快捷键、
+  销毁浮窗并 dispose 后端。
 
 | 层                    | 职责                                                                    |
 | --------------------- | ----------------------------------------------------------------------- |

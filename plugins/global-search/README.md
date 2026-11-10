@@ -84,6 +84,9 @@ await launcher.request('remember', { path: item.path });
 
 ```sh
 bunx vitest run --project unit plugins/global-search/search.test.ts
+bunx vitest run --project unit plugins/global-search/desktop.test.ts
 ```
 
 测试使用临时文件系统，覆盖中文与空格路径、文件夹和递归深度、隐藏及产物目录、符号链接、重叠根目录、权限异常 mock、扫描条目/目录/时间预算、查询排序及 80 条上限、缓存与并发去重、配置变更，以及全局最近记录的版本冲突重放、并发写入、30 条限制和范围校验。无需构建或重启应用。
+
+`desktop.test.ts` 渲染真实共享 Arco 输入框并检查插件局部 CSS 合约：填满搜索行、继承字体、透明无边框、主题 placeholder，以及 hover / focus / disabled 不改变外观或尺寸。浏览器层叠与实际尺寸用 `apps/desktop/.probe/global-search/` 测量（运行方式见 `.probe/README.md`），包括 767px 以下触发的窄屏字号规则；探针不连接真实搜索或打开文件。

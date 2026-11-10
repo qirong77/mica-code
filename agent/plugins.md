@@ -132,6 +132,7 @@ Electron 外壳 `main/plugin-launchers.js` 管理系统快捷键与独立浮窗�
 前端 `api.launcher` 提供 `request` / `status` / `retry` / `show` / `close` / `configure` / `openPath`；
 原生动作走已有私有系统 socket 的 `/plugin-launcher`，路径交给主窗口唯一的编辑器入口。
 插件设置页可打开启动器；浏览器宿主用整页显示同一组件，系统快捷键与浮窗仅桌面应用可用。
+macOS 浮窗只取键盘焦点、不连带唤起主应用；原生窗口策略见 `desktop.md` 的「三层边界与装配」。
 这类模块同 `desktop.jsx` 一样只支持随包插件，无用户插件运行期代码加载。
 
 `desktop` 能力只有桌面端 spawn 的 app-server 提供：`buildSpawnEnv` 注入 `MICA_PLUGIN_DESKTOP_HOST=1`（别用 `MICA_DESKTOP_HOST`，那是运行时的绑定地址），`runAppServer` 据此传 `desktopHost` 给 `HeadlessPluginHost`。CLI / TUI / `mica exec` 里没有它，依赖插件整块跳过。

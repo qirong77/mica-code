@@ -40,18 +40,42 @@
   color: var(--color-fg-muted, var(--text-soft));
 }
 
-.global-search-input {
+/* 继续使用共享 Arco Input，只在搜索行内恢复 quick pick 的无框外观与继承字号。
+   三个类名压过设置页 scoped 控件的高度与字号，不依赖 chunk 加载顺序。 */
+.global-search .global-search-input.arco-input {
+  width: auto;
   min-width: 0;
   flex: 1 1 auto;
   height: 100%;
   padding: 0;
+  background: transparent;
+  border: none;
+  outline: none;
+  box-shadow: none;
+  color: inherit;
+  font: inherit;
 }
 
-/* 整个浮窗就是一个搜索框，输入框不再单独描边。配置页样式里的全局 `:focus-visible`
-   会给它套一圈 1px 外框（outline-offset: 1px），权重与上面的单类名相同，只靠加载
-   顺序是压不住的——这里带上 :focus-visible 把权重提到两档。 */
+/* 桌面 app.css 的窄屏规则是 #root input；浮窗宽度也会命中它，字号仍跟随搜索行。 */
+#root .global-search .global-search-input.arco-input {
+  font: inherit;
+}
 
-/* 图标按钮：常态无框，悬停才浮出一层底，跟应用里的一排图标按钮一致。 */
+.global-search .global-search-input.arco-input:is(:hover, :focus, :focus-visible, :disabled, .arco-input-disabled) {
+  background: transparent;
+  border: none;
+  outline: none;
+  box-shadow: none;
+}
+
+.global-search .global-search-input.arco-input:disabled {
+  color: var(--color-fg-muted, var(--text-soft));
+}
+
+.global-search .global-search-input.arco-input::placeholder {
+  color: var(--color-fg-muted, var(--text-soft));
+  opacity: 1;
+}
 
 /* 快捷键未注册 / 打开失败：一条细提示，不另起卡片。 */
 .global-search-notice {
@@ -74,8 +98,6 @@
   flex: 1 1 auto;
   overflow-wrap: anywhere;
 }
-
-/* 行内文字动作（重试、设置、打开设置）：应用里这类动作用蓝色文字，不画按钮框。 */
 
 .global-search-body {
   min-height: 0;

@@ -12,6 +12,13 @@ const root = fileURLToPath(new URL('../../../..', import.meta.url))
 export default defineConfig({
   root: fileURLToPath(new URL('.', import.meta.url)),
   plugins: [react(), tailwindcss()],
-  resolve: { alias: [{ find: /^(apps|plugins)\//, replacement: `${root}/$1/` }] },
+  resolve: {
+    dedupe: ['react', 'react-dom'],
+    alias: [
+      { find: '@mica-config-ui/web', replacement: `${root}/packages/mica-config-ui/web/index.tsx` },
+      { find: '@packages', replacement: `${root}/packages` },
+      { find: /^(apps|plugins)\//, replacement: `${root}/$1/` }
+    ]
+  },
   server: { port: 5231, fs: { allow: [root] } }
 })

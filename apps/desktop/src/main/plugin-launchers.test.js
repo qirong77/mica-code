@@ -10,7 +10,7 @@ afterEach(() => {
   for (const close of cleanups.splice(0)) close()
 })
 
-function fixture({ occupied = false, load } = {}) {
+function fixture({ occupied = false, load, platform = 'darwin' } = {}) {
   let shortcutOccupied = occupied
   const home = mkdtempSync(join(tmpdir(), 'mica-launcher-test-'))
   const disabled = new Set()
@@ -21,11 +21,14 @@ function fixture({ occupied = false, load } = {}) {
     constructor(options) {
       super()
       this.options = options
+      this.calls = []
       this.webContents = new EventEmitter()
       this.webContents.setWindowOpenHandler = () => {}
       windows.push(this)
     }
-    setVisibleOnAllWorkspaces() {}
+    setVisibleOnAllWorkspaces(...args) {
+      this.calls.push(['setVisibleOnAllWorkspaces', ...args])
+    }
     async loadURL(url) {
       this.url = url
       await load?.()
@@ -43,12 +46,16 @@ function fixture({ occupied = false, load } = {}) {
       this.destroyed = true
     }
     hide() {
+      this.calls.push(['hide'])
       this.visible = false
     }
     show() {
+      this.calls.push(['show'])
       this.visible = true
     }
-    focus() {}
+    focus() {
+      this.calls.push(['focus'])
+    }
     getSize() {
       return [720, 480]
     }
@@ -82,6 +89,7 @@ function fixture({ occupied = false, load } = {}) {
     },
     pageUrl: 'http://127.0.0.1:8787/?existing=1',
     backgroundColor: () => '#ffffff',
+    platform,
     deliver: async (intent) => {
       delivered.push(intent)
     },
@@ -136,6 +144,38 @@ describe('manifest desktop launchers', () => {
     expect(f.windows[0].destroyed).not.toBe(true)
   })
 
+  test('macOS uses a nonactivating panel without changing the app process type', async () => {
+    const f = fixture()
+    await f.control('show')
+    const win = f.windows[0]
+    expect(win.options.type).toBe('panel')
+    expect(win.options.focusable).not.toBe(false)
+    expect(win.options.parent).toBeUndefined()
+    expect(win.calls).toEqual([['show'], ['focus']])
+    await f.control('close')
+    f.bindings.get('Alt+Space')()
+    await Promise.resolve()
+    expect(f.windows).toHaveLength(1)
+    expect(win.calls).toEqual([['show'], ['focus'], ['hide'], ['show'], ['focus']])
+    win.emit('blur')
+    expect(win.isVisible()).toBe(false)
+    expect(f.delivered).toEqual([])
+  })
+
+  for (const platform of ['win32', 'linux']) {
+    test(`${platform} retains the ordinary focusable launcher window`, async () => {
+      const f = fixture({ platform })
+      await f.control('show')
+      const win = f.windows[0]
+      expect(win.options.type).toBeUndefined()
+      expect(win.calls).toEqual([
+        ['setVisibleOnAllWorkspaces', true, { visibleOnFullScreen: true }],
+        ['show'],
+        ['focus']
+      ])
+    })
+  }
+
   test('does not reshow a pending window after disabling and toggles the visible palette off', async () => {
     let finishLoad
     const f = fixture({
@@ -168,6 +208,28 @@ describe('manifest desktop launchers', () => {
     await expect(f.control('openPath', { path: join(f.home, 'missing') })).rejects.toThrow()
     await f.control('openPath', { path: f.home })
     expect(f.delivered.at(-1).path).toBe(f.home)
+  })
+
+  test('Escape only hides the panel; settings explicitly delivers to the main window', async () => {
+    const f = fixture()
+    await f.control('show')
+    let prevented = false
+    f.windows[0].webContents.emit(
+      'before-input-event',
+      {
+        preventDefault: () => {
+          prevented = true
+        }
+      },
+      { type: 'keyDown', key: 'Escape' }
+    )
+    expect(prevented).toBe(true)
+    expect(f.windows[0].isVisible()).toBe(false)
+    expect(f.delivered).toEqual([])
+    await f.control('show')
+    await f.control('configure')
+    expect(f.delivered).toEqual([{ type: 'configurePlugin', pluginId: 'sample' }])
+    expect(f.windows[0].isVisible()).toBe(false)
   })
 
   test('disabling releases only the owned shortcut and destroys its palette', async () => {

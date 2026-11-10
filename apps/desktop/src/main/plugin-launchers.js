@@ -13,6 +13,7 @@ export function createPluginLaunchers({
   pageUrl,
   backgroundColor,
   deliver,
+  platform = process.platform,
   onError = console.warn
 }) {
   const records = new Map()
@@ -77,12 +78,16 @@ export function createPluginLaunchers({
         fullscreenable: false,
         skipTaskbar: true,
         alwaysOnTop: true,
+        ...(platform === 'darwin' ? { type: 'panel' } : {}),
         title: spec.title,
         backgroundColor: backgroundColor(),
         webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true }
       })
       record.win = win
-      win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
+      // macOS panels accept keyboard focus without activating the app and already
+      // join all Spaces, including fullscreen. setVisibleOnAllWorkspaces would
+      // additionally transform the app's process type and disturb other windows.
+      if (platform !== 'darwin') win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
       win.on('blur', () => {
         if (!win.isDestroyed()) win.hide()
       })
