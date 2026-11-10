@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test'
+import { readFileSync } from 'node:fs'
 import {
   SESSION_FILTER_HOUR_MS,
   SESSION_FILTER_MODES,
@@ -11,6 +12,26 @@ import {
 const NOW = new Date(2026, 2, 15, 15, 30).getTime()
 const ago = (hours) => NOW - hours * 60 * 60 * 1000
 const session = (id, hours, extra = {}) => ({ id, updatedAtMs: ago(hours), ...extra })
+
+describe('会话筛选按钮', () => {
+  const source = readFileSync(new URL('./SessionTree.jsx', import.meta.url), 'utf8')
+  const buttons = source.slice(
+    source.indexOf('aria-label="会话筛选"'),
+    source.indexOf('{searching && (', source.indexOf('aria-label="会话筛选"'))
+  )
+
+  it('显式伸展以覆盖共享按钮的 flex: none，窄时保持文字完整并横向滚动', () => {
+    expect(buttons).toContain("flex: '1 0 auto'")
+    expect(buttons).toContain('min-w-fit whitespace-nowrap')
+    expect(buttons).toContain('overflow-x-auto')
+  })
+
+  it('当前档位使用强调色主按钮，其余档位保留普通灰底', () => {
+    expect(buttons).toContain('aria-pressed={filterMode === mode.id}')
+    expect(buttons).toContain("tone={filterMode === mode.id ? 'accent' : undefined}")
+    expect(buttons).toContain("appearance={filterMode === mode.id ? 'primary' : 'secondary'}")
+  })
+})
 
 describe('sessionFilterMode', () => {
   it('档位是全部 + 4/8/12/24 小时，按时间从短到长排', () => {

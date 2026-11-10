@@ -1963,7 +1963,7 @@ export function SessionTree({
           </div>
           {/* 几档互斥，默认「全部」：它不筛任何东西，列表照旧是 Pinned / Projects /
               Recent。选其余档时列表整体变平铺（见下面的 filterBlocks 分支）。
-              按钮按内容定宽（`min-w-fit`，标签不换行不截断），侧栏宽时等分铺满、
+              按钮按内容定宽（`min-w-fit`，标签不换行不截断），侧栏宽时均分剩余空间、
               窄时整行横向滚动——滚动条全局隐藏，所以看起来只是最右边那个被切掉半截，
               这正是「右边还有」的提示。搜索接管列表时不显示这一行——两个入口同时在
               屏上会分不清谁在过滤谁。 */}
@@ -1980,9 +1980,17 @@ export function SessionTree({
                   aria-pressed={filterMode === mode.id}
                   title={filterHint(mode)}
                   tone={filterMode === mode.id ? 'accent' : undefined}
-                  appearance="secondary"
-                  className="min-w-fit flex-1 whitespace-nowrap"
-                  style={{ height: 24, paddingInline: 6, fontSize: 11.5, fontWeight: 500, borderRadius: 6 }}
+                  appearance={filterMode === mode.id ? 'primary' : 'secondary'}
+                  className="min-w-fit whitespace-nowrap"
+                  // 共享 Arco 按钮的未分层 flex: none 会压过 Tailwind 的 flex-1。
+                  style={{
+                    flex: '1 0 auto',
+                    height: 24,
+                    paddingInline: 6,
+                    fontSize: 11.5,
+                    fontWeight: 500,
+                    borderRadius: 6
+                  }}
                   onClick={() => chooseFilter(mode.id)}
                 >
                   {mode.label}

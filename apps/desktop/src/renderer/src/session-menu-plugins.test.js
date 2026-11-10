@@ -1,7 +1,9 @@
 import { describe, expect, test } from 'bun:test'
 import {
   parseSessionMenuAction,
+  retainPendingMenuNotices,
   runSessionMenuPluginAction,
+  runSessionMenuPluginActionWithNotice,
   sessionMenuPluginItems
 } from './session-menu-plugins'
 
@@ -218,4 +220,57 @@ describe('runSessionMenuPluginAction', () => {
     const result = await runSessionMenuPluginAction({ item: { pluginId: 'x' }, target })
     expect(result).toEqual({ ok: false, message: '插件动作无效' })
   })
+})
+
+describe('runSessionMenuPluginActionWithNotice', () => {
+  test('shows progress before a slow model action resolves, then updates the same notice', async () => {
+    const notices = []
+    const pending = new Set()
+    let finish
+    const run = () => new Promise((resolve) => { finish = resolve })
+    const action = runSessionMenuPluginActionWithNotice({
+      item: { pluginId: 'session-compact', pluginAction: 'model', label: '模型压缩' },
+      target: { sessionId: 's-1' },
+      run,
+      appendNotice: (text, variant) => {
+        notices.push({ text, variant })
+        return 'notice-1'
+      },
+      updateNotice: (id, text, variant) => notices.push({ id, text, variant }),
+      onPendingChange: (id, active) => active ? pending.add(id) : pending.delete(id)
+    })
+    expect(notices).toEqual([{ text: '正在模型压缩…', variant: 'info' }])
+    expect(pending.has('notice-1')).toBe(true)
+    finish({ ok: true, message: '模型压缩完成' })
+    expect(await action).toEqual({ ok: true, message: '模型压缩完成' })
+    expect(notices[1]).toEqual({ id: 'notice-1', text: '模型压缩完成', variant: 'info' })
+    expect(pending.size).toBe(0)
+  })
+
+  test('updates progress to an error and clears the pending marker when the host rejects', async () => {
+    const notices = []
+    const pending = new Set()
+    const result = await runSessionMenuPluginActionWithNotice({
+      item: { pluginId: 'session-compact', pluginAction: 'model', label: '模型压缩' },
+      run: async () => { throw new Error('请求超时') },
+      appendNotice: (text, variant) => {
+        notices.push({ text, variant })
+        return 'notice-2'
+      },
+      updateNotice: (id, text, variant) => notices.push({ id, text, variant }),
+      onPendingChange: (id, active) => active ? pending.add(id) : pending.delete(id)
+    })
+    expect(result.ok).toBe(false)
+    expect(notices[1]).toEqual({ id: 'notice-2', text: '插件动作失败：请求超时', variant: 'error' })
+    expect(pending.size).toBe(0)
+  })
+})
+
+test('history replacement keeps queued prompts and pending menu progress, not old notices', () => {
+  const queued = { id: 'queued', queued: true }
+  const pending = { id: 'progress', kind: 'notice', text: '正在模型压缩…' }
+  const old = { id: 'old', kind: 'notice' }
+  expect(retainPendingMenuNotices([old, queued, pending], new Set(['progress']))).toEqual([
+    queued, pending
+  ])
 })

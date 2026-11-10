@@ -112,3 +112,27 @@ export async function runSessionMenuPluginAction({ item, target = {}, run, copy 
   if (result?.message) return { ok: true, message: result.message }
   return { ok: false, message: '插件没有返回内容' }
 }
+
+/** 菜单关闭后立即显示进度，结果回包后原位更新，而不是长时间看起来没有反应。 */
+export async function runSessionMenuPluginActionWithNotice({
+  item,
+  appendNotice,
+  updateNotice,
+  onPendingChange,
+  ...options
+}) {
+  const noticeId = appendNotice(`正在${item?.label || '执行插件动作'}…`, 'info')
+  onPendingChange?.(noticeId, true)
+  try {
+    const result = await runSessionMenuPluginAction({ item, ...options })
+    updateNotice(noticeId, result.message, result.ok ? 'info' : 'error')
+    return result
+  } finally {
+    onPendingChange?.(noticeId, false)
+  }
+}
+
+/** 压缩回推的新历史替换当前消息时，保留尚未收到动作结果的那条进度通知。 */
+export function retainPendingMenuNotices(messages, pendingIds) {
+  return messages.filter((message) => message.queued || pendingIds.has(message.id))
+}

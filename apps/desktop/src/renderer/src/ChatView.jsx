@@ -108,9 +108,11 @@ import { DigestNotice } from './DigestNotice'
 import { newlyAnsweredBtwEntries } from './btw-thread'
 import { canCollapseMessage, measureChatCollapse } from './chat-collapse'
 import { useChatTooltip } from './chat-hover-tooltip'
+import { displayedModelId, selectedModelEntry } from './chat-model-identity'
 import {
   parseSessionMenuAction,
-  runSessionMenuPluginAction,
+  retainPendingMenuNotices,
+  runSessionMenuPluginActionWithNotice,
   useSessionMenuPlugins
 } from './session-menu-plugins'
 
@@ -3538,6 +3540,8 @@ export function ChatView({
   const previousVisibleRef = useRef(visible)
 
   const [messages, setMessages] = useState([])
+  // 会话菜单动作可能在模型压缩期间改写整份历史；保住等待中的 notice，直到动作回包。
+  const pendingMenuNoticesRef = useRef(new Set())
   const [input, setInput] = useState('')
   const inputRef = useLatest(input)
   const [running, setRunning] = useState(false)
@@ -5040,12 +5044,11 @@ export function ChatView({
             event.sessionID || nodeIdRef.current
           )
           updateMessages((previous) => {
-            // 排队中的乐观行跟着换过来的历史一起丢，但它们在 `messages` 里还要留着：
+            // 排队中的乐观行和菜单动作的进度通知在 `messages` 里还要留着：
             // 输入框上方的 dock 靠这些行补出「确认通知还没回来」的待发送项
-            // （queuedDisplayItems 的 pending）。它们不画进对话（transcriptMessages
-            // 过滤 queued），所以这里只是保留数据、不是重复渲染。
-            const queued = previous.filter((message) => message.queued)
-            return queued.length > 0 ? [...rows, ...queued] : rows
+            // （queuedDisplayItems 的 pending）；进度通知等动作回包后原位更新。
+            const pending = retainPendingMenuNotices(previous, pendingMenuNoticesRef.current)
+            return pending.length > 0 ? [...rows, ...pending] : rows
           })
           // 历史被改写通常也改了上下文占用（压缩写 displayUsage），徽标要跟着走。
           if (event.meta) setMeta(event.meta)
@@ -5815,11 +5818,9 @@ export function ChatView({
           if (kind === 'variant' && result?.ok) {
             // 条目存在但 efforts 为空 = 模型本身没有推理强度可选。这时不能再回落到
             // 全部五档：界面看起来切了档，实际一条参数都发不出去。
-            const activeModel = overridesRef.current.get(nodeId)?.model || meta?.model || ''
-            const entry = (result.models || []).find((item) => {
-              if (!activeModel) return false
-              return item.id === activeModel || item.id.endsWith(`/${activeModel}`)
-            })
+            const entry = selectedModelEntry(
+              result.models || [], overridesRef.current.get(nodeId)?.model, meta?.model, meta?.providerId
+            )
             if (entry && Array.isArray(entry.efforts) && entry.efforts.length === 0) {
               setPicker(null)
               appendNotice('当前模型不提供推理强度选项')
@@ -5831,11 +5832,9 @@ export function ChatView({
             if (!result?.ok)
               return { ...current, loading: false, error: result?.error || '加载失败' }
             if (kind === 'variant') {
-              const activeModel = overridesRef.current.get(nodeId)?.model || meta?.model || ''
-              const entry = (result.models || []).find((item) => {
-                if (!activeModel) return false
-                return item.id === activeModel || item.id.endsWith(`/${activeModel}`)
-              })
+              const entry = selectedModelEntry(
+                result.models || [], overridesRef.current.get(nodeId)?.model, meta?.model, meta?.providerId
+              )
               // 选项就是模型自己声明的档位，原样展示（`max` 不显示成 `xhigh`）；
               // 已知名字补一句说明，未知名字只显示原名。
               const options = (entry?.efforts || []).map((level) => ({
@@ -6946,9 +6945,9 @@ export function ChatView({
   const todoPanel = useMemo(() => {
     return todoPanelForTurn(messages, activityTurnId, running, todoHidden, todoInterrupted, meta?.todoInput)
   }, [activityTurnId, messages, running, todoHidden, todoInterrupted, meta?.todoInput])
-  const activeModel = activeOverrides.model || meta?.model || ''
+  const activeModel = displayedModelId(activeOverrides.model, meta?.model, meta?.providerId)
   const activeEffort = activeOverrides.variant || meta?.effort || null
-  const activeEffortKey = activeOverrides.model || `${meta?.providerId || ''}/${meta?.model || ''}`
+  const activeEffortKey = activeModel
   const activeEffortLevels = modelEfforts?.[activeEffortKey]?.efforts
   // 状态行显示「这一轮真正会发出去的档位」，而不是上一次会话留下的值：
   // 模型没有任何档位时发不出推理参数（显示 `—`）；当前档位不属于这个模型时，host 每轮会把它
@@ -7148,11 +7147,17 @@ export function ChatView({
           appendNotice('发送第一条消息后才能复制会话内容', 'error')
           return
         }
-        const { ok, message } = await runSessionMenuPluginAction({
-          item: pluginMenu,
-          target: { id: nodeIdRef.current, sessionId, cwd: cwdRef.current }
+        const item = sessionMenuPlugins.find((entry) => entry.action === action)
+        await runSessionMenuPluginActionWithNotice({
+          item: { ...pluginMenu, label: item?.label },
+          target: { id: nodeIdRef.current, sessionId, cwd: cwdRef.current },
+          appendNotice,
+          updateNotice,
+          onPendingChange: (id, pending) => {
+            if (pending) pendingMenuNoticesRef.current.add(id)
+            else pendingMenuNoticesRef.current.delete(id)
+          }
         })
-        appendNotice(message, ok ? 'info' : 'error')
         return
       }
       if (action === 'retry') {
@@ -7223,8 +7228,10 @@ export function ChatView({
       onShareSessionRef,
       runSlashCommand,
       running,
+      sessionMenuPlugins,
       send,
-      startCommitTask
+      startCommitTask,
+      updateNotice
     ]
   )
 
@@ -7384,7 +7391,7 @@ export function ChatView({
               className="chat-status-model"
               role="button"
               tabIndex={0}
-              title="切换模型"
+              title={`切换模型 · ${activeModel}`}
               data-popover-trigger="picker"
               onClick={() => openPicker('model')}
             >
@@ -7769,7 +7776,7 @@ export function ChatView({
                     ? activeEffortLabel
                     : picker.kind === 'role'
                       ? meta?.role || 'default'
-                      : meta?.model) ||
+                      : activeModel) ||
                   ''
                 }
                 loading={picker.loading}
