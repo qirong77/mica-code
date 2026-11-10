@@ -178,7 +178,7 @@ Electron 外壳 `main/plugin-launchers.js` 管理系统快捷键与独立浮窗�
 `context()` 返回 `{ localHost }`（客户端实际本机页面地址），`readData/writeData` 访问本机插件数据，
 `probe/open/local` 分别从客户端探活、复用或打开目标窗口、聚焦原本机窗口。清单 `desktop.clientData: true`
 显式开放插件的本机数据；宿主按本机随包清单及启停状态授权，不信任远端页面声明。
-这组能力由外壳 `mica-client:` 协议提供，浏览器里 `client` 为 null；原有 `readData/writeData/access`
+这组能力由外壳隔离的 `window.micaClient` 原生桥提供，以实际桥是否存在检测能力，浏览器里 `client` 为 null；原有 `readData/writeData/access`
 仍属于页面所在运行时。Connections 用客户端清单，远程访问策略用当前运行时，不能整体替换 transport。
 
 插件前端模块的能力就这几件，来自 `renderer/src/plugin-host.js` 的 `createPluginHostApi(pluginId, session)`：`currentHost()`（页面所在运行时的 origin）、`probe(address)`、`readData()` / `writeData(value, options?)`、`open(url)`、`access`（读改写这台机器的远程访问策略）、`action(key)`（执行清单 `actions` 里声明过的动作，宿主转给一次性插件进程 `mica plugin-action`；卡片要「真的干一件事」时用它，不要用 `writeData` 伪造一个请求位再等后端轮询，没声明的 key 会被拒绝，卡片能做的动作与配置页的按钮是同一份声明）、`session`（页面正在看的那条会话：`id()` / `sessionId()` / `cwd()`、`state.read()|write(value)|subscribe()` 读写插件自己的会话级状态（`pluginState[pluginId]`，与 `ctx.sessionState` 同一份，走 `mica/sessionState/get|set`）、`onIdle()` 在这一轮跑完时回调——模型在轮次里写下的状态只能在这一刻重读）。`session` 为 null 表示当前没有打开的会话，卡片要如实画空态。探活、数据读写、访问策略与动作必须由运行时代劳（页面读不到跨源响应、碰不到请求分派、也没有文件系统），落在 `host/plugin-host.js` 的 `plugin-host:probe` / `plugin-host:read-data|write-data` / `plugin-host:access-get|set` / `plugin-host:run-action`；数据文件统一在 `$MICA_HOME/plugin-data/<id>/data.json`，宿主不解析结构。读取返回 `{ value, version }`，缺文件两者为 null、IO 失败显式报错；读改写可带 `{ expectedVersion }`，宿主在跨进程锁内比较版本并原子替换，冲突返回 `{ ok: false, conflict: true }`，插件重读并只重放本次修改。`open` 是纯页面行为，分支在 `shell-env.js` 的 `isElectronShell`。

@@ -536,7 +536,9 @@ export function summary(api) { return api.currentHost() } // 可选：入口行�
   `client.local()`（恢复并聚焦原本机窗口），以及 `client.readData/writeData`（本机同一份插件数据，
   读取版本及写入 `expectedVersion` 与下述数据 API 相同）。数据访问要求本机随包清单声明
   `desktop.clientData: true` 且插件未停用；远端页面不能靠自己的清单取得本机其它插件数据。
-  能力由外壳的 `mica-client:` 协议提供，无通用 IPC、无 preload，不受当前页面所在机器影响。
+  能力由外壳的隔离 preload 提供固定的 `window.micaClient` 方法，不暴露通用 IPC；主进程逐次核对
+  已登记窗口与顶层 frame 的身份及入口来源，不受当前页面所在机器影响。以桥是否存在检测能力，
+  不凭 Electron UA 猜测；旧 `mica-client:` fetch 协议不再支持。
   Connections 显式使用这份本机清单，因此切换机器后保留同一组连接；`access` 继续控制当前运行时。
 - 插件数据：`currentHost()`（页面所在运行时的 origin）、`probe(address)`
   （探活一个地址，页面跨源读不到结果，由运行时代查）、`readData()` / `writeData(value, options?)`

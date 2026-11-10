@@ -1,43 +1,45 @@
-export const CLIENT_SCHEME = 'mica-client'
+export const CLIENT_CONTEXT_CHANNEL = 'mica:client-context'
 
-/** 只有外壳认可的入口且仍停留在该来源的窗口，才能授予客户端能力。 */
-export function isClientOriginAllowed(windows, origin) {
-  for (const state of windows) {
-    if (state.win.isDestroyed() || state.clientOrigin !== origin) continue
-    try {
-      if (new URL(state.win.webContents.getURL()).origin === origin) return true
-    } catch {
-      /* Blank/error pages do not authorize origins. */
+/** Only the registered window's current top-level HTTP(S) page gets capabilities. */
+export function isClientSenderAllowed(windows, event) {
+  try {
+    const sender = event?.sender
+    const frame = event?.senderFrame
+    if (!sender || !frame || frame !== sender.mainFrame || sender.isDestroyed?.()) return false
+    for (const state of windows) {
+      if (state.win.isDestroyed() || state.win.webContents !== sender) continue
+      const origin = httpOrigin(state.clientOrigin)
+      return Boolean(
+        origin &&
+        origin === state.clientOrigin &&
+        httpOrigin(frame.url) === origin &&
+        httpOrigin(sender.getURL()) === origin
+      )
     }
+  } catch {
+    // Destroyed frames/windows and invalid URLs never grant capabilities.
   }
   return false
 }
 
-// Plugin data may occupy 256 KiB; leave room for its JSON request envelope.
-const MAX_BODY_BYTES = 256 * 1024 + 4096
-const PATHS = new Set(['/read-data', '/write-data', '/probe', '/open', '/local', '/context'])
-
-class RequestError extends Error {
-  constructor(status, message) {
-    super(message)
-    this.status = status
-  }
+function httpOrigin(value) {
+  if (typeof value !== 'string') return null
+  const url = new URL(value)
+  return ['http:', 'https:'].includes(url.protocol) ? url.origin : null
 }
 
+// Plugin data may occupy 256 KiB; leave room for its JSON request envelope.
+const MAX_BODY_BYTES = 256 * 1024 + 4096
+const OPERATIONS = new Set(['context', 'read-data', 'write-data', 'probe', 'open', 'local'])
+
 /**
- * Electron-independent handler for protocol.handle on the default session only.
- * isAllowedOrigin must consult actual Mica runtime windows; browser partitions
- * must never register this protocol. Authorization is checked on every request.
- *
- * manifests is an array (or a function returning one) of parsed plugin manifests.
- * readDisabled() returns an iterable of disabled ids. Both may be asynchronous.
- * readData(id) and writeData(id, value, options?) return their results unchanged,
- * including version/CAS conflict results. options is omitted unless the request
- * owns expectedVersion, in which case it is { expectedVersion }.
- * probe(address), open(url), local(), localHost() supply desktop capabilities.
+ * Electron-independent IPC handler. Authorization is checked on every invocation.
+ * manifests is an array (or an async function returning one) of parsed manifests.
+ * readDisabled() returns an iterable of disabled ids. Data results, including CAS
+ * conflicts, pass through unchanged. Omitted expectedVersion stays omitted.
  */
 export function createClientContextHandler({
-  isAllowedOrigin,
+  isAllowedSender,
   manifests,
   readDisabled,
   readData,
@@ -47,161 +49,133 @@ export function createClientContextHandler({
   local,
   localHost
 }) {
-  return async (request) => {
-    // Electron 39 omits Origin on custom protocol Requests but supplies the
-    // browser-validated referrer. Newer shells also supply initiatorOrigin.
-    let origin = request.initiatorOrigin ?? request.headers.get('origin')
-    if (!origin && request.referrer) {
-      try {
-        const referrer = new URL(request.referrer)
-        if (['http:', 'https:'].includes(referrer.protocol)) origin = referrer.origin
-      } catch {
-        /* Invalid/opaque referrers do not authorize a request. */
-      }
-    }
-    // A sandboxed/opaque origin is serialized as the literal string "null".
+  return async (event, operation, payload = {}) => {
     try {
-      if (!origin || origin === 'null' || !(await isAllowedOrigin(origin))) {
-        return jsonResponse(403, { ok: false, error: 'Forbidden origin' })
-      }
+      if (!(await isAllowedSender(event))) return { ok: false, error: 'Forbidden sender' }
     } catch {
-      return jsonResponse(403, { ok: false, error: 'Forbidden origin' })
+      return { ok: false, error: 'Forbidden sender' }
     }
 
     try {
-      const url = new URL(request.url)
-      if (url.protocol !== `${CLIENT_SCHEME}:` || url.hostname !== 'host') {
-        throw new RequestError(403, 'Forbidden host')
-      }
-      if (!PATHS.has(url.pathname)) throw new RequestError(404, 'Unknown client operation')
-      if (request.method === 'OPTIONS') {
-        return new Response(null, { status: 204, headers: corsHeaders(origin) })
-      }
-      if (request.method !== 'POST') throw new RequestError(405, 'Only POST is supported')
-
-      const body = await readJson(request)
+      if (!OPERATIONS.has(operation)) throw new Error('Unknown client operation')
+      const body = readPayload(payload)
       let result
-      switch (url.pathname) {
-        case '/read-data':
-        case '/write-data': {
+      switch (operation) {
+        case 'read-data':
+        case 'write-data': {
           const { pluginId } = body
           if (typeof pluginId !== 'string' || !/^[a-z0-9][a-z0-9._-]*$/.test(pluginId)) {
-            throw new RequestError(400, 'Invalid pluginId')
+            throw new Error('Invalid pluginId')
           }
           const available = await (typeof manifests === 'function' ? manifests() : manifests)
           const manifest = available.find((entry) => entry.id === pluginId)
           const disabled = new Set(await readDisabled())
           if (manifest?.desktopClientData !== true || disabled.has(pluginId)) {
-            throw new RequestError(403, 'Plugin client data access is not enabled')
+            throw new Error('Plugin client data access is not enabled')
           }
-          if (url.pathname === '/read-data') {
+          if (operation === 'read-data') {
             result = await readData(pluginId)
           } else {
-            if (!Object.hasOwn(body, 'value')) throw new RequestError(400, 'Missing value')
+            if (!Object.hasOwn(body, 'value')) throw new Error('Missing value')
             result = Object.hasOwn(body, 'expectedVersion')
               ? await writeData(pluginId, body.value, { expectedVersion: body.expectedVersion })
               : await writeData(pluginId, body.value)
           }
           break
         }
-        case '/probe':
+        case 'probe':
           if (typeof body.address !== 'string' || !body.address.trim()) {
-            throw new RequestError(400, 'Invalid address')
+            throw new Error('Invalid address')
           }
           result = await probe(body.address)
           break
-        case '/open': {
+        case 'open': {
           let target
           try {
             target = typeof body.url === 'string' ? new URL(body.url) : null
           } catch {
-            /* Invalid absolute URLs are rejected below. */
+            // Invalid absolute URLs are rejected below.
           }
           if (!target || !['http:', 'https:'].includes(target.protocol)) {
-            throw new RequestError(400, 'Only HTTP and HTTPS URLs are supported')
+            throw new Error('Only HTTP and HTTPS URLs are supported')
           }
           result = await open(body.url)
           break
         }
-        case '/local':
+        case 'local':
           result = await local()
           break
-        case '/context':
+        case 'context':
           result = { localHost: await localHost() }
           break
       }
-      return jsonResponse(200, { ok: true, result: result === undefined ? null : result }, origin)
+      return { ok: true, result: result === undefined ? null : result }
     } catch (error) {
-      return jsonResponse(
-        error instanceof RequestError ? error.status : 500,
-        { ok: false, error: error instanceof Error ? error.message : String(error) },
-        // Host authorization failures, like origin failures, never grant CORS.
-        error instanceof RequestError && error.status === 403 ? undefined : origin
-      )
+      return { ok: false, error: error instanceof Error ? error.message : String(error) }
     }
   }
 }
 
-function corsHeaders(origin) {
-  return {
-    'Access-Control-Allow-Origin': origin,
-    'Access-Control-Allow-Methods': 'POST, OPTIONS',
-    'Access-Control-Allow-Headers': 'content-type',
-    Vary: 'Origin'
-  }
+function isPlainObject(value) {
+  if (value === null || typeof value !== 'object') return false
+  const prototype = Object.getPrototypeOf(value)
+  return prototype === Object.prototype || prototype === null
 }
 
-function jsonResponse(status, body, origin) {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: {
-      'Content-Type': 'application/json; charset=utf-8',
-      'Cache-Control': 'no-store',
-      ...(origin ? corsHeaders(origin) : {})
-    }
-  })
-}
-
-async function readJson(request) {
-  const mediaType = request.headers.get('content-type')?.split(';', 1)[0].trim().toLowerCase()
-  if (mediaType !== 'application/json') throw new RequestError(415, 'Expected application/json')
-  if (Number(request.headers.get('content-length')) > MAX_BODY_BYTES) {
-    throw new RequestError(413, 'Request body is too large')
-  }
-  const reader = request.body?.getReader()
-  const chunks = []
+/** Validate without invoking getters/toJSON or stringifying an unbounded graph. */
+function readPayload(payload) {
+  if (!isPlainObject(payload)) throw new Error('JSON payload must be a plain object')
   let bytes = 0
-  if (reader) {
-    try {
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-        bytes += value.byteLength
-        if (bytes > MAX_BODY_BYTES) {
-          // Do not wait for an untrusted request producer to finish cancelling.
-          void reader.cancel().catch(() => {})
-          throw new RequestError(413, 'Request body is too large')
-        }
-        chunks.push(value)
+  const addBytes = (size) => {
+    bytes += size
+    if (bytes > MAX_BODY_BYTES) throw new Error('Request body is too large')
+  }
+  const stringBytes = (value) => {
+    // Every UTF-16 code unit needs at least one byte in its JSON representation.
+    if (value.length > MAX_BODY_BYTES) throw new Error('Request body is too large')
+    return Buffer.byteLength(JSON.stringify(value), 'utf8')
+  }
+  const invalid = () => {
+    throw new Error('Invalid JSON payload')
+  }
+  const active = new WeakSet()
+  const stack = [{ value: payload }]
+  while (stack.length) {
+    const { value, exit } = stack.pop()
+    if (exit) {
+      active.delete(value)
+      continue
+    }
+    if (value === null) {
+      addBytes(4)
+    } else if (typeof value === 'string') {
+      addBytes(stringBytes(value))
+    } else if (typeof value === 'boolean') {
+      addBytes(value ? 4 : 5)
+    } else if (typeof value === 'number' && Number.isFinite(value)) {
+      addBytes(JSON.stringify(value).length)
+    } else if (typeof value === 'object') {
+      const array = Array.isArray(value)
+      if ((!array && !isPlainObject(value)) || active.has(value)) invalid()
+      if (array && Object.getPrototypeOf(value) !== Array.prototype) invalid()
+      active.add(value)
+      stack.push({ value, exit: true })
+      const keys = Reflect.ownKeys(value)
+      const count = array ? value.length : keys.length
+      addBytes(2 + Math.max(0, count - 1))
+      if (array && keys.length !== count + 1) invalid()
+      for (let index = 0; index < count; index++) {
+        const key = array ? String(index) : keys[index]
+        if (typeof key !== 'string') invalid()
+        const descriptor = Object.getOwnPropertyDescriptor(value, key)
+        if (!descriptor?.enumerable || !Object.hasOwn(descriptor, 'value')) invalid()
+        if (!array) addBytes(stringBytes(key) + 1)
+        stack.push({ value: descriptor.value })
       }
-    } finally {
-      reader.releaseLock()
+    } else {
+      invalid()
     }
   }
-  const buffer = new Uint8Array(bytes)
-  let offset = 0
-  for (const chunk of chunks) {
-    buffer.set(chunk, offset)
-    offset += chunk.byteLength
-  }
-  let body
-  try {
-    body = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(buffer))
-  } catch {
-    throw new RequestError(400, 'Invalid JSON body')
-  }
-  if (body === null || typeof body !== 'object' || Array.isArray(body)) {
-    throw new RequestError(400, 'JSON body must be an object')
-  }
-  return body
+  // Work with a detached plain JSON value, just as the former JSON request did.
+  return JSON.parse(JSON.stringify(payload))
 }

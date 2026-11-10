@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, globalShortcut, nativeTheme, protocol, screen, shell } from 'electron'
+import { app, BrowserWindow, dialog, globalShortcut, ipcMain, nativeTheme, screen, shell } from 'electron'
 import { spawn } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync, statSync, watch } from 'node:fs'
 import { join } from 'node:path'
@@ -28,7 +28,7 @@ import { officialPluginManifests } from '@packages/mica-official-plugins/manifes
 import { readDisabledPluginIds, resolvePluginStatePath } from '@packages/mica-plugin/PluginState.js'
 import { createPluginLaunchers } from './plugin-launchers.js'
 import { isDevToolsShortcut } from './devtools-shortcut.js'
-import { CLIENT_SCHEME, createClientContextHandler, isClientOriginAllowed } from './client-context.js'
+import { CLIENT_CONTEXT_CHANNEL, createClientContextHandler, isClientSenderAllowed } from './client-context.js'
 import { resolveMicaHome } from '@packages/mica-config/index.js'
 import { readPluginData, writePluginData } from '../host/plugin-data-store.js'
 import { retainHiddenWindow } from './window-retention.js'
@@ -41,18 +41,11 @@ import { retainHiddenWindow } from './window-retention.js'
  * 拉起运行时、装载页面、补上只有容器才能提供的原生体验（dock 徽标等）。切换 Mica
  * 服务器在这里体现为「再开一个窗口」——一个窗口一台服务器，彼此互不影响。
  *
- * 因此这里不注册任何业务 IPC，也不注入 preload —— 页面里的 `window.mica`
- * 始终由 renderer 自己的 transport 适配层通过 HTTP + SSE 建立。
+ * 页面里的 `window.mica` 始终由 renderer 的 transport 通过 HTTP + SSE 建立。
+ * 只有客户端专属能力走受限 preload，不把运行时业务或通用 IPC 暴露给页面。
  */
 
 const RUNTIME_ENTRY = join(__dirname, '../server/index.mjs')
-
-// 客户端能力只注册在应用窗口的默认 session；受控浏览器的独立 partition 没有这条通道。
-// 仍受页面 CSP 与 CORS 约束，不向远程页面暴露通用 IPC 或文件系统。
-protocol.registerSchemesAsPrivileged([{
-  scheme: CLIENT_SCHEME,
-  privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true }
-}])
 
 /**
  * 一份「外部进程读得到」的页面产物目录。
@@ -715,7 +708,8 @@ function createWindow(url, { primary = false } = {}) {
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: true
+      sandbox: true,
+      preload: join(__dirname, '../preload/index.js')
     }
   })
 
@@ -1022,8 +1016,8 @@ app.whenReady().then(async () => {
 
   localPageUrl = devPageUrl || runtime.url
   const clientHome = process.env.MICA_HOME || resolveMicaHome()
-  protocol.handle(CLIENT_SCHEME, createClientContextHandler({
-    isAllowedOrigin: (origin) => isClientOriginAllowed(windows, origin),
+  ipcMain.handle(CLIENT_CONTEXT_CHANNEL, createClientContextHandler({
+    isAllowedSender: (event) => isClientSenderAllowed(windows, event),
     manifests: officialPluginManifests,
     readDisabled: () => readDisabledPluginIds(),
     readData: (pluginId) => readPluginData(clientHome, pluginId),

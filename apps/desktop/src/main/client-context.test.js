@@ -1,31 +1,24 @@
 import assert from 'node:assert/strict'
-import { test } from 'node:test'
+import { test } from 'bun:test'
 import {
-  CLIENT_SCHEME,
+  CLIENT_CONTEXT_CHANNEL,
   createClientContextHandler,
-  isClientOriginAllowed
+  isClientSenderAllowed
 } from './client-context.js'
 
 const ORIGIN = 'http://127.0.0.1:3210'
 const MAX_BODY_BYTES = 256 * 1024 + 4096
+const EVENT = { sender: {}, senderFrame: {} }
 
-test('redirected pages do not inherit the shell-approved entry origin', () => {
-  let url = `${ORIGIN}/?t=machine-a`
-  let destroyed = false
-  const windows = new Set([
-    {
-      clientOrigin: ORIGIN,
-      win: { isDestroyed: () => destroyed, webContents: { getURL: () => url } }
-    }
-  ])
-  assert.equal(isClientOriginAllowed(windows, ORIGIN), true)
-  url = 'https://login.example/'
-  assert.equal(isClientOriginAllowed(windows, 'https://login.example'), false)
-  assert.equal(isClientOriginAllowed(windows, ORIGIN), false)
-  url = `${ORIGIN}/`
-  destroyed = true
-  assert.equal(isClientOriginAllowed(windows, ORIGIN), false)
-})
+function windowFixture(origin = ORIGIN) {
+  const frame = { url: `${origin}/?t=machine-a` }
+  const sender = { mainFrame: frame, getURL: () => frame.url, isDestroyed: () => false }
+  const state = {
+    clientOrigin: origin,
+    win: { isDestroyed: () => false, webContents: sender }
+  }
+  return { frame, sender, state, event: { sender, senderFrame: frame }, windows: new Set([state]) }
+}
 
 function setup(overrides = {}) {
   const calls = []
@@ -36,7 +29,7 @@ function setup(overrides = {}) {
       return result
     }
   const handler = createClientContextHandler({
-    isAllowedOrigin: (origin) => origin === ORIGIN,
+    isAllowedSender: (event) => event === EVENT,
     manifests: [{ id: 'connections', desktopClientData: true }],
     readDisabled: () => [],
     readData: dependency('readData', { value: { connections: [] }, version: 'v1' }),
@@ -44,102 +37,180 @@ function setup(overrides = {}) {
     probe: dependency('probe', { reachable: true }),
     open: dependency('open', { opened: true }),
     local: dependency('local', { focused: true }),
-    localHost: dependency('localHost', 'http://127.0.0.1:3210'),
+    localHost: dependency('localHost', ORIGIN),
     ...overrides
   })
   return { calls, handler }
 }
 
-function request(path, body = {}, options = {}) {
-  const { origin = ORIGIN, method = 'POST', url, headers = {}, rawBody, ...rest } = options
-  const result = new Request(url ?? `${CLIENT_SCHEME}://host${path}`, {
-    method,
-    headers: {
-      ...(origin === null ? {} : { Origin: origin }),
-      'Content-Type': 'application/json',
-      ...headers
-    },
-    ...(method === 'GET' || method === 'OPTIONS' ? {} : { body: rawBody ?? JSON.stringify(body) }),
-    ...rest
-  })
-  // Bun's Request currently ignores RequestInit.referrer; Electron supplies it.
-  if (Object.hasOwn(rest, 'referrer'))
-    Object.defineProperty(result, 'referrer', { value: rest.referrer })
-  return result
+async function rejected(handler, operation, payload, message) {
+  const result = await handler(EVENT, operation, payload)
+  assert.equal(result.ok, false)
+  assert.equal(typeof result.error, 'string')
+  assert.deepEqual(Object.keys(result).sort(), ['error', 'ok'])
+  if (message) assert.match(result.error, message)
 }
 
-async function rejected(handler, req, status, cors = true) {
-  const response = await handler(req)
-  assert.equal(response.status, status)
-  assert.equal(response.headers.get('access-control-allow-origin'), cors ? ORIGIN : null)
-  const body = await response.json()
-  assert.equal(body.ok, false)
-  assert.equal(typeof body.error, 'string')
-}
-
-test('rejects absent, opaque and untrusted origins before invoking capabilities', async () => {
-  const { handler, calls } = setup()
-  for (const origin of [null, 'null', '', 'https://untrusted.example', `${ORIGIN}.evil.example`]) {
-    for (const method of ['POST', 'OPTIONS']) {
-      await rejected(handler, request('/local', {}, { origin, method }), 403, false)
-    }
+test('exports the single native channel and authorizes registered top-level HTTP(S) senders', () => {
+  assert.equal(CLIENT_CONTEXT_CHANNEL, 'mica:client-context')
+  for (const origin of [ORIGIN, 'https://relay.example']) {
+    const { windows, event } = windowFixture(origin)
+    assert.equal(isClientSenderAllowed(windows, event), true)
   }
-  assert.deepEqual(calls, [])
 })
 
-test('checks live origin authorization for every request and fails closed on errors', async () => {
-  let allowed = true
-  const { handler } = setup({ isAllowedOrigin: async () => allowed })
-  assert.equal((await handler(request('/context'))).status, 200)
-  allowed = false
-  await rejected(handler, request('/context'), 403, false)
-  const throwing = setup({
-    isAllowedOrigin: () => {
-      throw new Error('window closed')
+test('rejects same-origin iframes even when their URLs equal the main frame URL', () => {
+  const { windows, event, frame } = windowFixture()
+  assert.equal(isClientSenderAllowed(windows, { ...event, senderFrame: { ...frame } }), false)
+  assert.equal(isClientSenderAllowed(windows, { ...event, senderFrame: null }), false)
+})
+
+test('rejects an unregistered window even if another registered window has the same origin', () => {
+  const registered = windowFixture()
+  const other = windowFixture()
+  assert.equal(isClientSenderAllowed(registered.windows, other.event), false)
+  assert.equal(isClientSenderAllowed(new Set(), registered.event), false)
+})
+
+test('requires approved origin, live frame origin and webContents URL origin to match', () => {
+  const { windows, event, frame, sender, state } = windowFixture()
+  sender.getURL = () => 'https://login.example/'
+  assert.equal(isClientSenderAllowed(windows, event), false)
+  sender.getURL = () => `${ORIGIN}/`
+  frame.url = 'https://login.example/'
+  assert.equal(isClientSenderAllowed(windows, event), false)
+  sender.getURL = () => frame.url
+  assert.equal(isClientSenderAllowed(windows, event), false)
+  state.clientOrigin = 'https://login.example'
+  assert.equal(isClientSenderAllowed(windows, event), true)
+  state.clientOrigin = null
+  assert.equal(isClientSenderAllowed(windows, event), false)
+})
+
+test('rejects destroyed windows, destroyed contents, detached frames and URL failures', () => {
+  const { windows, event, state, sender } = windowFixture()
+  state.win.isDestroyed = () => true
+  assert.equal(isClientSenderAllowed(windows, event), false)
+  state.win.isDestroyed = () => false
+  sender.isDestroyed = () => true
+  assert.equal(isClientSenderAllowed(windows, event), false)
+  sender.isDestroyed = () => false
+  sender.getURL = () => {
+    throw new Error('destroyed')
+  }
+  assert.equal(isClientSenderAllowed(windows, event), false)
+  Object.defineProperty(event, 'senderFrame', {
+    get() {
+      throw new Error('detached')
     }
   })
-  await rejected(throwing.handler, request('/context'), 403, false)
+  assert.equal(isClientSenderAllowed(windows, event), false)
+  assert.equal(isClientSenderAllowed(windows, null), false)
 })
 
-test('Electron 39 authorizes its browser-validated referrer when Origin is omitted', async () => {
-  const { handler } = setup()
-  const response = await handler(
-    request('/context', {}, { origin: null, referrer: `${ORIGIN}/?t=secret` })
-  )
-  assert.equal(response.status, 200)
-  assert.equal(response.headers.get('access-control-allow-origin'), ORIGIN)
-  await rejected(handler, request('/context', {}, { origin: 'null', referrer: ORIGIN }), 403, false)
-  await rejected(
-    handler,
-    request('/context', {}, { origin: null, referrer: 'https://untrusted.example/' }),
-    403,
-    false
-  )
-})
-
-test('only serves the protocol host and known paths with POST or OPTIONS', async () => {
-  const { handler, calls } = setup()
+test('only permits HTTP(S) URLs, including when all three origins otherwise agree', () => {
   for (const url of [
-    'mica-client://other/local',
-    'mica-client://host.evil/local',
-    'https://host/local'
+    'file:///tmp/app.html',
+    'about:blank',
+    'data:text/html,test',
+    'mica://host/',
+    'garbage'
   ]) {
-    await rejected(handler, request('/local', {}, { url }), 403, false)
+    const { windows, event, frame, state } = windowFixture()
+    frame.url = url
+    state.clientOrigin = url
+    assert.equal(isClientSenderAllowed(windows, event), false)
   }
-  await rejected(handler, request('/unknown'), 404)
-  await rejected(handler, request('/context', {}, { method: 'GET' }), 405)
-  assert.deepEqual(calls, [])
+  const { windows, event, frame } = windowFixture()
+  for (const url of [
+    'about:blank',
+    'http://127.0.0.1:3211/',
+    'http://localhost:3210/',
+    'https://127.0.0.1:3210/'
+  ]) {
+    frame.url = url
+    assert.equal(isClientSenderAllowed(windows, event), false)
+  }
 })
 
-test('returns exact-origin CORS preflight without invoking a capability', async () => {
+test('checks exact event authorization first on every call and fails closed on errors', async () => {
+  let allowed = true
+  const seen = []
+  const { handler, calls } = setup({
+    isAllowedSender: async (event) => {
+      seen.push(event)
+      return allowed && event === EVENT
+    }
+  })
+  assert.deepEqual(await handler(EVENT, 'context'), { ok: true, result: { localHost: ORIGIN } })
+  allowed = false
+  const payload = Object.defineProperty({}, 'value', {
+    get() {
+      throw new Error('must not read')
+    }
+  })
+  assert.deepEqual(await handler(EVENT, '/invalid', payload), {
+    ok: false,
+    error: 'Forbidden sender'
+  })
+  const otherEvent = {}
+  assert.deepEqual(await handler(otherEvent, 'local'), { ok: false, error: 'Forbidden sender' })
+  assert.deepEqual(seen, [EVENT, EVENT, otherEvent])
+  assert.equal(calls.length, 1)
+  for (const isAllowedSender of [
+    () => false,
+    () => {
+      throw new Error('closed')
+    },
+    async () => {
+      throw new Error('closed')
+    }
+  ]) {
+    const blocked = setup({ isAllowedSender })
+    assert.deepEqual(await blocked.handler(EVENT, 'local'), {
+      ok: false,
+      error: 'Forbidden sender'
+    })
+    assert.deepEqual(blocked.calls, [])
+  }
+})
+
+test('sender identity is enforced by the handler for same-origin other windows and frames', async () => {
+  const { windows, event, frame, state } = windowFixture()
+  const { handler, calls } = setup({
+    isAllowedSender: (value) => isClientSenderAllowed(windows, value)
+  })
+  assert.equal((await handler(event, 'local')).ok, true)
+  assert.equal((await handler({ ...event, senderFrame: { ...frame } }, 'local')).ok, false)
+  assert.equal((await handler(windowFixture().event, 'local')).ok, false)
+  frame.url = 'https://redirect.example/'
+  assert.equal((await handler(event, 'local')).ok, false)
+  frame.url = `${ORIGIN}/`
+  state.win.isDestroyed = () => true
+  assert.equal((await handler(event, 'local')).ok, false)
+  assert.deepEqual(calls, [['local']])
+})
+
+test('accepts only six exact operation names, never paths or arbitrary channels', async () => {
   const { handler, calls } = setup()
-  const response = await handler(request('/write-data', {}, { method: 'OPTIONS' }))
-  assert.equal(response.status, 204)
-  assert.equal(await response.text(), '')
-  assert.equal(response.headers.get('access-control-allow-origin'), ORIGIN)
-  assert.equal(response.headers.get('access-control-allow-methods'), 'POST, OPTIONS')
-  assert.equal(response.headers.get('access-control-allow-headers'), 'content-type')
-  assert.equal(response.headers.get('vary'), 'Origin')
+  for (const operation of [
+    undefined,
+    null,
+    {},
+    [],
+    1,
+    'unknown',
+    '/local',
+    'local/',
+    'LOCAL',
+    'mica:client-context',
+    'shell:openExternal',
+    'mica-client://host/local',
+    '__proto__',
+    'constructor'
+  ]) {
+    await rejected(handler, operation, {}, /Unknown client operation/)
+  }
   assert.deepEqual(calls, [])
 })
 
@@ -151,32 +222,30 @@ test('reads opted-in data and passes write values and CAS conflicts through unch
       return conflict
     }
   })
-  const read = await handler(request('/read-data', { pluginId: 'connections' }))
-  assert.deepEqual(await read.json(), {
+  assert.deepEqual(await handler(EVENT, 'read-data', { pluginId: 'connections' }), {
     ok: true,
     result: { value: { connections: [] }, version: 'v1' }
   })
-  const write = await handler(
-    request('/write-data', {
-      pluginId: 'connections',
-      value: { connections: [] },
-      expectedVersion: 'v1'
-    })
-  )
-  assert.deepEqual(await write.json(), { ok: true, result: conflict })
+  const write = await handler(EVENT, 'write-data', {
+    pluginId: 'connections',
+    value: { connections: [] },
+    expectedVersion: 'v1'
+  })
+  assert.equal(write.result, conflict)
+  assert.deepEqual(write, { ok: true, result: conflict })
   assert.deepEqual(calls, [
     ['readData', 'connections'],
     ['writeData', 'connections', { connections: [] }, { expectedVersion: 'v1' }]
   ])
 })
 
-test('distinguishes omitted expectedVersion from explicit null or empty versions', async () => {
+test('preserves omitted, null and empty expectedVersion as distinct CAS requests', async () => {
   const { handler, calls } = setup()
   for (const extra of [{}, { expectedVersion: null }, { expectedVersion: '' }]) {
-    const response = await handler(
-      request('/write-data', { pluginId: 'connections', value: null, ...extra })
+    assert.equal(
+      (await handler(EVENT, 'write-data', { pluginId: 'connections', value: null, ...extra })).ok,
+      true
     )
-    assert.equal(response.status, 200)
   }
   assert.deepEqual(calls, [
     ['writeData', 'connections', null],
@@ -185,7 +254,7 @@ test('distinguishes omitted expectedVersion from explicit null or empty versions
   ])
 })
 
-test('requires a known manifest with literal true and checks disabled ids dynamically', async () => {
+test('requires literal opt-in and checks disabled ids dynamically for reads and writes', async () => {
   for (const manifest of [
     undefined,
     { id: 'connections' },
@@ -193,8 +262,8 @@ test('requires a known manifest with literal true and checks disabled ids dynami
     { id: 'connections', desktopClientData: 'true' }
   ]) {
     const { handler, calls } = setup({ manifests: manifest ? [manifest] : [] })
-    for (const path of ['/read-data', '/write-data']) {
-      await rejected(handler, request(path, { pluginId: 'connections', value: {} }), 403, false)
+    for (const operation of ['read-data', 'write-data']) {
+      await rejected(handler, operation, { pluginId: 'connections', value: {} }, /not enabled/)
     }
     assert.deepEqual(calls, [])
   }
@@ -203,44 +272,41 @@ test('requires a known manifest with literal true and checks disabled ids dynami
     manifests: async () => [{ id: 'connections', desktopClientData: true }],
     readDisabled: async () => new Set(disabled)
   })
-  assert.equal((await handler(request('/read-data', { pluginId: 'connections' }))).status, 200)
+  assert.equal((await handler(EVENT, 'read-data', { pluginId: 'connections' })).ok, true)
   disabled = ['connections']
-  await rejected(handler, request('/read-data', { pluginId: 'connections' }), 403, false)
-  await rejected(
-    handler,
-    request('/write-data', { pluginId: 'connections', value: {} }),
-    403,
-    false
-  )
+  for (const operation of ['read-data', 'write-data']) {
+    await rejected(handler, operation, { pluginId: 'connections', value: {} }, /not enabled/)
+  }
   assert.equal(calls.length, 1)
 })
 
-test('validates data ids and requires a write value', async () => {
+test('validates data ids and requires an own write value', async () => {
   const { handler, calls } = setup()
-  for (const pluginId of [undefined, null, '', '../secrets', 'UPPER', {}, 1]) {
-    await rejected(handler, request('/read-data', { pluginId }), 400)
+  for (const pluginId of [null, '', '../secrets', 'UPPER', {}, 1]) {
+    await rejected(handler, 'read-data', { pluginId }, /Invalid pluginId/)
   }
-  await rejected(handler, request('/write-data', { pluginId: 'connections' }), 400)
+  await rejected(handler, 'read-data', {}, /Invalid pluginId/)
+  await rejected(handler, 'write-data', { pluginId: 'connections' }, /Missing value/)
   assert.deepEqual(calls, [])
 })
 
-test('runtime capabilities do not require a plugin data opt-in', async () => {
+test('runtime capabilities do not require data opt-in and return plain envelopes', async () => {
   const { handler, calls } = setup({
     manifests: [],
     readDisabled: () => {
       throw new Error('not needed')
     }
   })
-  for (const [path, body, result] of [
-    ['/probe', { address: 'server:3210' }, { reachable: true }],
-    ['/open', { url: 'https://server.example/chat' }, { opened: true }],
-    ['/open', { url: 'http://server.example/chat' }, { opened: true }],
-    ['/local', {}, { focused: true }],
-    ['/context', {}, { localHost: ORIGIN }]
+  for (const [operation, payload, result] of [
+    ['probe', { address: 'server:3210' }, { reachable: true }],
+    ['open', { url: 'https://server.example/chat' }, { opened: true }],
+    ['open', { url: 'http://server.example/chat' }, { opened: true }],
+    ['local', {}, { focused: true }],
+    ['context', {}, { localHost: ORIGIN }]
   ]) {
-    const response = await handler(request(path, body))
-    assert.equal(response.headers.get('access-control-allow-origin'), ORIGIN)
-    assert.deepEqual(await response.json(), { ok: true, result })
+    const response = await handler(EVENT, operation, payload)
+    assert.equal(Object.getPrototypeOf(response), Object.prototype)
+    assert.deepEqual(response, { ok: true, result })
   }
   assert.deepEqual(calls, [
     ['probe', 'server:3210'],
@@ -254,104 +320,162 @@ test('runtime capabilities do not require a plugin data opt-in', async () => {
 test('rejects malformed probe targets and all non-HTTP open URLs', async () => {
   const { handler, calls } = setup()
   for (const url of [
-    undefined,
     null,
     {},
     '',
     '/local',
     '//server',
+    'https://',
     'javascript:alert(1)',
     'file:///etc/passwd',
     'mica-client://host/local',
     'data:text/plain,hello',
     'ftp://server'
   ]) {
-    await rejected(handler, request('/open', { url }), 400)
+    await rejected(handler, 'open', { url }, /Only HTTP and HTTPS/)
   }
-  for (const address of [undefined, null, {}, '', '   ']) {
-    await rejected(handler, request('/probe', { address }), 400)
+  await rejected(handler, 'open', {}, /Only HTTP and HTTPS/)
+  for (const address of [null, {}, '', '   ', 123]) {
+    await rejected(handler, 'probe', { address }, /Invalid address/)
   }
+  await rejected(handler, 'probe', {}, /Invalid address/)
+  await rejected(
+    handler,
+    'open',
+    { channel: 'shell:openExternal', path: '/tmp/file' },
+    /Only HTTP and HTTPS/
+  )
   assert.deepEqual(calls, [])
 })
 
-test('handles media types, bad JSON, non-object bodies and malformed UTF-8', async () => {
+test('requires a plain root object and strict JSON-compatible values', async () => {
   const { handler, calls } = setup()
-  await rejected(handler, request('/local', {}, { headers: { 'Content-Type': 'text/plain' } }), 415)
-  for (const rawBody of ['', '{', 'null', '[]', 'true', '1', '"text"', new Uint8Array([0xff])]) {
-    await rejected(handler, request('/local', {}, { rawBody }), 400)
+  for (const payload of [
+    null,
+    [],
+    true,
+    1,
+    'text',
+    new Date(),
+    new Map(),
+    Object.create({ value: 1 })
+  ]) {
+    await rejected(handler, 'local', payload, /plain object/)
   }
+  for (const value of [
+    undefined,
+    1n,
+    NaN,
+    Infinity,
+    -Infinity,
+    Symbol('x'),
+    () => {},
+    new Date(),
+    new Set(),
+    new Uint8Array(1),
+    [,],
+    Object.assign([], { extra: true })
+  ]) {
+    await rejected(handler, 'local', { value }, /Invalid JSON/)
+  }
+  await rejected(handler, 'local', { [Symbol('x')]: true }, /Invalid JSON/)
   assert.deepEqual(calls, [])
-  assert.equal(
-    (
-      await handler(
-        request('/local', {}, { headers: { 'Content-Type': 'application/json; charset=utf-8' } })
-      )
-    ).status,
-    200
-  )
+  assert.equal((await handler(EVENT, 'local', Object.create(null))).ok, true)
+  assert.equal((await handler(EVENT, 'local')).ok, true)
 })
 
-test('allows a 256 KiB value with envelope but bounds actual and declared body bytes', async () => {
+test('rejects cycles and accessors without executing getters or toJSON', async () => {
   const { handler, calls } = setup()
-  assert.equal(
-    (
-      await handler(
-        request('/write-data', { pluginId: 'connections', value: 'x'.repeat(256 * 1024) })
-      )
-    ).status,
-    200
-  )
-  await rejected(handler, request('/local', { value: 'x'.repeat(MAX_BODY_BYTES) }), 413)
-  await rejected(
-    handler,
-    request('/local', {}, { headers: { 'Content-Length': String(MAX_BODY_BYTES + 1) } }),
-    413
-  )
-  // UTF-8 byte count, rather than JS character count, controls the limit.
-  await rejected(handler, request('/local', { value: '界'.repeat(100_000) }), 413)
-  assert.equal(calls.length, 1)
-})
-
-test('stops a streaming body at the size limit even with an understated content length', async () => {
-  let cancelled = false
-  const stream = new ReadableStream({
-    pull(controller) {
-      controller.enqueue(new Uint8Array(64 * 1024))
-    },
-    cancel() {
-      cancelled = true
-    }
-  })
-  const { handler, calls } = setup()
-  await rejected(
-    handler,
-    request(
-      '/local',
-      {},
-      {
-        rawBody: stream,
-        duplex: 'half',
-        headers: { 'Content-Length': '2' }
+  const circular = {}
+  circular.self = circular
+  const array = []
+  array.push(array)
+  for (const payload of [
+    circular,
+    { value: array },
+    {
+      toJSON() {
+        throw new Error('must not invoke')
       }
-    ),
-    413
+    }
+  ]) {
+    await rejected(handler, 'local', payload, /Invalid JSON/)
+  }
+  let accessed = false
+  const getter = Object.defineProperty({}, 'value', {
+    enumerable: true,
+    get() {
+      accessed = true
+      return {}
+    }
+  })
+  await rejected(handler, 'local', getter, /Invalid JSON/)
+  assert.equal(accessed, false)
+  assert.deepEqual(calls, [])
+  const shared = { x: true }
+  assert.equal((await handler(EVENT, 'local', { first: shared, second: shared })).ok, true)
+})
+
+test('allows a 256 KiB value and enforces the exact UTF-8 JSON envelope limit', async () => {
+  const { handler, calls } = setup()
+  assert.equal(
+    (await handler(EVENT, 'write-data', { pluginId: 'connections', value: 'x'.repeat(256 * 1024) }))
+      .ok,
+    true
   )
-  assert.equal(cancelled, true)
+  const envelopeSize = Buffer.byteLength(JSON.stringify({ value: '' }))
+  assert.equal(
+    (await handler(EVENT, 'local', { value: 'x'.repeat(MAX_BODY_BYTES - envelopeSize) })).ok,
+    true
+  )
+  for (const payload of [
+    { value: 'x'.repeat(MAX_BODY_BYTES - envelopeSize + 1) },
+    { value: '界'.repeat(100_000) },
+    { value: '\n'.repeat(MAX_BODY_BYTES / 2) },
+    { ['界'.repeat(100_000)]: true },
+    { value: Array(100_000).fill(null) }
+  ]) {
+    await rejected(handler, 'local', payload, /too large/)
+  }
+  assert.equal(calls.length, 2)
+})
+
+test('rejects very deep or unbounded payload graphs without invoking a capability', async () => {
+  const { handler, calls } = setup()
+  const payload = {}
+  let node = payload
+  for (let index = 0; index < MAX_BODY_BYTES; index++) node = node.next = {}
+  await rejected(handler, 'local', payload, /too large/)
   assert.deepEqual(calls, [])
 })
 
-test('serializes dependency errors and undefined capability results', async () => {
-  const { handler } = setup({
-    local: () => {
-      throw new Error('No local window')
-    }
-  })
-  const response = await handler(request('/local'))
-  assert.equal(response.status, 500)
-  assert.equal(response.headers.get('access-control-allow-origin'), ORIGIN)
-  assert.deepEqual(await response.json(), { ok: false, error: 'No local window' })
-  const empty = setup({ local: () => {} })
-  assert.deepEqual(await (await empty.handler(request('/local'))).json(), {
+test('returns dependency failures and normalizes undefined success results to null', async () => {
+  for (const thrown of [new Error('No local window'), 'plain failure', null]) {
+    const { handler } = setup({
+      local: () => {
+        throw thrown
+      }
+    })
+    assert.deepEqual(await handler(EVENT, 'local'), {
+      ok: false,
+      error: thrown instanceof Error ? thrown.message : String(thrown)
+    })
+  }
+  for (const dependency of ['manifests', 'readDisabled', 'readData', 'writeData']) {
+    const { handler, calls } = setup({
+      [dependency]: async () => {
+        throw new Error(`${dependency} failed`)
+      }
+    })
+    await rejected(
+      handler,
+      dependency === 'writeData' ? 'write-data' : 'read-data',
+      { pluginId: 'connections', value: {} },
+      /failed/
+    )
+    assert.deepEqual(calls, [])
+  }
+  assert.deepEqual(await setup({ local: () => {} }).handler(EVENT, 'local'), {
     ok: true,
     result: null
   })

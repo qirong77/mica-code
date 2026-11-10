@@ -81,7 +81,8 @@ https://mica.qirong77.com/?t=<那台机器的口令>&session=<会话 id>
 
 文件由插件前端经宿主的 `plugin-host:read-data|write-data` 读写，宿主不解析结构——连接清单
 是插件自己的事。桌面端使用清单声明的 `desktop.clientData: true` 和 `api.client.readData/writeData`，
-通过外壳的 `mica-client:` 协议读写本机同一文件；探活和窗口切换也走 `api.client`。
+通过外壳的隔离原生桥读写本机同一文件；探活和窗口切换也走 `api.client`，
+不经页面 fetch，因此 Local 不受页面网络请求失败影响。旧 `mica-client:` 协议不再支持。
 卡片底部的远程访问策略仍通过 `api.access` 控制**当前连接的机器**。
 旧版本存的是纯地址数组，读取时一并收敛成 `{ url, note }` 并在卡片加载时
 回写成新格式（见 `peers.ts` / `persistence.ts`）。

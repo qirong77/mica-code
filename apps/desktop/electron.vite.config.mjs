@@ -12,8 +12,7 @@ import { fileIconAssets } from './scripts/file-icon-assets.mjs'
  * dev 下页面走 Vite dev server（HMR），运行时另行启动，因此把 /api 代理到它，
  * 让页面在两种模式下都保持同源调用。端口与外壳一致（MICA_DESKTOP_PORT 可覆盖）。
  *
- * 这里没有 preload 段：页面只通过 HTTP + SSE 访问运行时，不需要 IPC 桥
- * （脚本里的 `--ignoreConfigWarning` 就是为它加的）。
+ * preload 只提供客户端专属能力（本机插件数据、探活和窗口切换）；运行时业务仍走 HTTP + SSE。
  */
 // dev 代理要落到运行时那个端口上：端口常量的唯一来源是 mica-web-shared 的 runtime-port，
 // 这里不再抄一份 8787
@@ -69,6 +68,14 @@ export default defineConfig({
         // 终端窗口要加载的页面路径与运行时路由同源：直接用共享包里的常量，
         // 不再在主进程里抄一份 '/terminal-control'
         '@mica-app-paths': resolve('../../packages/mica-web-shared/app-paths.ts')
+      }
+    }
+  },
+  preload: {
+    build: {
+      rolldownOptions: {
+        input: resolve('src/preload/index.js'),
+        output: { format: 'cjs', entryFileNames: 'index.js' }
       }
     }
   },

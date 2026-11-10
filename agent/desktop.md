@@ -15,8 +15,8 @@
 | `src/main/index.js`   | Electron 容器：启动运行时、窗口导航、未读徽标、窗口状态                 |
 | `src/renderer/`       | 页面；`transport.js` 统一实现 `window.mica` 与平台差异                  |
 
-- 外壳不注册通用业务 IPC、不加 preload；页面始终通过 HTTP + SSE 访问运行时。主进程只保留三项业务例外：受控浏览器、终端控制、系统检查（TCC 权限状态只属于有 app 身份的那个进程，运行时进程拿不到）。
-- 与当前运行时无关的**客户端能力**走 `main/client-context.js` 的 `mica-client://host` 协议：本机插件数据、客户端探活、窗口切换与 Local 返回。协议在 ready 前登记为支持 fetch 的安全 scheme，ready 后只注册默认 session（受控浏览器 partition 不注册）；每次核对发起 Origin 是否同时匹配外壳认可的入口及窗口当前地址（重定向不扩大授权），Electron 39 缺 Origin 时取 Chromium 校验过的 referrer，新版可取 initiatorOrigin。页面 CSP 只额外放行 `connect-src mica-client:`，不绕过 CSP。数据只开放本机随包清单显式声明 `desktop.clientData: true` 且未停用的插件，复用 `host/plugin-data-store.js` 的版本比较和原子写；不接受路径、任意 channel 或运行时地址。
+- 外壳不注册通用业务 IPC；页面始终通过 HTTP + SSE 访问运行时。主进程只保留三项业务例外：受控浏览器、终端控制、系统检查（TCC 权限状态只属于有 app 身份的那个进程，运行时进程拿不到）。
+- 与当前运行时无关的**客户端能力**由 `src/preload/index.js` 的隔离桥 `window.micaClient` 提供：本机插件数据、客户端探活、窗口切换与 Local 返回。只在主应用运行时窗口装载 preload，只暴露固定方法；`main/client-context.js` 的 `mica:client-context` 处理器每次核对 sender 是已登记窗口的 webContents、senderFrame 精确等于该窗口 mainFrame，且外壳认可的入口、frame 和窗口当前 URL 的 HTTP(S) origin 一致（重定向不扩大授权）。受控浏览器、iframe、未登记窗口没有权限。数据只开放本机随包清单显式声明 `desktop.clientData: true` 且未停用的插件，复用 `host/plugin-data-store.js` 的版本比较和原子写；不接受路径、任意 channel 或运行时地址。页面通过实际 bridge 检测能力，不根据 Electron UA 猜测；旧 `mica-client:` fetch 协议不再支持，客户端操作不依赖 CSP、CORS 或 referrer。
 - 运行时构建保持 `ssr.noExternal: true`，只 external Node 内置模块与 node-pty。新增依赖后跑 `npm run build:server && npm test`。
 - `package.json` 的 `dependencies` 只放主进程/运行时真正 require 的包；renderer 依赖全部归 `devDependencies`。
 - `electron.vite.config.mjs` 的 `resolve.dedupe: ['react', 'react-dom']` 不能删。

@@ -214,8 +214,9 @@ $ npm run build:linux
 - `src/main/index.js` — the Electron container. It spawns the runtime
   (`ELECTRON_RUN_AS_NODE`), loads the window at the runtime URL, mirrors unread notifications onto
   the dock badge (and flashes the taskbar on Windows), and stops the runtime on quit. It registers
-  no business IPC and injects no preload: the page always builds `window.mica` from HTTP + SSE, so
-  the window and a phone browser run byte-identical UI code. It also owns the navigation policy and
+  no general business IPC: the page always builds `window.mica` from HTTP + SSE, so
+  the window and a phone browser run byte-identical UI code. A restricted preload supplies only client-local
+  data, probes and window actions through `window.micaClient`. It also owns the navigation policy and
   one window per server — title suffix, badge subscription and ⇧⌘M are tracked per window — see
   _Switching Mica servers_ below.
 - `ELECTRON_RUN_AS_NODE` is a bootstrap marker for the runtime process only. The runtime calls
@@ -629,10 +630,15 @@ Connections 的桌面窗口共用启动客户端的本机清单（`$MICA_HOME/pl
 `client.context()` 给出真实本机页面地址（包含开发端口或回退端口）；`currentTarget()` 保留中转链接的令牌身份。
 普通浏览器的 `client` 为 null，继续使用当前运行时的清单。访问策略 `api.access` 始终控制当前连接的运行时。
 
-客户端能力由 `main/client-context.js` 的 `mica-client://host` 协议提供，不增加 preload 或通用 IPC。
-协议只注册到默认 session，受控浏览器的独立 partition 不注册；每个请求验证发起 origin 是否同时匹配外壳认可的入口及窗口当前地址，重定向不扩大授权
-（Electron 39 使用 Chromium 校验过的 referrer），本机插件数据只开放给本机随包清单显式授权且未停用的插件。
-页面 CSP 仅额外允许 `connect-src mica-client:`。本机和远端页面都需使用新版产物；旧远端页面仍可用 **⇧⌘M** 返回本机。
+客户端能力由 `src/preload/index.js` 的隔离桥 `window.micaClient` 提供，只暴露固定方法，
+不暴露 `ipcRenderer`、任意 channel 或通用文件访问。`main/client-context.js` 每次核对 sender 必须是
+已登记运行时窗口的 webContents、senderFrame 必须精确等于 mainFrame，并要求外壳认可的入口、frame 和
+窗口当前 URL 的 HTTP(S) origin 一致。iframe、未登记窗口、跨源重定向页不能继承授权；
+本机插件数据只开放给本机随包清单显式授权且未停用的插件。
+页面按真实桥是否存在检测能力，不根据 Electron UA 猜测。旧 `mica-client:` fetch 协议不再支持，
+Local 与本机清单读取不依赖页面 fetch、CSP、CORS 或 referrer。
+本机和远端页面都需使用新版产物；旧远端页面仍可用 **⇧⌘M** 返回本机。
+回归探针见 `.probe/client-context/README.md`。
 
 The container owns navigation and one window per runtime (`src/main/index.js`), using origin plus relay token
 for relay entries. Switching to an existing target restores and focuses its window without reloading it.

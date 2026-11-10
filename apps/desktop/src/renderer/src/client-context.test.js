@@ -1,57 +1,54 @@
 import { describe, expect, test } from 'bun:test'
 import { createClientContextApi } from './client-context.js'
 
-const userAgent = 'Mica Electron/39.2.6'
+function fixture() {
+  const calls = []
+  const bridge = Object.fromEntries(
+    ['context', 'readData', 'writeData', 'probe', 'open', 'local'].map((operation) => [
+      operation,
+      async (...args) => {
+        calls.push([operation, ...args])
+        return {
+          ok: true,
+          result: operation === 'writeData' ? { ok: false, conflict: true } : null
+        }
+      }
+    ])
+  )
+  return { calls, bridge, api: createClientContextApi('bookmarks', { bridge }) }
+}
 
 describe('native client context API', () => {
-  test('ordinary browsers have no native client data capability', () => {
-    expect(createClientContextApi('bookmarks', { userAgent: 'Chrome/131' })).toBeNull()
+  test('browsers and other Electron containers without the native bridge have no client capability', () => {
+    expect(createClientContextApi('bookmarks', { bridge: null })).toBeNull()
+    expect(createClientContextApi('bookmarks', { bridge: {} })).toBeNull()
   })
 
   test('pins data access to the plugin and preserves version comparisons', async () => {
-    const requests = []
-    const api = createClientContextApi('bookmarks', {
-      userAgent,
-      fetch: async (url, init) => {
-        requests.push([url, JSON.parse(init.body)])
-        return Response.json({ ok: true, result: { ok: false, conflict: true } })
-      }
-    })
+    const { api, calls } = fixture()
     await api.readData()
-    expect(await api.writeData({ peers: [] }, { expectedVersion: null })).toEqual({
-      ok: false,
-      conflict: true
-    })
-    expect(requests).toEqual([
-      ['mica-client://host/read-data', { pluginId: 'bookmarks' }],
-      [
-        'mica-client://host/write-data',
-        { pluginId: 'bookmarks', value: { peers: [] }, expectedVersion: null }
-      ]
+    expect(
+      await api.writeData({ peers: [] }, { expectedVersion: null, pluginId: 'other' })
+    ).toEqual({ ok: false, conflict: true })
+    expect(calls).toEqual([
+      ['readData', 'bookmarks'],
+      ['writeData', 'bookmarks', { peers: [] }, { expectedVersion: null }]
     ])
   })
 
-  test('Local is a shell operation and relay targets retain their token', async () => {
-    const requests = []
-    const api = createClientContextApi('bookmarks', {
-      userAgent,
-      fetch: async (url, init) => {
-        requests.push([url, JSON.parse(init.body)])
-        return Response.json({ ok: true, result: null })
-      }
-    })
+  test('Local uses the native bridge without fetching, and relay targets retain their token', async () => {
+    const { api, calls } = fixture()
     await api.local()
     await api.open('https://relay.example/?t=machine-b&session=two')
-    expect(requests).toEqual([
-      ['mica-client://host/local', {}],
-      ['mica-client://host/open', { url: 'https://relay.example/?t=machine-b&session=two' }]
-    ])
+    expect(calls).toEqual([['local'], ['open', 'https://relay.example/?t=machine-b&session=two']])
   })
 
-  test('reports shell failures to the card', async () => {
+  test('reports native errors to the card', async () => {
     const api = createClientContextApi('bookmarks', {
-      userAgent,
-      fetch: async () => Response.json({ ok: false, error: 'disk full' }, { status: 500 })
+      bridge: {
+        context: async () => ({ ok: true }),
+        readData: async () => ({ ok: false, error: 'disk full' })
+      }
     })
     await expect(api.readData()).rejects.toThrow('disk full')
   })
