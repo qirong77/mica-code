@@ -344,7 +344,8 @@ const RAW_ENDPOINTS = [
         name: 'raw',
         in: 'query',
         required: false,
-        description: 'true 时直接返回 image/png 字节，否则返回 dataUrl'
+        description:
+          'MCP 默认 true（推荐）：返回模型可见的图片；显式 raw=false 返回 JSON dataUrl。直接 HTTP 调用默认 false，raw=true 时返回 image/png 字节'
       },
       {
         name: 'timeoutMs',
@@ -353,7 +354,7 @@ const RAW_ENDPOINTS = [
         description: '默认 20000；页面忙时超时返回错误而不是一直挂着'
       }
     ],
-    returns: '{ ok, dataUrl, bytes }'
+    returns: 'MCP 默认返回图片；raw=false：{ ok, dataUrl, bytes }；HTTP raw=true：image/png'
   },
   {
     id: 'waitFor',
@@ -558,6 +559,7 @@ export const BROWSER_GUIDE = [
   'keys 只接受单个键：Enter / Tab / Escape / Esc / Backspace / Delete / Space / ArrowUp / ArrowDown / ArrowLeft / ArrowRight / PageUp / PageDown / Home / End，或单个可打印字符（"a"、"1"、"/"）。组合键（Cmd / Ctrl / Shift / Alt）不支持，也不要写 KeyB 这类键盘码：要按 Ctrl+S 这种快捷键，改用 evaluate 在页面里 dispatchEvent(new KeyboardEvent("keydown", { key: "s", code: "KeyS", ctrlKey: true, bubbles: true }))，或者直接点页面上那个按钮。',
   '等页面别 sleep：用 waitFor（不给条件 = 等加载完成，也可等元素/文本/地址）。',
   '读页面优先 content / evaluate；不要 hook fetch —— 要核对请求参数看 network 记录里的 body 与 headers。',
+  'screenshot 的 MCP 调用默认 raw=true（推荐），图片直接交给模型查看，不要把 base64 当文本读。只有需要 JSON dataUrl 时才显式传 raw=false；直接 HTTP 调用仍默认返回 JSON。',
   '截图超时（页面忙、长任务）先重试；仍失败就改用 evaluate 读 DOM / content 校验收敛。',
   'evaluate 里的复杂逻辑写成 (async () => { … })()，它会等待 Promise。',
   '用户关窗口只是隐藏（页面状态保留）；hideBrowser 同理，closeBrowser 才真正销毁。'

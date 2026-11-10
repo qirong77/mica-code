@@ -1,8 +1,9 @@
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createRole, deleteRole, getRolesDetails, writeRole } from './details.js';
+import { estimateTextTokens } from './sessionAnalysis.js';
 import type { PersistedSession } from '@packages/mica-session/index.js';
 
 let home = '';
@@ -33,7 +34,15 @@ describe('config web roles', () => {
     const details = writeRole('reviewer', 'Updated prompt.');
 
     expect(details.roles.find((role) => role.name === 'reviewer')?.content).toBe('Updated prompt.');
-    expect(() => writeRole('default', 'Override')).toThrow('Editable role not found');
+    expect(() => writeRole('default', 'Override')).toThrow('read-only');
+  });
+
+  it('normalizes custom role extensions and whitespace for writes and deletes', () => {
+    createRole(' reviewer.md ', 'Review carefully.');
+    expect(writeRole(' reviewer.md ', 'Updated.').roles.find((role) => role.name === 'reviewer')?.content).toBe(
+      'Updated.',
+    );
+    expect(deleteRole(' reviewer.md ').roles.map((role) => role.name)).toEqual(['default']);
   });
 
   it('rejects duplicate and unsafe role names', () => {
@@ -49,7 +58,30 @@ describe('config web roles', () => {
     const details = deleteRole('reviewer');
 
     expect(details.roles.map((role) => role.name)).toEqual(['default']);
-    expect(() => deleteRole('default')).toThrow('Editable role not found');
+    expect(() => deleteRole('default')).toThrow('read-only');
+  });
+
+  it.each(['default', 'default.md', ' default.md ', 'DEFAULT.MD', '\tdefault\n', 'default.md.md'])(
+    'rejects every mutation of the default system prompt via %j',
+    (name) => {
+      mkdirSync(join(home, 'role'), { recursive: true });
+      const shadow = join(home, 'role', 'default.md');
+      writeFileSync(shadow, 'User shadow must stay untouched.');
+      const builtIn = getRolesDetails().roles.find((role) => role.name === 'default');
+
+      expect(() => createRole(name, 'Override')).toThrow('read-only');
+      expect(() => writeRole(name, 'Override')).toThrow('read-only');
+      expect(() => deleteRole(name)).toThrow('read-only');
+      expect(getRolesDetails().roles.find((role) => role.name === 'default')).toEqual(builtIn);
+      expect(readFileSync(shadow, 'utf-8')).toBe('User shadow must stay untouched.');
+      expect(readdirSync(join(home, 'role'))).toEqual(['default.md']);
+    },
+  );
+
+  it.each(['', '   ', 'default.md ', '../default', 'default/../default'])('rejects unsafe names %j', (name) => {
+    expect(() => createRole(name)).toThrow();
+    expect(() => writeRole(name, 'Override')).toThrow();
+    expect(() => deleteRole(name)).toThrow();
   });
 });
 
@@ -223,5 +255,47 @@ describe('config web sessions', () => {
     // Context 分析的第一轮前言也读这一份：它比角色文件多出 skills 与插件段落。
     const analysis = detailsApi.getSessionContextAnalysis(session.id);
     expect(analysis.turns[0].entries[0]?.preview).toContain('Role prompt body.');
+  });
+
+  it.each(['reviewer', 'default', 'missing'])(
+    'keeps the default in an unrecorded %s session fallback',
+    async (name) => {
+      const { micaSession } = await import('@packages/mica-session/index.js');
+      const { micaAgent } = await import('@packages/mica-agent/index.js');
+      if (name === 'reviewer') detailsApi.createRole(name, 'Review carefully.');
+      const session = makeSession();
+      session.id = `20260801-fallback-${name}`;
+      session.snapshot.role = name;
+      micaSession.createStore().save(session);
+      const path = join(micaSession.dir, `${session.id}.json`);
+      const before = readFileSync(path, 'utf-8');
+
+      const reference = detailsApi.getSessionSystemPrompt(session.id);
+      expect(reference.prompt).toBe('');
+      expect(reference.rolePrompt).toContain(micaAgent.roles.get('default')!.prompt.trim());
+      expect(reference.rolePrompt.match(/<system>/g)).toHaveLength(1);
+      if (name === 'reviewer') expect(reference.rolePrompt).toContain('<role>\nReview carefully.\n</role>');
+      else expect(reference.rolePrompt).not.toContain('<role>');
+      expect(detailsApi.getSessionItem(session.id, 1).content).toBe(reference.rolePrompt);
+      expect(detailsApi.getSessionContextAnalysis(session.id).turns[0].entries[0]?.tokens).toBe(
+        estimateTextTokens(reference.rolePrompt),
+      );
+      expect(JSON.parse(detailsApi.getSessionContent(session.id).content).snapshot.systemPrompt).toBeUndefined();
+      expect(readFileSync(path, 'utf-8')).toBe(before);
+    },
+  );
+
+  it('keeps the recorded prompt after a custom role body changes', async () => {
+    const { micaSession } = await import('@packages/mica-session/index.js');
+    detailsApi.createRole('archived', 'Current role body.');
+    const session = makeSession();
+    session.id = '20260801-archived-role';
+    session.snapshot.role = 'archived';
+    session.snapshot.systemPrompt = '<system>\nArchived base.\n</system>\n\n<role>\nArchived role.\n</role>';
+    micaSession.createStore().save(session);
+
+    expect(detailsApi.getSessionSystemPrompt(session.id).prompt).toBe(session.snapshot.systemPrompt);
+    expect(detailsApi.getSessionItem(session.id, 1).content).toBe(session.snapshot.systemPrompt);
+    expect(detailsApi.getSessionContextAnalysis(session.id).turns[0].entries[0]?.preview).toContain('Archived role.');
   });
 });

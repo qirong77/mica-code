@@ -63,6 +63,8 @@ render(<ConfigWebApp />)
 
 ## 约定
 
+- **Roles**：内置 `default` 以「默认系统提示词」展示，只读、可复制，不可创建同名覆盖、编辑或删除。自定义 Role 编辑的只是追加正文，紧接默认正文且同属系统提示词。会话详情优先使用历史存档；没有记录时只展示当前默认正文与 Role 的参考，不写回快照。
+
 - Web 基础控件统一基于 Arco Design React：共享 `Button` / `Switch` / `Checkbox` / `Tag` / `Alert` / `Empty` / `Segmented` 保留业务接口；`SelectMenu` / `DateField` / `Modal` / `DataTable` 分别适配 Arco 的下拉、日期、弹窗、表格，普通输入从共享入口导入 `Input` / `InputNumber` / `Select`（`onChange` 接收值而非 DOM event）。设置页、桌面内嵌界面和插件复用这一套；保留 `PageFrame` / `SettingsGroup` / `SettingRow` 与原有布局。完整 App 使用 `ArcoProvider`，普通工具栏动作用透传原生属性与 ref 的 `ArcoAction`（`appearance` / `tone` 控制 Arco 类型与状态，`iconOnly` 使用 Arco 的纯图标尺寸与零内边距，双轴居中；文字动作继承宿主字号和中性色；富内容悬浮卡片使用共享 `ArcoPopover`）。`arco-settings.css` 按需载入样式，将现有主题映射到 `body.mica-arco-theme` 与 `.mica-config-ui`，不引全局 reset；原生开关几何与交互状态由 Arco 自己绘制，Portal 继承同一份主题。
 
 - **样式必须限定在 `.mica-config-ui` 容器内**：`web/styles.css` 把全部规则放进 `@scope (.mica-config-ui) { … }`，自定义属性也定义在容器上而不是 `:root`。桌面端把它当普通视图内嵌渲染，规则不能泄漏到应用其余部分，也不能被应用的同名变量覆盖（应用用 `--color-*`，这里用 `--bg/--panel/--text`）。新增样式沿用这个作用域，不要写裸标签选择器到作用域之外。

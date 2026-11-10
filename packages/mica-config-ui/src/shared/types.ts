@@ -173,8 +173,8 @@ export type ConfigWebConversationPage = {
  * 一条会话最近一次请求实际发出的 system prompt。
  *
  * `prompt` 是完整文本（角色提示词 + 项目说明 + skills 索引 + 环境信息 + 插件段落），空串表示
- * 这条会话还没发过请求（旧会话也没有这一份记录）。`rolePrompt` 只是角色文件里那一段，用来在
- * 没有记录时说明「实际发出去的内容比它多」。
+ * 这条会话还没发过请求（旧会话也没有这一份记录）。`rolePrompt` 仅提供当前默认正文与追加 Role
+ * 的参考，不是当时发出去的完整提示词。
  */
 export type ConfigWebSessionPrompt = {
   prompt: string;

@@ -29,7 +29,9 @@ import {
   normalizeSize,
   notFoundError,
   outputSince,
-  readScreen
+  readInputEchoContext,
+  readScreen,
+  screenMatchText
 } from './terminal-core.js'
 
 const { Terminal } = headless
@@ -313,12 +315,16 @@ export function createTerminalSessions({
     }
     if (!payload) throw new TerminalRequestError('缺少要输入的内容（data 或 text）')
     if (input.submit === true || input.submit === '1' || input.submit === 'true') payload += '\r'
+    const echoContext =
+      !session.pending && session.pendingWrites === 0
+        ? readInputEchoContext(session.term, payload)
+        : null
     session.pty.write(payload)
     // 把「刚有输入」算作活动：紧接着的 wait idleMs 要从现在开始计时
     const at = Date.now()
     session.lastOutputAt = at
     // 记下原文：wait 的 text 需要区分「命令回显」和「命令输出」
-    session.recentInputs.push({ data: payload, at })
+    session.recentInputs.push({ data: payload, at, echoContext })
     if (session.recentInputs.length > RECENT_INPUT_LIMIT) session.recentInputs.shift()
     touch(session)
     return { seq: session.output.seq }
@@ -407,7 +413,6 @@ export function createTerminalSessions({
       )
     }
     // 默认过滤刚输入命令的回显：否则 agent 敲完命令再等自己的输出，会立刻命中命令本身
-    // 默认过滤刚输入命令的回显：否则 agent 敲完命令再等自己的输出，会立刻命中命令本身
     const skipEcho = options.skipEcho === undefined ? true : parseBoolean(options.skipEcho)
     const timeoutMs = Math.min(
       MAX_WAIT_TIMEOUT_MS,
@@ -426,12 +431,10 @@ export function createTerminalSessions({
       }
       // 匹配范围要覆盖滚动历史：标记可能已经滚出默认的 200 行窗口
       const screen = readScreen(session.term, { maxLines: TERMINAL_MAX_SCREEN_LINES })
-      const masked = skipEcho ? maskEchoedInput(screen.text, session.recentInputs) : null
-      const matchText = masked ? masked.text : screen.text
-      if (masked && masked.masked > 0) {
-        screen.text = matchText
-        screen.lines = matchText.split('\n')
-      }
+      const logicalText = text || regex ? screenMatchText(session.term, screen) : ''
+      const matchText = skipEcho
+        ? maskEchoedInput(logicalText, session.recentInputs).text
+        : logicalText
       if (wantExit && session.exited) {
         return { matched: true, reason: 'exited', elapsedMs: Date.now() - startedAt, screen }
       }

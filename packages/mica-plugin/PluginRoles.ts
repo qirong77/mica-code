@@ -10,8 +10,8 @@ import { PLUGIN_STATE_FILE, readDisabledPluginIds } from './PluginState.js';
  * 手工抄一份进去。现在插件在清单里声明 `roles: ["roles"]`（相对插件目录），正文留在插件
  * 里——**编辑插件目录里的文件就是编辑角色**，和 skills 一个待遇。
  *
- * 与角色文件的区别只有一条：插件角色是**追加**在通用系统提示词后面（`<role>` 段），而不是
- * 整段替换 `<system>`。插件角色只该说「这个角色额外要遵守什么」，不必把通用规则再抄一遍。
+ * 与磁盘角色一样，非默认角色统一**追加**在固定通用正文后面（`<role>` 段），同属 system
+ * prompt，不替换 `<system>`。角色只该说「这个角色额外要遵守什么」，不必把通用规则再抄一遍。
  *
  * 索引落在 `$MICA_HOME/plugin-roles/<pluginId>.json`：输入框的角色切换与 CLI 的 `/role`
  * 都只扫描索引，不 setup 插件。

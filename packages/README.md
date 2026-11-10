@@ -18,7 +18,7 @@
 
 - `mica-agent`：agent 抽象、模型 provider adapter、prompt 构建；请求用量可附服务商 ID、总耗时与首字等待。生成速率另用成对的 `generationOutputTokens`（扣推理与首 token）/ `generationDurationMs`（正文首末增量），只采纳明细可归因且足够长的正文流，仍为客户端估算。`IAgent.getSnapshot({ includeConversation: false })` 可省去展示消息投影。
 - `mica-tools`：内置工具、支持文本/图片的工具结果、工具 registry、MCP 工具接入；`MicaTool.canOverlap(input)` 与 `micaTools.isOverlappable(name, input)` 为 provider 提供按调用输入判断的重叠调度能力。
-- `mica-mcp`：MCP 配置读取、server 连接管理和工具注册。
+- `mica-mcp`：MCP 配置读取、server 连接管理和工具注册；工具适配保留标准图片块、混合图文顺序及文本资源，二进制不转成截断的 JSON/base64 文本。
 - `mica-ui`：Ink 终端 UI 组件和 UI 状态。
 - `mica-runtime`：运行时协议、事件、状态、输入、消息队列，以及 Codex 两套协议（`codexExecEvents.ts` 的 exec `ThreadEvent`、`codexProtocol.ts` 的 app-server v2 JSONL）。
 - `@anthropic/ink`：仓库内 vendored 的 Ink 分支，`mica-ui` 各组件唯一的 Ink 来源。
@@ -79,4 +79,4 @@
 bunx tsc --noEmit
 ```
 
-系统提示词按注入来源组织 XML：`mica-common` 导出 `escapePromptXml` / `wrapPromptXml`，`mica-agent` 包装基础段落与项目文档，`mica-plugin` 的 `ctx.prompt.section()` 为插件正文统一生成带 `plugin`、`section` 属性的 `injection`。`system-prompt:build` 形态不再支持。插件线程和独立模型请求由 CLI 宿主包装其系统提示词。
+系统提示词按注入来源组织 XML：`mica-common` 导出 `escapePromptXml` / `wrapPromptXml`，`mica-agent` 包装基础段落与项目文档。`buildSystemPrompt()` 固定使用内置只读的 `<system>` 默认正文；`BuildSystemPromptOptions.baseSystemPrompt` 覆盖入口已移除，这个形态不再支持。磁盘与插件的非默认 Role 统一经 `rolePrompt` 追加为紧接其后的 `<role>` 段，两者同属 system prompt，`default` 不重复追加，`AgentRole` 不再包含 `append` 标志。`mica-plugin` 的 `ctx.prompt.section()` 为插件正文统一生成带 `plugin`、`section` 属性的 `injection`。`system-prompt:build` 形态不再支持。插件线程和独立模型请求由 CLI 宿主包装其系统提示词。

@@ -410,9 +410,11 @@ main process' Unix socket) so the agent only needs `MICA_TERMINAL_URL`.
   that it fell behind and rebuilds from a snapshot when shown, instead of parsing every frame in the
   background.
 - The agent flow is create → `input` (text + submit) → `wait` → read the session's
-  `screen`/`inputLine`. `wait` matches text/regex after masking the echo of what was just typed
-  (only the first hit per input, so identical output still matches; `skipEcho: false` disables it),
-  and `expectExitCode` is the reliable way to tell whether a command succeeded. Writes carry
+  `screen`/`inputLine`. `wait` matches text/regex against logical lines (only xterm soft wraps are
+  joined) after masking recent input echoes; `skipEcho: false` disables masking. Returned screens
+  always retain their visual rows, echoes and cursor coordinates. `expectExitCode` waits for the
+  PTY/shell process to exit, not a command inside a persistent shell; capture that command's `$?`
+  in a unique completion marker instead. `idleMs` means silence, not completion or success. Writes carry
   `x-mica-owner`: an agent cannot type into or close another chat's terminal, while the human page
   (no owner header) can still take over any of them. The top-bar shows one icon **per live terminal
   of the current chat** (numbered when there are several) and nothing at all when the chat has none;

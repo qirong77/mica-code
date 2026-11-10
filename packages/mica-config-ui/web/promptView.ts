@@ -3,7 +3,7 @@ import { estimateTextTokens } from '../src/shared/text.js';
 /**
  * 系统提示词的分段展示。
  *
- * 提示词是现场拼出来的：`<system>`（角色）、`<project-instructions>`（AGENT.md）、
+ * 提示词是现场拼出来的：`<system>`（默认正文）、`<role>`（追加角色）、`<project-instructions>`（AGENT.md）、
  * `<skills>`（索引）、`<context>`（环境信息），再由插件追加自己的段落（会话笔记、循环说明…）。
  * 界面要回答「发出去的那一份里都有什么、各占多少」，所以按顶层标签切开，标签之间没被包住的
  * 部分（插件段落就是这么进来的）聚成一段「其它注入」，而不是假装它不存在。
@@ -53,7 +53,8 @@ export type PromptOutline = {
 
 /** 已知段落的叫法：讲清它从哪来，而不是把标签名原样丢给用户。 */
 const SECTION_LABELS: Record<string, string> = {
-  system: '角色提示词',
+  system: '系统提示词正文',
+  role: '追加 Role',
   'project-instructions': '项目说明（AGENT.md）',
   skills: 'Skills 索引',
   context: '环境信息',

@@ -35,12 +35,23 @@ const SENT_PROMPT = [
 ].join('\n');
 
 describe('splitPromptSections', () => {
+  it('区分固定默认正文与追加的 Role，并保留系统提示词顺序', () => {
+    const system = '<system>\nDefault instructions.\n</system>';
+    const role = '<role>\nTranslate clearly.\n</role>';
+    const parts = splitPromptSections(`${system}\n\n${role}`);
+    expect(parts.map((part) => [part.tag, part.label])).toEqual([
+      ['system', '系统提示词正文'],
+      ['role', '追加 Role'],
+    ]);
+    expect(parts.map((part) => part.content)).toEqual([system, role]);
+  });
+
   it('按顶层标签切段，标签之外的追加内容单独成段', () => {
     const parts = splitPromptSections(SENT_PROMPT);
 
     expect(parts.map((part) => part.tag)).toEqual(['system', 'project-instructions', 'skills', 'context', '']);
     expect(parts.map((part) => part.label)).toEqual([
-      '角色提示词',
+      '系统提示词正文',
       '项目说明（AGENT.md）',
       'Skills 索引',
       '环境信息',
@@ -124,7 +135,7 @@ describe('splitPromptSections', () => {
   });
 
   it('保留基础标签名称，缺少来源时回退，未闭合注入作为其它内容', () => {
-    expect(splitPromptSections('<system source="role">\nrole\n</system>')[0]!.label).toBe('角色提示词');
+    expect(splitPromptSections('<system source="role">\nrole\n</system>')[0]!.label).toBe('系统提示词正文');
     expect(splitPromptSections('<injection>\nbody\n</injection>')[0]!.label).toBe('injection');
     expect(splitPromptSections('<injection source="hook" section="build">\nbody\n</injection>')[0]!.label).toBe(
       'hook / build',
@@ -178,7 +189,7 @@ describe('analyzePrompt', () => {
   it('顶层段按标签切，段内再按 markdown 标题切成树', () => {
     const nodes = analyzePrompt(NESTED_PROMPT).nodes;
 
-    expect(nodes.map((node) => node.label)).toEqual(['角色提示词', '项目说明（AGENT.md）']);
+    expect(nodes.map((node) => node.label)).toEqual(['系统提示词正文', '项目说明（AGENT.md）']);
     const book = nodes[1]!;
     expect(book.level).toBe(0);
     // 段里唯一的 h1 被提到段本身：段名已经说了来源，不必再点一层。
@@ -243,10 +254,10 @@ describe('analyzePrompt', () => {
 describe('searchPrompt', () => {
   it('按标题与正文过滤，父链保留，命中数只算节点自己的正文', () => {
     const nodes = analyzePrompt(NESTED_PROMPT).nodes;
-    const result = searchPrompt(nodes, '正文');
+    const result = searchPrompt(nodes, '正文。');
 
     expect(result.total).toBe(2);
-    // 「角色提示词」里没有这个词，整段被过滤掉；「项目说明」因为子节命中而留在树上。
+    // 默认正文里没有这个词，整段被过滤掉；「项目说明」因为子节命中而留在树上。
     expect(result.nodes).toHaveLength(1);
     const book = result.nodes[0]!;
     expect(book.label).toBe('项目说明（AGENT.md）');

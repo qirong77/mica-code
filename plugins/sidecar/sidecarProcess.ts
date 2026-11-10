@@ -56,6 +56,42 @@ export function resolveCliCommand(): SidecarCliCommand {
   return { command: process.execPath, prefixArgs: [] };
 }
 
+const INITIAL_CWD = process.cwd();
+
+function parentMcpCwd(argv: readonly string[]): string {
+  let cwd = INITIAL_CWD;
+  for (let index = 0; index < argv.length; index++) {
+    const arg = argv[index]!;
+    if (arg === '--') break;
+    if (arg !== '--dir' && !arg.startsWith('--dir=')) continue;
+    const value = arg === '--dir' ? argv[++index] : arg.slice('--dir='.length);
+    if (value) cwd = resolve(INITIAL_CWD, value);
+  }
+  return cwd;
+}
+
+export function inheritSessionMcpArgs(
+  argv: readonly string[] = process.argv.slice(2),
+  parentCwd = process.cwd(),
+): string[] {
+  const args: string[] = [];
+  for (let index = 0; index < argv.length; index++) {
+    const arg = argv[index]!;
+    if (arg === '--') break;
+    if (arg === '--strict-mcp-config') {
+      args.push(arg);
+      continue;
+    }
+    const name = ['--mcp-config', '--mcp-init-timeout-ms'].find((name) => arg === name || arg.startsWith(`${name}=`));
+    if (!name) continue;
+    const value = arg === name ? argv[++index] : arg.slice(name.length + 1);
+    if (!value) continue;
+    // Keep the same config (and its owner), but anchor its path before the child changes cwd.
+    args.push(name, name === '--mcp-config' ? resolve(parentCwd, value) : value);
+  }
+  return args;
+}
+
 export type SidecarProcessOptions = {
   /** 子会话的工作目录；缺省与父会话相同。 */
   cwd?: string;
@@ -146,9 +182,17 @@ export class SidecarProcess {
   ): Promise<SidecarProcess> {
     options.signal?.throwIfAborted();
     // 解析成绝对路径再往下传：同一个值要用作子进程 cwd 和 --dir，相对路径会被解析两次。
-    const cwd = resolveSessionCwd(options.cwd);
+    const parentCwd = process.cwd();
+    const cwd = resolveSessionCwd(options.cwd, parentCwd);
     assertUsableCwd(cwd);
-    const args = [...cli.prefixArgs, 'app-server', '--thinking', '--dir', cwd];
+    const args = [
+      ...cli.prefixArgs,
+      'app-server',
+      '--thinking',
+      '--dir',
+      cwd,
+      ...inheritSessionMcpArgs(process.argv.slice(2), parentMcpCwd(process.argv.slice(2))),
+    ];
     if (options.model) args.push('--model', options.model);
     if (options.effort) args.push('--variant', options.effort);
     if (options.role) args.push('--role', options.role);

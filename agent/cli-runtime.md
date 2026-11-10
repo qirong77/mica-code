@@ -53,8 +53,8 @@
 - 无视觉模型经 `stripImagesForVision` 替换发送副本中的图片；持久化历史保留原图。
 - 图片有三道闸：**准备阶段** `prepareImageForApi`（`mica-common/image.ts`）把 PNG 的长边压到 1568 并无损重编码（够小的图原样透传，其它格式不重编码），处理完长边仍超 `IMAGE_MAX_API_LONG_EDGE`（8192）就直接抛错——DeepSeek `/responses` 实测 8192 能过、8193 起 400，报错文案却说「不支持的图片格式」，这种 400 不可重试、整个 turn 会失败，所以要在本机拦住并让模型缩小 / 裁剪 / 分段重读；**发送阶段** `applyImageBudget`（`mica-agent/providers/imageBudget.ts`）按字节而不是 token 算账——一次请求的正文（文本 + 内联图片载荷）上限 20MB、单张 6MB，超了就把最旧的图换成 `[图片已省略]…` 占位文本，最新的图优先保留。三道都要有：token 口径看不出 53MB 的请求体，实测 DeepSeek 网关 32MB 能过、48MB 回 413（openresty 的 HTML 错误页），而压缩只覆盖能解码的 PNG。
 - Responses 带 reasoning 参数时保留 `summary: 'auto'`；历史 reasoning 经 `dropReplayedReasoningItems` 从发送副本移除。
-- `buildSystemPrompt()` 默认读 `mica-agent/prompt/system.md`；磁盘 role 只替换 `<system>`，插件 role（清单 `roles` → `$MICA_HOME/plugin-roles/`）**追加**在末尾并带 `append: true`；cwd 的 `AGENT.md` / `AGENTS.md` 合并注入，路径按 live cwd 解析。会话角色名是**配置**：`loadSnapshot` 与 `resolveCurrentRole` 解析不到它时用默认角色的正文，但绝不把名字改写成 `default`（插件 role 由插件 setup 之后才发布，那一刻查不到很正常；改写会让下一次保存真的把角色丢掉）。`agent.role` 因此报配置里的名字。
-- base prompt 只放「换宿主也不变」的东西：身份、指令层级、能力与插件的判断方式、工作方式、编辑约束、验证与交付。计划、委派、笔记、记忆这类策略由对应插件注册 `ctx.prompt.section()` 注入，随插件停用一起消失——不要为了「提示词完整」把工具用法抄回 base。
+- `buildSystemPrompt()` 始终以 `mica-agent/prompt/system.md` 构建固定的 `<system>` 默认正文，不接受 `baseSystemPrompt` 覆盖；内置 `default` 只读，Role 页面展示其正文。磁盘与插件的非默认 role 统一通过 `rolePrompt` 追加为紧接 `<system>` 的 `<role>` 段，两段同属 system prompt，默认角色不重复追加；cwd 的 `AGENT.md` / `AGENTS.md` 合并注入，路径按 live cwd 解析。会话角色名是**配置**：`loadSnapshot` 与 `resolveCurrentRole` 解析不到它时只保留默认正文、不追加 Role，但绝不把名字改写成 `default`（插件 role 由插件 setup 之后才发布，那一刻查不到很正常；改写会让下一次保存真的把角色丢掉）。`agent.role` 因此报配置里的名字。
+- base prompt 只放通用协作底座：通用助手身份、指令与事实边界、工具与权限、任务推进与成果保护、验证与沟通；专业职责与工作风格由 Role 补充，不替换通用约束。计划、委派、笔记、记忆这类策略由对应插件注册 `ctx.prompt.section()` 注入，随插件停用一起消失——不要为了「提示词完整」把工具用法抄回 base。
 - 工具用法（参数、超时、并发、等待语义）只写在工具 schema 描述里，base prompt 不重复：两处都写必然漂移，且每次改工具都在改 prompt cache 前缀。
 - skills 只以索引进入 system prompt。
 - 每次提示词注入都有 XML 边界：项目文件各用 `<document source="…">`，插件只通过 `ctx.prompt.section()` 注入，由宿主生成 `<injection source="plugin" plugin="…" section="…">`；`system-prompt:build` 不再支持。正文允许语义 XML，动态数据必须转义；外层标签由宿主保留。子代理规则、角色与插件独立模型请求也分别包装，来源属性保持稳定，不含轮次随机值。

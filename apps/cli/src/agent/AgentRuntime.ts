@@ -777,9 +777,7 @@ export class AgentRuntime {
   buildSystemPrompt(): string {
     const role = this.resolveCurrentRole();
     const prompt = micaAgent.buildSystemPrompt({
-      // 插件角色只追加：通用规则仍是默认 base，别让插件把整段系统提示词顶掉。
-      baseSystemPrompt: role.append ? undefined : role.prompt,
-      ...(role.append ? { rolePrompt: role.prompt } : {}),
+      rolePrompt: role.name === DEFAULT_ROLE_NAME ? undefined : role.prompt,
       skills: this.availableSkills(),
     });
     // 插件段落固定追加在最末：它们才是「每轮可能变」的内容（会话笔记、循环说明），

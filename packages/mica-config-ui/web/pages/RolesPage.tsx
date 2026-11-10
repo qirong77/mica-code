@@ -5,6 +5,7 @@ import { JsonEditor } from '../components/JsonEditor.js';
 import { PageFrame } from '../components/PageFrame.js';
 import { Alert, Button, Empty, SaveStatus, Tag } from '../components/Ui.js';
 import { appIcons } from '../icons.js';
+import { ROLE_LABELS } from '../labels.js';
 import { useAutoSave } from '../useAutoSave.js';
 import type { ConfigWebRolesDetails } from '../../src/shared/types.js';
 
@@ -21,11 +22,13 @@ export function RolesPage() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [copiedName, setCopiedName] = useState<string | null>(null);
   const selectedRole = useMemo(
     () => details?.roles.find((role) => role.name === selectedName),
     [details, selectedName],
   );
-  const editable = Boolean(selectedRole) && !selectedRole?.builtIn;
+  const isDefault = selectedRole?.name === 'default';
+  const editable = Boolean(selectedRole) && !isDefault && !selectedRole?.builtIn;
   const autoSave = useAutoSave<{ name: string; content: string }, ConfigWebRolesDetails>({
     save: (next) => writeRole(next.name, next.content),
     onSaved: (next) => setDetails(next),
@@ -42,8 +45,10 @@ export function RolesPage() {
    * 再跑 effect，那一批改动就没人登记了。
    */
   function editContent(next: string) {
+    if (!editable) return;
     setContent(next);
-    if (!editable || !selectedName) return;
+    setCopiedName(null);
+    if (!selectedName) return;
     if (next === (selectedRole?.content ?? '')) return;
     schedule({ name: selectedName, content: next });
   }
@@ -53,6 +58,7 @@ export function RolesPage() {
     setDetails(next);
     setSelectedName(selected?.name ?? '');
     setContent(selected?.content ?? '');
+    setCopiedName(null);
   }
 
   async function load() {
@@ -95,7 +101,7 @@ export function RolesPage() {
   }
 
   async function removeRole() {
-    if (!selectedRole || selectedRole.builtIn || busy) return;
+    if (!selectedRole || !editable || busy) return;
     const confirmed = await confirmDialog({
       title: `删除 Role「${selectedRole.name}」`,
       message: '此操作不可撤销。',
@@ -123,6 +129,20 @@ export function RolesPage() {
     const role = details?.roles.find((item) => item.name === name);
     setSelectedName(name);
     setContent(role?.content ?? '');
+    setCopiedName(null);
+  }
+
+  async function copyContent() {
+    if (!navigator.clipboard?.writeText) {
+      setError(ROLE_LABELS.copyUnsupported);
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(content);
+      setCopiedName(selectedName);
+    } catch {
+      setError(ROLE_LABELS.copyFailed);
+    }
   }
 
   useEffect(() => {
@@ -134,7 +154,7 @@ export function RolesPage() {
   return (
     <PageFrame
       title="Roles"
-      description="会话可切换的角色提示词：只替换 system prompt 的正文，其余段落仍由 Mica 组装"
+      description={ROLE_LABELS.description}
       path={details?.root}
       actions={
         <div className="toolbar">
@@ -178,15 +198,25 @@ export function RolesPage() {
                     <span className="role-list-item-name" title={role.name}>
                       {role.name}
                     </span>
+                    {role.name === 'default' ? (
+                      <span className="role-list-item-sub">{ROLE_LABELS.defaultPrompt}</span>
+                    ) : null}
                   </span>
-                  {role.builtIn ? <Tag>内置</Tag> : null}
+                  {role.builtIn || role.name === 'default' ? <Tag>{ROLE_LABELS.readOnly}</Tag> : null}
                 </button>
               ))}
             </div>
             <div className="role-editor-pane">
-              <div className="editor-pane-header">
-                <h3>{selectedRole?.name}</h3>
-                {selectedRole?.builtIn ? <span className="muted-text">内置 Role 只读</span> : null}
+              <div className="editor-pane-header role-prompt-header">
+                <div>
+                  <h3>{isDefault ? ROLE_LABELS.defaultPrompt : selectedRole?.name}</h3>
+                  <p className="muted-text editor-pane-subtitle">
+                    {isDefault ? ROLE_LABELS.defaultDescription : ROLE_LABELS.appendedPrompt}
+                  </p>
+                </div>
+                <Button variant="ghost" disabled={!selectedRole} onClick={() => void copyContent()}>
+                  {copiedName === selectedName ? ROLE_LABELS.copied : ROLE_LABELS.copy}
+                </Button>
               </div>
               <div className="editor-host role-editor-host">
                 <JsonEditor value={content} language="markdown" readOnly={!editable} onChange={editContent} />

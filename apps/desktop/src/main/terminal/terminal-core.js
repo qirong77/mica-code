@@ -190,11 +190,11 @@ function normalizeEchoText(value) {
 }
 
 /**
- * 去掉「刚输入的命令回显」所在的行。
+ * 去掉「刚输入的命令回显」所在的逻辑行（调用方先用 screenMatchText 还原软换行）。
  *
  * shell 会把输入原样回显到屏幕上，agent 敲完 `echo done` 再等 `done` 时，命令自己的
- * 回显就已经命中了。这里按最近写入的原文做行级过滤：回显行包含整段输入原文，而命令
- * 真正的输出通常不含。只是启发式——确实要匹配回显时可以关掉（`skipEcho: false`）。
+ * 回显就已经命中了。优先按写入前的输入行上下文定位回显，避免把包含输入的真正输出
+ * 当成回显。只是启发式——确实要匹配回显时可以关掉（`skipEcho: false`）。
  */
 export function maskEchoedInput(
   text,
@@ -205,29 +205,44 @@ export function maskEchoedInput(
   // 多行粘贴时 shell 逐行回显：按行拆开，每行都能对上自己的回显
   const needles = (inputs || [])
     .filter((entry) => entry && now - Number(entry.at || 0) <= windowMs)
-    .flatMap((entry) => String(entry.data ?? '').split(/\r?\n|\r/))
-    .map(normalizeEchoText)
-    .filter((payload) => payload.length >= 2)
+    .flatMap((entry) =>
+      String(entry.data ?? '')
+        .split(/\r?\n|\r/)
+        .map((data, index) => ({
+          needle: normalizeEchoText(data),
+          context: index === 0 ? entry.echoContext : null
+        }))
+    )
+    .filter(({ needle }) => needle.length >= 2)
   if (needles.length === 0) return { text: source, masked: 0 }
 
   const lines = source.split('\n')
   const normalized = lines.map(normalizeEchoText)
   const maskedLines = new Set()
-  for (const needle of needles) {
-    // 取最后一处「带提示符」的命中：同一条命令重复执行时，最近的回显最靠下。
-    // 整行就等于输入原文的通常是命令打印出来的同一段文本（`echo done` 的输出 `done`、
-    // 脚本自己打出的名字），遮掉它会让 wait 永远等不到，所以只在没有别的候选时才用
+  for (const { needle, context } of needles) {
+    if (context) {
+      let preceding = context.preceding
+      for (let cursor = 0; cursor < normalized.length; cursor += 1) {
+        const line = normalized[cursor]
+        if (context.prefix ? line !== context.expected : !line.endsWith(needle)) continue
+        if (preceding-- > 0) continue
+        maskedLines.add(cursor)
+        break
+      }
+      continue
+    }
+    // 没有写入上下文时，只认行尾回显；有提示符的重复命令仍取最近一次。
     let index = -1
     for (let cursor = normalized.length - 1; cursor >= 0; cursor -= 1) {
       const line = normalized[cursor]
-      if (line && line !== needle && line.includes(needle)) {
+      if (line && line !== needle && line.endsWith(needle)) {
         index = cursor
         break
       }
     }
     if (index < 0) {
-      // 没有带提示符的命中，只剩整行等于输入原文的行：兜底遮最后一处
-      for (let cursor = normalized.length - 1; cursor >= 0; cursor -= 1) {
+      // 无提示符的回显在同文输出之前，不能把后面的真实输出一起遮掉。
+      for (let cursor = 0; cursor < normalized.length; cursor += 1) {
         if (normalized[cursor] === needle) {
           maskedLines.add(cursor)
           break
@@ -247,6 +262,52 @@ export function maskEchoedInput(
     text: lines.filter((_, index) => !maskedLines.has(index)).join('\n'),
     masked: maskedLines.size
   }
+}
+
+function logicalLineText(term, y, wrappedNext, endColumn = term.cols, trimRight = !wrappedNext) {
+  const buffer = term.buffer.active
+  const line = buffer.getLine(y)
+  if (wrappedNext) {
+    const lastCell = line?.getCell(endColumn - 1)
+    // 宽字符放不进最后一列时，xterm 留下一个空占位；真实空格不能一并 trim。
+    if (
+      lastCell?.getCode() === 0 &&
+      lastCell.getWidth() === 1 &&
+      buffer
+        .getLine(y + 1)
+        ?.getCell(0)
+        ?.getWidth() === 2
+    ) {
+      endColumn -= 1
+    }
+  }
+  return line ? line.translateToString(trimRight, 0, endColumn) : ''
+}
+
+/** 写入前的逻辑输入行；列偏移使用 xterm 单元格，不能按 JS 字符数截宽字符。 */
+export function readInputEchoContext(term, data) {
+  const buffer = term.buffer.active
+  const cursorY = buffer.baseY + buffer.cursorY
+  let startLine = cursorY
+  while (startLine > 0 && buffer.getLine(startLine)?.isWrapped) startLine -= 1
+  let prefix = ''
+  for (let y = startLine; y <= cursorY; y += 1) {
+    prefix += logicalLineText(
+      term,
+      y,
+      y < cursorY,
+      y === cursorY ? buffer.cursorX : term.cols,
+      false
+    )
+  }
+  const firstLine = String(data).split(/\r?\n|\r/)[0]
+  const needle = normalizeEchoText(firstLine)
+  const expected = normalizeEchoText(prefix + firstLine)
+  const preceding = screenMatchText(term, { startLine: 0, lines: new Array(startLine) })
+    .split('\n')
+    .map(normalizeEchoText)
+    .filter((line) => (prefix ? line === expected : line.endsWith(needle))).length
+  return { prefix, expected, preceding }
 }
 
 /**
@@ -288,6 +349,24 @@ export function readScreen(term, { maxLines = TERMINAL_DEFAULT_SCREEN_LINES } = 
     inputLine: cursorLine ? cursorLine.translateToString(true, 0, buffer.cursorX) : '',
     scrollback: buffer.baseY
   }
+}
+
+/** 仅供匹配：拼接软换行，不改变对外屏幕的视觉行与坐标。 */
+export function screenMatchText(term, screen = readScreen(term)) {
+  const buffer = term.buffer.active
+  let startLine = screen.startLine
+  const endLine = startLine + screen.lines.length
+  while (startLine > 0 && buffer.getLine(startLine)?.isWrapped) startLine -= 1
+
+  const lines = []
+  for (let y = startLine; y < endLine; y += 1) {
+    const line = buffer.getLine(y)
+    const wrappedNext = y + 1 < endLine && buffer.getLine(y + 1)?.isWrapped
+    const text = logicalLineText(term, y, wrappedNext)
+    if (line?.isWrapped && lines.length > 0) lines[lines.length - 1] += text
+    else lines.push(text)
+  }
+  return lines.join('\n')
 }
 
 /** 屏幕文本（不含坐标信息），给 `format=text` 用 */

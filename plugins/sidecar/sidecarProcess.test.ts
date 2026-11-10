@@ -1,8 +1,52 @@
 import { describe, expect, it } from 'vitest';
-import { existsSync, mkdtempSync, readFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { isAbsolute, join, resolve } from 'node:path';
-import { currentSidecarDepth, MAX_SIDECAR_DEPTH, SidecarProcess, resolveSessionCwd } from './sidecarProcess.js';
+import {
+  currentSidecarDepth,
+  inheritSessionMcpArgs,
+  MAX_SIDECAR_DEPTH,
+  SidecarProcess,
+  resolveSessionCwd,
+} from './sidecarProcess.js';
+
+describe('inheritSessionMcpArgs', () => {
+  const parentCwd = resolve('/parent', 'workspace');
+
+  it('does not add MCP options when the parent has none', () => {
+    expect(inheritSessionMcpArgs(['app-server', '--model', 'test-model'], parentCwd)).toEqual([]);
+  });
+
+  it('inherits a split absolute config path without changing it', () => {
+    const path = resolve('/session', 'mcp.json');
+    expect(inheritSessionMcpArgs(['app-server', '--mcp-config', path], parentCwd)).toEqual(['--mcp-config', path]);
+  });
+
+  it.each([['--mcp-config', './session/mcp=controls.json'], ['--mcp-config=./session/mcp=controls.json']])(
+    'anchors a relative config path in the parent cwd (%j)',
+    (...argv) => {
+      expect(inheritSessionMcpArgs(argv, parentCwd)).toEqual([
+        '--mcp-config',
+        resolve(parentCwd, 'session/mcp=controls.json'),
+      ]);
+    },
+  );
+
+  it('inherits strict mode even without an explicit config', () => {
+    expect(inheritSessionMcpArgs(['--strict-mcp-config'], parentCwd)).toEqual(['--strict-mcp-config']);
+  });
+
+  it.each([['--mcp-init-timeout-ms', '4500'], ['--mcp-init-timeout-ms=4500']])(
+    'inherits the explicit initialization timeout (%j)',
+    (...argv) => {
+      expect(inheritSessionMcpArgs(argv, parentCwd)).toEqual(['--mcp-init-timeout-ms', '4500']);
+    },
+  );
+
+  it('does not treat positional prompt arguments as MCP options', () => {
+    expect(inheritSessionMcpArgs(['exec', '--', '--mcp-config=prompt.json', '--strict-mcp-config'])).toEqual([]);
+  });
+});
 
 describe('resolveSessionCwd', () => {
   it('always returns an absolute path', () => {
@@ -99,6 +143,79 @@ async function waitForFile(path: string, timeoutMs: number): Promise<boolean> {
 }
 
 describe('SidecarProcess.start', () => {
+  it.each(['split', 'equals'] as const)('passes inherited MCP options to the actual child argv (%s)', async (form) => {
+    const dir = mkdtempSync(join(process.env.MICA_TEST_ROOT ?? tmpdir(), 'mica-sidecar-mcp-'));
+    const captureFile = join(dir, 'launch.json');
+    const parentCwd = process.cwd();
+    const originalArgv = process.argv;
+    const originalDesktopHost = process.env.MICA_PLUGIN_DESKTOP_HOST;
+    const configPath = './session/mcp=controls.json';
+    const script = `
+        const { writeFileSync } = require('node:fs');
+        const { createInterface } = require('node:readline');
+        writeFileSync(process.argv[1], JSON.stringify({
+          argv: process.argv.slice(2),
+          cwd: process.cwd(),
+          desktopHost: process.env.MICA_PLUGIN_DESKTOP_HOST ?? null,
+        }));
+        const input = createInterface({ input: process.stdin });
+        input.on('line', (line) => {
+          const request = JSON.parse(line);
+          if (request.id === undefined) return;
+          const result = request.method === 'thread/start' ? { thread: { id: 'child-1' } } : {};
+          process.stdout.write(JSON.stringify({ id: request.id, result }) + '\\n');
+        });
+        input.on('close', () => process.exit(0));
+      `;
+    let child: SidecarProcess | undefined;
+    try {
+      process.argv = [
+        ...originalArgv.slice(0, 2),
+        'app-server',
+        '--dir',
+        parentCwd,
+        ...(form === 'split' ? ['--mcp-config', configPath] : [`--mcp-config=${configPath}`]),
+        '--strict-mcp-config',
+        '--mcp-init-timeout-ms=4500',
+      ];
+      process.env.MICA_PLUGIN_DESKTOP_HOST = 'test-desktop-host';
+      process.chdir(dir);
+      child = await SidecarProcess.start({
+        cwd: dir,
+        parentSessionId: 'parent-1',
+        launch: { command: process.execPath, prefixArgs: ['-e', script, '--', captureFile] },
+        requestTimeoutMs: 5_000,
+      });
+
+      expect(child.sessionId).toBe('child-1');
+      expect(JSON.parse(readFileSync(captureFile, 'utf8'))).toEqual({
+        argv: [
+          'app-server',
+          '--thinking',
+          '--dir',
+          dir,
+          '--mcp-config',
+          resolve(parentCwd, configPath),
+          '--strict-mcp-config',
+          '--mcp-init-timeout-ms',
+          '4500',
+          '--parent',
+          'parent-1',
+        ],
+        cwd: realpathSync(dir),
+        desktopHost: null,
+      });
+      expect(resolve(parentCwd, configPath)).not.toBe(resolve(dir, configPath));
+    } finally {
+      process.chdir(parentCwd);
+      process.argv = originalArgv;
+      if (originalDesktopHost === undefined) delete process.env.MICA_PLUGIN_DESKTOP_HOST;
+      else process.env.MICA_PLUGIN_DESKTOP_HOST = originalDesktopHost;
+      await child?.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it('kills the child process when the handshake never completes', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'mica-sidecar-handshake-'));
     const pidFile = join(dir, 'pid');

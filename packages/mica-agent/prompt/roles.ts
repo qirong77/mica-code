@@ -20,11 +20,6 @@ export type AgentRole = {
   prompt: string;
   builtIn: boolean;
   path?: string;
-  /**
-   * 这一段是**追加**在通用系统提示词后面（`<role>` 段），而不是替换 `<system>`。
-   * 插件角色都是这种：它们只说自己额外要遵守什么，不必把通用规则再抄一遍。
-   */
-  append?: boolean;
   /** 来自哪个插件（`user.demand-dev` 这类）；磁盘角色没有这个字段。 */
   pluginId?: string;
 };
@@ -45,7 +40,7 @@ export function listAgentRoles(): AgentRole[] {
         (entry) =>
           entry.isFile() &&
           extname(entry.name) === '.md' &&
-          basename(entry.name, extname(entry.name)) !== DEFAULT_ROLE_NAME,
+          !/^default(?:\.md)*$/i.test(basename(entry.name, extname(entry.name)).trim()),
       )
       .flatMap((entry) => {
         const path = join(directory, entry.name);
@@ -121,7 +116,7 @@ function pluginRoles(): AgentRole[] {
       if (!name || name === DEFAULT_ROLE_NAME || !path || seen.has(name)) continue;
       try {
         if (!statSync(path).isFile()) continue;
-        roles.push({ name, prompt: readFileSync(path, 'utf-8'), builtIn: false, path, append: true, pluginId });
+        roles.push({ name, prompt: readFileSync(path, 'utf-8'), builtIn: false, path, pluginId });
         seen.add(name);
       } catch {
         // 正文被删掉就跳过：列出来也切不过去。

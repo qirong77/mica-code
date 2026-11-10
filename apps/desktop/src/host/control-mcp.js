@@ -102,7 +102,10 @@ export function pathParams(endpoint) {
  */
 export function unknownParams(endpoint, params = {}) {
   if (!params || typeof params !== 'object') return []
-  const known = new Set([...(endpoint.params || []).map((param) => param.name), ...pathParams(endpoint)])
+  const known = new Set([
+    ...(endpoint.params || []).map((param) => param.name),
+    ...pathParams(endpoint)
+  ])
   // `id` 的别名在下面会被折进去，不该再报「不认识这个参数」。
   const aliases = new Set(Object.keys(PATH_ID_ALIASES))
   return Object.keys(params).filter((key) => !known.has(key) && !aliases.has(key))
@@ -417,7 +420,11 @@ export function createControlMcpHandler({
         if (kind === 'mica-browser' && !options.owner) {
           throw new Error('缺少会话归属，无法调用浏览器操作')
         }
-        const request = buildActionRequest(endpoint, params, options)
+        const actionParams =
+          kind === 'mica-browser' && action === 'screenshot'
+            ? { ...params, raw: params.raw ?? true }
+            : params
+        const request = buildActionRequest(endpoint, actionParams, options)
         return callControlService(socketPath, request, { label })
       }
     })

@@ -157,6 +157,135 @@ describe('terminal session lifecycle', () => {
     expect(hit.reason).toBe('text')
   })
 
+  test.each([
+    {
+      cols: 80,
+      prompt: 'MICA_QA_7E42_INPUT> ',
+      output: 'MICA_QA_7E42_RECEIVED=<林 奇荣 qa smoke>'
+    },
+    {
+      cols: 21,
+      prompt: 'MICA_QA_7E42_INPUT> ',
+      output: 'MICA_QA_7E42_RECEIVED=<林 奇荣 qa smoke>'
+    },
+    { cols: 21, prompt: 'abcd中文  xyz尾> ', output: 'received: 林 奇荣 qa smoke' },
+    { cols: 21, prompt: 'INPUT> ', output: '林 奇荣 qa smoke' },
+    { cols: 21, prompt: 'INPUT> ', output: 'INPUT> 林 奇荣 qa smoke' },
+    { cols: 21, prompt: '', output: '林 奇荣 qa smoke' }
+  ])(
+    'wait preserves interactive results at $cols columns with prompt $prompt and output $output',
+    async ({ cols, prompt, output }) => {
+      const session = await sessions.create({ shell: '/bin/sh', cols, rows: 24 })
+      const input = '林 奇荣 qa smoke'
+      ptys[0].data(prompt)
+      await sessions.detail(session.id)
+      sessions.write(session.id, { text: input, submit: true })
+      ptys[0].data(`${input}\r\n`)
+
+      const echoOnly = await sessions.waitFor(session.id, { text: input, timeoutMs: 100 })
+      expect(echoOnly.matched).toBe(false)
+      const raw = await sessions.waitFor(session.id, {
+        text: input,
+        skipEcho: false,
+        timeoutMs: 350
+      })
+      expect(raw.matched).toBe(true)
+
+      ptys[0].data(`\r\n${output}\r\n`)
+      for (const condition of [
+        { text: output },
+        { regex: `${output.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\n` }
+      ]) {
+        const hit = await sessions.waitFor(session.id, { ...condition, timeoutMs: 350 })
+        expect(hit.matched).toBe(true)
+        expect(hit.screen).toEqual((await sessions.detail(session.id)).screen)
+      }
+    }
+  )
+
+  test('wait locates the latest repeated echo from its write context', async () => {
+    const session = await sessions.create({ shell: '/bin/sh', cols: 20, rows: 24 })
+    const command = 'git status'
+    ptys[0].data(`~ $ ${command}\r\nclean\r\n~ $ `)
+    await sessions.detail(session.id)
+    sessions.write(session.id, { text: command, submit: true })
+    ptys[0].data(`${command}\r\noutput: ${command}\r\n`)
+    const hit = await sessions.waitFor(session.id, { text: `output: ${command}`, timeoutMs: 350 })
+    expect(hit.matched).toBe(true)
+    expect(session.recentInputs.at(-1).echoContext.preceding).toBe(1)
+  })
+
+  test('wait matches long stdout by text and regex while returning the unchanged visual screen', async () => {
+    const session = await sessions.create({ shell: '/bin/sh', cols: 64, rows: 24 })
+    const marker =
+      'MICA_WRAP_TARGET_9137_ABCDEFGHIJKLMNOPQRSTUVWXYZ_0123456789_abcdefghijklmnopqrstuvwxyz_LONG_OUTPUT'
+    ptys[0].data(`${marker}\r\n$ `)
+    const { screen } = await sessions.detail(session.id)
+    expect(screen.lines).toEqual([marker.slice(0, 64), marker.slice(64), '$ '])
+    expect(screen.cursor).toEqual({ x: 2, y: 2, absoluteY: 2 })
+    for (const condition of [{ text: marker }, { regex: `^${marker}\\n` }]) {
+      const hit = await sessions.waitFor(session.id, { ...condition, timeoutMs: 350 })
+      expect(hit.matched).toBe(true)
+      expect(hit.screen).toEqual(screen)
+      expect(Object.keys(hit).sort()).toEqual(['elapsedMs', 'matched', 'reason', 'screen'])
+    }
+    expect((await sessions.detail(session.id)).screen).toEqual(screen)
+  })
+
+  test.each([
+    { cols: 20, marker: 'MICA_WRAP_TARGET_ABCDEFGHIJKLMNOPQRSTUVWXYZ_LONG_OUTPUT' },
+    { cols: 21, marker: 'abcdefghijklmnopqrst中文宽字符_输出标记_ABCDEFGHIJKLMNOPQRSTUVWXYZ' }
+  ])(
+    'wait masks long echoes at $cols columns before stdout and honors skipEcho:false',
+    async ({ cols, marker }) => {
+      const session = await sessions.create({ shell: '/bin/sh', cols, rows: 24 })
+      const command = `printf '%s\\n' ${marker}`
+      sessions.write(session.id, { text: command, submit: true })
+      ptys[0].data(`$ ${command}\r\n`)
+      const { screen } = await sessions.detail(session.id)
+      for (const condition of [{ text: marker.slice(-6) }, { regex: marker }]) {
+        const miss = await sessions.waitFor(session.id, { ...condition, timeoutMs: 100 })
+        expect(miss.matched).toBe(false)
+        expect(miss.reason).toBe('timeout')
+        expect(miss.screen).toEqual(screen)
+      }
+      for (const condition of [{ text: marker }, { regex: marker }]) {
+        const echo = await sessions.waitFor(session.id, {
+          ...condition,
+          skipEcho: false,
+          timeoutMs: 350
+        })
+        expect(echo.matched).toBe(true)
+        expect(echo.screen).toEqual(screen)
+      }
+
+      ptys[0].data(`${marker}\r\n$ `)
+      const output = await sessions.detail(session.id)
+      for (const condition of [{ text: marker }, { regex: marker }]) {
+        const hit = await sessions.waitFor(session.id, { ...condition, timeoutMs: 350 })
+        expect(hit.matched).toBe(true)
+        expect(hit.screen).toEqual(output.screen)
+      }
+    }
+  )
+
+  test('wait does not join real newlines into a false text or regex match', async () => {
+    const session = await sessions.create({ shell: '/bin/sh', cols: 20, rows: 24 })
+    const first = 'abcdefghijklmnopqrst'
+    const second = 'uvwxyz_LONG_OUTPUT'
+    ptys[0].data(`${first}\r\n${second}\r\n`)
+    for (const condition of [{ text: first + second }, { regex: `${first}${second}` }]) {
+      const miss = await sessions.waitFor(session.id, { ...condition, timeoutMs: 100 })
+      expect(miss.matched).toBe(false)
+      expect(miss.reason).toBe('timeout')
+    }
+    const hit = await sessions.waitFor(session.id, {
+      text: `${first}\n${second}`,
+      timeoutMs: 350
+    })
+    expect(hit.matched).toBe(true)
+  })
+
   test('wait matches a specific exit code', async () => {
     const session = await sessions.create({ shell: '/bin/sh', cols: 80, rows: 24 })
     setTimeout(() => ptys[0].exit(2, 0), 30)

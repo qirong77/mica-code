@@ -242,7 +242,7 @@ export function SystemPromptPane({
 
       {scopeOpen ? (
         <p className="prompt-scope">
-          这里只算 system prompt 本身：角色提示词、AGENT.md、skills 索引、环境信息与插件段落。 工具
+          这里只算 system prompt 本身：默认正文、追加 Role、AGENT.md、skills 索引、环境信息与插件段落。 工具
           schema、消息历史与思考内容不在其中（它们在「Context 分析」页计入未解释的开销）。 tokens 按字符粗估（CJK 按
           1、其余按 1/4），与状态栏的 ctx 同一口径。
         </p>
@@ -396,7 +396,7 @@ function PromptShareBar({
  * 没有记录时的说明。
  *
  * 旧会话的文件里没有提示词，重新拼一遍只会拼出「现在」的样子——那不是当时发出去的内容，
- * 所以宁可说清楚没有，只把角色提示词作为参考摆出来（它只是其中一段）。
+ * 所以宁可说清楚没有，只把当前默认正文与追加 Role 作为参考摆出来。
  */
 function PromptMissing({ rolePrompt, error }: { rolePrompt: string; error: string | null }) {
   return (
@@ -404,13 +404,13 @@ function PromptMissing({ rolePrompt, error }: { rolePrompt: string; error: strin
       {error ? <div className="ui-alert">{error}</div> : null}
       <h3>这条会话没有记录系统提示词</h3>
       <p>
-        提示词在每次请求时现场拼装：角色提示词、项目说明（AGENT.md）、skills 索引、环境信息， 再加上插件贡献的段落。Mica
-        只保留最近一次请求发出去的那一份，这条会话早于这项记录。
+        提示词在每次请求时现场拼装：默认正文、追加 Role、项目说明（AGENT.md）、skills 索引、环境信息，
+        再加上插件贡献的段落。Mica 只保留最近一次请求发出去的那一份，这条会话早于这项记录。
       </p>
       <p className="muted-text">在这个会话里发一条消息后再回来，这里就会显示完整内容。</p>
       {rolePrompt ? (
         <details className="prompt-role-fallback">
-          <summary>角色提示词（只是其中一段，不是发出去的全部内容）</summary>
+          <summary>当前默认正文与追加 Role（仅供参考，不是当时发出的完整提示词）</summary>
           <pre>{rolePrompt}</pre>
         </details>
       ) : null}

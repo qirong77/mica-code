@@ -41,6 +41,16 @@ describe('BROWSER_ENDPOINTS', () => {
     expect(catalog).toHaveLength(BROWSER_ENDPOINTS.length)
     expect(catalog.map((item) => item.path)).toEqual(BROWSER_ENDPOINTS.map((item) => item.path))
   })
+
+  it('distinguishes the MCP screenshot image default from the direct HTTP JSON default', () => {
+    const screenshot = BROWSER_ENDPOINTS.find((endpoint) => endpoint.id === 'screenshot')
+    const raw = screenshot.params.find((param) => param.name === 'raw')
+    expect(raw.description).toContain('MCP 默认 true（推荐）')
+    expect(raw.description).toContain('raw=false')
+    expect(raw.description).toContain('直接 HTTP 调用默认 false')
+    expect(screenshot.returns).toContain('MCP 默认返回图片')
+    expect(screenshot.returns).toContain('dataUrl')
+  })
 })
 
 describe('buildDocsMarkdown', () => {
@@ -92,6 +102,13 @@ describe('BROWSER_GUIDE', () => {
     expect(BROWSER_GUIDE).toContain('不需要先 showBrowser')
     const show = BROWSER_ENDPOINTS.find((endpoint) => endpoint.id === 'showBrowser')
     expect(show.summary).toContain('明确要给用户演示')
+  })
+
+  it('recommends model-visible MCP screenshots rather than base64 text', () => {
+    expect(BROWSER_GUIDE).toContain('MCP 调用默认 raw=true（推荐）')
+    expect(BROWSER_GUIDE).toContain('不要把 base64 当文本读')
+    expect(BROWSER_GUIDE).toContain('raw=false')
+    expect(BROWSER_GUIDE).toContain('直接 HTTP 调用仍默认返回 JSON')
   })
 })
 

@@ -1,11 +1,15 @@
-import { CallToolResultSchema, ListToolsResultSchema } from '@modelcontextprotocol/sdk/types.js';
-import { micaTools, type ToolExecuteCallbacks } from '@packages/mica-tools/index.js';
+import { CallToolResultSchema, ListToolsResultSchema, type ContentBlock } from '@modelcontextprotocol/sdk/types.js';
+import {
+  micaTools,
+  type ToolExecuteCallbacks,
+  type ToolImageMediaType,
+  type ToolResult,
+  type ToolResultBlock,
+} from '@packages/mica-tools/index.js';
 import { finalizeTextOutput } from '@packages/mica-tools/utils/outputLimits.js';
 import { connectToServer, connections, type ConnectedMcpServer } from './client.js';
 import { createHash } from 'node:crypto';
 
-type TextContent = { type: 'text'; text: string };
-type ContentItem = TextContent | { type: 'image' | 'audio' | 'resource' | 'resource_link' };
 const MAX_MCP_TOOL_RESULT_CHARS = 60_000;
 
 class McpProxyTool extends micaTools.MicaTool {
@@ -19,7 +23,7 @@ class McpProxyTool extends micaTools.MicaTool {
     super(name, description, inputSchema, { source: 'mcp', mcpServer: serverName });
   }
 
-  async execute(input: Record<string, unknown>, callbacks?: ToolExecuteCallbacks): Promise<string> {
+  async execute(input: Record<string, unknown>, callbacks?: ToolExecuteCallbacks): Promise<ToolResult> {
     return callMcpTool(this.serverName, this.toolName, input, callbacks?.signal);
   }
 
@@ -62,7 +66,7 @@ async function callMcpTool(
   toolName: string,
   args: Record<string, unknown>,
   signal?: AbortSignal,
-): Promise<string> {
+): Promise<ToolResult> {
   const server = connections.get(serverName);
   if (!server) {
     throw new Error(`MCP 服务器 "${serverName}" 未连接`);
@@ -85,27 +89,70 @@ async function doCallMcpTool(
   toolName: string,
   args: Record<string, unknown>,
   signal?: AbortSignal,
-): Promise<string> {
+): Promise<ToolResult> {
   const result = await server.client.callTool({ name: toolName, arguments: args }, CallToolResultSchema, {
     timeout: 120_000,
     signal,
   });
-  const content = result.content as ContentItem[];
+  const content = result.content as ContentBlock[];
 
   if (result.isError) {
-    const errorText = content
-      .filter((item): item is TextContent => item.type === 'text')
-      .map((item) => item.text)
-      .join('\n');
+    const errorText = content.flatMap((item) => (item.type === 'text' ? [item.text] : [])).join('\n');
     throw new Error(errorText || 'MCP tool returned an error');
   }
 
-  const textParts = content.filter((item): item is TextContent => item.type === 'text').map((item) => item.text);
-
-  return finalizeTextOutput(textParts.length > 0 ? textParts.join('\n') : JSON.stringify(content), {
+  const blocks = content.map(toToolResultBlock);
+  const textLimits = {
     maxChars: MAX_MCP_TOOL_RESULT_CHARS,
     label: `MCP ${server.name}.${toolName} 输出`,
-  });
+  };
+  if (!blocks.some((block) => block.type === 'image')) {
+    return finalizeTextOutput(
+      blocks.length > 0 ? blocks.flatMap((block) => (block.type === 'text' ? [block.text] : [])).join('\n') : '[]',
+      textLimits,
+    );
+  }
+  const textChars = blocks.reduce((total, block) => total + (block.type === 'text' ? block.text.length : 0), 0);
+  const textBudgetRatio = Math.min(1, MAX_MCP_TOOL_RESULT_CHARS / textChars);
+  return blocks.map((block) =>
+    block.type === 'text'
+      ? {
+          ...block,
+          text: finalizeTextOutput(block.text, {
+            ...textLimits,
+            maxChars: Math.floor(block.text.length * textBudgetRatio),
+            emptyMessage: '',
+          }),
+        }
+      : block,
+  );
+}
+
+function toToolResultBlock(item: ContentBlock): ToolResultBlock {
+  if (item.type === 'text') return { type: 'text', text: item.text };
+  if (item.type === 'resource' && 'text' in item.resource) {
+    return { type: 'text', text: item.resource.text };
+  }
+  if (item.type === 'resource_link') {
+    return { type: 'text', text: `${item.name.slice(0, 200)}: ${item.uri.slice(0, 4096)}` };
+  }
+  if (item.type === 'image') {
+    if (isSupportedImageMediaType(item.mimeType)) {
+      return { type: 'image', source: { type: 'base64', media_type: item.mimeType, data: item.data } };
+    }
+    return {
+      type: 'text',
+      text: `[MCP image omitted: unsupported MIME type ${item.mimeType.slice(0, 100)}; supported: image/jpeg, image/png, image/gif, image/webp. Binary data was not included as text.]`,
+    };
+  }
+  return {
+    type: 'text',
+    text: `[MCP ${item.type} content omitted: this content type is not supported. Its payload was not included as text.]`,
+  };
+}
+
+function isSupportedImageMediaType(mimeType: string): mimeType is ToolImageMediaType {
+  return mimeType === 'image/jpeg' || mimeType === 'image/png' || mimeType === 'image/gif' || mimeType === 'image/webp';
 }
 
 function createMcpToolName(serverName: string, toolName: string, usedNames: Set<string>): string {

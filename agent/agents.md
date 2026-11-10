@@ -2,6 +2,8 @@
 
 ## Subagent
 
+- `plugins/sidecar` 派生独立 app-server 时继承父 CLI 显式的 `--mcp-config`、`--strict-mcp-config` 与 `--mcp-init-timeout-ms`；配置路径按父启动 `--dir`（省略时为启动 cwd）绝对化，不随父会话之后换目录漂移，沿用原配置中的 owner，不生成新授权、不写用户配置。共享控制资源的委派须协调各自创建的窗口与终端；子会话仍不提供桌面专属插件能力面。
+
 - 委派能力本身是插件 `plugins/subagent/`：`agent` 工具、7 种内置类型、委派 prompt 段落都在插件里；内核只留机制（`ctx.subagents`，实现在 `apps/cli/src/agents/PluginSubagentHost.ts` + `SubagentTaskManager.ts`）。停用该插件后既没有 `agent` 工具，也没有提示词里的委派指引。
 - 内置类型：general-purpose、Explore、Implementer、Reviewer、Tester、Planner、Proposal；`maxTurns` 唯一默认值在 `plugins/subagent/definitions.ts`（999：截断一次要重做半成品，代价比多跑几轮高）。
 - `SubagentTaskManager` 按 owner 隔离任务与 abort signal，任务记录带 `pluginId` 供 `ctx.subagents.tasks.*` 收窄；后台完成元数据回注 owner，结果显式 read/await。parent Ctrl+C 同步中止其运行中的子代理。

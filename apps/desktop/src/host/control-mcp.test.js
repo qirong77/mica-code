@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test'
 import { createServer } from 'node:http'
-import { mkdtempSync } from 'node:fs'
+import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
@@ -104,6 +104,16 @@ describe('buildActionRequest', () => {
     }
   })
 
+  it('keeps the direct HTTP screenshot request default unchanged', () => {
+    const screenshot = browserCatalog.find((item) => item.id === 'screenshot')
+    expect(buildActionRequest(screenshot, { id: 'tab-1' }).path).toBe(
+      '/browser/tabs/tab-1/screenshot'
+    )
+    expect(buildActionRequest(screenshot, { id: 'tab-1', raw: false }).path).toBe(
+      '/browser/tabs/tab-1/screenshot?raw=false'
+    )
+  })
+
   it('splits params into path, query and body and injects the owner header', () => {
     const request = buildActionRequest(
       navigate,
@@ -184,10 +194,11 @@ describe('buildActionRequest', () => {
 describe('createControlMcpHandler over streamable http', () => {
   async function startRuntime({
     endpoints = BROWSER_ENDPOINTS,
-    socketPath = '/nonexistent.sock'
+    socketPath = '/nonexistent.sock',
+    kind = 'mica-browser'
   } = {}) {
     const handler = createControlMcpHandler({
-      kind: 'mica-browser',
+      kind,
       title: '受控浏览器',
       usage: '驱动浏览器',
       socketPath,
@@ -322,6 +333,94 @@ describe('createControlMcpHandler over streamable http', () => {
     } finally {
       await client.close()
       runtime.close()
+    }
+  })
+
+  it('returns screenshots as MCP images by default and honors an explicit raw=false', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mica-mcp-shot-'))
+    const socketPath = join(dir, 'svc.sock')
+    const data =
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl6dWQAAAAASUVORK5CYII='
+    const png = Buffer.from(data, 'base64')
+    const seen = []
+    const service = createServer((req, res) => {
+      const url = new URL(req.url, 'http://localhost')
+      seen.push({
+        path: url.pathname,
+        raw: url.searchParams.get('raw'),
+        owner: req.headers['x-mica-owner']
+      })
+      if (url.searchParams.get('raw') === 'true') {
+        res.writeHead(200, { 'content-type': 'image/png' })
+        return res.end(png)
+      }
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end(
+        JSON.stringify({ ok: true, dataUrl: `data:image/png;base64,${data}`, bytes: png.length })
+      )
+    })
+    await new Promise((resolve) => service.listen(socketPath, resolve))
+    const runtime = await startRuntime({ endpoints: browserCatalog, socketPath })
+    const client = await connect(runtime.url, { 'x-mica-owner': 'sess-shot' })
+    try {
+      const image = await client.callTool({
+        name: CONTROL_TOOL_NAME,
+        arguments: { action: 'screenshot', params: { id: 'tab-1' } }
+      })
+      expect(image.isError).toBeUndefined()
+      expect(image.content).toEqual([{ type: 'image', mimeType: 'image/png', data }])
+
+      const json = await client.callTool({
+        name: CONTROL_TOOL_NAME,
+        arguments: { action: 'screenshot', params: { id: 'tab-1', raw: false } }
+      })
+      expect(json.isError).toBeUndefined()
+      expect(json.content[0].type).toBe('text')
+      expect(JSON.parse(json.content[0].text)).toEqual({
+        ok: true,
+        dataUrl: `data:image/png;base64,${data}`,
+        bytes: png.length
+      })
+      expect(seen).toEqual([
+        { path: '/browser/tabs/tab-1/screenshot', raw: 'true', owner: 'sess-shot' },
+        { path: '/browser/tabs/tab-1/screenshot', raw: 'false', owner: 'sess-shot' }
+      ])
+    } finally {
+      await client.close()
+      runtime.close()
+      await new Promise((resolve) => service.close(resolve))
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('does not add a browser screenshot default to other MCP kinds', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mica-mcp-kind-'))
+    const socketPath = join(dir, 'svc.sock')
+    const seen = []
+    const service = createServer((req, res) => {
+      seen.push(req.url)
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ ok: true }))
+    })
+    await new Promise((resolve) => service.listen(socketPath, resolve))
+    const runtime = await startRuntime({
+      endpoints: browserCatalog,
+      socketPath,
+      kind: 'mica-terminal'
+    })
+    const client = await connect(runtime.url)
+    try {
+      const result = await client.callTool({
+        name: CONTROL_TOOL_NAME,
+        arguments: { action: 'screenshot', params: { id: 'tab-1' } }
+      })
+      expect(result.isError).toBeUndefined()
+      expect(seen).toEqual(['/browser/tabs/tab-1/screenshot'])
+    } finally {
+      await client.close()
+      runtime.close()
+      await new Promise((resolve) => service.close(resolve))
+      rmSync(dir, { recursive: true, force: true })
     }
   })
 })

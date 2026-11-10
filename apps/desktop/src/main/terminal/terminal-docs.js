@@ -81,7 +81,7 @@ const RAW_ENDPOINTS = [
     id: 'getSession',
     method: 'GET',
     path: '/sessions/:id',
-    summary: '会话详情 + 当前屏幕文本（真实终端解析后的内容，不是原始转义流）',
+    summary: '会话详情 + 当前屏幕文本（真实视觉行，保留软换行与光标坐标，不是原始转义流）',
     params: [
       {
         name: 'maxLines',
@@ -163,27 +163,43 @@ const RAW_ENDPOINTS = [
         name: 'text',
         in: 'body',
         required: false,
-        description: '屏幕文本包含该片段；默认跳过刚输入命令的回显所在行'
+        description: '逻辑文本包含该片段：只拼接 xterm 软换行，保留真实换行；默认跳过命令回显逻辑行'
       },
-      { name: 'regex', in: 'body', required: false, description: '屏幕文本匹配该正则' },
-      { name: 'idleMs', in: 'body', required: false, description: '连续无输出达到该毫秒数' },
-      { name: 'exited', in: 'body', required: false, description: 'true 时等待进程退出' },
+      {
+        name: 'regex',
+        in: 'body',
+        required: false,
+        description: '匹配同一份软换行逻辑文本；真实换行仍为 \\n，返回 screen 保留视觉行'
+      },
+      {
+        name: 'idleMs',
+        in: 'body',
+        required: false,
+        description: '连续无输出达到该毫秒数；不代表命令结束或成功'
+      },
+      {
+        name: 'exited',
+        in: 'body',
+        required: false,
+        description: 'true 时等待 PTY/shell 进程退出，不是 shell 内某条命令结束'
+      },
       {
         name: 'expectExitCode',
         in: 'body',
         required: false,
-        description: '等待进程退出且退出码等于该值，适合判断命令成败'
+        description: '等待 PTY/shell 进程退出且退出码等于该值；不是 shell 内任意命令的退出码'
       },
       {
         name: 'skipEcho',
         in: 'body',
         required: false,
-        description: '默认 true：匹配 text/regex 前去掉刚输入命令的回显行'
+        description:
+          '默认 true：仅在匹配 text/regex 前遮罩刚输入命令的回显逻辑行；false 可匹配回显，返回 screen 始终不变'
       },
       { name: 'timeoutMs', in: 'body', required: false, description: '默认 15000' }
     ],
     returns:
-      '{ ok, matched, reason, exitCode?, signal?, elapsedMs, screen }；reason 取值 text / regex / idle / exited / exitCode / timeout / closed；expectExitCode 不匹配时立刻返回 matched:false 并带上实际 exitCode'
+      '{ ok, matched, reason, exitCode?, signal?, elapsedMs, screen }；screen 始终为原始视觉行与坐标，不附加逻辑文本；reason 取值 text / regex / idle / exited / exitCode / timeout / closed；expectExitCode 不匹配时立刻返回 matched:false 并带上实际 exitCode'
   },
   {
     id: 'showSession',
@@ -249,11 +265,13 @@ function paramLabel(param) {
  * 详细文档仍然由 `buildDocsMarkdown` 生成（`/docs` 与设置页用）。
  */
 export const TERMINAL_GUIDE = [
-  '推荐流程：createSession → waitFor({idleMs:800}) 等登录 shell 出提示符 → writeInput → waitFor 等输出稳定 → getSession 读屏幕。',
+  '推荐流程：createSession → waitFor({idleMs:800}) 后 getSession 确认登录 shell 已出提示符 → writeInput → waitFor 等明确输出或完成标记 → getSession 读屏幕。',
   '屏幕文本已经过 ANSI 解析，TUI 的重绘、清屏、光标位置都按终端语义落定，不需要自己剥转义。',
-  'waitFor 默认跳过「刚输入命令的回显」所在行（30 秒内写入的原文），确实要匹配回显时传 skipEcho:false；判断命令成败优先用 expectExitCode 或 idleMs。',
+  'waitFor 的 text/regex 按软换行逻辑文本匹配：仅按 xterm isWrapped 拼接软换行，真实换行保留为 \\n；默认遮罩刚输入命令的回显逻辑行（30 秒内写入的原文），确实要匹配回显时传 skipEcho:false。getSession 与 waitFor 返回的 screen 始终保留真实视觉行、原始回显及光标坐标，不另返回逻辑文本。',
+  'expectExitCode 等待的是 PTY/shell 进程退出，不是 shell 内任意命令的退出码；命令成败须取该命令的实际退出码。持久 POSIX shell 的非破坏示例：输入 `pwd; mica_rc=$?; printf "\\nMICA_RC_%s_END\\n" "$mica_rc"`，waitFor({regex:"MICA_RC_[0-9]+_END"}) 后从输出读取数字，0 才是成功；每次使用唯一标记避免命中旧输出，且不要混用 idleMs（任一条件命中即可返回）。',
+  '仅在专用、允许结束的 POSIX shell 终端里，可输入 `pwd; mica_rc=$?; exit "$mica_rc"` 再 waitFor({expectExitCode:0})；exit 会结束终端，不要在共享或仍需使用的终端里这样做。',
   '进程退出后屏幕仍可读；用完请自己 closeSession。没有归属的终端会被立刻回收；没有窗口在看的已退出会话空闲 10 分钟后回收，活会话默认空闲 30 分钟后回收（MICA_TERMINAL_IDLE_REAP_MS 可调，0 关闭活会话自动回收）。输出、输入、读屏、等待与改尺寸会续期，在途请求不回收；回收会关闭 PTY 并释放屏幕缓存和窗口，再用需要新建终端。',
-  'idleMs 只代表「这段时间没有新输出」：刚创建的终端可能还在启动 shell，命令要等它就绪才会执行，必要时把 idleMs 调大或多读一次屏幕。'
+  'idleMs 只代表「这段时间没有新输出」，不代表命令结束或成功，失败、等待输入与静默运行都可能 idle；刚创建的终端也可能还在启动 shell，应先读屏确认就绪。'
 ].join('\n')
 
 export function buildDocsMarkdown({ serviceUrl = '$MICA_TERMINAL_URL' } = {}) {

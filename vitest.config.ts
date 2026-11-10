@@ -34,7 +34,7 @@ const ALL_TESTS = [
   'packages/mica-official-plugins/**/*.test.ts',
   'plugins/**/*.test.{ts,tsx}',
   'apps/**/*.test.{ts,tsx}',
-  'packages/mica-*/**/*.test.ts',
+  'packages/mica-*/**/*.test.{ts,tsx}',
   'packages/@anthropic/ink/**/*.test.ts',
 ];
 

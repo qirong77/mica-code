@@ -10,7 +10,9 @@ import {
   normalizeMaxLines,
   normalizeSize,
   outputSince,
-  readScreen
+  readInputEchoContext,
+  readScreen,
+  screenMatchText
 } from './terminal-core.js'
 
 const { Terminal } = headless
@@ -114,6 +116,82 @@ describe('output buffer', () => {
   })
 })
 
+describe('logical screen matching', () => {
+  it('joins soft wraps without changing the physical screen or cursor', async () => {
+    const term = new Terminal({ cols: 64, rows: 10, allowProposedApi: true })
+    const marker =
+      'MICA_WRAP_TARGET_9137_ABCDEFGHIJKLMNOPQRSTUVWXYZ_0123456789_abcdefghijklmnopqrstuvwxyz_LONG_OUTPUT'
+    try {
+      await write(term, `${marker}\r\n$ `)
+      const screen = readScreen(term)
+      expect(screen.lines).toEqual([marker.slice(0, 64), marker.slice(64), '$ '])
+      expect(screen.cursor).toEqual({ x: 2, y: 2, absoluteY: 2 })
+      expect(screenMatchText(term, screen)).toBe(`${marker}\n$ `)
+      expect(readScreen(term)).toEqual(screen)
+      expect(Object.keys(screen)).not.toContain('logicalText')
+    } finally {
+      term.dispose()
+    }
+  })
+
+  it('preserves spaces at soft wraps and skips wide-character padding in narrow columns', async () => {
+    const term = new Terminal({ cols: 5, rows: 10, allowProposedApi: true })
+    const text = 'abcd中文  xyz尾'
+    try {
+      await write(term, text)
+      expect(readScreen(term).lines.length).toBeGreaterThan(1)
+      expect(screenMatchText(term)).toBe(text)
+    } finally {
+      term.dispose()
+    }
+  })
+
+  it('keeps real newlines even after a full-width physical line', async () => {
+    const term = new Terminal({ cols: 10, rows: 10, allowProposedApi: true })
+    try {
+      await write(term, 'abcdefghij\r\nklmnopqrst')
+      expect(screenMatchText(term)).toBe('abcdefghij\nklmnopqrst')
+      expect(screenMatchText(term)).not.toContain('abcdefghijklmnopqrst')
+    } finally {
+      term.dispose()
+    }
+  })
+
+  it('recovers the first logical line when the visual window starts inside a wrap', async () => {
+    const term = new Terminal({ cols: 10, rows: 10, allowProposedApi: true })
+    try {
+      await write(term, 'abcdefghijklmnopqrstuvwxyz')
+      const screen = readScreen(term, { maxLines: 1 })
+      expect(screen.lines).toEqual(['uvwxyz'])
+      expect(screenMatchText(term, screen)).toBe('abcdefghijklmnopqrstuvwxyz')
+      expect(readScreen(term, { maxLines: 1 })).toEqual(screen)
+    } finally {
+      term.dispose()
+    }
+  })
+
+  it('masks an entire wrapped command echo while keeping its wrapped stdout', async () => {
+    const term = new Terminal({ cols: 20, rows: 20, allowProposedApi: true })
+    const marker = 'MICA_WRAP_中文_TARGET_ABCDEFGHIJKLMNOPQRSTUVWXYZ_LONG_OUTPUT'
+    const command = `printf '%s\\n' ${marker}`
+    const now = Date.now()
+    const inputs = [{ data: `${command}\r`, at: now }]
+    try {
+      await write(term, `$ ${command}\r\n`)
+      const echoed = maskEchoedInput(screenMatchText(term), inputs, { now })
+      expect(echoed.masked).toBe(1)
+      expect(echoed.text).not.toContain(marker)
+      await write(term, `${marker}\r\n$ `)
+      const output = maskEchoedInput(screenMatchText(term), inputs, { now })
+      expect(output.masked).toBe(1)
+      expect(output.text).toContain(marker)
+      expect(output.text).not.toContain(command)
+    } finally {
+      term.dispose()
+    }
+  })
+})
+
 describe('maskEchoedInput', () => {
   const now = 1_000_000
 
@@ -153,6 +231,99 @@ describe('maskEchoedInput', () => {
     const result = maskEchoedInput(screen, [{ data: 'echo hi\r', at: now }], { now })
     expect(result.masked).toBe(3)
     expect(result.text).toBe('hi')
+  })
+
+  it('does not treat an embedded input substring as a legacy echo candidate', () => {
+    const input = 'Lin qa smoke'
+    const screen = `INPUT> ${input}\n\nRECEIVED=<${input}>`
+    const result = maskEchoedInput(screen, [{ data: `${input}\r`, at: now }], { now })
+    expect(result).toEqual({ text: `\nRECEIVED=<${input}>`, masked: 1 })
+  })
+
+  it('preserves identical output after an unprefixed legacy echo', () => {
+    const result = maskEchoedInput('run.sh\nrun.sh\n', [{ data: 'run.sh\r', at: now }], { now })
+    expect(result).toEqual({ text: 'run.sh\n', masked: 1 })
+  })
+
+  it.each([
+    'RECEIVED=<林 奇荣 qa smoke>',
+    'RECEIVED: 林 奇荣 qa smoke',
+    '林 奇荣 qa smoke',
+    'INPUT> 林 奇荣 qa smoke'
+  ])('uses the input context instead of masking real output %s', async (output) => {
+    const term = new Terminal({ cols: 21, rows: 12, allowProposedApi: true })
+    const input = '林 奇荣 qa smoke'
+    try {
+      await write(term, 'INPUT> ')
+      const echoContext = readInputEchoContext(term, `${input}\r`)
+      const inputs = [{ data: `${input}\r`, at: now, echoContext }]
+      await write(term, `${input}\r\n`)
+      expect(maskEchoedInput(screenMatchText(term), inputs, { now }).text).not.toContain(input)
+      await write(term, `\r\n${output}\r\n`)
+      const result = maskEchoedInput(screenMatchText(term), inputs, { now })
+      expect(result.masked).toBe(1)
+      expect(result.text).toContain(output)
+    } finally {
+      term.dispose()
+    }
+  })
+
+  it('captures a wrapped wide-character prompt before the cursor without padding', async () => {
+    const term = new Terminal({ cols: 5, rows: 12, allowProposedApi: true })
+    const prompt = 'abcd中文  xyz尾> '
+    const input = 'qa smoke'
+    try {
+      await write(term, prompt)
+      const echoContext = readInputEchoContext(term, `${input}\r`)
+      expect(echoContext.prefix).toBe(prompt)
+      await write(term, `${input}\r\nreceived: ${input}\r\n`)
+      const result = maskEchoedInput(
+        screenMatchText(term),
+        [{ data: `${input}\r`, at: now, echoContext }],
+        { now }
+      )
+      expect(result).toEqual({ text: `received: ${input}\n`, masked: 1 })
+    } finally {
+      term.dispose()
+    }
+  })
+
+  it('locates a new contextual echo after history containing the same prompt and input', async () => {
+    const term = new Terminal({ cols: 20, rows: 20, allowProposedApi: true })
+    const input = 'git status'
+    try {
+      await write(term, `~ $ ${input}\r\nclean\r\n~ $ `)
+      const echoContext = readInputEchoContext(term, `${input}\r`)
+      expect(echoContext.preceding).toBe(1)
+      await write(term, `${input}\r\noutput: ${input}\r\n`)
+      const result = maskEchoedInput(
+        screenMatchText(term),
+        [{ data: `${input}\r`, at: now, echoContext }],
+        { now }
+      )
+      expect(result).toEqual({ text: `~ $ ${input}\nclean\noutput: ${input}\n`, masked: 1 })
+    } finally {
+      term.dispose()
+    }
+  })
+
+  it('masks only the new unprefixed echo even when real output is identical', async () => {
+    const term = new Terminal({ cols: 20, rows: 20, allowProposedApi: true })
+    const input = 'qa smoke'
+    try {
+      await write(term, `${input}\r\n`)
+      const echoContext = readInputEchoContext(term, `${input}\r`)
+      expect(echoContext.preceding).toBe(1)
+      await write(term, `${input}\r\n${input}\r\n`)
+      const result = maskEchoedInput(
+        screenMatchText(term),
+        [{ data: `${input}\r`, at: now, echoContext }],
+        { now }
+      )
+      expect(result).toEqual({ text: `${input}\n${input}\n`, masked: 1 })
+    } finally {
+      term.dispose()
+    }
   })
 
   it('treats each line of a pasted multi-line script as its own echo', () => {

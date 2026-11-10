@@ -4,6 +4,8 @@ import { micaAgent } from '@packages/mica-agent/index.js';
 import { micaMcp } from '@packages/mica-mcp/index.js';
 import { micaSession } from '@packages/mica-session/index.js';
 import { micaConfig } from '@packages/mica-config/index.js';
+import { applyBrandTemplate } from '@packages/mica-agent/prompt/brandTemplate.js';
+import { wrapPromptXml } from '@packages/mica-common/promptXml.js';
 import { buildConfigWebConversationItems } from './conversation.js';
 import { summarizeSessionFile } from './sessionHead.js';
 import { micaSkills } from '@packages/mica-skills/index.js';
@@ -228,13 +230,12 @@ export function getSessionItem(id: string, sequence: number): ConfigWebConversat
 
 export function getSessionContextAnalysis(id: string): ConfigWebContextAnalysis {
   const { value: session } = loadSessionCached(id);
-  const role = micaAgent.roles.get(session.snapshot.role);
   return buildConfigWebContextAnalysis(
     {
       providerId: session.snapshot.providerId,
       protocol: session.snapshot.protocol,
       model: session.snapshot.model,
-      systemPrompt: sessionSystemPrompt(session, role?.prompt),
+      systemPrompt: sessionSystemPrompt(session),
       messages: session.snapshot.messages,
     },
     {
@@ -250,19 +251,27 @@ export function getSessionContextAnalysis(id: string): ConfigWebContextAnalysis 
  * 这条会话最近一次请求发出的完整提示词。
  *
  * 会话快照里存着真正发出去的那一份（含 skills 索引、AGENT.md 与插件段落）；旧会话没有记录，
- * 此时 `prompt` 为空串、`rolePrompt` 只有角色文件里那一段，界面据此说明「没法重放」。
+ * 此时 `prompt` 为空串、`rolePrompt` 只提供当前默认正文与 Role 的参考，不冒充历史存档。
  */
 export function getSessionSystemPrompt(id: string): ConfigWebSessionPrompt {
   const { value: session } = loadSessionCached(id);
   return {
     prompt: session.snapshot.systemPrompt ?? '',
-    rolePrompt: micaAgent.roles.get(session.snapshot.role)?.prompt ?? '',
+    rolePrompt: currentRolePrompt(session.snapshot.role),
   };
 }
 
-/** 展示用的提示词：有记录就用真实发出的一份，旧会话退回角色提示词。 */
-function sessionSystemPrompt(session: PersistedSession, rolePrompt: string | undefined): string {
-  return session.snapshot.systemPrompt ?? rolePrompt ?? '';
+/** 展示参考不重建环境、skills 或插件注入，也不写回快照。 */
+function currentRolePrompt(name: string): string {
+  const base = wrapPromptXml('system', micaAgent.roles.get('default')?.prompt ?? '');
+  const role = micaAgent.roles.get(name);
+  return role && role.name !== 'default' && role.prompt.trim()
+    ? `${base}\n\n${wrapPromptXml('role', applyBrandTemplate(role.prompt))}`
+    : base;
+}
+
+function sessionSystemPrompt(session: PersistedSession): string {
+  return session.snapshot.systemPrompt ?? currentRolePrompt(session.snapshot.role);
 }
 
 export function getSessionContent(id: string): { content: string } {
@@ -316,12 +325,11 @@ function loadConversationItemsCached(id: string, session: PersistedSession): Con
   const { mtimeMs, size } = statSessionFile(id);
   const cached = itemsCache.get(id);
   if (cached && cached.mtimeMs === mtimeMs && cached.size === size) return cached.value;
-  const role = micaAgent.roles.get(session.snapshot.role);
   const items = buildConfigWebConversationItems({
     providerId: session.snapshot.providerId,
     protocol: session.snapshot.protocol,
     model: session.snapshot.model,
-    systemPrompt: sessionSystemPrompt(session, role?.prompt),
+    systemPrompt: sessionSystemPrompt(session),
     messages: session.snapshot.messages,
   });
   const entry = { mtimeMs, size, value: items };
@@ -376,9 +384,10 @@ export function getRolesDetails(): ConfigWebRolesDetails {
 }
 
 export function writeRole(name: string, content: string): ConfigWebRolesDetails {
-  const role = micaAgent.roles.get(name);
+  const normalizedName = normalizeRoleName(name);
+  const role = micaAgent.roles.get(normalizedName);
   if (!role || role.builtIn || !role.path) throw new Error(`Editable role not found: ${name}`);
-  if (basename(role.path) !== `${name}.md`) throw new Error('Invalid role path');
+  if (basename(role.path) !== `${normalizedName}.md`) throw new Error('Invalid role path');
 
   const temporaryPath = `${role.path}.${process.pid}.tmp`;
   writeFileSync(temporaryPath, content, 'utf-8');
@@ -388,7 +397,6 @@ export function writeRole(name: string, content: string): ConfigWebRolesDetails 
 
 export function createRole(name: string, content = ''): ConfigWebRolesDetails {
   const normalizedName = normalizeRoleName(name);
-  if (normalizedName === 'default') throw new Error('The default role is built in');
 
   const directory = micaAgent.roles.directory();
   mkdirSync(directory, { recursive: true });
@@ -398,9 +406,10 @@ export function createRole(name: string, content = ''): ConfigWebRolesDetails {
 }
 
 export function deleteRole(name: string): ConfigWebRolesDetails {
-  const role = micaAgent.roles.get(name);
+  const normalizedName = normalizeRoleName(name);
+  const role = micaAgent.roles.get(normalizedName);
   if (!role || role.builtIn || !role.path) throw new Error(`Editable role not found: ${name}`);
-  if (basename(role.path) !== `${name}.md`) throw new Error('Invalid role path');
+  if (basename(role.path) !== `${normalizedName}.md`) throw new Error('Invalid role path');
   rmSync(role.path, { force: true });
   return getRolesDetails();
 }
@@ -410,6 +419,7 @@ function normalizeRoleName(name: string): string {
   if (!/^[\p{L}\p{N}][\p{L}\p{N}_.-]*$/u.test(trimmed)) {
     throw new Error('Role name may only contain letters, numbers, dots, underscores, and hyphens');
   }
+  if (/^default(?:\.md)*$/i.test(trimmed)) throw new Error('The default system prompt is read-only');
   return trimmed;
 }
 

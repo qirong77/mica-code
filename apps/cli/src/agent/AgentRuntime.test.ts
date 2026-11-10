@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { IMicaConfig } from '@packages/mica-config/index.js';
+import DEFAULT_SYSTEM_PROMPT from '@packages/mica-agent/prompt/system.md' with { type: 'text' };
+import { applyBrandTemplate } from '@packages/mica-agent/prompt/brandTemplate.js';
 import type {
   AgentQueryContent,
   AgentQueryOptions,
@@ -566,7 +568,38 @@ describe('AgentRuntime tool status', () => {
     expect(agent.getSnapshot().role).toBe('reviewer');
     const options = createModelClient.mock.calls.at(-1)?.[0];
     expect(typeof options?.systemPrompt).toBe('function');
-    expect((options?.systemPrompt as () => string)()).toContain('<system>\nReview carefully.\n</system>');
+    const prompt = (options?.systemPrompt as () => string)();
+    expect(
+      prompt.startsWith(
+        `<system>\n${applyBrandTemplate(DEFAULT_SYSTEM_PROMPT).trim()}\n</system>\n\n<role>\nReview carefully.\n</role>`,
+      ),
+    ).toBe(true);
+    agent.setRole('default');
+    const defaultPrompt = agent.buildSystemPrompt();
+    expect(defaultPrompt.startsWith(`<system>\n${applyBrandTemplate(DEFAULT_SYSTEM_PROMPT).trim()}\n</system>`)).toBe(
+      true,
+    );
+    expect(defaultPrompt).not.toContain('<role>');
+    expect(defaultPrompt).not.toContain('Review carefully.');
+    expect(defaultPrompt).not.toContain('Default prompt.');
+  });
+
+  it('appends plugin roles without allowing them to replace the built-in prompt', async () => {
+    const { micaAgent } = await import('@packages/mica-agent/index.js');
+    vi.spyOn(micaAgent.roles, 'get').mockImplementation((name: string) =>
+      name === 'translator'
+        ? { name, prompt: 'Translate clearly.', builtIn: false, pluginId: 'user.translator' }
+        : { name: 'default', prompt: 'Default prompt.', builtIn: true },
+    );
+    const { AgentRuntime } = await import('./AgentRuntime.js');
+    const agent = new AgentRuntime();
+    agent.setRole('translator');
+    const prompt = agent.buildSystemPrompt();
+    expect(
+      prompt.startsWith(
+        `<system>\n${applyBrandTemplate(DEFAULT_SYSTEM_PROMPT).trim()}\n</system>\n\n<role>\nTranslate clearly.\n</role>`,
+      ),
+    ).toBe(true);
   });
 
   it('keeps a role name that is not resolvable yet instead of resetting it to default', async () => {
@@ -593,8 +626,18 @@ describe('AgentRuntime tool status', () => {
     expect(agent.getSnapshot().role).toBe('需求开发');
 
     // 拼系统提示词时用默认角色那份正文（角色还没发布），但会话角色本身不变。
-    expect(agent.buildSystemPrompt()).toContain('<system>');
+    const prompt = agent.buildSystemPrompt();
+    expect(prompt.startsWith(`<system>\n${applyBrandTemplate(DEFAULT_SYSTEM_PROMPT).trim()}\n</system>`)).toBe(true);
+    expect(prompt).not.toContain('<role>');
     expect(agent.getSnapshot().role).toBe('需求开发');
+
+    vi.mocked(micaAgent.roles.get).mockImplementation((name: string) =>
+      name === '需求开发'
+        ? { name, prompt: 'Newly published role.', builtIn: false, pluginId: 'user.demand-dev' }
+        : { name: 'default', prompt: 'Default prompt.', builtIn: true },
+    );
+    expect(agent.buildSystemPrompt()).toContain('<role>\nNewly published role.\n</role>');
+    expect(agent.role).toBe('需求开发');
   });
 
   it('records the system prompt actually sent into the snapshot', async () => {

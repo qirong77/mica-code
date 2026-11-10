@@ -48,6 +48,8 @@ describe('agent roles', () => {
     writeFileSync(join(roleDir, 'reviewer.md'), 'Review every change.', 'utf-8');
     writeFileSync(join(roleDir, 'ignored.txt'), 'Ignore this file.', 'utf-8');
     writeFileSync(join(roleDir, 'default.md'), 'Do not override Mica.', 'utf-8');
+    writeFileSync(join(roleDir, 'DEFAULT.md'), 'Do not alias Mica.', 'utf-8');
+    writeFileSync(join(roleDir, 'default.md.md'), 'Do not duplicate Mica.', 'utf-8');
     mkdirSync(join(roleDir, 'ignored-directory'));
 
     const roles = listAgentRoles();
@@ -71,7 +73,6 @@ describe('agent roles', () => {
       name: '需求开发',
       prompt: '只改 B 端。',
       builtIn: false,
-      append: true,
       pluginId: 'user.demand-dev',
       path,
     });
@@ -86,7 +87,6 @@ describe('agent roles', () => {
 
     const role = getAgentRole('需求开发');
     expect(role?.prompt).toBe('磁盘版');
-    expect(role?.append).toBeUndefined();
   });
 
   it('skips plugin index entries whose file is gone', () => {

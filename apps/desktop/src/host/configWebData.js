@@ -34,6 +34,7 @@ import { summarizeSessionFile } from '@mica-config-ui/session-head'
 // 展开品牌占位符后原样展示（只读），桌面宿主不自己留一份副本。
 import defaultSystemPromptTemplate from '@packages/mica-agent/prompt/system.md?raw'
 import { applyBrandTemplate } from '@packages/mica-agent/prompt/brandTemplate.js'
+import { wrapPromptXml } from '@packages/mica-common/promptXml.js'
 import { readBrowserControlDetails as readBrowserControlDetailsFromHost } from './browser-control.js'
 import { readTerminalControlDetails as readTerminalControlDetailsFromHost } from './terminal-control.js'
 import {
@@ -189,7 +190,7 @@ function listRoles() {
             entry.isFile() &&
             entry.name.toLowerCase().endsWith('.md') &&
             // 与 CLI 的 roles 扫描一致：用户目录里的 default.md 不能盖掉内置角色
-            basename(entry.name, extname(entry.name)) !== 'default'
+            !/^default(?:\.md)*$/i.test(basename(entry.name, extname(entry.name)).trim())
         )
         .map((entry) => entry.name)
         .sort()
@@ -220,12 +221,12 @@ function normalizeRoleName(name) {
   if (!/^[\p{L}\p{N}][\p{L}\p{N}_.-]*$/u.test(trimmed)) {
     throw new Error('角色名只允许字母、数字、点、下划线和连字符')
   }
+  if (/^default(?:\.md)*$/i.test(trimmed)) throw new Error('默认系统提示词只读')
   return trimmed
 }
 
 function roleFileOf(name) {
   const normalized = normalizeRoleName(name)
-  if (normalized === 'default') throw new Error('内置 default 角色不可编辑')
   const path = join(rolesDir(), `${normalized}.md`)
   if (!existsSync(path)) throw new Error(`角色不存在：${normalized}`)
   return path
@@ -248,13 +249,15 @@ function deleteRole(name) {
   return readRolesDetails()
 }
 
-/** 会话视图要用「这个会话当时用的角色提示词」把 history 还原成对话 */
+/** 旧会话仅展示当前默认正文与 Role 的参考，不冒充历史存档。 */
 function rolePromptOf(name) {
-  if (!name || name === 'default') return builtInRolePrompt()
+  const base = wrapPromptXml('system', builtInRolePrompt())
+  if (!name || name === 'default') return base
   try {
-    return readRoleFile(name) ?? ''
+    const role = readRoleFile(normalizeRoleName(name))
+    return role?.trim() ? `${base}\n\n${wrapPromptXml('role', applyBrandTemplate(role))}` : base
   } catch {
-    return ''
+    return base
   }
 }
 
@@ -430,9 +433,8 @@ function conversationSource(session) {
     providerId: session.snapshot.providerId,
     protocol: session.snapshot.protocol,
     model: session.snapshot.model,
-    // 会话快照里存着最近一次请求真正发出的完整提示词；旧会话没有记录，退回角色文件里那一段
-    // （只含 <system>，不含 skills 索引 / AGENT.md / 插件段落）。
-    systemPrompt: session.snapshot.systemPrompt || rolePromptOf(session.snapshot.role),
+    // 空串也是存档；只有没有记录时才展示当前默认正文与 Role 的参考。
+    systemPrompt: session.snapshot.systemPrompt ?? rolePromptOf(session.snapshot.role),
     messages: session.snapshot.messages
   }
 }

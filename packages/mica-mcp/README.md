@@ -14,6 +14,14 @@
 - 拼会话能力目录的 MCP 一栏：`micaMcp.catalog({ configured, extra, statuses })`——用户配置、
   会话自己的 `--mcp-config`、已连上的 server 三处合并。桌面端把受控浏览器 / 终端挂在会话
   `--mcp-config` 上而不写用户配置，能力目必须把这一处也算进去。
+- 工具结果支持文本与图片：纯文本保持字符串返回与 60,000 字符限长；图片映射为 `mica-tools`
+  的标准 base64 image block，混合内容保留块顺序，只有文本块参与限长，图片数据不转成文本或截断。
+  支持 `image/jpeg`、`image/png`、`image/gif`、`image/webp`；文本资源与资源链接保留为文本，
+  其他图片 MIME、音频与二进制资源返回简短的不支持说明，不把二进制或未知内容 JSON 序列化进
+  上下文。`isError` 仍按文本错误抛出。
+
+桌面端浏览器 MCP 的 `screenshot` 默认按 `raw=true` 返回模型可见的图片；需要 JSON dataUrl 时可
+显式传 `raw=false`。这只改变 MCP 调用默认值，直接 HTTP 截图接口仍默认返回 JSON。
 
 ## 使用入口
 
@@ -73,5 +81,5 @@ await micaMcp.init({ parallel: true, initTimeoutMs: 3000 });
 - `config.ts`：MCP 配置路径、配置类型和加载逻辑。
 - `client.ts`：MCP client 与连接状态。
 - `service.ts`：初始化、重连和关闭编排。
-- `tools.ts`：MCP tool 到 Mica tool 的适配。
+- `tools.ts`：MCP tool 到 Mica tool 的适配，保留文本资源与资源链接；二进制资源只返回简短说明。
 - `index.ts`：公共 API 聚合导出。

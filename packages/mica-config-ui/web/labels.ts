@@ -10,6 +10,18 @@ export const TIMING_SORT_OPTIONS = [
   { value: 'duration', label: '按耗时' },
 ];
 
+export const ROLE_LABELS = {
+  description: '默认系统提示词始终保留；Role 追加在其后，同属系统提示词，不替换默认正文',
+  defaultPrompt: '默认系统提示词',
+  defaultDescription: '通用约束只读；选择 default 时不额外追加 Role 正文。',
+  appendedPrompt: '追加正文：放在默认系统提示词之后，同属系统提示词，不替换默认正文。',
+  readOnly: '只读',
+  copy: '复制正文',
+  copied: '已复制',
+  copyUnsupported: '当前环境不支持自动复制，请在编辑器中手动选择复制。',
+  copyFailed: '复制失败，请在编辑器中手动选择复制。',
+};
+
 const MCP_STATUS_LABEL: Record<string, string> = {
   connected: '已连接',
   connecting: '连接中',

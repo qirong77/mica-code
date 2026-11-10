@@ -1598,6 +1598,15 @@ html[data-theme='tokyo-night-light'] .mica-config-ui {
     border-bottom: 1px solid var(--line);
   }
 
+  .role-prompt-header {
+    flex-wrap: wrap;
+  }
+
+  .role-prompt-header > div {
+    flex: 1 1 240px;
+    min-width: 0;
+  }
+
   .role-editor-host {
     min-height: 0;
     border: 0;

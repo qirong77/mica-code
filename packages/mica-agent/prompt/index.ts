@@ -13,11 +13,7 @@ type PromptSection = 'system' | 'role' | 'project-instructions' | 'context' | 's
 const PROJECT_INSTRUCTION_FILES = ['AGENT.md', 'AGENTS.md'] as const;
 
 export type BuildSystemPromptOptions = {
-  baseSystemPrompt?: string;
-  /**
-   * 追加在 `<system>` 后面的角色正文。插件角色（`AgentRole.append`）走这里：
-   * 通用规则仍是 base，角色只说自己额外要遵守什么。
-   */
+  /** 追加在内置 `<system>` 后面的 `<role>` 正文，同属系统提示词。 */
   rolePrompt?: string;
   cwd?: string;
   now?: Date;
@@ -31,9 +27,9 @@ class SystemPromptBuilder {
   private prompt = '';
 
   constructor(options: BuildSystemPromptOptions = {}) {
-    this.prompt = wrapSection('system', applyBrandTemplate(options.baseSystemPrompt ?? DEFAULT_SYSTEM_PROMPT));
+    this.prompt = wrapSection('system', applyBrandTemplate(DEFAULT_SYSTEM_PROMPT));
     if (options.rolePrompt?.trim()) {
-      this.append('role', options.rolePrompt);
+      this.append('role', applyBrandTemplate(options.rolePrompt));
     }
 
     const projectInstructions =
