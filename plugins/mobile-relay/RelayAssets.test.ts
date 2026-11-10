@@ -79,7 +79,7 @@ function publish(body: Buffer): Promise<Response> {
   return fetch(`${base}/api/publish`, {
     method: 'POST',
     headers: { 'x-relay-token': TOKEN },
-    body,
+    body: Uint8Array.from(body),
   });
 }
 
