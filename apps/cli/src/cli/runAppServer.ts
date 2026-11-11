@@ -120,16 +120,10 @@ export function projectBackgroundTask(task: BackgroundTaskMeta): MicaBackgroundT
   };
 }
 
-/** Keep active tasks and the 20 most recently finished ones worth a look (see keepsBackgroundTaskRow). */
+/** Project only active tasks for the status dock. */
 export function projectBackgroundTasks(tasks: BackgroundTaskMeta[]): MicaBackgroundTaskItem[] {
-  const visible = tasks.filter((task) => keepsBackgroundTaskRow({ status: task.status, exitCode: task.exit_code }));
-  const recentFinished = visible
-    .filter((task) => task.status !== 'starting' && task.status !== 'running')
-    .sort((a, b) => Date.parse(b.finished_at ?? b.started_at) - Date.parse(a.finished_at ?? a.started_at))
-    .slice(0, 20);
-  const retainedIds = new Set(recentFinished.map((task) => task.id));
-  return visible
-    .filter((task) => task.status === 'starting' || task.status === 'running' || retainedIds.has(task.id))
+  return tasks
+    .filter((task) => keepsBackgroundTaskRow({ status: task.status, exitCode: task.exit_code }))
     .map((task) => projectBackgroundTask(task));
 }
 

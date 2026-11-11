@@ -1276,7 +1276,7 @@ export default function App() {
   }, [refreshPins, refreshProjects, refreshLoops, refreshAnnotations, refreshSessions, refreshSort])
 
   const refreshGit = useCallback(
-    async ({ quiet = false, cwd: requestedCwd = null, forceCounts = false } = {}) => {
+    async ({ quiet = false, cwd: requestedCwd = null, forceCounts = false, invalidateCounts = forceCounts } = {}) => {
       const id = activeRef.current
       if (!id) {
         setGit({
@@ -1370,8 +1370,8 @@ export default function App() {
         const counts =
           status?.status && (forceCounts || countsStale)
             ? await window.mica.git
-                // turn 结束或工作区推送后跳过旧数字，多个窗口仍共用同一代扫描。
-                .changeCounts(cwd, { invalidate: forceCounts })
+                // watcher 已推进 epoch，可复用编辑器同代扫描；轮次结束仍强制发现遗漏变化。
+                .changeCounts(cwd, { invalidate: invalidateCounts })
                 .then((result) => (result?.counts ? { cwd, counts: result.counts } : null))
                 // 徽标是锦上添花：取不到（非仓库、目录被删）就不画，别打断整次刷新。
                 .catch(() => null)
@@ -1477,7 +1477,7 @@ export default function App() {
       // 徽标那 20s TTL 是给轮询用的：仓库真变了就该重算，别拿旧数字顶。
       gitCountsAt.current = { cwd: null, at: 0 }
       // forceCounts 同时绕过「刚读过就不重复读」那条捷径：推送说明确实变了。
-      void refreshGit({ quiet: true, cwd: terminalCwd(activeRef.current), forceCounts: true })
+      void refreshGit({ quiet: true, cwd: terminalCwd(activeRef.current), forceCounts: true, invalidateCounts: false })
     })
     return () => off?.()
   }, [activeRef, refreshGit, terminalCwd])

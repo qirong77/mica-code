@@ -71,8 +71,9 @@ async function readSummary(root, base) {
       let content
       try {
         content = await readFile(path.join(root, filePath))
-      } catch {
+      } catch (error) {
         // A staged addition removed again from the worktree has no final diff against HEAD.
+        if (error.code !== 'ENOENT' && error.code !== 'ENOTDIR') throw error
         continue
       }
       stat = {
@@ -242,10 +243,9 @@ async function hasLocalBranch(root, name) {
 // 目录不是仓库是常态（主目录、临时目录、还没 init 的项目），不是失败：回 `error: null`
 // 让调用方当成「这里没有仓库」。否则每 10s 的 `git:status` 都会在日志与 Performance
 // 面板里记成一次失败，真正要看的错误被埋掉。
-const NOT_A_REPOSITORY = /not a git repository/i
 function workspaceError(error) {
-  const message = gitErrorMessage(error)
-  return NOT_A_REPOSITORY.test(message) ? null : message
+  // 只有本地发现确认没有 .git 标记才是空状态；损坏的 .git 也可能让 Git 报同一句话。
+  return error?.code === 'MICA_NOT_A_REPOSITORY' ? null : gitErrorMessage(error)
 }
 
 /**

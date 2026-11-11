@@ -384,6 +384,36 @@ describe('getWorkspaceStatus', () => {
       await rm(outside, { recursive: true, force: true })
     }
   })
+
+  it('非仓库重复读取不启动 Git，且创建/删除 .git 后立即重新发现', async () => {
+    const outside = await mkdtemp(path.join(tmpdir(), 'mica-git-discovery-'))
+    try {
+      for (let i = 0; i < 3; i += 1) {
+        const error = await getWorkspaceStatus(outside).catch((failure) => failure)
+        // 子进程错误会带数字退出码；这条错误来自目录发现，没有启动 git。
+        expect(error.code).toBe('MICA_NOT_A_REPOSITORY')
+        expect(error.cmd).toBeUndefined()
+        await expect(cachedRepository(outside)).rejects.toMatchObject({ code: 'MICA_NOT_A_REPOSITORY' })
+      }
+      await git(outside, ['init', '-q', '-b', 'created'])
+      expect((await getWorkspaceStatus(outside)).branch).toBe('created')
+      expect((await cachedRepository(outside)).root).toBe((await getWorkspaceStatus(outside)).root)
+      await rm(path.join(outside, '.git'), { recursive: true })
+      await expect(getWorkspaceStatus(outside)).rejects.toMatchObject({ code: 'MICA_NOT_A_REPOSITORY' })
+      await git(outside, ['init', '-q', '-b', 'recreated'])
+      expect((await getWorkspaceStatus(outside)).branch).toBe('recreated')
+    } finally {
+      await rm(outside, { recursive: true, force: true })
+    }
+  })
+
+  it('目录缺失或 .git 损坏时保留实际错误', async () => {
+    await expect(getWorkspaceStatus(path.join(dir, 'missing'))).rejects.toMatchObject({ code: 'ENOENT' })
+    await writeFile(path.join(dir, '.git', 'config'), '[broken\n')
+    const failure = await getWorkspaceStatus(dir).catch((error) => error)
+    expect(failure.code).not.toBe('MICA_NOT_A_REPOSITORY')
+    expect(gitErrorMessage(failure)).toContain('bad config')
+  })
 })
 
 describe('cachedRepository', () => {
@@ -487,6 +517,63 @@ describe('cachedWorktreeRead', () => {
     noteWorktreeChange(dir)
     await cachedWorktreeRead(dir, 'status', probe.run)
     expect(probe.runs).toBe(2)
+  })
+
+  it('文件变化只失效扫描，status 继续复用；提交和切分支仍立刻失效', async () => {
+    const identity = counter(0)
+    const summary = counter(0)
+    const before = await cachedWorktreeRead(dir, 'workspace-status', identity.run)
+    await cachedWorktreeRead(dir, 'summary:HEAD', summary.run)
+    await writeFile(path.join(dir, 'external.txt'), 'changed\n')
+    noteWorktreeChange(dir)
+    await cachedWorktreeRead(dir, 'summary:HEAD', summary.run)
+    expect(await cachedWorktreeRead(dir, 'workspace-status', identity.run)).toBe(before)
+    expect([identity.runs, summary.runs]).toEqual([1, 2])
+    await commit(dir, 'new HEAD', ['--allow-empty'])
+    await cachedWorktreeRead(dir, 'workspace-status', identity.run)
+    await git(dir, ['checkout', '-q', '-b', 'other'])
+    await cachedWorktreeRead(dir, 'workspace-status', identity.run)
+    expect(identity.runs).toBe(3)
+  })
+
+  it('文件变化期间仍合并 status 的在途读取，并缓存完成的身份', async () => {
+    let finish
+    let runs = 0
+    const gate = new Promise((resolve) => { finish = resolve })
+    const read = async () => { runs += 1; await gate; return 'main' }
+    const first = cachedWorktreeRead(dir, 'workspace-status', read)
+    noteWorktreeChange(dir)
+    const second = cachedWorktreeRead(dir, 'workspace-status', read)
+    finish()
+    expect(await Promise.all([first, second])).toEqual(['main', 'main'])
+    expect(await cachedWorktreeRead(dir, 'workspace-status', read)).toBe('main')
+    expect(runs).toBe(1)
+  })
+
+  it('旧 epoch 的慢扫描不能覆盖新一代结果，也不能删除替代中的请求', async () => {
+    let finishOld, finishNew
+    let runs = 0
+    const oldGate = new Promise((resolve) => { finishOld = resolve })
+    const newGate = new Promise((resolve) => { finishNew = resolve })
+    const run = async () => { runs += 1; return runs === 1 ? oldGate : newGate }
+    const old = cachedWorktreeRead(dir, 'summary:race', run)
+    noteWorktreeChange(dir)
+    const current = cachedWorktreeRead(dir, 'summary:race', run)
+    finishOld('old')
+    expect(await old).toBe('old')
+    const shared = cachedWorktreeRead(dir, 'summary:race', run)
+    finishNew('new')
+    expect(await Promise.all([current, shared])).toEqual(['new', 'new'])
+    expect(await cachedWorktreeRead(dir, 'summary:race', run)).toBe('new')
+    expect(runs).toBe(2)
+  })
+
+  it('失败的扫描不缓存，下一次真实读取能够恢复', async () => {
+    let runs = 0
+    const run = async () => { runs += 1; if (runs === 1) throw new Error('IO failure'); return 'recovered' }
+    await expect(cachedWorktreeRead(dir, 'summary:error', run)).rejects.toThrow('IO failure')
+    expect(await cachedWorktreeRead(dir, 'summary:error', run)).toBe('recovered')
+    expect(runs).toBe(2)
   })
 
   /**

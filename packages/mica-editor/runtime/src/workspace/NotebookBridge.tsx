@@ -3,6 +3,7 @@ import {type LexicalEditor} from 'lexical';
 import {Component, createContext, type ReactNode, useContext, useEffect, useRef, useState} from 'react';
 
 import {type Comments, type CommentStore} from '../playground/commenting';
+import NotebookOutline, {type NotebookNavigation, type NotebookOutlineSnapshot} from './NotebookOutline';
 import {applyNotebookTheme} from './theme';
 
 export interface NotebookDocument {
@@ -29,6 +30,7 @@ export class NotebookSession {
   private loaded = false;
   private frozen = false;
   private frozenBeforeEditable: boolean | null = null;
+  private navigateOutline: ((navigation: NotebookNavigation) => void) | null = null;
 
   constructor(
     readonly noteId: string,
@@ -93,6 +95,21 @@ export class NotebookSession {
     return () => { this.nestedEditors.delete(editor); };
   }
 
+  publishOutline(snapshot: NotebookOutlineSnapshot): boolean {
+    if (!this.active || !this.editor) return false;
+    post({type: 'outline', noteId: this.noteId, ...snapshot});
+    return true;
+  }
+
+  bindNavigation(navigate: (navigation: NotebookNavigation) => void): () => void {
+    this.navigateOutline = navigate;
+    return () => { if (this.navigateOutline === navigate) this.navigateOutline = null; };
+  }
+
+  navigate(navigation: NotebookNavigation): void {
+    if (this.active && this.editor) this.navigateOutline?.(navigation);
+  }
+
   dirty = () => {
     if (this.queued || !this.active) return;
     this.queued = true;
@@ -148,6 +165,11 @@ export function NotebookFrame({children}: {children: ReactNode}) {
         frozen.current = message.frozen;
         document.documentElement.dataset.frozen = String(message.frozen);
         current.current?.setFrozen(message.frozen);
+      } else if (message.type === 'navigate') {
+        const active = current.current;
+        if (!active || message.noteId !== active.noteId) return;
+        if (typeof message.heading === 'string') active.navigate({heading: message.heading});
+        else if (['top', 'table', 'code', 'mermaid', 'image'].includes(message.block)) active.navigate({block: message.block});
       } else if (message.type === 'load') {
         try {
           const doc = message.document;
@@ -239,5 +261,5 @@ export function NotebookEditorBinding() {
   const [editor] = useLexicalComposerContext();
   const session = useNotebookSession();
   useEffect(() => session?.attach(editor), [editor, session]);
-  return null;
+  return session ? <NotebookOutline session={session} /> : null;
 }

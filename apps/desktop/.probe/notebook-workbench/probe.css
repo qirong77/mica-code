@@ -1,0 +1,77 @@
+/* Host sizing and probe controls only. Notebook styles come from desktop.jsx. */
+body.notebook-workbench-probe {
+  margin: 0;
+  overflow: hidden;
+}
+
+body.notebook-workbench-probe,
+body.notebook-workbench-probe #root {
+  width: 100%;
+  height: 100dvh;
+  min-height: 0;
+}
+
+.notebook-workbench-probe-shell {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  background: var(--color-canvas);
+  color: var(--color-fg);
+}
+
+.notebook-workbench-probe-toolbar {
+  display: flex;
+  flex: 0 0 40px;
+  align-items: center;
+  gap: 10px;
+  box-sizing: border-box;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--color-line);
+  background: var(--color-panel);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.notebook-workbench-probe-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.notebook-workbench-probe-hint,
+.notebook-workbench-probe-toolbar label {
+  flex: none;
+  color: var(--color-fg-muted);
+  white-space: nowrap;
+}
+
+.notebook-workbench-probe-toolbar .ui-select {
+  flex: 0 0 160px;
+  min-width: 0;
+}
+
+.notebook-workbench-probe-content {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+@media (max-width: 600px) {
+  .notebook-workbench-probe-toolbar {
+    gap: 6px;
+    padding: 0 8px;
+  }
+
+  .notebook-workbench-probe-hint {
+    display: none;
+  }
+
+  .notebook-workbench-probe-toolbar .ui-select {
+    flex-basis: 138px;
+  }
+}

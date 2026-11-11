@@ -1,0 +1,64 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="640" viewBox="0 0 1600 640" fill="none" role="img" aria-labelledby="title desc">
+  <title id="title">山间的思路</title>
+  <desc id="desc">原创抽象插图。纸白天空、青绿层山与暖灰便签，几枚细线连接的圆点从观察通向行动。</desc>
+  <defs>
+    <linearGradient id="sky" x1="800" y1="0" x2="800" y2="640" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#F4F3ED"/><stop offset="1" stop-color="#E9EDE5"/>
+    </linearGradient>
+    <linearGradient id="ridge" x1="0" y1="307" x2="1600" y2="603" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#B4C9BC"/><stop offset="1" stop-color="#C5D1BE"/>
+    </linearGradient>
+    <linearGradient id="near" x1="900" y1="426" x2="500" y2="700" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#79998B"/><stop offset="1" stop-color="#557C70"/>
+    </linearGradient>
+    <linearGradient id="paper" x1="1129" y1="143" x2="1129" y2="480" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFFEF8"/><stop offset="1" stop-color="#F4F2E8"/>
+    </linearGradient>
+    <filter id="shadow" x="-30%" y="-30%" width="170%" height="180%"><feDropShadow dx="0" dy="15" stdDeviation="17" flood-color="#3D5A50" flood-opacity=".09"/></filter>
+    <pattern id="grain" width="12" height="12" patternUnits="userSpaceOnUse"><circle cx="1" cy="1" r=".55" fill="#647366" opacity=".11"/><circle cx="7" cy="8" r=".45" fill="#647366" opacity=".08"/></pattern>
+    <clipPath id="frame"><rect width="1600" height="640" rx="24"/></clipPath>
+  </defs>
+  <g clip-path="url(#frame)">
+    <rect width="1600" height="640" fill="url(#sky)"/>
+    <circle cx="287" cy="164" r="60" fill="#E3D4B6" opacity=".78"/>
+    <circle cx="287" cy="164" r="83" stroke="#CBBE9F" stroke-opacity=".25"/>
+    <path d="M-40 385C107 343 172 285 286 302C420 322 466 212 602 242C730 271 803 370 943 335C1078 302 1226 220 1361 270C1496 320 1554 288 1650 261V680H-40V385Z" fill="#D3DDD1"/>
+    <path d="M-40 437C94 380 211 394 332 342C421 304 501 319 595 366C715 426 786 368 904 376C1020 384 1100 459 1218 425C1351 387 1487 356 1650 399V680H-40V437Z" fill="url(#ridge)"/>
+    <path d="M-40 544C120 488 227 528 352 479C492 424 563 451 685 472C827 497 884 455 1011 469C1150 484 1260 533 1387 491C1486 459 1571 466 1650 479V680H-40V544Z" fill="url(#near)"/>
+    <path d="M227 680C355 563 493 603 608 539C704 486 744 434 841 422C913 413 955 431 1007 456" stroke="#DCE4D4" stroke-opacity=".72" stroke-width="3" stroke-linecap="round"/>
+    <path d="M255 680C383 566 508 611 625 546C714 496 758 443 847 435" stroke="#ECEDDE" stroke-opacity=".33" stroke-width="1.5" stroke-linecap="round"/>
+    <g stroke="#638476" stroke-width="1.5" stroke-linecap="round">
+      <path d="M498 204C596 143 679 156 760 208C851 267 903 210 971 236" stroke-dasharray="3 9"/>
+      <path d="M761 208C745 272 777 311 835 338" stroke-dasharray="3 9"/>
+      <circle cx="498" cy="204" r="9" fill="#F4F3ED"/>
+      <circle cx="761" cy="208" r="13" fill="#E2E8DB"/>
+      <circle cx="835" cy="338" r="7" fill="#E2E8DB"/>
+      <circle cx="971" cy="236" r="7" fill="#F4F3ED"/>
+    </g>
+    <g transform="rotate(7 1190 288)" opacity=".8"><rect x="1053" y="153" width="277" height="300" rx="13" fill="#D1CCBC"/></g>
+    <g transform="rotate(-5 1148 302)" filter="url(#shadow)">
+      <rect x="997" y="135" width="292" height="325" rx="12" fill="url(#paper)" stroke="#DADCD0"/>
+      <path d="M1218 135V177C1218 184 1224 190 1231 190H1289" fill="#E7E6D9"/>
+      <path d="M1218 136L1288 190" stroke="#D7D9CA"/>
+      <rect x="1033" y="178" width="68" height="7" rx="3.5" fill="#7C9C8B"/>
+      <path d="M1033 219H1209M1033 238H1174" stroke="#CFD5C8" stroke-width="5" stroke-linecap="round"/>
+      <rect x="1033" y="279" width="15" height="15" rx="4" stroke="#849F8E" stroke-width="1.5"/>
+      <path d="M1037 286L1041 290L1046 283" stroke="#6D8F7A" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="M1063 286H1208" stroke="#ADBDAA" stroke-width="5" stroke-linecap="round"/>
+      <rect x="1033" y="319" width="15" height="15" rx="4" stroke="#849F8E" stroke-width="1.5"/>
+      <path d="M1063 326H1177" stroke="#CFD5C8" stroke-width="5" stroke-linecap="round"/>
+      <rect x="1033" y="359" width="15" height="15" rx="4" stroke="#849F8E" stroke-width="1.5"/>
+      <path d="M1063 366H1193" stroke="#CFD5C8" stroke-width="5" stroke-linecap="round"/>
+      <circle cx="1238" cy="417" r="13" fill="#E2E7D6"/>
+      <path d="M1233 417H1243M1238 412L1243 417L1238 422" stroke="#7F9A83" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
+    </g>
+    <g fill="#456C60" stroke="#456C60" stroke-linecap="round">
+      <path d="M1429 466V547" stroke-width="3"/><path d="M1429 429L1405 483H1453L1429 429Z"/><path d="M1429 457L1394 515H1464L1429 457Z"/>
+      <path d="M1374 501V554" stroke-width="2"/><path d="M1374 476L1354 522H1394L1374 476Z"/>
+    </g>
+    <path d="M106 580H185M145 541V620" stroke="#DDE4D4" stroke-opacity=".4"/>
+    <circle cx="145" cy="580" r="23" stroke="#DDE4D4" stroke-opacity=".4"/>
+    <rect width="1600" height="640" fill="url(#grain)" opacity=".38"/>
+    <path d="M65 65H109M65 65V109M1535 65H1491M1535 65V109M1535 575H1491M1535 575V531" stroke="#8EA08D" stroke-opacity=".35" stroke-linecap="round"/>
+  </g>
+</svg>

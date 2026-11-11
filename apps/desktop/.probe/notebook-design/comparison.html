@@ -1,0 +1,424 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ctext y='25' font-size='26'%3E✎%3C/text%3E%3C/svg%3E"
+    />
+    <title>Notebook · C / D / E 工作台对比</title>
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        background: #f9fafb;
+        color: #1b1b1c;
+        font:
+          14px/1.7 -apple-system,
+          BlinkMacSystemFont,
+          'PingFang SC',
+          sans-serif;
+        -webkit-font-smoothing: antialiased;
+      }
+      main {
+        max-width: 1720px;
+        margin: auto;
+        padding: 52px 38px 40px;
+      }
+      .eyebrow {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        font-size: 11px;
+        letter-spacing: 1.5px;
+        color: #61666b;
+      }
+      .eyebrow:before {
+        content: '';
+        width: 22px;
+        height: 1px;
+        background: #61666b;
+      }
+      h1 {
+        font-size: 32px;
+        line-height: 1.5;
+        letter-spacing: -1px;
+        margin: 14px 0 10px;
+        font-weight: 650;
+      }
+      .intro {
+        max-width: 840px;
+        color: #61666b;
+        font-size: 14px;
+        margin: 0 0 36px;
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 22px;
+      }
+      .card {
+        display: flex;
+        flex-direction: column;
+        border: 1px solid #00000012;
+        border-radius: 10px;
+        background: #fff;
+        overflow: hidden;
+        box-shadow: 0 2px 5px #00000003;
+      }
+      .card-header {
+        flex: 1;
+        padding: 23px 23px 20px;
+      }
+      .number {
+        font:
+          11px/1.5 ui-monospace,
+          monospace;
+        color: #81858c;
+        letter-spacing: 1px;
+      }
+      .card h2 {
+        font-size: 21px;
+        margin: 6px 0 7px;
+        letter-spacing: -0.3px;
+      }
+      .card p {
+        font-size: 12px;
+        color: #61666b;
+        min-height: 41px;
+        margin: 0;
+      }
+      .screenshot {
+        display: block;
+        border-top: 1px solid #0000000a;
+        border-bottom: 1px solid #0000000a;
+        background: #f1f3f5;
+        overflow: hidden;
+      }
+      .screenshot img {
+        display: block;
+        width: 100%;
+        height: auto;
+        transition: transform 180ms ease;
+      }
+      .screenshot:hover img {
+        transform: scale(1.015);
+      }
+      .card-footer {
+        padding: 18px 22px 21px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 9px;
+      }
+      .tags {
+        font-size: 11px;
+        color: #61666b;
+      }
+      .open {
+        font-size: 12px;
+        color: #4176e6;
+        text-decoration: none;
+        white-space: nowrap;
+      }
+      .open:hover {
+        text-decoration: underline;
+      }
+      .extras {
+        display: flex;
+        justify-content: space-between;
+        gap: 20px;
+        margin: 31px 0 0;
+        padding: 23px 0;
+        border-top: 1px solid #00000012;
+        color: #61666b;
+        font-size: 12px;
+      }
+      .extras p {
+        margin: 0;
+      }
+      .extras strong {
+        font-size: 12px;
+        font-weight: 600;
+        color: #43454a;
+      }
+      .extras a {
+        color: #4176e6;
+        text-decoration: none;
+      }
+      .extras .asset-links {
+        margin-top: 7px;
+        font-size: 11px;
+        color: #81858c;
+      }
+      .note {
+        margin-top: 12px;
+        font-size: 11px;
+        color: #81858c;
+      }
+      .formats {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+        margin-top: 11px;
+      }
+      .formats span {
+        padding: 3px 8px;
+        background: #f1f3f5;
+        color: #61666b;
+        border-radius: 4px;
+        font-size: 10px;
+      }
+      .recommend {
+        color: #43454a;
+        margin-top: 25px;
+        font-size: 13px;
+      }
+      .recommend strong {
+        font-weight: 600;
+      }
+      .previous {
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 8px 20px;
+        margin-top: 24px;
+        padding: 13px 17px;
+        border: 1px solid #0000000a;
+        border-radius: 8px;
+        background: #f1f3f5;
+        font-size: 12px;
+        color: #61666b;
+      }
+      .previous h2 {
+        margin: 0;
+        font-size: 12px;
+        font-weight: 600;
+        color: #43454a;
+      }
+      .previous p {
+        margin: 0;
+      }
+      a:focus-visible {
+        outline: 2px solid #4176e6;
+        outline-offset: 3px;
+      }
+      @media (max-width: 1050px) {
+        .grid {
+          grid-template-columns: 1fr;
+          max-width: 850px;
+          margin: auto;
+        }
+        .card-header {
+          padding: 20px 23px 15px;
+        }
+        .card p {
+          min-height: 0;
+        }
+        .extras {
+          flex-direction: column;
+        }
+        .intro {
+          margin-bottom: 28px;
+        }
+      }
+      @media (max-width: 600px) {
+        main {
+          padding: 30px 18px;
+        }
+        h1 {
+          font-size: 26px;
+        }
+        .intro {
+          font-size: 13px;
+        }
+        .grid {
+          gap: 24px;
+        }
+        .card-footer {
+          padding-inline: 17px;
+        }
+        .tags {
+          font-size: 10px;
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .screenshot img {
+          transition: none;
+        }
+      }
+      .details-title {
+        font-size: 18px;
+        font-weight: 600;
+        margin: 34px 0 15px;
+        letter-spacing: -0.3px;
+      }
+      .detail-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 22px;
+      }
+      .detail-grid figure {
+        margin: 0;
+        border: 1px solid #00000012;
+        border-radius: 8px;
+        background: white;
+        overflow: hidden;
+      }
+      .detail-grid img {
+        display: block;
+        width: 100%;
+        height: auto;
+      }
+      .detail-grid figcaption {
+        padding: 12px 17px;
+        border-top: 1px solid #0000000a;
+        font-size: 11px;
+        color: #61666b;
+      }
+      @media (max-width: 800px) {
+        .detail-grid {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <div class="eyebrow">MICA / NOTEBOOK DESIGN STUDY</div>
+      <h1>沿着 C，找到更舒服的工作台。</h1>
+      <p class="intro">
+        以 C · 工作台为基准，新增 D 的清晰分区和 E 的开阔画布。三版都有目录树、正文与可收起的大纲，
+        示例内容完全一致，使用真实 Lexical 编辑器，可直接编辑；进入后可在顶部随时切换比较。
+      </p>
+      <div class="grid">
+        <article class="card">
+          <div class="card-header">
+            <span class="number">01 / BASELINE</span>
+            <h2>C · 工作台</h2>
+            <p>本轮基准。紧凑的三栏布局，目录、正文与文档大纲并排，浏览线索始终清楚。</p>
+          </div>
+          <a class="screenshot" href="./?design=c&theme=light" aria-label="体验 C 工作台，本轮基准"
+            ><img
+              src="./preview-c.png"
+              alt="C 工作台真实截图：紧凑的目录、正文和大纲三栏布局"
+              width="1440"
+              height="960"
+          /></a>
+          <div class="card-footer">
+            <span class="tags">本轮基准 · 紧凑三栏</span
+            ><a class="open" href="./?design=c&theme=light">进入体验 ↗</a>
+          </div>
+        </article>
+        <article class="card">
+          <div class="card-header">
+            <span class="number">02 / DEFINED SPACES</span>
+            <h2>D · 分区工作台</h2>
+            <p>沿用 C 的三栏导航。轻灰底、圆角分区与正文轻卡片，配合最近阅读页签和编号大纲。</p>
+          </div>
+          <a class="screenshot" href="./?design=d&theme=light" aria-label="体验 D 分区工作台"
+            ><img
+              src="./preview-d.png"
+              alt="D 分区工作台真实截图：轻灰底、圆角分区、正文卡片与编号大纲"
+              width="1440"
+              height="960"
+          /></a>
+          <div class="card-footer">
+            <span class="tags">分区层次 · 最近阅读页签</span
+            ><a class="open" href="./?design=d&theme=light">进入体验 ↗</a>
+          </div>
+        </article>
+        <article class="card">
+          <div class="card-header">
+            <span class="number">03 / OPEN CANVAS</span>
+            <h2>E · 一体工作台</h2>
+            <p>沿用 C 的三栏导航。一体画布减少边框，侧栏与大纲更纤细，轻量工具栏让正文更开阔。</p>
+          </div>
+          <a class="screenshot" href="./?design=e&theme=light" aria-label="体验 E 一体工作台"
+            ><img
+              src="./preview-e.png"
+              alt="E 一体工作台真实截图：一体画布、纤细侧栏和大纲、开阔正文"
+              width="1440"
+              height="960"
+          /></a>
+          <div class="card-footer">
+            <span class="tags">连贯画布 · 更多正文空间</span
+            ><a class="open" href="./?design=e&theme=light">进入体验 ↗</a>
+          </div>
+        </article>
+      </div>
+      <div class="extras">
+        <div>
+          <strong>同样的五篇笔记，都可以实际编辑</strong>
+          <p>产品设计手记、周计划、技术决策记录、阅读摘录，以及一篇格式巡检笔记。</p>
+          <div class="formats">
+            <span>H1–H3 标题</span><span>行内格式与链接</span><span>嵌套列表</span
+            ><span>任务清单</span><span>数据表格</span><span>TypeScript</span
+            ><span>Mermaid × 2</span><span>原创插图与图注</span><span>公式</span
+            ><span>引用与分割线</span>
+          </div>
+        </div>
+        <div>
+          <strong>也看看深色与窄屏</strong>
+          <p>
+            <a href="./?design=c&theme=dark">C 深色</a> ·
+            <a href="./?design=d&theme=dark">D 深色</a> ·
+            <a href="./?design=e&theme=dark">E 深色 ↗</a>
+          </p>
+          <p class="asset-links">
+            深色截图：<a href="./preview-d-dark.png">D</a> · <a href="./preview-e-dark.png">E</a
+            ><br />
+            手机截图：<a href="./mobile-d.png">D</a> · <a href="./mobile-e.png">E</a>
+          </p>
+        </div>
+      </div>
+      <h2 class="details-title">放进表格与图表，看看正文里的层次。</h2>
+      <div class="detail-grid">
+        <figure>
+          <a href="./?design=d&theme=light" aria-label="体验 D 分区工作台中的表格"
+            ><img
+              src="./detail-d-table.png"
+              width="1440"
+              height="960"
+              loading="lazy"
+              alt="D 分区工作台的表格细节：正文轻卡片中的数据表格"
+          /></a>
+          <figcaption>
+            D · 分区工作台：表格放进正文轻卡片，段落与数据层次清楚。进入后可直接编辑表格。
+          </figcaption>
+        </figure>
+        <figure>
+          <a href="./?design=e&theme=light" aria-label="体验 E 一体工作台中的 Mermaid 图表"
+            ><img
+              src="./detail-e-mermaid.png"
+              width="1440"
+              height="960"
+              loading="lazy"
+              alt="E 一体工作台的 Mermaid 细节：开阔正文中的图表"
+          /></a>
+          <figcaption>
+            E · 一体工作台：图表融入连续正文，阅读区更开阔。Mermaid 可放大查看，也可展开源码编辑。
+          </figcaption>
+        </figure>
+      </div>
+      <p class="recommend">
+        <strong>保留熟悉的导航，比较两种空间感。</strong>D 强调分区和层次，E 强调连贯和留白；
+        可以在同一篇笔记中来回切换，再用 C 作对照。
+      </p>
+      <aside class="previous" aria-labelledby="previous-title">
+        <h2 id="previous-title">上一轮方案</h2>
+        <p>
+          <a class="open" href="./?design=a&theme=light">A · 清透 ↗</a> ·
+          <a class="open" href="./?design=b&theme=light">B · 书页 ↗</a>
+        </p>
+      </aside>
+      <p class="note">
+        这是独立设计预览，不会替换正式 Notebook。正文只在当前页面内存中暂存，刷新会恢复示例，
+        不访问或修改你的本地笔记。五版均支持项目现有的六套主题。
+      </p>
+    </main>
+  </body>
+</html>

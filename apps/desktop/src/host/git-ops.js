@@ -92,6 +92,9 @@ export function summaryScanCostOf(root) {
 export function noteWorktreeChange(root) {
   if (typeof root !== 'string' || !root) return
   root = worktreeRoot(root)
+  const identity = worktreeState.get(root)?.get('workspace-status')
+  if (identity) worktreeState.set(root, new Map([['workspace-status', identity]]))
+  else worktreeState.delete(root)
   worktreeEpoch.set(root, worktreeEpochOf(root) + 1)
 }
 
@@ -116,44 +119,56 @@ export function worktreeSignature(root) {
  * 从一个目录往上找仓库根（只看 `.git` 是否存在，不跑 git 命令）：保存文件时用来
  * 精确失效那一份缓存。找不到就返回 null，调用方当作「没有可失效的」。
  */
-export function repositoryRootOf(directory, { strict = false } = {}) {
+function discoverRepository(directory, strict = false) {
   let current = typeof directory === 'string' ? directory : ''
-  if (!current) return null
-  current = path.resolve(current)
+  if (!current) return { root: null, metadata: false }
+  current = worktreeRoot(current)
   if (strict && !statSync(current).isDirectory()) {
     throw Object.assign(new Error(`ENOTDIR: not a directory, '${current}'`), { code: 'ENOTDIR' })
   }
   for (;;) {
+    // Git 元数据、嵌套裸仓库和 linked worktree 元数据都是上溯边界。
     try {
-      statSync(path.join(current, '.git'))
-      return current
+      if (statSync(path.join(current, 'HEAD')).isFile()) {
+        for (const marker of ['objects', 'commondir']) {
+          try {
+            const info = statSync(path.join(current, marker))
+            if (marker === 'objects' ? info.isDirectory() : info.isFile())
+              return { root: null, metadata: true }
+          } catch (error) {
+            if (strict && error.code !== 'ENOENT') throw error
+          }
+        }
+      }
     } catch (error) {
-      // 保存文件的失效提示可以尽力而为；读取请求不能把权限/IO 错误伪装成「没有仓库」。
+      if (strict && error.code !== 'ENOENT') throw error
+    }
+    try {
+      // 悬空的 .git 链接也是损坏的元数据，不能误报成正常的非仓库目录。
+      lstatSync(path.join(current, '.git'))
+      return { root: current, metadata: false }
+    } catch (error) {
       if (strict && error.code !== 'ENOENT') throw error
       const parent = path.dirname(current)
-      if (!parent || parent === current) return null
+      if (!parent || parent === current) return { root: null, metadata: false }
       current = parent
     }
   }
 }
 
+export function repositoryRootOf(directory, { strict = false } = {}) {
+  return discoverRepository(directory, strict).root
+}
+
 /** 每次重新查祖先标记，无负缓存：刚 init、删除或移入 .git 时下一次读取立即生效。 */
 function requireRepositoryDirectory(cwd) {
-  const root = repositoryRootOf(cwd, { strict: true })
-  if (root || GIT_ENV.GIT_DIR || GIT_ENV.GIT_WORK_TREE) return root
-  // 裸仓库没有 .git；让 Git 给出「需要工作区」的原始错误。
-  for (let current = cwd; ; current = path.dirname(current)) {
-    try {
-      if (
-        statSync(path.join(current, 'HEAD')).isFile() &&
-        statSync(path.join(current, 'objects')).isDirectory()
-      ) return null
-    } catch (error) {
-      if (error.code !== 'ENOENT') throw error
-    }
-    if (path.dirname(current) === current) break
-  }
-  throw new Error('fatal: not a git repository (or any of the parent directories): .git')
+  const { root, metadata } = discoverRepository(cwd, true)
+  // 元数据边界不能越过后复用外层工作区；由 Git 保留原始错误。
+  if (root || metadata || GIT_ENV.GIT_DIR || GIT_ENV.GIT_WORK_TREE) return root
+  throw Object.assign(
+    new Error('fatal: not a git repository (or any of the parent directories): .git'),
+    { code: 'MICA_NOT_A_REPOSITORY' }
+  )
 }
 
 /**
@@ -274,6 +289,9 @@ export async function cachedWorktreeRead(root, key, run, { refresh = false, inva
     }
     // 每个 key 独立记身份、epoch 和时间，避免 summary 与 status 互相覆盖/续期。
     const values = worktreeState.get(root) || new Map()
+    for (const [otherKey, other] of values) {
+      if (other.signature !== signature) values.delete(otherKey)
+    }
     values.set(key, { signature, epoch, at: Date.now(), value })
     worktreeState.set(root, values)
     return value
@@ -392,6 +410,8 @@ export async function getWorkspaceStatus(cwd) {
   } catch (error) {
     // 还没有第一个提交时 `--abbrev-ref HEAD` 以 128 退出；仓库根照样取得到，
     // 分支名改从 HEAD 引用读（symbolic-ref 不依赖提交存在）。
+    // 权限、配置或元数据错误在取得根之前就失败，不额外再启动两个必然失败的进程。
+    if (error.code !== 128 || !error.stdout?.trim()) throw error
     root = (await git(cwd, ['rev-parse', '--show-toplevel'])).trim()
     branch = (
       await git(root, ['symbolic-ref', '--quiet', '--short', 'HEAD']).catch(() => '')

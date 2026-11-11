@@ -11,10 +11,10 @@ describe('keepsBackgroundTaskRow', () => {
     expect(keepsBackgroundTaskRow({ status: 'killed', exitCode: null })).toBe(false);
   });
 
-  it('keeps endings that need a look', () => {
+  it('hides all ended tasks regardless of exit status', () => {
     expect(keepsBackgroundTaskRow({ status: 'finished', exitCode: 0 })).toBe(false);
-    expect(keepsBackgroundTaskRow({ status: 'finished', exitCode: 2 })).toBe(true);
-    expect(keepsBackgroundTaskRow({ status: 'failed' })).toBe(true);
-    expect(keepsBackgroundTaskRow({ status: 'unknown_exited' })).toBe(true);
+    expect(keepsBackgroundTaskRow({ status: 'finished', exitCode: 2 })).toBe(false);
+    expect(keepsBackgroundTaskRow({ status: 'failed' })).toBe(false);
+    expect(keepsBackgroundTaskRow({ status: 'unknown_exited' })).toBe(false);
   });
 });

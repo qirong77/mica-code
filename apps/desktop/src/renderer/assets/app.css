@@ -1382,48 +1382,64 @@ html[data-appearance='light'] .chat-modal-arco-wrap {
   color: var(--color-fg);
 }
 
-/* 压缩块：会话里只留一行（压了多少、保留了什么），摘要正文按需展开。底衬与
-   「已清理 N 轮工具调用」同一档（--color-panel），不抢正文的注意力。 */
+/* 压缩块：会话里只留一行（压了多少、保留了什么），摘要正文按需展开。
+   它按用户消息那一行来排：同一条高亮带（--chat-user）、同样的上下内边距、
+   同样的 4px 左右延伸、同样的 marker 列与右侧留白。行首的 ▸ 占 marker 列，
+   所以「已压缩上下文」与你说的话从同一个 x 起排。 */
 .chat-compact-block {
-  margin-top: 10px;
-  padding-block: 2px;
-  background: var(--color-panel);
+  display: grid;
+  grid-template-columns: var(--chat-row-marker-width) minmax(0, 1fr);
+  margin-top: 20px;
+  /* 右侧留白与 .chat-message 的第三列（悬停操作）同宽，两种行的文字右边界
+     因此落在同一处；这块本身没有悬停操作，只借用宽度。 */
+  padding: 5px 48px 5px 0;
+  background: var(--chat-user);
   box-shadow:
-    24px 0 0 var(--color-panel),
-    -24px 0 0 var(--color-panel);
+    4px 0 0 var(--chat-user),
+    -4px 0 0 var(--chat-user);
+  color: var(--color-fg-max);
   font-size: 11.5px;
 }
 
+.chat-compact-block:first-child {
+  margin-top: 10px;
+}
+
 .chat-compact-head {
-  display: flex;
+  /* 整行可点，内部仍按 marker 列 + 标题 + 摘要三列排，标题落在正文列起点。 */
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: var(--chat-row-marker-width) max-content minmax(0, 1fr);
   align-items: baseline;
-  gap: 6px;
   width: 100%;
   margin: 0;
   padding: 3px 0;
   border: 0;
   background: transparent;
-  color: var(--color-fg-dim);
+  /* 摘要那半句按用户消息的亮度降两档：标题与正文跟用户消息同为 --color-fg-max，
+     元信息弱一档才不会抢标题。 */
+  color: color-mix(in srgb, var(--color-fg-max) 66%, transparent);
   font: inherit;
   text-align: left;
   cursor: pointer;
 }
 
 .chat-compact-head:hover {
-  color: var(--color-fg);
+  color: var(--color-fg-max);
 }
 
 .chat-compact-caret {
-  width: 1em;
   color: color-mix(in srgb, var(--color-fg-max) 40%, transparent);
 }
 
 .chat-compact-title {
-  color: var(--color-fg);
+  color: var(--color-fg-max);
   font-weight: 600;
 }
 
 .chat-compact-meta {
+  /* 标题与摘要之间 6px 由摘要自己让开，marker 列因此仍是 18px 整。 */
+  padding-left: 6px;
   min-width: 0;
   overflow: hidden;
   white-space: nowrap;
@@ -1431,9 +1447,12 @@ html[data-appearance='light'] .chat-modal-arco-wrap {
 }
 
 .chat-compact-body {
-  margin: 2px 0 6px 1em;
+  grid-column: 2;
+  margin: 2px 0 6px;
   padding: 4px 8px 4px 10px;
-  border-left: 1px solid var(--color-line);
+  /* --color-line 在高亮带上几乎不可见（暗色两者只差 5 级），改用前景混合，
+     明暗主题都能立住这条竖线。 */
+  border-left: 1px solid color-mix(in srgb, var(--color-fg-max) 20%, transparent);
   max-height: 40vh;
   overflow: auto;
 }

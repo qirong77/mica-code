@@ -1,0 +1,320 @@
+/* Notebook design D. Markdown never mounts this container. Content rules use
+   normal specificity so the document's explicit inline formatting stays intact. */
+html:has(.notebook-workbench),
+body:has(.notebook-workbench) {
+  min-width: 0;
+}
+
+.notebook-workbench {
+  --notebook-body-top: 32px;
+  --notebook-body-gutter: 36px;
+  --notebook-body-bottom: 100px;
+  --notebook-body-size: 14px;
+  min-width: 0;
+}
+
+.notebook-workbench :is(.editor-canvas, .editor-shell, .editor-container, .editor-scroller, .editor) {
+  min-width: 0;
+}
+
+.notebook-workbench .editor-canvas {
+  background: var(--color-canvas);
+}
+
+.notebook-workbench .toolbar {
+  box-sizing: border-box;
+  position: sticky;
+  top: 0;
+  min-width: 0;
+  max-width: 100%;
+  min-height: 44px;
+  padding: 7px 12px;
+  border-bottom: 1px solid var(--color-line-soft);
+  border-radius: 0;
+  background: color-mix(in srgb, var(--color-canvas) 55%, var(--color-panel));
+  box-shadow: none;
+  z-index: 30;
+}
+
+.notebook-workbench .toolbar button.toolbar-item {
+  height: 28px;
+  min-width: 28px;
+  border-radius: 5px;
+}
+
+.notebook-workbench .toolbar-group {
+  gap: 2px;
+  padding-inline: 6px;
+}
+
+.notebook-workbench .toolbar .toolbar-font-size {
+  border-color: var(--color-line-soft);
+  border-radius: 5px;
+  background: var(--color-canvas);
+}
+
+/* Only the main editor gets page geometry. Captions and sticky editors have
+   separate editing roots and retain their own small surfaces. */
+.notebook-workbench .editor-scroller > .editor > .ContentEditable__root {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 1000px;
+  min-height: calc(100vh - 76px);
+  margin-inline: auto;
+  padding: var(--notebook-body-top) var(--notebook-body-gutter) var(--notebook-body-bottom);
+  font-size: var(--notebook-body-size);
+  line-height: 1.92;
+  letter-spacing: 0.06px;
+  color: var(--color-fg);
+  overflow-wrap: anywhere;
+}
+
+.notebook-workbench .editor-scroller > .editor > .ContentEditable__placeholder {
+  top: var(--notebook-body-top);
+  left: max(var(--notebook-body-gutter), calc((100% - 1000px) / 2 + var(--notebook-body-gutter)));
+  font-size: var(--notebook-body-size);
+  line-height: 1.92;
+}
+
+.notebook-workbench .PlaygroundEditorTheme__h1 {
+  margin: 0 0 17px;
+  font-size: 30px;
+  line-height: 1.4;
+  font-weight: 650;
+  letter-spacing: -0.8px;
+}
+
+.notebook-workbench .PlaygroundEditorTheme__h2 {
+  margin: 32px 0 13px;
+  font-size: 19px;
+  line-height: 1.55;
+  font-weight: 620;
+  letter-spacing: -0.35px;
+}
+
+.notebook-workbench .PlaygroundEditorTheme__h3 {
+  margin: 22px 0 9px;
+  font-size: 15px;
+  line-height: 1.7;
+  font-weight: 600;
+}
+
+.notebook-workbench .PlaygroundEditorTheme__paragraph {
+  margin-bottom: 11px;
+}
+
+.notebook-workbench .PlaygroundEditorTheme__h1 + .PlaygroundEditorTheme__paragraph {
+  margin-bottom: 21px;
+  font-size: 14px;
+  line-height: 1.9;
+  color: var(--color-fg-soft);
+}
+
+.notebook-workbench .PlaygroundEditorTheme__quote {
+  margin: 21px 0;
+  padding: 11px 17px;
+  border-left-width: 2px;
+  border-left-color: color-mix(in srgb, var(--color-accent) 50%, var(--color-line));
+  border-radius: 0 6px 6px 0;
+  background: var(--color-panel);
+  color: var(--color-fg-soft);
+  font-size: 13px;
+  line-height: 1.9;
+}
+
+.notebook-workbench .PlaygroundEditorTheme__quote p:last-child {
+  margin-bottom: 0;
+}
+
+.notebook-workbench .PlaygroundEditorTheme__textCode {
+  border: 1px solid var(--color-inline-code-border);
+  border-radius: 4px;
+  padding: 1px 5px;
+  color: var(--color-inline-code);
+  background: var(--color-inline-code-bg);
+  font-size: 12.5px;
+}
+
+.notebook-workbench .PlaygroundEditorTheme__code {
+  margin: 19px 0 25px;
+  border: 1px solid var(--color-line-soft);
+  border-radius: 7px;
+  font-size: 12px;
+  line-height: 1.85;
+}
+
+.notebook-workbench .PlaygroundEditorTheme__code::before {
+  border-radius: 7px 0 0 7px;
+}
+
+/* Keep table/column widths and alignment under Lexical's control. Wide tables
+   continue to scroll inside the existing wrapper. */
+.notebook-workbench .PlaygroundEditorTheme__table {
+  font-size: 13px;
+  margin-block: 0;
+  border-color: var(--color-line-soft);
+}
+
+.notebook-workbench .PlaygroundEditorTheme__tableCell {
+  min-width: 0;
+  height: 34px;
+  padding: 7px 10px;
+  border-color: var(--color-line-soft);
+}
+
+.notebook-workbench .PlaygroundEditorTheme__tableCell > .PlaygroundEditorTheme__paragraph {
+  min-height: 20px;
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.65;
+}
+
+.notebook-workbench .PlaygroundEditorTheme__tableCellHeader {
+  background: var(--color-panel);
+  font-size: 12px;
+}
+
+.notebook-workbench .PlaygroundEditorTheme__tableScrollableWrapper {
+  min-width: 0;
+  max-width: 100%;
+  margin: 20px 0 25px;
+}
+
+.notebook-workbench .PlaygroundEditorTheme__hr {
+  margin-block: 30px;
+}
+
+/* Display the whole figure within the reading column. The node's stored pixel
+   dimensions remain unchanged; only oversized display geometry is constrained. */
+.notebook-workbench span.editor-image {
+  display: inline-block;
+  max-width: 100%;
+  vertical-align: top;
+}
+
+.notebook-workbench .editor-image img {
+  max-width: 100% !important;
+  height: auto !important;
+  border-radius: 7px;
+}
+
+body.mica-arco-theme .notebook-workbench .editor-image .image-caption-container {
+  position: relative;
+  bottom: auto;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+}
+
+.notebook-workbench .image-caption-container .ImageNode__contentEditable {
+  min-height: 24px;
+  max-width: 100%;
+  padding: 9px 8px;
+  color: var(--color-fg-soft);
+  font-size: 11px;
+  line-height: 1.7;
+  text-align: center;
+}
+
+.notebook-workbench .image-caption-container .ImageNode__contentEditable .PlaygroundEditorTheme__paragraph {
+  margin: 0;
+}
+
+.notebook-workbench :is(.image-caption-container, .sticky-note) .ContentEditable__root {
+  width: auto;
+  max-width: 100%;
+  min-height: 20px;
+  margin: 0;
+  padding: 10px;
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+.notebook-workbench :is(.image-caption-container, .sticky-note) .ContentEditable__placeholder {
+  top: 10px;
+  left: 10px;
+  font-size: 13px;
+}
+
+.notebook-workbench .document-statusbar {
+  box-sizing: border-box;
+  position: fixed;
+  inset: auto 0 0;
+  height: 28px;
+  min-height: 28px;
+  border-top: 1px solid var(--color-line-soft);
+  background: var(--color-canvas);
+  font-size: 9px;
+  z-index: 10;
+}
+
+.notebook-workbench :is(.mermaid-preview, .mermaid-source-toolbar) {
+  border-color: var(--color-line-soft);
+}
+
+.notebook-workbench .mermaid-preview {
+  border-radius: 7px;
+}
+
+.notebook-workbench .mermaid-preview-live {
+  border-radius: 0 0 7px 7px;
+}
+
+.notebook-workbench .mermaid-source-toolbar {
+  border-radius: 7px 7px 0 0;
+}
+
+.notebook-workbench .mermaid-preview-actions {
+  border-bottom: 1px solid var(--color-line-soft);
+  background: var(--color-panel);
+}
+
+/* The iframe viewport changes when either host sidebar opens or closes. */
+@media (max-width: 1050px) {
+  .notebook-workbench {
+    --notebook-body-gutter: 32px;
+  }
+}
+
+@media (max-width: 760px) {
+  .notebook-workbench {
+    --notebook-body-top: 28px;
+    --notebook-body-gutter: 26px;
+    --notebook-body-bottom: 90px;
+  }
+
+  .notebook-workbench .toolbar {
+    padding: 6px 10px;
+  }
+
+  .notebook-workbench :is(.toolbar-primary, .toolbar-secondary) {
+    max-width: 100%;
+    overflow-x: auto;
+    scrollbar-width: thin;
+  }
+
+  .notebook-workbench .toolbar-group {
+    padding-inline: 5px;
+  }
+}
+
+@media (max-width: 600px) {
+  .notebook-workbench {
+    --notebook-body-top: 26px;
+    --notebook-body-gutter: 20px;
+    --notebook-body-bottom: 78px;
+    --notebook-body-size: 15px;
+  }
+
+  .notebook-workbench .toolbar {
+    padding-inline: 8px;
+  }
+
+  .notebook-workbench .PlaygroundEditorTheme__h1 {
+    font-size: 28px;
+  }
+
+  .notebook-workbench .PlaygroundEditorTheme__tableCell {
+    padding: 7px 9px;
+  }
+}

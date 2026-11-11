@@ -59,6 +59,8 @@ await ref.current?.flush(); // 切换条目/离开页面前把最后一批输入
 
 ## Mermaid 与代码块
 
+Notebook 富文本画布使用分区工作台排版（`runtime/src/workspace/notebook-workbench.css`）：紧凑工具栏、限宽正文、表格与图注排版及底部字数栏。样式限定富文本画布，不改变文件或配置页 Markdown 模式的布局。宿主大纲通过现有身份校验消息桥接收标题、当前位置和内容块元数据，并按节点 key 请求跳转；这些信息不写入正文，也不改变编辑器选区或撤销历史。
+
 两种模式共用 `MermaidPreviewPlugin`：语言为 `mermaid` 的 Lexical CodeNode 默认显示紧凑图表卡片，
 标出流程图、时序图等类型，沿用宿主画布、文字和边框颜色；小图不拉伸，长图限制概览高度。
 点「源码」展开实际代码，下方实时预览，上方「完成」收起；Alt+F10 可从源码进入图表工具条，⌘/Ctrl+Enter 退出代码块继续正文。

@@ -2,6 +2,8 @@ import {useLexicalComposerContext} from '@lexical/react/LexicalComposerContext';
 import {$getRoot} from 'lexical';
 import {type ReactNode, useEffect, useState} from 'react';
 
+import './notebook-workbench.css';
+
 import {useNotebookSession} from './NotebookBridge';
 import {countCharacters} from './storage';
 
@@ -21,7 +23,7 @@ export default function WorkspaceShell({children}: {children: ReactNode}) {
   }, [editor, session]);
 
   return (
-    <div className="workspace notebook-editor">
+    <div className="workspace notebook-editor notebook-workbench">
       <section className="editor-canvas" aria-label="笔记富文本编辑器">
         {children}
         <footer className="document-statusbar">

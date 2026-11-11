@@ -17,6 +17,8 @@
 | `stats-design/`   | Stats 图表新版：用量全景 / 来源环形分析 / 项目矩形地图，共享示例数据与主题          |
 | `digest-design/`  | 长回复摘要的三版 Arco 容器对照，置于模拟对话流中                                    |
 | `stats-export/`   | 将对照探针导出为不依赖服务的单文件 HTML                                             |
+| `notebook-design/` | Notebook 真实编辑预览：C 工作台 / D 分区 / E 一体对比，保留 A/B；丰富示例、共享 Lexical 与六套主题 |
+| `notebook-workbench/` | 方案 D 正式 Notebook 页面验收：真实目录/自动保存/大纲组件、内存 CAS 宿主、丰富示例与主题切换 |
 
 ## 运行
 
@@ -29,6 +31,8 @@ npx vite --config .probe/arco-light/vite.config.mjs      # http://127.0.0.1:5236
 npx vite --config .probe/reply-digest/vite.config.mjs    # http://127.0.0.1:5232
 npx vite --config .probe/stats-design/vite.config.mjs    # http://127.0.0.1:5233
 npx vite --config .probe/digest-design/vite.config.mjs   # http://127.0.0.1:5234
+npx vite --config .probe/notebook-design/vite.config.mjs # http://127.0.0.1:5286/comparison.html
+npx vite --config .probe/notebook-workbench/vite.config.mjs # http://127.0.0.1:5287/
 ```
 
 `vite.config.mjs` 里已固定 `root`，所以在哪个目录执行都能跑；端口按上面两行分配，新增探针另取一个。

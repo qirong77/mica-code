@@ -157,7 +157,7 @@ describe('task snapshot projection (mica task extension)', () => {
     ...partial,
   });
 
-  it('surfaces active tasks and endings worth a look, dropping clean finishes and kills', () => {
+  it('surfaces active tasks and hides all ended tasks', () => {
     const result = projectBackgroundTasks([
       task({ status: 'starting' }),
       task({ id: 'running-1', status: 'running', exit_code: null }),
@@ -166,8 +166,7 @@ describe('task snapshot projection (mica task extension)', () => {
       task({ id: 'nonzero', status: 'finished', exit_code: 2, finished_at: '2026-08-06T00:02:00.000Z' }),
       task({ id: 'killed', status: 'killed', signal: 'SIGTERM' }),
     ]);
-    expect(result.map((item) => item.id)).toEqual(['abc123', 'running-1', 'failed', 'nonzero']);
-    expect(result[3]).toMatchObject({ status: 'finished', exitCode: 2, finishedAt: '2026-08-06T00:02:00.000Z' });
+    expect(result.map((item) => item.id)).toEqual(['abc123', 'running-1']);
     expect(result[0]).toEqual({
       id: 'abc123',
       command: 'npm run dev',
@@ -178,7 +177,7 @@ describe('task snapshot projection (mica task extension)', () => {
     });
   });
 
-  it('retains all active background tasks and only the 20 most recent finished tasks worth a look', () => {
+  it('retains active background tasks regardless of the number of finished tasks', () => {
     const finished = Array.from({ length: 21 }, (_, index) => task({
       id: `finished-${index}`,
       status: 'finished',
@@ -186,10 +185,7 @@ describe('task snapshot projection (mica task extension)', () => {
       finished_at: new Date(Date.UTC(2026, 7, 6, 0, index)).toISOString(),
     }));
     const result = projectBackgroundTasks([...finished, task({ id: 'active' })]);
-    expect(result).toHaveLength(21);
-    expect(result.map((item) => item.id)).not.toContain('finished-0');
-    expect(result.map((item) => item.id)).toContain('finished-20');
-    expect(result.map((item) => item.id)).toContain('active');
+    expect(result.map((item) => item.id)).toEqual(['active']);
   });
 
   it('carries finish metadata when present', () => {
