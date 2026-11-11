@@ -33,6 +33,7 @@
 | `mica-web-shared`             | desktop renderer 与运行时共享的展示、状态、搜索、地址约定               |
 | `mica-file-mentions`          | CLI / desktop 共用的文件补全触发、扫描、排序、插入                      |
 | `mica-config-ui`              | 配置页唯一实现：页面、数据动作、共享类型                                |
+| `mica-editor`                 | 共享 Lexical 编辑器：富文本与 Markdown 两种模式、隔离 runtime、CDN 依赖  |
 | `mica-diagnostics`            | 诊断日志唯一写入器：JSONL 落盘、慢操作聚合、进程内存采样（node-only）   |
 | `mica-official-plugins`       | 官方插件目录：`manifests.js` 只含清单，`index.js` 才带入口              |
 | `@anthropic/ink`              | 仓库内 vendored 的 Ink 分支：终端渲染原语，`mica-ui` 的唯一 Ink 来源    |

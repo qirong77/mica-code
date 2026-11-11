@@ -337,6 +337,17 @@ export class PluginManager {
     const paths = baseContext.paths;
     const ctx: PluginContext = {
       ...shared,
+      ...(shared.tools
+        ? {
+            tools: {
+              register: (tool, options = {}) =>
+                shared.tools!.register(tool, {
+                  ...options,
+                  group: { key: `plugin:${plugin.id}`, label: plugin.manifest?.name ?? plugin.id },
+                }),
+            },
+          }
+        : {}),
       pluginId: plugin.id,
       ...(statusHost && paths
         ? {

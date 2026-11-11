@@ -27,12 +27,12 @@ export type CapabilitySection<T extends CapabilityGroupable> = {
 /**
  * 按分组键归并（不要求同组成员相邻），顺序沿用工具名的字典序。
  *
- * 只有共享前缀的工具族（`pty_*` 等）才带 `group`，它们在字典序里本来就相邻；按 key
- * 归并是为了不依赖目录的排序细节。独立工具（没有 `group`）就地单独成行，不聚到末尾。
+ * 插件工具与内核工具族带 `group`，按 key 归并，不依赖工具名或目录排序。
+ * 独立工具（没有 `group`）就地单独成行，不聚到末尾。
  */
 export function buildCapabilitySections<T extends CapabilityGroupable>(
   items: T[],
-  isEnabled: (name: string) => boolean
+  isEnabled: (name: string) => boolean,
 ): CapabilitySection<T>[] {
   const sections: CapabilitySection<T>[] = [];
   const byKey = new Map<string, CapabilitySection<T>>();
@@ -60,11 +60,7 @@ export function buildCapabilitySections<T extends CapabilityGroupable>(
   for (const section of sections) {
     section.enabledCount = section.items.filter((item) => isEnabled(item.name)).length;
     section.state =
-      section.enabledCount === 0
-        ? 'none'
-        : section.enabledCount === section.items.length
-          ? 'all'
-          : 'partial';
+      section.enabledCount === 0 ? 'none' : section.enabledCount === section.items.length ? 'all' : 'partial';
   }
   return sections;
 }
@@ -86,4 +82,10 @@ export function applyGroupEnabled(disabledNames: string[], names: string[], enab
     return disabledNames.filter((name) => !drop.has(name));
   }
   return [...new Set([...disabledNames, ...names])];
+}
+
+/** 列表与详情共用：有插件归属时，任何入口都改写整组。 */
+export function capabilityToggleNames(items: CapabilityGroupable[], name: string): string[] {
+  const key = items.find((item) => item.name === name)?.group?.key;
+  return key ? items.filter((item) => item.group?.key === key).map((item) => item.name) : [name];
 }

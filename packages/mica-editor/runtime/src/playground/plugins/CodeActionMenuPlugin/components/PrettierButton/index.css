@@ -1,0 +1,34 @@
+/**
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+.code-action-menu-container .prettier-wrapper {
+  display: flex;
+  flex: none;
+}
+
+.code-action-menu-container .code-error-tips {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  z-index: 1;
+  box-sizing: border-box;
+  width: max-content;
+  max-width: min(360px, 100%);
+  max-height: 180px;
+  overflow: auto;
+  padding: 8px 10px;
+  margin-top: 4px;
+  border: 1px solid var(--color-line);
+  border-radius: 4px;
+  color: var(--color-danger);
+  background: var(--color-panel);
+  box-shadow: var(--notebook-popup-shadow);
+  font: 12px/1.5 var(--font-family);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: text;
+}

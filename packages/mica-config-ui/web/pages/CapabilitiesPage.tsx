@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { PageFrame } from '../components/PageFrame.js';
 import { Alert, Button } from '../components/Ui.js';
 import { CapabilityList, CapabilityParameters } from '../components/CapabilityList.js';
-import { applyGroupEnabled } from '../capabilityGroups.js';
+import { applyGroupEnabled, capabilityToggleNames } from '../capabilityGroups.js';
 import { Modal } from '../components/Modal.js';
 import { readCapabilityDefaults, writeCapabilityDefaults } from '../api.js';
 import { appIcons } from '../icons.js';
@@ -156,10 +156,10 @@ export function CapabilitiesPage() {
 
   function toggle(name: string, enabled: boolean) {
     const key = disabledKey(group);
-    const next = new Set(draftRef.current[key]);
-    if (enabled) next.delete(name);
-    else next.add(name);
-    commit({ ...draftRef.current, [key]: [...next] });
+    commit({
+      ...draftRef.current,
+      [key]: applyGroupEnabled(draftRef.current[key], capabilityToggleNames(items, name), enabled),
+    });
   }
 
   // 整组开关：一次改写组内全部成员，落到同一个禁用名单里（能力校验按工具名逐条判定）。

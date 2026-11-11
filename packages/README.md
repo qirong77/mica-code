@@ -42,6 +42,7 @@
 - `mica-diagnostics`：诊断日志的唯一写入器（node-only）。JSONL 落 `resolveLogDir()`、2s 批量 flush、7 天与 256MB 保留策略、环形缓冲与慢操作聚合；`startMemorySampler()` 让每个常驻进程每 30s 上报自己的 `memoryUsage()`，`readPerformanceSummary()` 把渲染采样、通道耗时与进程内存聚合成配置页 Performance 用的形状。桌面运行时、Electron 主进程、`mica app-server`、TUI、`mica exec` 共用这一份。
 - `mica-pty`：PTY 能力包。`PtyDriver` 是基于 node-pty 的测试驱动（Node/vitest 环境）；同时提供内置 `pty_*` 工具的运行时支持（`PtyManager` + Node helper 桥接），Bun 主进程通过 JSONL IPC 使用，node-pty 只在 Node 子进程中加载。
 - `mica-web-shared`：`apps/desktop` renderer 与其运行时共用的纯函数（端口常量与「本机」地址、单端口上的路径约定、时间/token/工具图标与展示名格式化、界面状态的补丁语义、侧栏会话搜索的匹配/高亮/片段、模型用量来源分类与无会话用量账本的解析），无 React、无运行时依赖。
+- `mica-editor`：共享 Lexical 编辑器，一份 runtime 两种模式——富文本（Lexical JSON，`plugins/notebook` 笔记用）与 Markdown（只收发 Markdown 字符串，配置页 Role / Skill 用）。runtime 在无 `allow-same-origin` 的 sandbox iframe 中运行，宿主只拿到 `MarkdownEditor` 与 `flush()`；第三方库按固定版本走 CDN，宿主用 `build.mjs` 的 `editorWebAssets()` 产出同一份 `/editor/` 资源。Markdown 文本进出的唯一口径在 `runtime/src/markdown/markdownDocument.ts`，不保留 Markdown 空行、沿用原文件收尾换行；无损不了的写法由 `markdownPolicy.ts` 留在源码模式。细节见 [包 README](./mica-editor/README.md)。
 - `mica-file-mentions`：`@` 文件补全的唯一实现（触发判定、工作区扫描 + 缓存、评分排序、插入文本）。CLI 输入框/插件与 `apps/desktop` 的聊天输入框共用它，纯逻辑在 `rank.ts`，Node 侧扫描在 `search.ts`。
 - `mica-config-ui`：配置页（Mica Config）的唯一实现——页面组件、数据动作与共享类型；Web 基础控件统一以 Arco Design React 实现，公开 `Input` / `InputNumber` / `Select`、全应用 `ArcoProvider`、富内容浮层 `ArcoPopover`、透传原生按钮事件与 ref 的 `ArcoAction` 和保留业务接口的按钮、开关、下拉、日期、表格供宿主与插件复用，布局不由组件库接管。浏览器宿主 `apps/config-web` 用它托管页面（HTTP `/api/*`），桌面宿主 `apps/desktop` 直接渲染它的组件、数据走运行时 IPC，两边各有一份数据实现（见该包 README）。
 
@@ -86,3 +87,5 @@ bunx tsc --noEmit
 ```
 
 系统提示词按注入来源组织 XML：`mica-common` 导出 `escapePromptXml` / `wrapPromptXml`，`mica-agent` 包装基础段落与项目文档。`buildSystemPrompt()` 固定使用内置只读的 `<system>` 默认正文；`BuildSystemPromptOptions.baseSystemPrompt` 覆盖入口已移除，这个形态不再支持。磁盘与插件的非默认 Role 统一经 `rolePrompt` 追加为紧接其后的 `<role>` 段，两者同属 system prompt，`default` 不重复追加，`AgentRole` 不再包含 `append` 标志。`mica-plugin` 的 `ctx.prompt.section()` 为插件正文统一生成带 `plugin`、`section` 属性的 `injection`。`system-prompt:build` 形态不再支持。插件线程和独立模型请求由 CLI 宿主包装其系统提示词。
+
+插件工具通过 `ctx.tools.register()` 注册时，由 PluginManager 自动注入 `group: { key, label }`（插件 id 与清单名称），宿主传给工具 registry。会话能力与默认能力列表按插件归组，只提供整组开关；工具详情的开关同样作用于整组。

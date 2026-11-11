@@ -33,6 +33,7 @@ export type ToolFilter = (name: string) => boolean;
 
 export type RuntimeToolRegistrationOptions = {
   primaryAgentOnly?: boolean;
+  group?: ToolGroupEntry;
 };
 
 export type ToolCatalogEntry = {
@@ -44,7 +45,7 @@ export type ToolCatalogEntry = {
   readOnly: boolean;
   /** 入参摘要：能力面板的详情要能说清这个工具吃什么，不用去翻代码。 */
   parameters: ToolParameterEntry[];
-  /** 所属工具族（共享名字前缀，如 `pty_*`）；`null` 表示独立工具，面板平铺。 */
+  /** 所属插件；内核工具可按工具族分组，`null` 表示独立工具。 */
   group: ToolGroupEntry | null;
 };
 
@@ -244,7 +245,7 @@ export function getToolCatalog(): ToolCatalogEntry[] {
     mcpServer: tool.mcpServer,
     readOnly: tool.readOnly,
     parameters: toolParameters(tool),
-    group: families.get(tool.name) ?? null,
+    group: runtimeToolOptions.get(tool)?.group ?? descriptorGroup(tool.name) ?? families.get(tool.name) ?? null,
   }));
   // 运行期工具只存在于跑 agent 的进程里：配置页 / 桌面设置页不加载插件，目录会缺
   // todo_write 这类工具，「新会话默认值」里就关不掉它们。未注册时用描述补一行。
@@ -256,10 +257,16 @@ export function getToolCatalog(): ToolCatalogEntry[] {
     entries.push({
       ...descriptor,
       source: 'builtin',
-      group: families.get(descriptor.name) ?? null,
+      group: descriptorGroup(descriptor.name) ?? families.get(descriptor.name) ?? null,
     });
   }
   return entries.sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/** 不加载插件的配置宿主从静态目录读取相同归属。 */
+function descriptorGroup(name: string): ToolGroupEntry | null {
+  const descriptor = RUNTIME_TOOL_DESCRIPTORS.find((entry) => entry.name === name);
+  return descriptor?.pluginId ? { key: `plugin:${descriptor.pluginId}`, label: descriptor.pluginId } : null;
 }
 
 function orphanDescriptorNames(registered: Set<string>): string[] {

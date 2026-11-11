@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="referrer" content="no-referrer">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'unsafe-inline' https://esm.sh https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; img-src 'self' data: blob: https:; font-src 'self' data: https://cdn.jsdelivr.net https://esm.sh; connect-src 'self' https://esm.sh https://cdn.jsdelivr.net; worker-src blob: https://esm.sh; frame-src https://www.youtube-nocookie.com https://www.youtube.com https://www.figma.com https://platform.twitter.com; base-uri 'none'; form-action 'none'">
+  <title>Mica 编辑器</title>
+  <!-- CDN_IMPORTS -->
+  <style>html,body,#root{margin:0;height:100%;}body{font:14px/1.6 -apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif;background:transparent;color:#86909c}#boot{padding:40px;display:grid;gap:14px}#boot i{height:12px;border-radius:3px;background:#f2f3f5;width:70%}#boot i:first-child{height:28px;width:44%}</style>
+</head>
+<body>
+  <div id="root"><div id="boot" aria-label="编辑器骨架"><i></i><i></i><i></i></div></div>
+  <script type="module">
+    import('./src/main.tsx').catch(error => {
+      const channel = new URLSearchParams(location.search).get('mode') === 'markdown' ? 'mica-markdown' : 'mica-notebook';
+      window.parent.postMessage({channel,token:location.hash.slice(1),type:'error',message:'编辑器依赖加载失败，请检查网络后重试。'+error.message}, '*');
+      document.getElementById('root').textContent='编辑器暂时无法加载，请重试。原文不会被替换。';
+    });
+  </script>
+</body>
+</html>

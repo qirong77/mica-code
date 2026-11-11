@@ -36,6 +36,8 @@ export type PluginStatusItem = {
 export type PluginToolRegistrationOptions = {
   icon?: string;
   primaryAgentOnly?: boolean;
+  /** 宿主由 PluginManager 注入，插件无需声明。 */
+  group?: { key: string; label: string };
 };
 
 export type PluginFileMentionItem = {

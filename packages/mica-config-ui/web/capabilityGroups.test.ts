@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { applyGroupEnabled, buildCapabilitySections, nextGroupEnabled } from './capabilityGroups.js';
+import {
+  applyGroupEnabled,
+  buildCapabilitySections,
+  capabilityToggleNames,
+  nextGroupEnabled,
+} from './capabilityGroups.js';
 
 const tools = [
   { name: 'apply_patch', group: { key: 'edit', label: '文件修改' } },
@@ -61,9 +66,7 @@ describe('nextGroupEnabled', () => {
 
 describe('applyGroupEnabled', () => {
   it('removes every member when enabling and appends missing ones when disabling', () => {
-    expect(applyGroupEnabled(['pty_kill', 'run_shell'], ['pty_kill', 'pty_read'], true)).toEqual([
-      'run_shell',
-    ]);
+    expect(applyGroupEnabled(['pty_kill', 'run_shell'], ['pty_kill', 'pty_read'], true)).toEqual(['run_shell']);
     expect(applyGroupEnabled(['run_shell'], ['pty_kill', 'pty_read'], false)).toEqual([
       'run_shell',
       'pty_kill',
@@ -73,5 +76,17 @@ describe('applyGroupEnabled', () => {
 
   it('does not duplicate names already disabled', () => {
     expect(applyGroupEnabled(['pty_read'], ['pty_read'], false)).toEqual(['pty_read']);
+  });
+});
+
+describe('capabilityToggleNames', () => {
+  it('updates every group member from an individual detail entry', () => {
+    expect(capabilityToggleNames(tools, 'pty_read')).toEqual(['pty_kill', 'pty_read']);
+    expect(applyGroupEnabled(['skill'], capabilityToggleNames(tools, 'pty_read'), false)).toEqual([
+      'skill',
+      'pty_kill',
+      'pty_read',
+    ]);
+    expect(capabilityToggleNames(tools, 'skill')).toEqual(['skill']);
   });
 });

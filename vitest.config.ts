@@ -74,7 +74,7 @@ export default defineConfig({
     environment: 'node',
     globalSetup: ['./test/globalSetup.ts'],
     setupFiles: ['./test/setup.ts'],
-    exclude: ['**/node_modules/**', '**/dist/**', 'temp/**'],
+    exclude: ['**/node_modules/**', '**/dist/**', 'temp/**', 'packages/mica-editor/runtime/**'],
     // Vitest 默认 5s 是给纯内存单测留的预算，这套测试不是：unit 里有真实 git 仓库和
     // 文件 I/O，process 里的 PTY 用例自身就按 20s 等待。机器一忙（多个 worker + 开发者
     // 自己的进程）5s 就会随机打挂与代码无关的用例，所以显式给出预算而不是沿用默认值。
@@ -86,7 +86,7 @@ export default defineConfig({
         test: {
           name: 'unit',
           include: ALL_TESTS,
-          exclude: ['**/node_modules/**', '**/dist/**', 'temp/**', ...PROCESS_TESTS],
+          exclude: ['**/node_modules/**', '**/dist/**', 'temp/**', 'packages/mica-editor/runtime/**', ...PROCESS_TESTS],
           fileParallelism: true,
           // 8 核上 7 个 worker 会把「首个用例加载整个模块图」和 git 子进程压到 5s
           // 默认超时之外（实测 6 个 worker 有 7 个用例超时）。4 个 worker 是这台机器的

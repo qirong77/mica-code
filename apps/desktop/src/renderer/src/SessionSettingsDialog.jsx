@@ -5,7 +5,8 @@ import {
   CapabilityList,
   CapabilityParameters,
   ConfigSwitch as Switch,
-  applyGroupEnabled
+  applyGroupEnabled,
+  capabilityToggleNames
 } from '@mica-config-ui/web'
 import { ModalShell } from './chat-modal'
 import { LoopPanel } from './LoopPanel'
@@ -182,10 +183,8 @@ export function SessionSettingsDialog({
   function toggleWith(disabledKey, name, enabled) {
     const base = selectionRef.current
     if (!base) return
-    const current = new Set(base[disabledKey])
-    if (enabled) current.delete(name)
-    else current.add(name)
-    void apply({ ...base, [disabledKey]: [...current] })
+    const names = capabilityToggleNames(items, name)
+    void apply({ ...base, [disabledKey]: applyGroupEnabled(base[disabledKey], names, enabled) })
   }
 
   // 整组开关：一次改写组内全部成员，仍然是同一个禁用名单（能力校验按工具名逐条判定）。
@@ -338,7 +337,9 @@ export function SessionSettingsDialog({
         <CapabilityDetail
           detail={detail}
           item={items.find((entry) => entry.name === detail.name)}
-          enabled={!disabled.includes(detail.name)}
+          enabled={capabilityToggleNames(items, detail.name).every(
+            (name) => !disabled.includes(name)
+          )}
           running={running}
           onToggle={(checked) => toggleWith(activeTab.disabledKey, detail.name, checked)}
           onClose={() => setDetail(null)}
@@ -382,7 +383,7 @@ function CapabilityDetail({ detail, item, enabled, running, onToggle, onClose })
           </div>
         ))}
         <div className="session-cap-detail-row">
-          <dt>启用</dt>
+          <dt>{item.group ? '整组启用' : '启用'}</dt>
           <dd>
             <span
               className={`session-cap-detail-switch mica-config-ui is-embed${running ? ' is-disabled' : ''}`}

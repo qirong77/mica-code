@@ -15,6 +15,7 @@
     "packages/mica-ui",
     "packages/mica-config",
     "packages/mica-config-ui",
+    "packages/mica-editor",
     "apps/config-web",
     "packages/mica-session",
     "packages/mica-skills",
@@ -25,5 +26,5 @@
     "packages/mica-file-mentions",
     "packages/@anthropic/ink/src"
   ],
-  "exclude": ["**/dist", "**/node_modules", "plugins/notebook/editor"]
+  "exclude": ["**/dist", "**/node_modules", "packages/mica-editor/runtime"]
 }

@@ -218,3 +218,5 @@ context.onDispose(() => registration.dispose());
 - `PluginLog.ts`：插件文件日志（`resolveLogDir()/plugin-<id>-<day>[-n].jsonl`），带分片与过期清理。
 - `sessionAnnotations.ts`：`$MICA_HOME/plugin-data/<pluginId>/session-annotations.json` 的归一化读写。
 - `index.ts`：公共 API 聚合导出。
+
+插件工具通过 `ctx.tools.register()` 注册时，由 PluginManager 自动注入 `group: { key, label }`（插件 id 与清单名称），宿主传给工具 registry。会话能力与默认能力列表按插件归组，只提供整组开关；工具详情的开关同样作用于整组。

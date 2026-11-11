@@ -256,3 +256,24 @@ describe('PluginManager host-local status', () => {
     expect(otherStatus().plugins).toEqual(initial.plugins);
   });
 });
+
+describe('plugin tool groups', () => {
+  it('injects the plugin owner and display name into every tool registration', async () => {
+    const manager = createManager();
+    const register = vi.fn(() => ({ dispose() {} }));
+    manager.register({
+      id: 'example',
+      manifest: manifest('example', { name: 'Example Tools' }),
+      setup(ctx) {
+        for (const name of ['first_action', 'different_name']) {
+          ctx.tools!.register({ name, description: '', input_schema: { type: 'object' }, execute: () => '' });
+        }
+      },
+    });
+    await manager.setupAll({ ...context(), tools: { register } });
+    expect(register).toHaveBeenCalledTimes(2);
+    for (const call of register.mock.calls as unknown[][]) {
+      expect(call[1]).toMatchObject({ group: { key: 'plugin:example', label: 'Example Tools' } });
+    }
+  });
+});

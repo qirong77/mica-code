@@ -422,7 +422,10 @@ export function createHeadlessPluginHost(options: HeadlessPluginHostOptions): He
     },
     tools: {
       register: (tool, toolOptions = {}) => {
-        const registered = micaTools.registerRuntime(tool, { primaryAgentOnly: toolOptions.primaryAgentOnly });
+        const registered = micaTools.registerRuntime(tool, {
+          primaryAgentOnly: toolOptions.primaryAgentOnly,
+          group: toolOptions.group,
+        });
         return {
           dispose: () => {
             micaTools.unregisterRuntime(registered);

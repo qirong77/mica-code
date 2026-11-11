@@ -249,4 +249,6 @@ macOS 浮窗只取键盘焦点、不连带唤起主应用；原生窗口策略�
 
 前端 `api.documents.read(key)` / `write(key,value,{expectedVersion})` 使用现有 plugin-host 数据通道的可选 `key`，落在插件 `documents/<key>.json`（6 MiB，严格损坏检查、路径标识校验、CAS 与原子写）；无 `key` 的 `data.json` 保持 256 KiB。整页 `api.page.beforeClose(handler)` 可在返回前等待保存，`false` 保持页面。
 
-随包插件可提供 `web-build.mjs`，桌面 `scripts/plugin-web-assets.mjs` 通用构建到 renderer 的 `plugin-web/<id>/`，开发临时产物在 `temp/plugin-web-dev/`。此静态目录支持 CORS 供 opaque sandbox 加载，宿主 API 不开放。Notebook 是首个使用方：核心代码只在 `plugins/notebook/editor/src/`，固定版本 CDN 库不混入本地运行时，主题使用同一份 `mica-config-ui/web/arco-settings.css` 而不是复制皮肤。其独立 TypeScript 检查见插件 README。
+随包插件可提供 `web-build.mjs`，桌面 `scripts/plugin-web-assets.mjs` 通用构建到 renderer 的 `plugin-web/<id>/`，开发临时产物在 `temp/plugin-web-dev/`。此静态目录支持 CORS 供 opaque sandbox 加载，宿主 API 不开放。Notebook 是首个使用方，但它的编辑器已提成共享包 `packages/mica-editor`：一份隔离运行时承载富文本（笔记）与 Markdown（配置页 Role / Skill）两种模式，两个宿主都用它的 `editorWebAssets()` 输出 `/editor/`；固定版本 CDN 库不混入本地运行时，主题使用同一份 `mica-config-ui/web/arco-settings.css` 而不是复制皮肤。Markdown 模式的文本口径与降级策略见该包 README。
+
+插件工具通过 `ctx.tools.register()` 注册时，由 PluginManager 自动注入 `group: { key, label }`（插件 id 与清单名称），宿主传给工具 registry。会话能力与默认能力列表按插件归组，只提供整组开关；工具详情的开关同样作用于整组。

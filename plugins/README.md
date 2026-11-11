@@ -20,8 +20,7 @@
 ## Notebook 本地笔记本
 
 随包 `notebook` 在侧栏提供 Notebook 整页：目录树、本地富文本与表格编辑，和会话笔记相互独立。
-核心编辑器在 `plugins/notebook/editor/src/`，第三方依赖固定版本从 CDN 运行时加载；数据在
-`plugin-data/notebook/data.json` 与 `documents/<id>.json`。首次打开需要 CDN 网络。
+编辑器是共享包 `packages/mica-editor`（笔记用其富文本模式，配置页 Role / Skill 用同一份运行时的 Markdown 模式），第三方依赖固定版本从 CDN 运行时加载；数据在 `plugin-data/notebook/data.json` 与 `documents/<id>.json`。首次打开需要 CDN 网络。
 具体能力、限制与开发方式见 [Notebook](./notebook/README.md)。
 
 ## 目录结构
@@ -1028,3 +1027,5 @@ const child = spawn(micaExecutable, ['app-server', '--dir', cwd, '--parent', thi
 桌面通用构建器发现后输出到 `plugin-web/<id>/`；此静态目录开放跨源读取以支持 opaque-origin
 sandbox 模块，不对宿主 API 开放 CORS。插件在自己的 `desktop.jsx` 管理 iframe、消息认证、
 CDN 版本与 CSP，宿主不写具体插件分支。UI 仍复用宿主共享主题与控件适配，不能借隔离再维护一套皮肤。
+
+插件工具通过 `ctx.tools.register()` 注册时，由 PluginManager 自动注入 `group: { key, label }`（插件 id 与清单名称），宿主传给工具 registry。会话能力与默认能力列表按插件归组，只提供整组开关；工具详情的开关同样作用于整组。

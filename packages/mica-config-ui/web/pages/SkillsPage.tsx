@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { MarkdownEditor, type MarkdownEditorHandle } from '../../../mica-editor/index.js';
 import { createSkill, deleteSkill, readSkillsDetails, writeSkill } from '../api.js';
 import { confirmDialog, promptDialog } from '../components/DialogHost.js';
-import { JsonEditor } from '../components/JsonEditor.js';
 import { PageFrame } from '../components/PageFrame.js';
 import { Alert, Button, Empty, SaveStatus, Tag } from '../components/Ui.js';
 import { appIcons } from '../icons.js';
@@ -21,6 +21,11 @@ export function SkillsPage() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const editorRef = useRef<MarkdownEditorHandle>(null);
+  const actionPending = useRef(false);
+  const detailsRef = useRef(details);
+  const saveError = useRef<string | null>(null);
+  detailsRef.current = details;
   const selectedSkill = useMemo(
     () => details?.skills.find((skill) => skill.name === selectedName),
     [details, selectedName],
@@ -28,7 +33,12 @@ export function SkillsPage() {
   const editable = Boolean(selectedSkill?.editable);
   const autoSave = useAutoSave<{ name: string; content: string }, ConfigWebSkillsDetails>({
     save: (next) => writeSkill(next.name, next.content),
-    onSaved: (next) => setDetails(next),
+    onSaved: (next) => {
+      detailsRef.current = next;
+      saveError.current = null;
+      setDetails(next);
+    },
+    onError: (message) => { saveError.current = message; },
   });
   const { schedule, flush } = autoSave;
   const RefreshIcon = appIcons.refresh;
@@ -42,36 +52,59 @@ export function SkillsPage() {
    * 再跑 effect，那一批改动就没人登记了。
    */
   function editContent(next: string) {
+    if (!editable) return;
     setContent(next);
-    if (!editable || !selectedName) return;
-    if (next === (selectedSkill?.content ?? '')) return;
+    if (!selectedName) return;
     schedule({ name: selectedName, content: next });
+  }
+
+  async function flushEditor() {
+    const value = await editorRef.current?.flush() ?? content;
+    if (editable && saveError.current) schedule({ name: selectedName, content: value });
+    await flush();
+    if (saveError.current) throw new Error(saveError.current);
+    return value;
+  }
+
+  async function runAction(action: () => Promise<void>) {
+    if (actionPending.current) return;
+    actionPending.current = true;
+    setBusy(true);
+    setError(null);
+    try {
+      await action();
+    } catch (cause) {
+      setError(formatError(cause));
+    } finally {
+      actionPending.current = false;
+      setBusy(false);
+    }
   }
 
   function applyDetails(next: ConfigWebSkillsDetails, preferredName = selectedName) {
     const selected = next.skills.find((skill) => skill.name === preferredName) ?? next.skills[0];
+    detailsRef.current = next;
     setDetails(next);
     setSelectedName(selected?.name ?? '');
     setContent(selected?.content ?? '');
   }
 
   async function load() {
-    await flush();
-    setLoading(true);
-    setError(null);
-    autoSave.clearError();
-    try {
-      applyDetails(await readSkillsDetails());
-    } catch (loadError) {
-      setError(formatError(loadError));
-    } finally {
-      setLoading(false);
-    }
+    await runAction(async () => {
+      await flushEditor();
+      setLoading(true);
+      autoSave.clearError();
+      try {
+        applyDetails(await readSkillsDetails());
+      } finally {
+        setLoading(false);
+      }
+    });
   }
 
   async function addSkill() {
-    if (busy) return;
-    await flush();
+    await runAction(async () => {
+    await flushEditor();
     const name = (
       await promptDialog({
         title: '新建 Skill',
@@ -82,19 +115,14 @@ export function SkillsPage() {
       })
     )?.trim();
     if (!name) return;
-    setBusy(true);
-    setError(null);
-    try {
+      await flushEditor();
       applyDetails(await createSkill(name), name);
-    } catch (createError) {
-      setError(formatError(createError));
-    } finally {
-      setBusy(false);
-    }
+    });
   }
 
   async function removeSkill() {
     if (!selectedSkill || !selectedSkill.editable || busy) return;
+    await runAction(async () => {
     const confirmed = await confirmDialog({
       title: `删除 Skill「${selectedSkill.name}」`,
       message: `目录 ${selectedSkill.baseDir} 会被整个删除，此操作不可撤销。`,
@@ -102,26 +130,22 @@ export function SkillsPage() {
       danger: true,
     });
     if (!confirmed) return;
-    // 这个文件马上要没了，路上那份改动不必再写回去。
+    await flushEditor();
     autoSave.cancel();
-    setBusy(true);
-    setError(null);
-    try {
       applyDetails(await deleteSkill(selectedSkill.name));
-    } catch (deleteError) {
-      setError(formatError(deleteError));
-    } finally {
-      setBusy(false);
-    }
+    });
   }
 
   async function selectSkill(name: string) {
     if (name === selectedName) return;
     // 先把当前这份写完再换：切换不打断、也不丢正在敲的内容。
-    await flush();
-    const skill = details?.skills.find((item) => item.name === name);
-    setSelectedName(name);
-    setContent(skill?.content ?? '');
+    await runAction(async () => {
+      await flushEditor();
+      const skill = detailsRef.current?.skills.find((item) => item.name === name);
+      if (!skill) return;
+      setSelectedName(name);
+      setContent(skill.content);
+    });
   }
 
   useEffect(() => {
@@ -138,7 +162,7 @@ export function SkillsPage() {
       actions={
         <div className="toolbar">
           <SaveStatus saving={autoSave.saving} saved={autoSave.status === 'saved'} />
-          <Button icon={<RefreshIcon size={15} />} title="重新加载" onClick={() => void load()} loading={loading} />
+          <Button icon={<RefreshIcon size={15} />} title="重新加载" onClick={() => void load()} loading={loading} disabled={busy} />
           <Button icon={<AddIcon size={15} />} disabled={busy} onClick={() => void addSkill()}>
             新建
           </Button>
@@ -170,6 +194,7 @@ export function SkillsPage() {
                 <button
                   key={skill.baseDir}
                   type="button"
+                  disabled={busy}
                   className={`role-list-item ${selectedName === skill.name ? 'role-list-item-active' : ''}`}
                   onClick={() => void selectSkill(skill.name)}
                 >
@@ -196,7 +221,14 @@ export function SkillsPage() {
                 ) : null}
               </div>
               <div className="editor-host role-editor-host">
-                <JsonEditor value={content} language="markdown" readOnly={!editable} onChange={editContent} />
+                <MarkdownEditor
+                  ref={editorRef}
+                  documentId={`skill:${selectedSkill?.baseDir ?? selectedName}`}
+                  ariaLabel={`Skill ${selectedName}`}
+                  value={content}
+                  readOnly={!editable}
+                  onChange={editContent}
+                />
               </div>
             </div>
           </div>

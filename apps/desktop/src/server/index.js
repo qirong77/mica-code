@@ -520,7 +520,7 @@ async function serveStatic(req, res, rendererRoot, urlPath) {
   const extension = extname(file).toLowerCase()
   // 隔离插件页面不授予 same-origin；只开放它自己的静态资源供模块/CSS读取，
   // 不对 /api 或其它宿主数据开放跨源访问。
-  if (relative.startsWith('plugin-web/')) res.setHeader('access-control-allow-origin', '*')
+  if (relative.startsWith('plugin-web/') || relative.startsWith('editor/')) res.setHeader('access-control-allow-origin', '*')
   if (extension === '.html') {
     res.writeHead(200, {
       'content-type': MIME_TYPES['.html'],

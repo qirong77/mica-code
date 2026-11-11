@@ -2,12 +2,13 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { editorWebAssets } from '../../../packages/mica-editor/build.mjs';
 
 const root = dirname(fileURLToPath(import.meta.url));
 
 export default defineConfig({
   root,
-  plugins: [react()],
+  plugins: [editorWebAssets(), react()],
   resolve: {
     // 页面组件与数据层来自 packages/mica-config-ui，桌面端用同一份源码（见 apps/desktop）
     alias: { '@packages': resolve(root, '../../../packages') },

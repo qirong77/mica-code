@@ -1,0 +1,94 @@
+/**
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+.code-action-menu-container {
+  position: absolute;
+  z-index: 4;
+  display: flex;
+  justify-content: flex-end;
+  height: 28px;
+  min-width: 0;
+  color: var(--color-fg-soft);
+  font: 12px/1.5 var(--font-family);
+  user-select: none;
+}
+
+.code-action-menu-container .code-action-menu-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  min-width: 0;
+  padding: 2px;
+  box-sizing: border-box;
+  background: var(--color-panel);
+  border: 1px solid var(--color-line-soft);
+  border-radius: 5px;
+  box-shadow: 0 2px 6px var(--color-shade);
+  /* Very narrow nested blocks can scroll their controls, never the page. */
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.code-action-menu-container .code-language-select {
+  flex: 1 1 140px;
+  min-width: 72px;
+  max-width: 160px;
+}
+
+.notebook-editor .code-action-menu-container .code-action-button.arco-btn {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  height: 24px;
+  min-width: 24px;
+  padding: 0 4px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--color-fg-soft);
+  line-height: 1;
+}
+
+.notebook-editor .code-action-menu-container .code-action-button.arco-btn:hover:not(:disabled) {
+  background: var(--color-active);
+}
+
+.notebook-editor .code-action-menu-container .code-action-button.arco-btn:disabled {
+  color: var(--color-fg-faint);
+  opacity: 0.5;
+}
+
+.notebook-editor .code-action-menu-container .code-action-button.arco-btn:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: -2px;
+}
+
+.notebook-editor .code-action-menu-container .code-copy-button.success {
+  color: var(--color-success);
+}
+
+.notebook-editor .code-action-menu-container .code-copy-button.error {
+  color: var(--color-danger);
+}
+
+.code-action-menu-container .code-language-options {
+  width: 220px;
+  max-width: calc(100vw - 32px);
+}
+
+.code-action-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  border: 0;
+  clip-path: inset(50%);
+  overflow: hidden;
+  white-space: nowrap;
+}

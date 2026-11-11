@@ -85,4 +85,4 @@ npm run start:web          # 运行已构建的 Web 运行时
 
 ## 隔离插件 Web 运行时
 
-桌面 renderer 的 `pluginWebAssets()` 自动构建提供 `plugins/*/web-build.mjs` 的随包插件，静态文件进入 `out/renderer/plugin-web/<id>/`。Notebook 编辑器单独管理开发依赖与类型检查（`plugins/notebook/editor` 下 `npm ci --ignore-scripts`、`npm run typecheck`），第三方库在运行时由 CDN 加载，主仓库 `typecheck` 不重复检查这份独立项目。隔离调试只向 `temp/` 或 `/private/tmp` 输出，不覆盖已安装应用。
+桌面 renderer 的 `pluginWebAssets()` 自动构建提供 `plugins/*/web-build.mjs` 的随包插件，静态文件进入 `out/renderer/plugin-web/<id>/`。共享编辑器 `packages/mica-editor` 不走这条路径：两个宿主都用它的 `editorWebAssets()`（`build.mjs`）输出 `/editor/`，桌面进 `out/renderer/editor/`、配置 Web 进 `apps/config-web/web/dist/editor/`，开发期按需构建到 `temp/editor-web-dev/`。它的运行时单独管理开发依赖与类型检查（`packages/mica-editor/runtime` 下 `npm ci --ignore-scripts`、`npm run typecheck`），第三方库在运行时由 CDN 加载，主仓库 `typecheck` 不重复检查这份独立项目。隔离调试只向 `temp/` 或 `/private/tmp` 输出，不覆盖已安装应用。

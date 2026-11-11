@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { MarkdownEditor, type MarkdownEditorHandle } from '../../../mica-editor/index.js';
 import { createRole, deleteRole, readRolesDetails, writeRole } from '../api.js';
 import { confirmDialog, promptDialog } from '../components/DialogHost.js';
-import { JsonEditor } from '../components/JsonEditor.js';
 import { PageFrame } from '../components/PageFrame.js';
 import { Alert, Button, Empty, SaveStatus, Tag } from '../components/Ui.js';
 import { appIcons } from '../icons.js';
@@ -23,6 +23,11 @@ export function RolesPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copiedName, setCopiedName] = useState<string | null>(null);
+  const editorRef = useRef<MarkdownEditorHandle>(null);
+  const actionPending = useRef(false);
+  const detailsRef = useRef(details);
+  const saveError = useRef<string | null>(null);
+  detailsRef.current = details;
   const selectedRole = useMemo(
     () => details?.roles.find((role) => role.name === selectedName),
     [details, selectedName],
@@ -31,7 +36,12 @@ export function RolesPage() {
   const editable = Boolean(selectedRole) && !isDefault && !selectedRole?.builtIn;
   const autoSave = useAutoSave<{ name: string; content: string }, ConfigWebRolesDetails>({
     save: (next) => writeRole(next.name, next.content),
-    onSaved: (next) => setDetails(next),
+    onSaved: (next) => {
+      detailsRef.current = next;
+      saveError.current = null;
+      setDetails(next);
+    },
+    onError: (message) => { saveError.current = message; },
   });
   const { schedule, flush } = autoSave;
   const RefreshIcon = appIcons.refresh;
@@ -49,12 +59,36 @@ export function RolesPage() {
     setContent(next);
     setCopiedName(null);
     if (!selectedName) return;
-    if (next === (selectedRole?.content ?? '')) return;
     schedule({ name: selectedName, content: next });
+  }
+
+  async function flushEditor() {
+    const value = await editorRef.current?.flush() ?? content;
+    // A failed write is retried from the editor's current source, not from an old server response.
+    if (editable && saveError.current) schedule({ name: selectedName, content: value });
+    await flush();
+    if (saveError.current) throw new Error(saveError.current);
+    return value;
+  }
+
+  async function runAction(action: () => Promise<void>) {
+    if (actionPending.current) return;
+    actionPending.current = true;
+    setBusy(true);
+    setError(null);
+    try {
+      await action();
+    } catch (cause) {
+      setError(formatError(cause));
+    } finally {
+      actionPending.current = false;
+      setBusy(false);
+    }
   }
 
   function applyDetails(next: ConfigWebRolesDetails, preferredName = selectedName) {
     const selected = next.roles.find((role) => role.name === preferredName) ?? next.roles[0];
+    detailsRef.current = next;
     setDetails(next);
     setSelectedName(selected?.name ?? '');
     setContent(selected?.content ?? '');
@@ -62,22 +96,21 @@ export function RolesPage() {
   }
 
   async function load() {
-    await flush();
-    setLoading(true);
-    setError(null);
-    autoSave.clearError();
-    try {
-      applyDetails(await readRolesDetails());
-    } catch (loadError) {
-      setError(formatError(loadError));
-    } finally {
-      setLoading(false);
-    }
+    await runAction(async () => {
+      await flushEditor();
+      setLoading(true);
+      autoSave.clearError();
+      try {
+        applyDetails(await readRolesDetails());
+      } finally {
+        setLoading(false);
+      }
+    });
   }
 
   async function addRole() {
-    if (busy) return;
-    await flush();
+    await runAction(async () => {
+    await flushEditor();
     const name = (
       await promptDialog({
         title: '新建 Role',
@@ -88,20 +121,15 @@ export function RolesPage() {
       })
     )?.trim();
     if (!name) return;
-    setBusy(true);
-    setError(null);
-    try {
+      await flushEditor();
       const next = await createRole(name);
       applyDetails(next, name.replace(/\.md$/i, ''));
-    } catch (createError) {
-      setError(formatError(createError));
-    } finally {
-      setBusy(false);
-    }
+    });
   }
 
   async function removeRole() {
     if (!selectedRole || !editable || busy) return;
+    await runAction(async () => {
     const confirmed = await confirmDialog({
       title: `删除 Role「${selectedRole.name}」`,
       message: '此操作不可撤销。',
@@ -109,27 +137,23 @@ export function RolesPage() {
       danger: true,
     });
     if (!confirmed) return;
-    // 这个文件马上要没了，路上那份改动不必再写回去。
+    await flushEditor();
     autoSave.cancel();
-    setBusy(true);
-    setError(null);
-    try {
       applyDetails(await deleteRole(selectedRole.name));
-    } catch (deleteError) {
-      setError(formatError(deleteError));
-    } finally {
-      setBusy(false);
-    }
+    });
   }
 
   async function selectRole(name: string) {
     if (name === selectedName) return;
     // 先把当前这份写完再换：切换不打断、也不丢正在敲的内容。
-    await flush();
-    const role = details?.roles.find((item) => item.name === name);
-    setSelectedName(name);
-    setContent(role?.content ?? '');
-    setCopiedName(null);
+    await runAction(async () => {
+      await flushEditor();
+      const role = detailsRef.current?.roles.find((item) => item.name === name);
+      if (!role) return;
+      setSelectedName(name);
+      setContent(role.content);
+      setCopiedName(null);
+    });
   }
 
   async function copyContent() {
@@ -138,10 +162,11 @@ export function RolesPage() {
       return;
     }
     try {
-      await navigator.clipboard.writeText(content);
+      const value = await editorRef.current?.flush() ?? content;
+      await navigator.clipboard.writeText(value);
       setCopiedName(selectedName);
-    } catch {
-      setError(ROLE_LABELS.copyFailed);
+    } catch (cause) {
+      setError(`${ROLE_LABELS.copyFailed} ${formatError(cause)}`);
     }
   }
 
@@ -159,7 +184,7 @@ export function RolesPage() {
       actions={
         <div className="toolbar">
           <SaveStatus saving={autoSave.saving} saved={autoSave.status === 'saved'} />
-          <Button icon={<RefreshIcon size={15} />} title="重新加载" onClick={() => void load()} loading={loading} />
+          <Button icon={<RefreshIcon size={15} />} title="重新加载" onClick={() => void load()} loading={loading} disabled={busy} />
           <Button icon={<AddIcon size={15} />} disabled={busy} onClick={() => void addRole()}>
             新建
           </Button>
@@ -191,6 +216,7 @@ export function RolesPage() {
                 <button
                   key={role.name}
                   type="button"
+                  disabled={busy}
                   className={`role-list-item ${selectedName === role.name ? 'role-list-item-active' : ''}`}
                   onClick={() => void selectRole(role.name)}
                 >
@@ -219,7 +245,14 @@ export function RolesPage() {
                 </Button>
               </div>
               <div className="editor-host role-editor-host">
-                <JsonEditor value={content} language="markdown" readOnly={!editable} onChange={editContent} />
+                <MarkdownEditor
+                  ref={editorRef}
+                  documentId={`role:${details.root}/${selectedName}`}
+                  ariaLabel={isDefault ? ROLE_LABELS.defaultPrompt : `Role ${selectedName}`}
+                  value={content}
+                  readOnly={!editable}
+                  onChange={editContent}
+                />
               </div>
             </div>
           </div>

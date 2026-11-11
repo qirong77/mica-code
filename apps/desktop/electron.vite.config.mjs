@@ -5,6 +5,7 @@ import react from '@vitejs/plugin-react'
 import { resolve } from 'path'
 import { fileIconAssets } from './scripts/file-icon-assets.mjs'
 import { pluginWebAssets } from './scripts/plugin-web-assets.mjs'
+import { editorWebAssets } from './scripts/editor-web-assets.mjs'
 
 /**
  * 应用的运行时是 Web 页面（由 vite.server.config.mjs 构建的 out/server 托管），
@@ -81,7 +82,7 @@ export default defineConfig({
     }
   },
   renderer: {
-    plugins: [tablerIconDeepImports(), fileIconAssets(), pluginWebAssets(), react(), tailwindcss()],
+    plugins: [tablerIconDeepImports(), fileIconAssets(), pluginWebAssets(), editorWebAssets(), react(), tailwindcss()],
     resolve: {
       // packages/mica-config-ui 的源码从仓库根 node_modules 解析 react，页面脚本则从
       // apps/desktop/node_modules 解析，两份物理路径不同的 react 会被当成两个实例打进包：
@@ -111,8 +112,8 @@ export default defineConfig({
       }
     },
     build: {
-      // 两个页面入口：主应用与终端控制窗口（由 Electron 主进程加载，运行时按
-      // /terminal-control 提供）。编辑器是主应用里的一个视图，不再有独立页面。
+      // 两个宿主页面入口：主应用与终端控制窗口（运行时按 /terminal-control 提供）。
+      // 文件编辑器仍是主应用视图；共享 Lexical 隔离页面由 editorWebAssets 单独构建。
       rollupOptions: {
         input: {
           index: resolve('src/renderer/index.html'),

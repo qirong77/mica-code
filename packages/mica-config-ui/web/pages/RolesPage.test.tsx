@@ -12,9 +12,10 @@ vi.mock('react', async (original) => ({
   useState: () => [state.values.shift(), state.setState],
   useMemo: (factory: () => unknown) => factory(),
   useEffect: () => undefined,
+  useRef: (value: unknown) => ({ current: value }),
 }));
 vi.mock('../useAutoSave.js', () => ({
-  useAutoSave: () => ({ schedule: state.schedule, flush: vi.fn() }),
+  useAutoSave: () => ({ schedule: state.schedule, flush: vi.fn(), clearError: vi.fn() }),
 }));
 vi.mock('../components/DialogHost.js', () => ({ confirmDialog: vi.fn(), promptDialog: vi.fn() }));
 vi.mock('../components/PageFrame.js', () => ({
@@ -47,8 +48,8 @@ vi.mock('../components/Ui.js', () => ({
   SaveStatus: () => null,
   Tag: ({ children }: { children: ReactNode }) => <span>{children}</span>,
 }));
-vi.mock('../components/JsonEditor.js', () => ({
-  JsonEditor: ({ value, readOnly }: { value: string; readOnly: boolean }) => (
+vi.mock('../../../mica-editor/index.js', () => ({
+  MarkdownEditor: ({ value, readOnly }: { value: string; readOnly: boolean }) => (
     <textarea value={value} readOnly={readOnly} onChange={() => undefined} />
   ),
 }));
@@ -83,7 +84,7 @@ afterEach(() => vi.unstubAllGlobals());
 function editorIn(root: ReactNode) {
   return elements(
     root,
-    (node) => typeof node.props === 'object' && node.props !== null && 'language' in node.props,
+    (node) => typeof node.props === 'object' && node.props !== null && 'documentId' in node.props,
   )[0]!;
 }
 

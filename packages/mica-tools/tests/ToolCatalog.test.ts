@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { getToolCatalog } from '../registry.js';
+import { getToolCatalog, registerRuntimeTool, unregisterRuntimeTool } from '../registry.js';
 
 describe('tool catalog', () => {
   it('groups the pty family under one key', () => {
@@ -12,7 +12,7 @@ describe('tool catalog', () => {
 
   it('leaves tools without a shared prefix ungrouped', () => {
     const byName = new Map(getToolCatalog().map((tool) => [tool.name, tool]));
-    for (const name of ['run_shell', 'apply_patch', 'read_file', 'web_fetch', 'agent', 'skill']) {
+    for (const name of ['run_shell', 'apply_patch', 'read_file', 'web_fetch', 'skill']) {
       expect(byName.get(name)?.group, name).toBeNull();
     }
   });
@@ -54,4 +54,25 @@ describe('tool catalog', () => {
     // 目录里不再区分「运行期」，否则面板要额外解释一类对用户没有意义的来源。
     expect(new Set(getToolCatalog().map((tool) => tool.source))).toEqual(new Set(['builtin']));
   });
+});
+
+it('groups registered plugin tools by owner regardless of their names', () => {
+  const group = { key: 'plugin:example', label: 'Example' };
+  const tools = ['sidecar_spawn', 'unrelated_action'].map((name) =>
+    registerRuntimeTool(
+      {
+        name,
+        description: '',
+        input_schema: { type: 'object', properties: {} },
+        execute: async () => '',
+      },
+      { group },
+    ),
+  );
+  try {
+    const catalog = getToolCatalog();
+    for (const tool of tools) expect(catalog.find((entry) => entry.name === tool.name)?.group).toEqual(group);
+  } finally {
+    for (const tool of tools) unregisterRuntimeTool(tool);
+  }
 });

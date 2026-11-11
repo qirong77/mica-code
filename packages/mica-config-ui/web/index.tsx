@@ -38,7 +38,7 @@ export type { ConfigWebThemeHost, ThemeOption, ThemePreference } from './theme.j
  */
 export { CapabilityList, CapabilityParameters } from './components/CapabilityList.js';
 export type { CapabilityGroupDef, CapabilityItem, CapabilityParameter } from './components/CapabilityList.js';
-export { applyGroupEnabled, buildCapabilitySections } from './capabilityGroups.js';
+export { applyGroupEnabled, buildCapabilitySections, capabilityToggleNames } from './capabilityGroups.js';
 export type { CapabilityGroupRef, CapabilitySection } from './capabilityGroups.js';
 export { Switch, Switch as ConfigSwitch } from './components/Ui.js';
 export { SettingRow, SettingsGroup } from './components/Ui.js';

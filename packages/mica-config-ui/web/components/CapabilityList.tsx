@@ -32,7 +32,7 @@ export type CapabilityItem = {
  * 数据与落点由宿主决定，这里只管形态。
  *
  * 工具按目录给的 `group` 分块：组头是同一个滑块加组名与 `启用/总数`，点它就是整组开关
- * （`onToggleGroup`）；组内每一行仍然可以单独开关。技能与 MCP 服务器没有分组，照旧平铺。
+ * （`onToggleGroup`）；组内只展示工具信息，统一由组开关控制。技能与 MCP 服务器没有分组，照旧平铺。
  *
  * 只有滑块改启用状态；整行点击留给「打开详情」，避免点名字误关工具。
  */
@@ -69,23 +69,23 @@ export function CapabilityList({
 }) {
   const sections = buildCapabilitySections(items, isEnabled);
 
-  const renderRow = (item: CapabilityItem) => (
+  const renderRow = (item: CapabilityItem, grouped = false) => (
     <li
       key={item.name}
-      className={`capability-row${disabled ? ' is-disabled' : ''}${
-        onOpenDetail ? ' is-clickable' : ''
-      }`}
+      className={`capability-row${disabled ? ' is-disabled' : ''}${onOpenDetail ? ' is-clickable' : ''}`}
       onClick={onOpenDetail ? () => onOpenDetail(item) : undefined}
     >
       {/* 开关区拦住冒泡：点滑块只改启用状态，不打开详情 */}
       <span onClick={(event) => event.stopPropagation()}>
-        <Switch
-          id={`capability-${group}-${item.name}`}
-          checked={isEnabled(item.name)}
-          label={item.name}
-          disabled={disabled}
-          onChange={(checked) => onToggle(item.name, checked)}
-        />
+        {!grouped ? (
+          <Switch
+            id={`capability-${group}-${item.name}`}
+            checked={isEnabled(item.name)}
+            label={item.name}
+            disabled={disabled}
+            onChange={(checked) => onToggle(item.name, checked)}
+          />
+        ) : null}
       </span>
       <span className="capability-name" title={item.name}>
         {item.name}
@@ -146,7 +146,7 @@ export function CapabilityList({
                     onChange={(checked) =>
                       onToggleGroup?.(
                         section.items.map((item) => item.name),
-                        checked
+                        checked,
                       )
                     }
                   />
@@ -157,9 +157,7 @@ export function CapabilityList({
                   {section.state === 'partial' ? ' · 部分启用' : ''}
                 </span>
               </div>
-              <ul className="capability-group-items">
-                {section.items.map((item) => renderRow(item))}
-              </ul>
+              <ul className="capability-group-items">{section.items.map((item) => renderRow(item, true))}</ul>
             </li>
           );
         })}
