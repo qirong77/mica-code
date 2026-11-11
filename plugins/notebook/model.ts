@@ -23,7 +23,6 @@ export interface NotebookDocument {
   version: 1;
   /** null means a new, uninitialized editor. A non-null value is serialized editor JSON. */
   editorState: string | null;
-  comments: unknown[];
 }
 
 export class NotebookValidationError extends Error {
@@ -45,7 +44,7 @@ export function emptyIndex(): NotebookIndex {
 }
 
 export function emptyDocument(): NotebookDocument {
-  return { version: 1, editorState: null, comments: [] };
+  return { version: 1, editorState: null };
 }
 
 /** Safe as a documents key (no paths, extensions, dots or traversal segments). */
@@ -168,34 +167,11 @@ export function validateNotebookIndex(value: unknown): NotebookIndex {
   return result;
 }
 
-/** Reject values JSON.stringify would silently drop/change, not just JSON syntax errors. */
-function assertJson(value: unknown, ancestors = new Set<object>()): void {
-  if (value === null || typeof value === 'string' || typeof value === 'boolean') return;
-  if (typeof value === 'number' && Number.isFinite(value)) return;
-  if (!value || typeof value !== 'object') {
-    throw new NotebookValidationError('Notebook comments must contain JSON values only');
-  }
-  if (ancestors.has(value)) throw new NotebookValidationError('Notebook comments contain a cycle');
-  ancestors.add(value);
-  if (Array.isArray(value)) {
-    for (let i = 0; i < value.length; i++) assertJson(value[i], ancestors);
-  } else {
-    const object = record(value, 'Notebook comment');
-    if (Object.getOwnPropertySymbols(object).length) {
-      throw new NotebookValidationError('Notebook comments contain unsupported symbol keys');
-    }
-    for (const child of Object.values(object)) assertJson(child, ancestors);
-  }
-  ancestors.delete(value);
-}
-
 /** null is not a stored document. The controller initializes only a genuinely missing file. */
 export function parseNotebookDocument(value: unknown): NotebookDocument {
   const input = record(value, 'Notebook document');
-  knownKeys(input, ['version', 'editorState', 'comments'], 'Notebook document');
-  if (input.version !== 1 || !Array.isArray(input.comments)) {
-    throw new NotebookValidationError('Invalid notebook document version or comments');
-  }
+  knownKeys(input, ['version', 'editorState'], 'Notebook document');
+  if (input.version !== 1) throw new NotebookValidationError('Invalid notebook document version');
   if (input.editorState !== null) {
     if (typeof input.editorState !== 'string') {
       throw new NotebookValidationError('Notebook editorState must be serialized JSON or null');
@@ -208,11 +184,9 @@ export function parseNotebookDocument(value: unknown): NotebookDocument {
     }
     record(state, 'Notebook editorState');
   }
-  assertJson(input.comments);
   const result: NotebookDocument = {
     version: 1,
     editorState: input.editorState as string | null,
-    comments: input.comments,
   };
   // A detached snapshot prevents later editor changes from changing an in-flight save.
   return JSON.parse(checkSize(result, NOTEBOOK_DOCUMENT_MAX_BYTES, 'Notebook document')) as NotebookDocument;

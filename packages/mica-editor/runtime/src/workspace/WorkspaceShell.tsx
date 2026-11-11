@@ -7,7 +7,6 @@ import './notebook-document.css';
 
 import {useNotebookSession} from './NotebookBridge';
 import NotebookBlockEditing from './NotebookBlockEditing';
-import NotebookCommentsPanel from './NotebookCommentsPanel';
 import NotebookDocumentStyle from './NotebookDocumentStyle';
 import NotebookPresentation from './NotebookPresentation';
 import {countCharacters} from './storage';
@@ -32,7 +31,6 @@ export default function WorkspaceShell({children}: {children: ReactNode}) {
       <section className="editor-canvas" aria-label="笔记富文本编辑器">
         {children}
         <NotebookBlockEditing />
-        <NotebookCommentsPanel />
         <NotebookDocumentStyle />
         <NotebookPresentation />
         <footer className="document-statusbar">

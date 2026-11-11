@@ -357,21 +357,6 @@
   white-space: nowrap;
   text-overflow: ellipsis;
 }
-.notebook-save {
-  font-size: 11px;
-  color: var(--color-fg-muted);
-  display: flex;
-  gap: 4px;
-  align-items: center;
-  white-space: nowrap;
-  margin-inline: 6px;
-}
-.notebook-save--saved svg {
-  color: var(--color-success);
-}
-.notebook-save--error {
-  color: var(--color-danger);
-}
 .notebook-document-body {
   display: flex;
   flex: 1;
@@ -752,10 +737,6 @@
   .notebook-breadcrumb {
     font-size: 11px;
     padding-left: 0;
-  }
-  .notebook-save {
-    font-size: 10px;
-    margin-inline: 3px;
   }
   .notebook-document-body {
     gap: 0;

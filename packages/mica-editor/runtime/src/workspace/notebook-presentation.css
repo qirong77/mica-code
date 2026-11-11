@@ -26,7 +26,6 @@
 .notebook-workbench[data-presenting='true'] .PlaygroundEditorTheme__h3 { font-size: 28px; }
 .notebook-workbench[data-presenting='true'] :is(.PlaygroundEditorTheme__h4, .PlaygroundEditorTheme__h5, .PlaygroundEditorTheme__h6) { font-size: 24px; }
 .notebook-workbench[data-presenting='true'] .ContentEditable__root > [data-notebook-slide-hidden='false'] { scroll-margin: 0; }
-.notebook-workbench[data-presenting='true'] :is(.PlaygroundEditorTheme__mark, .PlaygroundEditorTheme__markOverlap) { background: transparent; border-color: transparent; }
 body[data-notebook-presentation='true'] :is(.floating-text-format-popup, .draggable-block-menu, .draggable-block-target-line, .table-control-popup, .table-context-toolbar, .code-action-menu-container, .image-tools, .image-resizer, .mermaid-preview-toolbar) { display: none; }
 .notebook-presentation-controls {
   box-sizing: border-box;

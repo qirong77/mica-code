@@ -174,40 +174,31 @@ describe('Notebook tree operations', () => {
 });
 
 describe('Notebook document validation', () => {
-  it('supports null initial editorState, serialized editor JSON and detached arbitrary JSON comments', () => {
-    expect(parseNotebookDocument(emptyDocument())).toEqual({ version: 1, editorState: null, comments: [] });
-    const document = { version: 1, editorState: '{"root":{"children":[]}}', comments: [{ id: 'c', text: 'hello', nested: [1, true, null] }] };
-    const parsed = parseNotebookDocument(document);
-    expect(parsed).toEqual(document);
-    expect(parsed.comments).not.toBe(document.comments);
+  it('supports null initial editorState and serialized editor JSON', () => {
+    expect(parseNotebookDocument(emptyDocument())).toEqual({ version: 1, editorState: null });
+    const document = { version: 1, editorState: '{"root":{"children":[]}}' };
+    expect(parseNotebookDocument(document)).toEqual(document);
   });
 
   it.each([
     null,
     undefined,
     {},
-    { version: 2, editorState: null, comments: [] },
-    { version: 1, editorState: '', comments: [] },
-    { version: 1, editorState: 'broken', comments: [] },
-    { version: 1, editorState: 'null', comments: [] },
-    { version: 1, editorState: '[]', comments: [] },
-    { version: 1, editorState: {}, comments: [] },
-    { version: 1, editorState: null, comments: {} },
-    { version: 1, editorState: null, comments: [], extra: 'keep or reject, never drop' },
+    { version: 2, editorState: null },
+    { version: 1, editorState: '' },
+    { version: 1, editorState: 'broken' },
+    { version: 1, editorState: 'null' },
+    { version: 1, editorState: '[]' },
+    { version: 1, editorState: {} },
+    // 评论已移除：旧文档里的 comments 字段必须由数据迁移清掉，运行时不当成合法形态。
+    { version: 1, editorState: null, comments: [] },
+    { version: 1, editorState: null, extra: 'keep or reject, never drop' },
   ])('rejects corrupt body data instead of initializing an empty editor: %j', (input) => {
     expect(() => parseNotebookDocument(input)).toThrow(NotebookValidationError);
   });
 
-  it('rejects comment values JSON would silently change/drop and cyclic data', () => {
-    const cyclic: unknown[] = [];
-    cyclic.push(cyclic);
-    const inputs = [cyclic, [undefined], [NaN], [new Date()], [() => 'x'], [{ dropped: undefined }]];
-    for (const comments of inputs) {
-      expect(() => parseNotebookDocument({ version: 1, editorState: null, comments })).toThrow(NotebookValidationError);
-    }
-  });
-
   it('enforces the document UTF-8 size cap', () => {
-    expect(() => parseNotebookDocument({ version: 1, editorState: null, comments: ['x'.repeat(NOTEBOOK_DOCUMENT_MAX_BYTES)] })).toThrow('exceeds');
+    const editorState = JSON.stringify({ root: { text: 'x'.repeat(NOTEBOOK_DOCUMENT_MAX_BYTES) } });
+    expect(() => parseNotebookDocument({ version: 1, editorState })).toThrow('exceeds');
   });
 });

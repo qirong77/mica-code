@@ -13,7 +13,7 @@ function deferred<T = void>() {
   return { promise, resolve };
 }
 
-const document = (text: string): NotebookDocument => ({ version: 1, editorState: null, comments: [{ text }] });
+const document = (text: string): NotebookDocument => ({ version: 1, editorState: JSON.stringify({ root: { text } }) });
 const draft = (id: string, text = id) =>
   createNotebookDraft(id, { value: document(text), version: `${id}-version`, missing: false });
 

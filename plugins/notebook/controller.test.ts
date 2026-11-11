@@ -33,7 +33,7 @@ function indexWithNote(): NotebookIndex {
 }
 
 function body(text: string): NotebookDocument {
-  return { version: 1, editorState: JSON.stringify({ root: { text } }), comments: [] };
+  return { version: 1, editorState: JSON.stringify({ root: { text } }) };
 }
 
 /** In-memory host with opaque versions; no filesystem or global config access. */
@@ -234,8 +234,8 @@ describe('Notebook document controller', () => {
   it.each([
     { ok: false, value: null, version: null, error: 'read failed' },
     { value: null, version: 'existing-json-null-file' },
-    { value: { version: 2, editorState: null, comments: [] }, version: 'existing' },
-    { value: { version: 1, editorState: 'broken JSON', comments: [] }, version: 'existing' },
+    { value: { version: 2, editorState: null }, version: 'existing' },
+    { value: { version: 1, editorState: 'broken JSON' }, version: 'existing' },
     { value: emptyDocument(), version: null },
   ])('does not open a failed/corrupt document as blank: %j', async (readResult) => {
     const { host } = memoryHost();
@@ -357,13 +357,13 @@ describe('Notebook document controller', () => {
     expect(host.documents.read).not.toHaveBeenCalled();
   });
 
-  it('captures the submitted document immediately, even when the editor mutates its comments before write', async () => {
+  it('captures the submitted document immediately, even when the editor replaces it before write', async () => {
     const storage = memoryHost();
     const controller = createNotebookController({ host: storage.host });
-    const draft: NotebookDocument = { ...body('one'), comments: [{ text: 'submitted' }] };
+    const draft: NotebookDocument = body('submitted');
     const saved = controller.saveDocument('n', draft, { expectedVersion: null });
-    (draft.comments[0] as { text: string }).text = 'new unsaved edit';
+    draft.editorState = JSON.stringify({ root: { text: 'new unsaved edit' } });
     await saved;
-    expect((storage.document().value as NotebookDocument).comments).toEqual([{ text: 'submitted' }]);
+    expect(storage.document().value).toEqual(body('submitted'));
   });
 });

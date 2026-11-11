@@ -1,7 +1,6 @@
 import { cloneElement, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   BookOpen,
-  Check,
   ChevronDown,
   ChevronRight,
   Download,
@@ -15,7 +14,6 @@ import {
   FolderOpen,
   FolderPlus,
   Menu,
-  MessageSquare,
   MoreHorizontal,
   PanelLeftClose,
   Pencil,
@@ -173,7 +171,6 @@ export default function NotebookPage({ api }) {
   const [outline, setOutline] = useState(emptyOutline);
   const [dialog, setDialog] = useState(null);
   const [busy, setBusy] = useState(false);
-  const [saveState, setSaveState] = useState('saved');
   const [frameState, setFrameState] = useState('loading');
   const [frameKey, setFrameKey] = useState(0);
   const iframe = useRef(null);
@@ -222,16 +219,10 @@ export default function NotebookPage({ api }) {
         saveTimer.current = null;
       }
       try {
-        await writer.save(target, () => {
-          if (mounted.current && current.current === target) setSaveState('saving');
-        });
-        if (mounted.current && current.current === target) setSaveState(uncollected.current ? 'error' : 'saved');
+        await writer.save(target);
         return true;
       } catch (cause) {
-        if (mounted.current && current.current === target) {
-          setSaveState('error');
-          setError(message(cause));
-        }
+        if (mounted.current && current.current === target) setError(message(cause));
         return false;
       }
     },
@@ -245,7 +236,6 @@ export default function NotebookPage({ api }) {
       uncollected.current = false;
       updateNotebookDraft(draft, document);
       if (!draft.dirty) return;
-      setSaveState('pending');
       if (saveTimer.current) clearTimeout(saveTimer.current);
       saveTimer.current = setTimeout(() => {
         void save(draft);
@@ -318,7 +308,6 @@ export default function NotebookPage({ api }) {
             current.current = draft;
             setActiveId(id);
             setSelectedId(id);
-            setSaveState(draft.dirty ? 'pending' : 'saved');
             setError('');
             setOutline(emptyOutline());
             loadedNote.current = null;
@@ -394,7 +383,6 @@ export default function NotebookPage({ api }) {
         setError(text);
         if (current.current && loadedNote.current === current.current.id) {
           uncollected.current = true;
-          setSaveState('error');
         }
         if (!ready.current) setFrameState('error');
       },
@@ -493,7 +481,7 @@ export default function NotebookPage({ api }) {
       observer.disconnect();
       syncLayout.current = () => {};
     };
-  }, [activeId, frameKey, focused, layout.mobile, railOpen, saveState]);
+  }, [activeId, frameKey, focused, layout.mobile, railOpen]);
 
   useEffect(() => {
     const escape = (event) => {
@@ -586,7 +574,6 @@ export default function NotebookPage({ api }) {
           drafts.current.set(draft.id, latest);
           current.current = latest;
           await loadEditor(latest);
-          setSaveState('saved');
           setError('');
           setDialog(null);
         },
@@ -1010,19 +997,6 @@ export default function NotebookPage({ api }) {
                 )}
                 {active && (
                   <div className="notebook-bar-actions" ref={barActions}>
-                    <span className={`notebook-save notebook-save--${saveState}`} role="status">
-                      {saveState === 'saved' ? <Check size={12} /> : null}
-                      {saveState === 'saved' ? '已保存' : saveState === 'error' ? '未保存' : '保存中'}
-                    </span>
-                    <Button
-                      variant="ghost"
-                      icon={<MessageSquare size={16} strokeWidth={1.6} />}
-                      title="评论"
-                      aria-label="评论"
-                      disabled={busy || frameState !== 'ready'}
-                      onMouseDown={(event) => event.preventDefault()}
-                      onClick={() => bridge.current?.action(active.id, 'comments')}
-                    />
                     <Button
                       variant="ghost"
                       icon={<Presentation size={16} strokeWidth={1.6} />}

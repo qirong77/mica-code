@@ -46,7 +46,7 @@ function $clearBlockStyleAtStart(editor: LexicalEditor, commandEditor: LexicalEd
     .setIndent(block.getIndent())
     .setTextFormat(selection.format)
     .setTextStyle(selection.style);
-  // Keep the inline nodes themselves (links, comments and explicit text
+  // Keep the inline nodes themselves (links and explicit text
   // formatting), and let the paragraph inherit the document's body styles.
   // replace(..., true) also maps element-point selections to the new block.
   block.replace(paragraph, true);

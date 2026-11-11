@@ -97,8 +97,7 @@ body :is(input, textarea)::placeholder { color: var(--color-fg-faint); }
 .notebook-editor .PlaygroundEditorTheme__layoutItem { border-color: var(--color-line); }
 .notebook-editor .PlaygroundEditorTheme__autocomplete { color: var(--color-fg-faint); }
 .notebook-editor .PlaygroundEditorTheme__hashtag { background: var(--color-primary-light-1); border-color: var(--color-primary-light-3); }
-.notebook-editor :is(.PlaygroundEditorTheme__mark, .PlaygroundEditorTheme__textHighlight) { background: var(--color-warning-light-1); border-color: var(--color-warning-light-3); }
-.notebook-editor :is(.PlaygroundEditorTheme__markOverlap, .PlaygroundEditorTheme__mark.selected, .PlaygroundEditorTheme__markOverlap.selected) { background: var(--color-warning-light-2); border-color: var(--color-warn); }
+.notebook-editor .PlaygroundEditorTheme__textHighlight { background: var(--color-warning-light-1); border-color: var(--color-warning-light-3); }
 
 /* Source mode and code blocks share the same palette, including the gutter.
    Class rules leave explicit inline text/background colors from rich text alone. */

@@ -7,7 +7,7 @@ import type { NotebookDraft } from './writer';
 function draft(id = 'a'): NotebookDraft {
   return {
     id,
-    document: { version: 1, editorState: null, comments: [] },
+    document: { version: 1, editorState: null },
     version: null,
     saved: '',
     dirty: true,
@@ -35,7 +35,7 @@ describe('Notebook autosave queue', () => {
     const saves = [writer.save(value), writer.save(value), writer.save(value)];
     await Promise.resolve();
     expect(saveDocument).toHaveBeenCalledTimes(1);
-    value.document = { ...value.document, comments: [{ text: 'last input' }] };
+    value.document = { ...value.document, editorState: '{"root":{"text":"last input"}}' };
     first.resolve('v1');
     await vi.waitFor(() => expect(saveDocument).toHaveBeenCalledTimes(2));
     expect(saveDocument.mock.calls[1]).toEqual(['a', value.document, { expectedVersion: 'v1' }]);
@@ -106,7 +106,7 @@ describe('Notebook autosave queue', () => {
 
   it('keeps an undo to the old baseline unsaved after a committed write loses its response, including later flushes/retries', async () => {
     const a = draft().document;
-    const b = { ...a, comments: [{ text: 'B' }] };
+    const b = { ...a, editorState: '{"root":{"text":"B"}}' };
     let disk = { value: a, version: 'A-version' };
     const response = deferred<NotebookWriteResult>();
     const written = deferred<void>();
@@ -167,7 +167,7 @@ describe('Notebook autosave queue', () => {
     const writer = createNotebookWriter({ saveDocument });
     const a = draft().document;
     const value = createNotebookDraft('a', { value: a, version: 'A-version', missing: false });
-    updateNotebookDraft(value, { ...a, comments: [{ text: 'B' }] });
+    updateNotebookDraft(value, { ...a, editorState: '{"root":{"text":"B"}}' });
     const saving = writer.save(value);
     const failed = expect(saving).rejects.toThrow('offline');
     await Promise.resolve();
@@ -193,7 +193,7 @@ describe('Notebook autosave queue', () => {
     const writer = createNotebookWriter({ saveDocument });
     const a = draft().document;
     const value = createNotebookDraft('a', { value: a, version: 'A-version', missing: false });
-    updateNotebookDraft(value, { ...a, comments: [{ text: 'B' }] });
+    updateNotebookDraft(value, { ...a, editorState: '{"root":{"text":"B"}}' });
     const saving = writer.save(value);
     await Promise.resolve();
     updateNotebookDraft(value, a);

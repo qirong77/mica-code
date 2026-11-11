@@ -9,8 +9,6 @@ import {isNotebookAction, NOTEBOOK_ACTION_COMMAND, type NotebookAction} from './
 export interface NotebookDocument {
   version: 1;
   editorState: string | null;
-  // Comment threads and unrecognized historical rows travel with the document.
-  comments: unknown[];
 }
 
 const CHANNEL = 'mica-notebook';
@@ -32,8 +30,6 @@ export class NotebookSession {
   private presenting = false;
   private frozenBeforeEditable: boolean | null = null;
   private navigateOutline: ((navigation: NotebookNavigation) => void) | null = null;
-  private comments: unknown[];
-  private commentListeners = new Set<() => void>();
 
   constructor(
     readonly noteId: string,
@@ -41,29 +37,6 @@ export class NotebookSession {
     readonly requestId?: string,
   ) {
     this.mountKey = `${noteId}:${++mountSequence}`;
-    this.comments = structuredClone(document.comments);
-  }
-
-  getComments(): readonly unknown[] {
-    return structuredClone(this.comments);
-  }
-
-  // React's external-store contract needs the same reference until a write.
-  getCommentSnapshot(): readonly unknown[] {
-    return this.comments;
-  }
-
-  setComments(next: unknown[]): boolean {
-    if (!this.active || this.frozen || !this.editor?.isEditable()) return false;
-    this.comments = structuredClone(next);
-    for (const listener of this.commentListeners) listener();
-    this.dirty();
-    return true;
-  }
-
-  subscribeComments(listener: () => void): () => void {
-    this.commentListeners.add(listener);
-    return () => { this.commentListeners.delete(listener); };
   }
 
   performAction(action: NotebookAction): void {
@@ -111,7 +84,6 @@ export class NotebookSession {
     return {
       version: 1,
       editorState: JSON.stringify(this.editor.getEditorState().toJSON()),
-      comments: structuredClone(this.comments),
     };
   }
 
@@ -219,7 +191,7 @@ export function NotebookFrame({children}: {children: ReactNode}) {
         try {
           const doc = message.document;
           if (!requestId || message.loadId !== requestId || typeof message.noteId !== 'string' || !doc || doc.version !== 1 ||
-              (doc.editorState !== null && typeof doc.editorState !== 'string') || !Array.isArray(doc.comments)) throw new Error('笔记文档格式无效');
+              (doc.editorState !== null && typeof doc.editorState !== 'string')) throw new Error('笔记文档格式无效');
           if (doc.editorState !== null) {
             const parsed = JSON.parse(doc.editorState);
             if (parsed?.root?.type !== 'root' || !Array.isArray(parsed.root.children)) throw new Error('笔记正文格式无效');

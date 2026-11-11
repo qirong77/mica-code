@@ -62,6 +62,7 @@ mica 选后者，这个插件就是「洗」的地方。
 | `harness-review-assessments`    | 将 `plugin-data/harness-review/decisions/<key>.json` 的合法旧人工决策迁入 `<key>/legacy-<digest>.json`，补 `version: 1` 与 `baseline: null`（观测范围未知），保留 id、status、note、updatedAt；已有同内容历史不重复。原文件改名归档为 `*.legacy-v1.json`，已有归档保留并使用编号后缀；未知、损坏、键不匹配或非法路径不动。运行期不再支持旧单文件形态，需运行 `/evolution run`。 |
 | `plugin-startup-health` | 将旧 `plugin-health/<id>.json` 中宿主写下的「启动失败：…」错误原文归档到 `plugin-data/evolution/legacy-plugin-health/`，不再当作当前运行健康。只识别明确的旧启动错误，真实运行错误、成功记录与损坏文件不动；装配结论由当前宿主的 `plugin-status.json` 负责。 |
 | `subagent-task-files` | 将 `subagent-tasks/<sessionId>.json` 的旧任务数组拆为 `<sessionId>/<taskId>.json`，已有独立任务更新优先；完整原文件改名归档为 `*.legacy-v1.json`，归档重名时加编号。损坏、未知数据与符号链接不改。运行时不再读取旧数组，需经此迁移。 |
+| `notebook-comments` | 评论功能移除后，笔记文档里的 `comments` 讨论记录先归档到 `plugin-data/evolution/legacy-notebook-comments/<noteId>.json`（重名加编号），再删掉该字段；正文里由评论产生的 MarkNode 锚点拆回普通子节点，文字与格式不变。文档只剩 `version` 与 `editorState`，损坏文档与非 `version: 1` 文档不动；重复执行改动数为 0。 |
 
 新增一条迁移 = 在 `migrations.ts` 里加一个 `Migration`（`id`、`description`、纯函数 `apply`），
 然后写进 `MIGRATIONS`。账本按 id 记进度，所以追加迁移会让所有会话重新评估一次；已经洗过的

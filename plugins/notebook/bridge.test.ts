@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createEditorBridge, NOTEBOOK_CHANNEL } from './bridge';
 
-const document = { version: 1 as const, editorState: null, comments: [] };
+const document = { version: 1 as const, editorState: null };
 function fixture() {
   const target = { postMessage: vi.fn() } as unknown as Window;
   const onReady = vi.fn(),
@@ -139,11 +139,11 @@ describe('Notebook iframe boundary', () => {
 
   it('routes document actions only to a loaded note and never to a replacement in flight', async () => {
     const f = fixture();
-    f.bridge.action('a', 'comments');
+    f.bridge.action('a', 'style');
     expect(f.target.postMessage).not.toHaveBeenCalled();
     await f.load('a');
     const loadId = f.last('load').loadId;
-    for (const action of ['comments', 'style', 'present'] as const) {
+    for (const action of ['style', 'present'] as const) {
       f.bridge.action('a', action);
       expect(f.last('action')).toEqual({channel: NOTEBOOK_CHANNEL, token: 'nonce', type: 'action', noteId: 'a', loadId, action});
     }
@@ -155,7 +155,7 @@ describe('Notebook iframe boundary', () => {
     f.receive({type: 'loaded', noteId: 'b', requestId: 'load-2', loadId: 'load-2'});
     await replacement;
     f.bridge.dispose();
-    f.bridge.action('b', 'comments');
+    f.bridge.action('b', 'style');
     expect(f.target.postMessage).not.toHaveBeenCalled();
   });
 

@@ -636,7 +636,7 @@
 .PlaygroundEditorTheme__tokenFunction {
   color: #dd4a68;
 }
-/* Persisted anchors retain their text and IDs, without comment decoration. */
+/* Historical MarkNodes keep their text and IDs, but render unmarked. */
 .PlaygroundEditorTheme__mark,
 .PlaygroundEditorTheme__markOverlap {
   background: transparent;

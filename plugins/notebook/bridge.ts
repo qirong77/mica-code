@@ -143,8 +143,7 @@ export function createEditorBridge(options: {
           !error ||
           !String(error).includes('exceeds') ||
           data.document?.version !== 1 ||
-          typeof data.document.editorState !== 'string' ||
-          !Array.isArray(data.document.comments)
+          typeof data.document.editorState !== 'string'
         )
           throw error;
         document = structuredClone(data.document) as NotebookDocument;
@@ -186,7 +185,7 @@ export function createEditorBridge(options: {
     navigate(noteId: string, target: { heading?: string; block?: 'top' | keyof NotebookOutline['blocks'] }) {
       if (active?.loaded && active.noteId === noteId) send('navigate', { noteId, loadId: active.loadId, ...target });
     },
-    action(noteId: string, action: 'comments' | 'style' | 'present') {
+    action(noteId: string, action: 'style' | 'present') {
       if (active?.loaded && active.noteId === noteId) send('action', { noteId, loadId: active.loadId, action });
     },
     flush(): Promise<{ noteId: string; document: NotebookDocument }> {
