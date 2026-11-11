@@ -1,4 +1,6 @@
 import { ArcoAction } from '@mica-config-ui/web'
+// Markdown 文件默认用共享 Lexical 编辑器打开（内部是沙箱 iframe，只收发 Markdown 字符串）。
+import { MarkdownEditor } from '@packages/mica-editor/index.js'
 import { confirmAction } from './desktop-dialog'
 import { lazyView } from './lazy-view'
 import {
@@ -47,9 +49,12 @@ import { useIsMobile, usePaneWidth } from './hooks'
 import { editorOptions, fileName, languageFor, loadMonaco } from './monaco'
 import {
   editorOptionsForTab,
+  editorSurface,
   isDocumentKey,
+  isMarkdownFile,
   planDocumentOpen,
-  uniqueDocumentTitle
+  uniqueDocumentTitle,
+  writeModelText
 } from './files-document'
 import {
   collapseNodes,
@@ -285,6 +290,14 @@ export const FilesView = forwardRef(function FilesView(
   const viewRef = useRef(null)
   const editorHostRef = useRef(null)
   const editorRef = useRef(null)
+  /** 共享 Markdown 编辑器：所有 .md 页签共用这一个实例，换页签只换 documentId。 */
+  const markdownRef = useRef(null)
+  const markdownHostRef = useRef(null)
+  /**
+   * 交给 Markdown 编辑器的正文，只在「换了文档」时更新。
+   * 逐字更新会让整个文件视图每敲一个字重渲染一次（目录树、Git 面板都在里面）。
+   */
+  const [markdownValue, setMarkdownValue] = useState('')
   /** ensureEditor() 的单调 promise：monaco 装载 + 编辑器创建只做一次 */
   const editorReadyRef = useRef(null)
   const tabListRef = useRef(null)
@@ -524,22 +537,38 @@ export const FilesView = forwardRef(function FilesView(
     editorRef.current.focus()
   }, [])
 
+  /**
+   * 把焦点交给当前可见的那套界面。
+   *
+   * Markdown 页签背后那个 monaco 只是正文的宿主（被 visibility 隐藏），聚焦它等于什么都没点着。
+   */
+  const focusSurface = useCallback((surface) => {
+    if (surface === 'markdown') markdownHostRef.current?.querySelector('iframe')?.focus()
+    else editorRef.current?.focus()
+  }, [])
+
   const activateFile = useCallback(
     (path, focus = true) => {
       const tab = tabsRef.current.find((item) => item.path === path)
       if (!tab) return
+      const surface = editorSurface(tab)
       if (activeRef.current === path && editorRef.current?.getModel() === tab.model) {
         openRequestRef.current += 1
         if (tab.model) {
           editorRef.current?.updateOptions(editorOptionsForTab(tab))
           showMessage('')
         }
-        if (focus) editorRef.current?.focus()
+        if (focus) focusSurface(surface)
         return
       }
       const previous = tabsRef.current.find((item) => item.path === activeRef.current)
-      if (previous?.model && previous.path !== path)
+      if (previous?.model && previous.path !== path) {
         previous.viewState = editorRef.current?.saveViewState()
+        // 换文档前先把 Markdown 编辑器手上的正文同步回旧 model。必须同步取值：
+        // 换文档会让 bridge 作废在途请求，等 flush() 只会拿到「文档已切换」的拒绝。
+        if (editorSurface(previous) === 'markdown' && markdownRef.current)
+          writeModelText(previous.model, markdownRef.current.getValue())
+      }
       setActivePath(path)
       if (!tab.model) {
         editorRef.current?.setModel(null)
@@ -547,6 +576,8 @@ export const FilesView = forwardRef(function FilesView(
         return
       }
       editorRef.current?.setModel(tab.model)
+      // Markdown 页签的正文由 model 供一次；之后归编辑器自己持有，逐字回灌会让整页重渲染。
+      if (surface === 'markdown') setMarkdownValue(tab.model.getValue())
       // editor 是唯一实例，只读状态跟着页签走：虚拟文档（工具输出预览）不可编辑。
       editorRef.current?.updateOptions(editorOptionsForTab(tab))
       if (tab.viewState) editorRef.current?.restoreViewState(tab.viewState)
@@ -554,7 +585,7 @@ export const FilesView = forwardRef(function FilesView(
       requestAnimationFrame(() => {
         if (activeRef.current !== path || editorRef.current?.getModel() !== tab.model) return
         editorRef.current?.layout()
-        if (focus) editorRef.current?.focus()
+        if (focus) focusSurface(surface)
         const current = tabsRef.current.find((item) => item.path === path)
         if (current?.pendingPosition) {
           revealPosition(current.pendingPosition)
@@ -562,7 +593,7 @@ export const FilesView = forwardRef(function FilesView(
         }
       })
     },
-    [revealPosition, setActivePath, showMessage]
+    [focusSurface, revealPosition, setActivePath, showMessage]
   )
 
   /**
@@ -658,6 +689,8 @@ export const FilesView = forwardRef(function FilesView(
         savedVersion: null,
         diskVersion: null,
         dirty: false,
+        // .md 默认用 Markdown 编辑器；正文仍然是这份 monaco model，保存 / 未保存 / 冲突逻辑不变。
+        markdown: isMarkdownFile(path),
         pendingPosition: position,
         loading: true,
         saving: false
@@ -692,12 +725,14 @@ export const FilesView = forwardRef(function FilesView(
         setTabs((items) => items.map((item) => (item === tab ? { ...tab } : item)))
         if (activeRef.current === path) {
           editorRef.current?.setModel(model)
+          // Markdown 页签：磁盘正文喂给共享编辑器一次，之后它自己持有。
+          if (editorSurface(tab) === 'markdown') setMarkdownValue(result.content)
           editorRef.current?.updateOptions(editorOptionsForTab(tab))
           showMessage('')
           requestAnimationFrame(() => {
             if (activeRef.current !== path || editorRef.current?.getModel() !== model) return
             editorRef.current?.layout()
-            editorRef.current?.focus()
+            focusSurface(editorSurface(tab))
             const current = tabsRef.current.find((item) => item.path === path)
             revealPosition(current?.pendingPosition)
             if (current) current.pendingPosition = null
@@ -724,7 +759,15 @@ export const FilesView = forwardRef(function FilesView(
         }
       }
     },
-    [activateFile, ensureEditor, revealPosition, setActivePath, setTabs, showMessage]
+    [
+      activateFile,
+      ensureEditor,
+      focusSurface,
+      revealPosition,
+      setActivePath,
+      setTabs,
+      showMessage
+    ]
   )
 
   /**
@@ -765,6 +808,14 @@ export const FilesView = forwardRef(function FilesView(
   const saveActive = useCallback(async () => {
     const tab = tabsRef.current.find((item) => item.path === activeRef.current)
     if (!tab?.model || tab.readOnly || !tab.dirty || tab.loading || tab.saving) return
+    // Markdown 页签：先让编辑器把手上那一份（含尚未提交的输入法组合）交出来，再落盘。
+    if (editorSurface(tab) === 'markdown' && markdownRef.current) {
+      try {
+        writeModelText(tab.model, await markdownRef.current.flush())
+      } catch {
+        // 拿不到就按 model 里的内容保存，不因为一次同步失败把保存也挡掉
+      }
+    }
     const content = tab.model.getValue()
     const savedVersion = tab.model.getAlternativeVersionId()
     tab.saving = true
@@ -1486,6 +1537,9 @@ export const FilesView = forwardRef(function FilesView(
         editorRef.current?.setModel(nextActive.model)
         editorRef.current?.updateOptions(editorOptionsForTab(nextActive))
         if (nextActive.viewState) editorRef.current?.restoreViewState(nextActive.viewState)
+        // 正文被磁盘内容覆盖了：Markdown 那一侧也要跟着换，否则它还在显示旧文字。
+        if (editorSurface(nextActive) === 'markdown' && nextActive.model)
+          setMarkdownValue(nextActive.model.getValue())
       } else {
         setActivePath(null)
         editorRef.current?.setModel(null)
@@ -1572,6 +1626,14 @@ export const FilesView = forwardRef(function FilesView(
   )
 
   const activeTab = tabs.find((tab) => tab.path === activePath)
+  // Markdown 页签：正文交给共享 Lexical 编辑器，monaco 只作为 model 的宿主（隐藏）。
+  const markdownTab = activeTab && editorSurface(activeTab) === 'markdown' ? activeTab : null
+  /** Markdown 编辑器交回整篇正文：只替换 model 里变化的那一段，撤销栈与 dirty 判定都保持不变。 */
+  const changeMarkdown = useCallback((text) => {
+    const tab = tabsRef.current.find((item) => item.path === activeRef.current)
+    if (!tab?.model || tab.readOnly) return
+    writeModelText(tab.model, text)
+  }, [])
   // 虚拟文档（工具输出预览）不在工作区里，面包屑就是它自己的标题
   const breadcrumbs = !activeTab
     ? []
@@ -2167,7 +2229,25 @@ export const FilesView = forwardRef(function FilesView(
             </div>
           )}
           <div className="relative min-h-0 flex-1">
-            <div ref={editorHostRef} className="size-full" />
+            {/* Markdown 页签里 monaco 只当 model 宿主：用 visibility 隐藏，保住尺寸，
+                切回普通文件时不需要重新 layout。 */}
+            <div
+              ref={editorHostRef}
+              className={`size-full ${markdownTab ? 'invisible' : ''}`}
+              aria-hidden={markdownTab ? 'true' : undefined}
+            />
+            {markdownTab && (
+              <div ref={markdownHostRef} className="absolute inset-0 flex">
+                <MarkdownEditor
+                  ref={markdownRef}
+                  documentId={markdownTab.path}
+                  value={markdownValue}
+                  onChange={changeMarkdown}
+                  readOnly={Boolean(markdownTab.readOnly)}
+                  ariaLabel={`${markdownTab.name} Markdown 编辑器`}
+                />
+              </div>
+            )}
             {!tabs.length && !(message && !message.transient) && <EmptyEditorWatermark />}
             {message && !message.transient && (
               <div

@@ -166,8 +166,15 @@ body.mica-arco-theme {
 .dropdown .divider, .floating-text-format-popup .divider, .find-replace-separator { background: var(--color-line-soft); }
 .floating-sort-menu__item { color: var(--color-fg-soft); }
 .floating-sort-menu__item:hover { background: var(--color-active); }
-.floating-text-format-popup { height: 34px; padding: 3px; }
-.floating-text-format-popup button.popup-item { border-radius: 4px; padding: 5px; color: var(--color-fg-soft); }
+/* The floating bar sits on top of正文, so it must read as the same control family as the
+   sticky toolbar (28px buttons, 16px icons, one active fill) instead of the upstream
+   18px icons with a 2px top offset. Groups + hairlines give the 12 buttons structure. */
+.floating-text-format-popup { display: flex; align-items: center; height: 34px; padding: 3px; }
+.floating-text-format-popup .popup-group { display: flex; align-items: center; gap: 2px; }
+.floating-text-format-popup button.popup-item { display: grid; place-items: center; height: 28px; min-width: 28px; margin: 0; padding: 0; border-radius: 4px; color: var(--color-fg-soft); background: transparent; }
+.floating-text-format-popup button.popup-item i.format { width: 16px; height: 16px; margin: 0; opacity: 1; }
+.floating-text-format-popup button.popup-item :is(i.format, .format-icon) { flex: none; }
+.floating-text-format-popup .divider { flex: none; width: 1px; height: 16px; margin: 0 3px; }
 .floating-text-format-popup .popup-item:hover:not([disabled]) { background: var(--color-active); }
 .floating-text-format-popup button.popup-item.active { color: var(--color-accent); background: var(--color-primary-light-1); }
 .floating-text-format-popup select.popup-item, .floating-text-format-popup .popup-item .text { color: inherit; font-size: 12px; }

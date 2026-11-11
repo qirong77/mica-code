@@ -14,6 +14,13 @@ export type MarkdownEditorProps = {
 export type MarkdownEditorHandle = {
   /** Wait for hydration, collect pending input, and synchronously notify onChange before resolving. */
   flush(): Promise<string>;
+  /**
+   * 最近一次交给宿主的 Markdown 文本，同步返回。
+   *
+   * 切换文档时不能等 flush()：换文档会让 bridge 作废在途请求，那个 promise 会以
+   * 「文档已切换」拒绝，最后一段输入反而丢了。宿主切换前用它同步取一次。
+   */
+  getValue(): string;
 };
 
 /** A lightweight host; the isolated runtime is the only module that imports Lexical/CDN React. */
@@ -30,6 +37,7 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
 
   useImperativeHandle(ref, () => ({
     flush: () => bridge.current?.flush() ?? Promise.resolve(latest.current.value),
+    getValue: () => bridge.current?.getValue() ?? latest.current.value,
   }), []);
 
   useLayoutEffect(() => {

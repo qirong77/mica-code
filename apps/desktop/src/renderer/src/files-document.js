@@ -54,3 +54,72 @@ export function uniqueDocumentTitle(tabs, title, key) {
 export function editorOptionsForTab(tab) {
   return { readOnly: Boolean(tab && tab.readOnly) }
 }
+
+/**
+ * 哪些文件默认交给 Markdown 编辑器。
+ *
+ * 只认 `.md` / `.markdown`：`.mdx` 里是 JSX，Markdown 往返表达不了，按普通文本开更安全。
+ */
+const MARKDOWN_EXTENSIONS = ['md', 'markdown']
+
+export function isMarkdownFile(path) {
+  const name = String(path ?? '')
+    .replaceAll('\\', '/')
+    .split('/')
+    .filter(Boolean)
+    .at(-1)
+  if (!name || !name.includes('.')) return false
+  return MARKDOWN_EXTENSIONS.includes(name.split('.').at(-1).toLowerCase())
+}
+
+/**
+ * 这个页签当前用哪一套编辑界面。
+ *
+ * `markdown` 是共享 Lexical 编辑器的 Markdown 模式，`source` 是 monaco 纯文本。
+ * 没有 `markdown` 标记的页签（普通文件、虚拟文档）永远走源码，与以前完全一致。
+ */
+export function editorSurface(tab) {
+  return tab && tab.markdown ? 'markdown' : 'source'
+}
+
+/**
+ * 新旧文本之间真正变化的那一段：公共前缀之后的 `[start, end)` 换成 `text`。
+ *
+ * Markdown 编辑器每敲一个字都会把整篇正文交回来。整篇 `setValue` 会让 monaco 丢掉撤销栈、
+ * 并对整篇重新分词（大文档每敲一个字都卡一次）；只替换变化的那一段，撤销、分词和视口都
+ * 保持增量。相同文本返回 null。
+ */
+export function planTextReplacement(previous, next) {
+  if (previous === next) return null
+  const shorter = Math.min(previous.length, next.length)
+  let start = 0
+  while (start < shorter && previous[start] === next[start]) start += 1
+  let tail = 0
+  while (tail < shorter - start && previous[previous.length - 1 - tail] === next[next.length - 1 - tail])
+    tail += 1
+  return { start, end: previous.length - tail, text: next.slice(start, next.length - tail) }
+}
+
+/**
+ * 把整段文本写回 monaco 模型，只动变化的那一段。
+ *
+ * `model` 只用到 `getValue` / `getPositionAt` / `applyEdits`，所以纯逻辑测试里能给假对象。
+ */
+export function writeModelText(model, next) {
+  const change = planTextReplacement(model.getValue(), next)
+  if (!change) return false
+  const from = model.getPositionAt(change.start)
+  const to = model.getPositionAt(change.end)
+  model.applyEdits([
+    {
+      range: {
+        startLineNumber: from.lineNumber,
+        startColumn: from.column,
+        endLineNumber: to.lineNumber,
+        endColumn: to.column
+      },
+      text: change.text
+    }
+  ])
+  return true
+}

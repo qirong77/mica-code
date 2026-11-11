@@ -936,23 +936,11 @@ html[data-appearance='light'] .chat-modal-arco-wrap {
   flex-direction: column;
 }
 
-/* 按实际对话区域宽度启用（ChatView 的 ResizeObserver），抽屉打开后也会重新判断。 */
+/* 按实际对话区域宽度启用（ChatView 的 ResizeObserver），抽屉打开后也会重新判断。
+   过程卡片浮在右上角而不是自带一列：占一列会永久吃掉 340–440px 的阅读宽度，
+   卡片下面还留一整片空灰。对话区因此始终是整宽。 */
 .chat-conversation-layout.has-process-sidebar {
-  --chat-process-width: clamp(340px, 32%, 440px);
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) var(--chat-process-width);
-  grid-template-rows: minmax(0, 1fr) auto;
-  grid-template-areas: 'transcript process' 'composer process';
-}
-
-.has-process-sidebar > .chat-scroll {
-  grid-area: transcript;
-  min-width: 0;
-}
-
-.has-process-sidebar > .chat-composer-dock {
-  grid-area: composer;
-  min-width: 0;
+  --chat-process-width: clamp(300px, 30%, 400px);
 }
 
 .chat-scroll {
@@ -2644,23 +2632,32 @@ html[data-appearance='light'] .chat-markdown code:not(pre code) {
  *
  * 思考是例外：它不是日志行，而是这一轮在想的什么，照旧整段折行。
  */
+/* 右上角浮卡：宽度固定、高度跟着内容长（上限 62% / 520px），超出自己在卡内滚。
+   不再占一列，所以对话区是整宽的；卡片浮在上层，滚动正文从它下面经过。 */
 .chat-turn-log.is-sidebar {
-  grid-area: process;
+  position: absolute;
+  top: 8px;
+  right: 10px;
+  z-index: 6;
+  width: var(--chat-process-width);
+  max-height: min(62%, 520px);
   overflow: hidden;
-  border-left: 1px solid var(--color-line);
-  border-bottom: 0;
+  border: 1px solid var(--color-line);
+  border-radius: 8px;
+  background: var(--color-panel);
+  box-shadow: 0 10px 28px var(--color-overlay-strong);
   font-size: 12px;
   line-height: 1.6;
 }
 
 .chat-turn-log.is-sidebar .chat-turn-log-head {
-  height: 38px;
-  min-height: 38px;
+  height: 34px;
+  min-height: 34px;
   flex: none;
   gap: 8px;
   border-top: 0;
   border-bottom: 1px solid var(--color-line-soft);
-  padding: 0 12px;
+  padding: 0 10px;
   cursor: default;
   touch-action: auto;
 }

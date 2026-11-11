@@ -2417,7 +2417,7 @@ function TurnLogDock({
               variant="ghost"
               size="compact"
               icon={sidebar ? <IconLayoutBottombar size={13} /> : <IconLayoutSidebarRight size={13} />}
-              title={sidebar ? '将过程移到底部' : '将过程移到右侧'}
+              title={sidebar ? '将过程移到底部' : '将过程移到右上角'}
               onClick={onTogglePlacement}
             />
           </span>
