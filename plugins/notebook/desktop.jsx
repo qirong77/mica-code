@@ -1,11 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ArrowUpRight,
   BookOpen,
   Check,
   ChevronDown,
   ChevronRight,
-  Code2,
   Download,
   FilePlus2,
   FileText,
@@ -13,18 +11,14 @@ import {
   Folder,
   FolderOpen,
   FolderPlus,
-  Image,
-  Layers3,
   ListTree,
   Menu,
   MoreHorizontal,
-  Network,
   PanelLeftClose,
   Plus,
   RefreshCw,
   Search,
   ShieldCheck,
-  Table2,
   Trash2,
   Undo2,
   X,
@@ -57,14 +51,7 @@ const message = (error) =>
 const emptyOutline = () => ({
   items: [],
   activeKey: null,
-  blocks: { table: false, code: false, mermaid: false, image: false },
 });
-const contentLinks = [
-  { block: 'table', label: '表格', description: '数据表格', icon: Table2 },
-  { block: 'code', label: '代码', description: '代码块', icon: Code2 },
-  { block: 'mermaid', label: '图表', description: 'Mermaid 图表', icon: Network },
-  { block: 'image', label: '图片', description: '图片与图注', icon: Image },
-];
 
 function download(value, name) {
   const url = URL.createObjectURL(new Blob([JSON.stringify(value, null, 2)], { type: 'application/json' }));
@@ -92,7 +79,6 @@ export default function NotebookPage({ api }) {
     overlay: window.innerWidth <= 1100,
   }));
   const [focused, setFocused] = useState(false);
-  const [recentIds, setRecentIds] = useState([]);
   const [outline, setOutline] = useState(emptyOutline);
   const [dialog, setDialog] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -133,9 +119,6 @@ export default function NotebookPage({ api }) {
     [index, expanded, query, trash],
   );
   const notesCount = index.nodes.filter((node) => node.kind === 'note' && !node.trashedAt).length;
-  const recentNotes = recentIds
-    .map((id) => index.nodes.find((node) => node.id === id && node.kind === 'note' && !node.trashedAt))
-    .filter(Boolean);
   const outlinePosition = outline.items.findIndex((item) => item.key === outline.activeKey);
   const railOverlay = layout.mobile && railOpen && !focused;
   const outlineOverlay = layout.overlay && outlineOpen && !focused && !!active;
@@ -253,7 +236,6 @@ export default function NotebookPage({ api }) {
             setOutline(emptyOutline());
             loadedNote.current = null;
             await loadEditor(draft);
-            setRecentIds((previous) => [id, ...previous.filter((value) => value !== id)].slice(0, 6));
             if (layoutRef.current.mobile) setRailOpen(false);
           },
         );
@@ -857,60 +839,6 @@ export default function NotebookPage({ api }) {
               </>
             )}
           </header>
-          {!!recentNotes.length && (
-            <nav className="session-tabs notebook-tabs" aria-label="最近阅读的笔记">
-              {recentNotes.map((note) => (
-                <button
-                  type="button"
-                  key={note.id}
-                  className={`session-tab notebook-tab ${note.id === activeId ? 'is-active' : ''}`}
-                  aria-current={note.id === activeId ? 'page' : undefined}
-                  title={note.title}
-                  disabled={busy}
-                  onClick={() => void openNote(note.id)}
-                >
-                  <FileText size={13} />
-                  <span>{note.title}</span>
-                </button>
-              ))}
-              <span className="notebook-tabs-caption">最近阅读</span>
-            </nav>
-          )}
-          {active && (
-            <div className="notebook-document-context">
-              <div>
-                <span>
-                  <Layers3 size={12} />
-                  笔记工作台
-                </span>
-                <span className="notebook-context-date" title={`创建于 ${new Date(active.createdAt).toLocaleString()}`}>
-                  ·　创建于 {new Date(active.createdAt).toLocaleDateString('zh-CN', { month: 'long', day: 'numeric' })}
-                </span>
-              </div>
-              <nav className="notebook-content-jumps" aria-label="内容快速跳转">
-                {contentLinks.map(({ block, label, icon: Icon }) => (
-                  <Button
-                    key={block}
-                    variant="ghost"
-                    size="compact"
-                    icon={<Icon size={12} />}
-                    disabled={!outline.blocks[block] || busy}
-                    onClick={() => jump({ block })}
-                  >
-                    {label}
-                  </Button>
-                ))}
-                <Button
-                  variant="ghost"
-                  size="compact"
-                  icon={<ArrowUpRight size={13} />}
-                  title="返回文首"
-                  disabled={busy}
-                  onClick={() => jump({ block: 'top' })}
-                />
-              </nav>
-            </div>
-          )}
           {error && (
             <div className="notebook-error">
               <Alert message={error} />
@@ -1074,27 +1002,6 @@ export default function NotebookPage({ api }) {
                       </Button>
                     ))}
                   </nav>
-                  {Object.values(outline.blocks).some(Boolean) && (
-                    <footer className="notebook-outline-contents">
-                      <span>内容索引</span>
-                      {contentLinks
-                        .filter(({ block }) => outline.blocks[block])
-                        .map(({ block, description, icon: Icon }) => (
-                          <Button
-                            key={block}
-                            variant="ghost"
-                            fullWidth
-                            className="mica-arco-row"
-                            size="compact"
-                            icon={<Icon size={13} />}
-                            disabled={busy}
-                            onClick={() => jump({ block })}
-                          >
-                            {description}
-                          </Button>
-                        ))}
-                    </footer>
-                  )}
                 </aside>
               </>
             )}
