@@ -55,6 +55,45 @@ describe('isRetryableError', () => {
     ).toBe(false);
   });
 
+  it.each([
+    { message: '400 请求体必须是有效 JSON，最大 8MB' },
+    { message: '400 invalid_json' },
+    {
+      message: '400 {"error":{"code":"invalid_json","message":"请求体必须是有效 JSON，最大 8MB","type":"codexgo_error"}}',
+    },
+    { message: 'bad request', code: 'invalid_json' },
+    { message: 'bad request', error: { code: 'invalid_json' } },
+  ])('retries codexgo parse failures: $message', (detail) => {
+    expect(isRetryableError(Object.assign(new Error(detail.message), detail, { status: 400 }))).toBe(true);
+  });
+
+  it.each([400, 401, 403, 404, 413, 422])('keeps deterministic HTTP %s errors non-retryable', (status) => {
+    const detail =
+      status === 400
+        ? { code: 'request_too_large', message: '请求体超过最大 8MB' }
+        : { code: 'invalid_json', message: '请求体必须是有效 JSON，最大 8MB' };
+    expect(isRetryableError(Object.assign(new Error(detail.message), detail, { status }))).toBe(false);
+  });
+
+  it('does not retry an aborted request even with a gateway parse error', () => {
+    expect(isRetryableError({ name: 'AbortError', status: 400, code: 'invalid_json' })).toBe(false);
+  });
+
+  it('stops retrying persistent codexgo parse failures at the retry limit', async () => {
+    const error = Object.assign(new Error('400 请求体必须是有效 JSON，最大 8MB'), { status: 400 });
+    let calls = 0;
+    await expect(
+      withRetry(
+        async () => {
+          calls++;
+          throw error;
+        },
+        { maxRetries: 2, delayMs: 0 },
+      ),
+    ).rejects.toBe(error);
+    expect(calls).toBe(3);
+  });
+
   it('treats timeout errors as retryable', () => {
     // Bun 下 AbortSignal.timeout() 触发的 fetch 超时：name=TimeoutError、
     // code=23（数字，不匹配 code 白名单）、无 status。

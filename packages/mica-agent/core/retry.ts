@@ -2,14 +2,22 @@ const DEFAULT_MAX_RETRIES = 3;
 const DEFAULT_RETRY_DELAY_MS = 3000;
 
 /**
- * 中转网关自己解析请求体失败（Go 侧 `invalid json: invalid character '\x00' ...`）。
+ * 中转网关报告请求体解析失败（Go 的 invalid json 或 codexgo 的 invalid_json）。
  *
- * 这类 400 与请求语义无关：它是网关读包/解析的抖动（同一份请求重发常常就过），
- * 当成确定性错误会让一次抖动把整个会话打成错误态，用户只能手动再发一遍。
+ * 本地序列化的请求也可能被网关偶发拒绝，允许按既有次数上限重试。
+ * 解析错误本身不能证明传输抖动；持续失败仍须报错（如网关混用解析与大小限制文案）。
  */
-function isUpstreamBodyParseFailure(message: unknown): boolean {
+function isUpstreamBodyParseFailure(error: Record<string, unknown>): boolean {
+  const detail = error.error;
+  const nestedCode = detail && typeof detail === 'object' ? (detail as Record<string, unknown>).code : undefined;
+  if ([error.code, nestedCode].some((code) => typeof code === 'string' && code.toLowerCase() === 'invalid_json')) {
+    return true;
+  }
+  const message = error.message;
   if (typeof message !== 'string') return false;
-  return /invalid json|invalid character|unexpected end of json|unexpected eof/i.test(message);
+  return /\binvalid[ _]json\b|invalid character|unexpected end of json|unexpected eof|请求体必须是有效\s*JSON/i.test(
+    message,
+  );
 }
 
 export function isRetryableError(error: unknown): boolean {
@@ -25,7 +33,7 @@ export function isRetryableError(error: unknown): boolean {
   if (status !== undefined) {
     if (status === 429) return true;
     if (status >= 500 && status < 600) return true;
-    if (status === 400 && isUpstreamBodyParseFailure(err.message)) return true;
+    if (status === 400 && isUpstreamBodyParseFailure(err)) return true;
     return false;
   }
 

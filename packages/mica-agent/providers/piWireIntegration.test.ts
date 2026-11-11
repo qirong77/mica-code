@@ -359,6 +359,38 @@ describe('real SDK request policy', () => {
     },
   );
 
+  it.each(['openai_chat_completions', 'openai_responses'] as const)(
+    '%s retries the exact codexgo invalid_json response with the same request body',
+    async (protocol) => {
+      const wire = await server((response, index) => {
+        if (index === 0) {
+          response.writeHead(400, { 'content-type': 'application/json' });
+          response.end(
+            JSON.stringify({
+              error: { code: 'invalid_json', message: '请求体必须是有效 JSON，最大 8MB', type: 'codexgo_error' },
+            }),
+          );
+        } else if (protocol === 'openai_responses') responses(response, false);
+        else chat(response, false);
+      });
+      const client = new PiModelClient({
+        model: 'wire-codexgo',
+        provider: { id: 'wire-codexgo', protocol, api_base: wire.url },
+        apiKey: 'local-test-key',
+        systemPrompt: 'test',
+        tools: false,
+      });
+      const retry = vi.fn();
+      const end = vi.fn();
+      await expect(client.query('question', { onRetry: retry, onRequestEnd: end })).resolves.toBe('after');
+      expect(wire.requests).toHaveLength(2);
+      expect(wire.requests[1]).toEqual(wire.requests[0]);
+      expect(retry).toHaveBeenCalledTimes(1);
+      expect(end).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ attempts: 2, outcome: 'completed' }));
+      expect(client.messages.filter((message) => message.role === 'assistant')).toHaveLength(1);
+    },
+  );
+
   it.each([400, 503])('uses the HTTP %s status from a real SDK failure for retry policy', async (status) => {
     const wire = await server((response, index) => {
       if (index === 0) {
