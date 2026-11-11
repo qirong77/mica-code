@@ -45,6 +45,8 @@ export type EffortFallbackRequest<T> = {
   effort: EffortOption | undefined;
   /** 这次真的会发出去的推理参数；为空表示本来就没带，不必降级。 */
   params: Record<string, unknown>;
+  /** A model must not be replayed after any visible or tool input output. */
+  shouldFallback?: () => boolean;
   send: (params: Record<string, unknown>) => Promise<T>;
 };
 
@@ -59,7 +61,7 @@ export async function sendWithEffortFallback<T>(request: EffortFallbackRequest<T
   try {
     return await request.send(request.params);
   } catch (error) {
-    if (!isUnsupportedReasoningError(error, request.params)) throw error;
+    if (request.shouldFallback?.() === false || !isUnsupportedReasoningError(error, request.params)) throw error;
     const level = request.effort ?? 'none';
     markEffortLevelRejected(request.provider, request.model, level);
     console.error(

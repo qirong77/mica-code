@@ -73,8 +73,7 @@ export type { ModelTextClient, ModelTextRequest, ModelTextResult } from './model
 export { probeModelConnection } from './probeModel.js';
 export type { ModelProbeConfig, ModelProbeResult } from './probeModel.js';
 export type { ModelClientFactory } from './providers/createModelClient.js';
-export { ChatCompletionsClient } from './providers/ChatCompletionsClient.js';
-export { ResponsesClient } from './providers/ResponsesClient.js';
+export { PiModelClient, PI_MESSAGE_FORMAT } from './providers/PiModelClient.js';
+export { PiHistoryNormalizer } from './providers/PiHistoryNormalizer.js';
+export type { Message as ModelMessage } from '@earendil-works/pi-ai';
 export type { ModelClientOptions } from './providers/types.js';
-export type { ChatCompletionsUsageRecord } from './providers/ChatCompletionsClient.js';
-export type { ResponsesUsageRecord } from './providers/ResponsesClient.js';

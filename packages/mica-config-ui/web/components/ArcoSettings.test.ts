@@ -4,6 +4,8 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import { ArcoAction, arcoPopupContainer, ArcoSettings, Select } from './ArcoSettings.js';
 import { ProviderEditor } from './ProviderEditor.js';
+import { PROVIDER_PROTOCOLS } from '@packages/mica-config/providerProtocol.js';
+import { providerProtocolLabel } from '../labels.js';
 
 function renderProvider(overrides: Partial<Parameters<typeof ProviderEditor>[0]> = {}) {
   return renderToStaticMarkup(
@@ -43,6 +45,10 @@ describe('Arco 配置页试验', () => {
     expect(html).toContain('aria-label="服务商 1 API Key"');
     expect(html).toContain('aria-label="显示明文"');
     expect(html).toContain('aria-label="移除模型 example-chat"');
+    for (const protocol of PROVIDER_PROTOCOLS) {
+      expect(html).toContain(`value="${protocol}"`);
+      expect(html).toContain(providerProtocolLabel(protocol));
+    }
   });
 
   it('仍默认收起；错误强制展开并交给 Arco 显示输入错误', () => {

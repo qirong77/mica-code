@@ -9,6 +9,7 @@ import {
 } from '@packages/mica-builtin-commands/startup/model-effort-context/getModelRule.js';
 import { resolveEffortParams } from './effort.js';
 import { ensureModelRule, getModelEffortOptions, getModelRule, orderEffortLevels } from './getModelRule.js';
+import type { ProviderProtocol } from './types.js';
 
 let dispose: (() => void) | undefined;
 let tempMicaHome: string;
@@ -167,7 +168,7 @@ describe('model-effort-context', () => {
     dispose = setupModelEffortContext();
     await Promise.all(['mock-toggle-model', 'mock-effort-model', 'mock-gpt'].map((model) => ensureModelRule(model)));
 
-    const params = (model: string, effort: string, protocol: 'openai_chat_completions' | 'openai_responses') =>
+    const params = (model: string, effort: string, protocol: ProviderProtocol) =>
       resolveEffortParams({
         provider: { id: 'gateway', api_base: 'http://127.0.0.1:1', protocol },
         model,
@@ -218,6 +219,62 @@ describe('model-effort-context', () => {
     // 模型没声明的档位不发参数，而不是把别的模型的档位名硬塞过去。
     expect(params('mock-effort-model', 'low', 'openai_chat_completions')).toEqual({});
     expect(params('mock-effort-model', 'xhigh', 'openai_chat_completions')).toEqual({});
+  });
+
+  it('adds native patches to models.dev rules without changing OpenAI effort fields', async () => {
+    await mockModelsDev();
+    dispose = setupModelEffortContext();
+    const anthropic = {
+      id: 'anthropic',
+      api_base: 'https://api.anthropic.com',
+      protocol: 'anthropic_messages' as const,
+    };
+    const google = {
+      id: 'google',
+      api_base: 'https://generativelanguage.googleapis.com',
+      protocol: 'google_generative_ai' as const,
+    };
+    await ensureModelRule('claude-mock-native', undefined, anthropic);
+    await ensureModelRule('gemini-mock-native', undefined, google);
+    await ensureModelRule('gemini-mock-max-only', undefined, google);
+    expect(getModelEffortOptions('claude-mock-native', anthropic.protocol, anthropic)).toEqual([
+      'none',
+      'low',
+      'high',
+      'xhigh',
+      'max',
+    ]);
+    expect(
+      resolveEffortParams({
+        provider: anthropic,
+        model: 'claude-mock-native',
+        effort: 'xhigh',
+        protocol: anthropic.protocol,
+      }),
+    ).toEqual({
+      thinking: { type: 'adaptive', display: 'summarized' },
+      output_config: { effort: 'xhigh' },
+    });
+    expect(getModelEffortOptions('gemini-mock-native', google.protocol, google)).toEqual(['minimal', 'low', 'high']);
+    expect(
+      resolveEffortParams({
+        provider: google,
+        model: 'gemini-mock-native',
+        effort: 'minimal',
+        protocol: google.protocol,
+      }),
+    ).toEqual({
+      config: { thinkingConfig: { includeThoughts: true, thinkingLevel: 'MINIMAL' } },
+    });
+    expect(
+      resolveEffortParams({ provider: google, model: 'gemini-mock-native', effort: 'max', protocol: google.protocol }),
+    ).toEqual({});
+    expect(getModelRule('claude-mock-native', anthropic).efforts.xhigh?.openai_chat_completions).toEqual({
+      thinking: { type: 'enabled' },
+      reasoning_effort: 'xhigh',
+    });
+    expect(getModelEffortOptions('gemini-mock-max-only', google.protocol, google)).toEqual([]);
+    expect(getModelRule('gemini-mock-max-only', google).defaultEffort).toBe('none');
   });
   it('uses a models.dev disk cache younger than 24 hours without requesting the API', async () => {
     await writeModelsCache(Date.now() - 60 * 60 * 1000, {
@@ -347,6 +404,20 @@ async function writeModelsCache(fetchedAt: number, payload: ModelsCache['payload
 
 async function mockModelsDev() {
   const payload = {
+    anthropic: {
+      models: {
+        'claude-mock-native': model(200000, [
+          { type: 'toggle' },
+          { type: 'effort', values: ['low', 'high', 'xhigh', 'max'] },
+        ]),
+      },
+    },
+    google: {
+      models: {
+        'gemini-mock-max-only': model(1000000, [{ type: 'effort', values: ['max'] }]),
+        'gemini-mock-native': model(1000000, [{ type: 'effort', values: ['minimal', 'low', 'high', 'xhigh', 'max'] }]),
+      },
+    },
     moonshotai: {
       models: {
         'mock-toggle-model': model(262144, [{ type: 'toggle' }]),

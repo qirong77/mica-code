@@ -13,8 +13,14 @@
  *   空数组报错（`models: []` 不合法）。
  */
 
-export const PROVIDER_PROTOCOL_VALUES = ['openai_chat_completions', 'openai_responses'] as const;
-export type ProviderProtocolValue = (typeof PROVIDER_PROTOCOL_VALUES)[number];
+import {
+  PROVIDER_PROTOCOLS,
+  isProviderProtocol,
+  type ProviderProtocol,
+} from '@packages/mica-config/providerProtocol.js';
+
+export const PROVIDER_PROTOCOL_VALUES = PROVIDER_PROTOCOLS;
+export type ProviderProtocolValue = ProviderProtocol;
 export const DEFAULT_PROVIDER_PROTOCOL: ProviderProtocolValue = 'openai_chat_completions';
 
 /** 表单已知的顶层字段，其余一律当「高级字段」原样保留。 */
@@ -94,7 +100,7 @@ export function readProviderDraft(raw: unknown): ProviderDraft {
     id: text(record.id),
     apiBase: text(record.api_base),
     apiKey: text(record.api_key),
-    protocol: isProtocol(record.protocol) ? record.protocol : DEFAULT_PROVIDER_PROTOCOL,
+    protocol: isProviderProtocol(record.protocol) ? record.protocol : DEFAULT_PROVIDER_PROTOCOL,
     models: Array.isArray(record.models) ? record.models.filter(isNonEmptyText) : [],
   };
 }
@@ -154,8 +160,8 @@ export function validateConfigDraft(draft: ConfigDraft): ConfigDraftIssue[] {
       if (!isNonEmptyText(raw.api_base)) {
         issues.push({ key: `${base}.api_base`, message: 'API Base 不能为空' });
       }
-      if (!isProtocol(raw.protocol)) {
-        issues.push({ key: `${base}.protocol`, message: '协议只能是 Chat Completions 或 Responses' });
+      if (!isProviderProtocol(raw.protocol)) {
+        issues.push({ key: `${base}.protocol`, message: '请选择支持的模型协议' });
       }
       if (raw.models !== undefined && !(Array.isArray(raw.models) && raw.models.every(isNonEmptyText))) {
         issues.push({ key: `${base}.models`, message: '模型列表必须是非空字符串' });
@@ -248,10 +254,6 @@ function orderKeys(record: ConfigDraft, order: readonly string[]): ConfigDraft {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === 'object' && !Array.isArray(value));
-}
-
-function isProtocol(value: unknown): value is ProviderProtocolValue {
-  return typeof value === 'string' && (PROVIDER_PROTOCOL_VALUES as readonly string[]).includes(value);
 }
 
 function isNonEmptyText(value: unknown): value is string {

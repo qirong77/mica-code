@@ -56,7 +56,7 @@ describe('session reader', () => {
     }
   })
 
-  it('recovers only completed todo writes from the last turn across provider formats', async () => {
+  it('recovers only completed todo writes from the last turn in pi history', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'session-reader-todo-'))
     const file = join(dir, 'session.json')
     const read = createSessionReader()
@@ -66,26 +66,18 @@ describe('session reader', () => {
       return (await read(file)).meta.todoInput
     }
     try {
-      const chat = [
+      const messages = [
         { role: 'user', content: 'work' },
-        { role: 'assistant', tool_calls: [{ id: 'a', function: { name: 'todo_write', arguments: JSON.stringify(plan) } }] },
-        { role: 'tool', tool_call_id: 'a', content: 'ok' }
+        { role: 'assistant', content: [{ type: 'toolCall', id: 'a|fc_a', name: 'todo_write', arguments: plan }] },
+        { role: 'toolResult', toolCallId: 'a|fc_a', content: [{ type: 'text', text: 'ok' }], isError: false }
       ]
-      expect(await write(chat)).toEqual(plan)
-      expect(await write([...chat, { role: 'user', content: 'new turn' }])).toBeNull()
-      expect(await write(chat.slice(0, 2))).toBeNull()
+      expect(await write(messages)).toEqual(plan)
+      expect(await write([...messages, { role: 'user', content: 'new turn' }])).toBeNull()
+      expect(await write(messages.slice(0, 2))).toBeNull()
       expect(await write([
-        { type: 'message', role: 'user', content: 'work' },
-        { type: 'function_call', call_id: 'b', name: 'todo_write', arguments: JSON.stringify(plan) },
-        { type: 'function_call_output', call_id: 'b', output: 'ok' }
-      ])).toEqual(plan)
-      const anthropic = [
-        { role: 'user', content: 'work' },
-        { role: 'assistant', content: [{ type: 'tool_use', id: 'c', name: 'todo_write', input: plan }] },
-        { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'c' }] }
-      ]
-      expect(await write(anthropic)).toEqual(plan)
-      expect(await write([...anthropic.slice(0, 2), { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'c', is_error: true }] }])).toBeNull()
+        ...messages.slice(0, 2),
+        { role: 'toolResult', toolCallId: 'a|fc_a', content: [{ type: 'text', text: 'failed' }], isError: true }
+      ])).toBeNull()
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }

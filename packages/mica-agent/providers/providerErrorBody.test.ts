@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
-import { OpenAI } from 'openai';
+import { describe, expect, it, vi } from 'vitest';
+import { PiModelClient } from './PiModelClient.js';
 import { errorMessageFromBody, fetchWithReadableErrors } from './providerErrorBody.js';
 
 function responseWith(body: string, status = 400): Response {
@@ -51,15 +51,18 @@ describe('fetchWithReadableErrors', () => {
   });
 
   it('surfaces the gateway detail instead of "400 status code (no body)"', async () => {
-    const client = new OpenAI({
+    const stub = vi.spyOn(globalThis, 'fetch').mockImplementation(fetchStub(responseWith('{"detail":"System messages are not allowed"}')));
+    const client = new PiModelClient({
+      model: 'test-model', tools: false, systemPrompt: 'test',
       apiKey: 'test-key',
       baseURL: 'http://gateway.test/v1',
-      maxRetries: 0,
-      fetch: fetchWithReadableErrors(fetchStub(responseWith('{"detail":"System messages are not allowed"}'))),
+      provider: { id: 'test', protocol: 'openai_responses', api_base: 'http://gateway.test/v1', supportsEffort: false },
     });
-
-    await expect(client.responses.create({ model: 'test-model', input: 'hi' })).rejects.toThrow(
-      '400 System messages are not allowed',
-    );
+    try {
+      await expect(client.query('hi')).rejects.toThrow('System messages are not allowed');
+      expect(stub).toHaveBeenCalledTimes(1);
+    } finally {
+      stub.mockRestore();
+    }
   });
 });

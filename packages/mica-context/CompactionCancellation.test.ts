@@ -1,9 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
 import { CompactionService } from './CompactionService.js';
+import { assistant, user } from './testFixtures.js';
 
 const messages = Array.from({ length: 12 }, (_, index) => [
-  { role: 'user', content: `Request ${index} ` + 'context '.repeat(3000) },
-  { role: 'assistant', content: 'answer '.repeat(3000) },
+  user(`Request ${index} ` + 'context '.repeat(3000)),
+  assistant('answer '.repeat(3000)),
 ]).flat();
 
 describe('compaction cancellation', () => {

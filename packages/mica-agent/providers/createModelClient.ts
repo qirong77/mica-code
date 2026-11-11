@@ -1,13 +1,13 @@
 import type { IAgent } from '../core/Agent.js';
-import { ChatCompletionsClient } from './ChatCompletionsClient.js';
-import { ResponsesClient } from './ResponsesClient.js';
+import { PiModelClient } from './PiModelClient.js';
 import type { ModelClientOptions } from './types.js';
 
 export type ModelClientFactory = (options: ModelClientOptions) => IAgent<ModelClientOptions>;
 
 const modelClientFactories = new Map<string, ModelClientFactory>([
-  ['openai_chat_completions', (options) => new ChatCompletionsClient(options)],
-  ['openai_responses', (options) => new ResponsesClient(options)],
+  ...['openai_chat_completions', 'openai_responses', 'anthropic_messages', 'google_generative_ai'].map(
+    (protocol): [string, ModelClientFactory] => [protocol, (options) => new PiModelClient(options)],
+  ),
 ]);
 
 /** Registers an additional provider protocol implementation. */

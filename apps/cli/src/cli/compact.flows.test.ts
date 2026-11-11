@@ -164,6 +164,80 @@ function readSession(home: string, sessionId: string): Record<string, unknown> {
   return JSON.parse(readFileSync(join(home, 'sessions', `${sessionId}.json`), 'utf8'));
 }
 
+// ── pi 消息夹具 ────────────────────────────────────────────────────────────
+// 会话历史只有一种形态：pi-ai 的 `Message[]`。CLI 按 `messageFormat` 拒绝旧 wire
+// 历史（那是 evolution 迁移的活），所以这里的夹具必须写成 pi 的形状：工具调用是
+// assistant 内容块，工具结果单独成条，思考也是内容块。
+const T = Date.parse('2026-01-01T00:00:00.000Z');
+const FIXTURE_USAGE = {
+  input: 0,
+  output: 0,
+  cacheRead: 0,
+  cacheWrite: 0,
+  totalTokens: 0,
+  cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+};
+type FixtureBlock =
+  | { type: 'text'; text: string }
+  | { type: 'image'; data: string; mimeType: string }
+  | { type: 'thinking'; thinking: string; thinkingSignature?: string }
+  | { type: 'toolCall'; id: string; name: string; arguments: Record<string, unknown> };
+
+function fixtureUser(content: string | FixtureBlock[]): Record<string, unknown> {
+  return { role: 'user', content, timestamp: T };
+}
+
+function fixtureAssistant(content: string | FixtureBlock[]): Record<string, unknown> {
+  const blocks: FixtureBlock[] = typeof content === 'string' ? [{ type: 'text', text: content }] : content;
+  return {
+    role: 'assistant',
+    content: blocks,
+    api: 'openai-responses',
+    provider: 'mock',
+    model: 'mock-chat',
+    usage: FIXTURE_USAGE,
+    stopReason: blocks.some((block) => block.type === 'toolCall') ? 'toolUse' : 'stop',
+    timestamp: T,
+  };
+}
+
+function fixtureToolResult(callId: string, toolName: string, text: string): Record<string, unknown> {
+  return {
+    role: 'toolResult',
+    toolCallId: callId,
+    toolName,
+    content: [{ type: 'text', text }],
+    isError: false,
+    timestamp: T,
+  };
+}
+
+/** 快照里除 messages 以外都必须有的字段（含 `messageFormat` 标记）。 */
+function fixtureSnapshot(messages: unknown[], extra: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    providerId: 'mock',
+    model: 'mock-chat',
+    effort: 'low',
+    role: 'default',
+    protocol: 'openai_responses',
+    messageFormat: 'pi-ai-v1',
+    messages,
+    conversationMessages: [],
+    usageHistory: [],
+    lastUsage: undefined,
+    ...extra,
+  };
+}
+
+/** 一条 assistant 消息里的工具调用块（压缩后仍要能找到它）。 */
+function toolCallsOf(messages: Array<Record<string, unknown>>): Array<Record<string, unknown>> {
+  return messages.flatMap((message) =>
+    Array.isArray(message.content)
+      ? (message.content as Array<Record<string, unknown>>).filter((block) => block.type === 'toolCall')
+      : [],
+  );
+}
+
 const SESSION_CWD = join(tmpdir(), `mica-compact-test-work-${process.pid}`);
 
 beforeAll(() => {
@@ -193,35 +267,22 @@ suite('mica compact --prune-only flows', () => {
       cwd: SESSION_CWD,
       turnState: 'completed',
       revision: 1,
-      snapshot: {
-        providerId: 'mock',
-        model: 'mock-chat',
-        effort: 'low',
-        role: 'default',
-        protocol: 'openai_responses',
-        messages: [
-          { type: 'message', role: 'user', content: '请创建一个文件' },
-          {
-            type: 'function_call',
-            id: 'call_1',
-            call_id: 'call_1',
-            name: 'write_file',
-            arguments: longArguments,
-          },
-          {
-            type: 'function_call_output',
-            call_id: 'call_1',
-            output: '写入成功',
-          },
-          { type: 'message', role: 'assistant', content: '已创建文件' },
+      snapshot: fixtureSnapshot(
+        [
+          fixtureUser('请创建一个文件'),
+          fixtureAssistant([
+            { type: 'toolCall', id: 'call_1', name: 'write_file', arguments: JSON.parse(longArguments) },
+          ]),
+          fixtureToolResult('call_1', 'write_file', '写入成功'),
+          fixtureAssistant('已创建文件'),
         ],
-        conversationMessages: [
-          { role: 'user', content: '请创建一个文件' },
-          { role: 'assistant', content: '已创建文件' },
-        ],
-        usageHistory: [],
-        lastUsage: undefined,
-      },
+        {
+          conversationMessages: [
+            { role: 'user', content: '请创建一个文件' },
+            { role: 'assistant', content: '已创建文件' },
+          ],
+        },
+      ),
     });
 
     const result = await runCli(['compact', '--prune-only', '--session', sessionId, '--dir', SESSION_CWD], {
@@ -234,19 +295,18 @@ suite('mica compact --prune-only flows', () => {
 
     const after = readSession(home, sessionId);
     const messages = (after.snapshot as Record<string, unknown[]>).messages as Array<Record<string, unknown>>;
-    const functionCall = messages.find((m) => m.type === 'function_call');
-    expect(functionCall).toBeTruthy();
+    const [call] = toolCallsOf(messages);
+    expect(call).toBeTruthy();
+    // 工具调用与工具结果必须成对留着，只是参数换成占位符。
+    expect(call!.name).toBe('write_file');
+    expect(messages.some((message) => message.role === 'toolResult')).toBe(true);
 
     // The original long arguments must be gone.
-    const args = functionCall!.arguments as string;
+    const args = JSON.stringify(call!.arguments);
     expect(args).not.toContain('hello world');
     expect(args).not.toContain('/some/long/path');
-
-    // The arguments field must still be valid JSON.
-    expect(() => JSON.parse(args)).not.toThrow();
     // The placeholder indicates truncation.
-    const parsedArgs = JSON.parse(args);
-    expect(parsedArgs._truncated).toBe(true);
+    expect(call!.arguments).toMatchObject({ _truncated: true });
   });
 
   itE2E('compact with --prune-only on a session with < 2 messages returns not_needed', async () => {
@@ -263,17 +323,9 @@ suite('mica compact --prune-only flows', () => {
       cwd: SESSION_CWD,
       turnState: 'completed',
       revision: 1,
-      snapshot: {
-        providerId: 'mock',
-        model: 'mock-chat',
-        effort: 'low',
-        role: 'default',
-        protocol: 'openai_responses',
-        messages: [{ type: 'message', role: 'user', content: '只有一条消息' }],
+      snapshot: fixtureSnapshot([fixtureUser('只有一条消息')], {
         conversationMessages: [{ role: 'user', content: '只有一条消息' }],
-        usageHistory: [],
-        lastUsage: undefined,
-      },
+      }),
     });
 
     const result = await runCli(['compact', '--prune-only', '--session', sessionId, '--dir', SESSION_CWD], {
@@ -319,35 +371,24 @@ suite('mica compact --prune-only flows', () => {
       cwd: SESSION_CWD,
       turnState: 'completed',
       revision: 1,
-      snapshot: {
-        providerId: 'mock',
-        model: 'mock-chat',
-        effort: 'low',
-        role: 'default',
-        protocol: 'openai_responses',
-        messages: [
-          { type: 'message', role: 'user', content: '请创建文件并总结' },
-          {
-            type: 'function_call',
-            id: 'call_1',
-            call_id: 'call_1',
-            name: 'write_file',
-            arguments: longToolArguments,
-          },
-          {
-            type: 'function_call_output',
-            call_id: 'call_1',
-            output: '写入成功',
-          },
-          { type: 'message', role: 'assistant', content: '已完成操作' },
+      snapshot: fixtureSnapshot(
+        [
+          fixtureUser('请创建文件并总结'),
+          fixtureAssistant([
+            { type: 'toolCall', id: 'call_1', name: 'write_file', arguments: JSON.parse(longToolArguments) },
+          ]),
+          fixtureToolResult('call_1', 'write_file', '写入成功'),
+          fixtureAssistant('已完成操作'),
         ],
-        conversationMessages: [
-          { role: 'user', content: '请创建文件并总结' },
-          { role: 'assistant', content: '已完成操作' },
-        ],
-        usageHistory: [usageRecord],
-        lastUsage: usageRecord,
-      },
+        {
+          conversationMessages: [
+            { role: 'user', content: '请创建文件并总结' },
+            { role: 'assistant', content: '已完成操作' },
+          ],
+          usageHistory: [usageRecord],
+          lastUsage: usageRecord,
+        },
+      ),
     });
 
     const result = await runCli(['compact', '--prune-only', '--session', sessionId, '--dir', SESSION_CWD], {
@@ -396,31 +437,22 @@ suite('mica compact --tool-results-only flows', () => {
       cwd: SESSION_CWD,
       turnState: 'completed',
       revision: 1,
-      snapshot: {
-        providerId: 'mock',
-        model: 'mock-chat',
-        effort: 'low',
-        role: 'default',
-        protocol: 'openai_responses',
-        messages: [
-          { type: 'message', role: 'user', content: '读取文件并总结' },
-          {
-            type: 'function_call',
-            id: 'call_1',
-            call_id: 'call_1',
-            name: 'read_file',
-            arguments: JSON.stringify({ file_path: '/tmp/target.txt' }),
-          },
-          { type: 'function_call_output', call_id: 'call_1', output: `文件内容 ${'y'.repeat(4_000)}` },
-          { type: 'message', role: 'assistant', content: '这是模型回复，必须保留' },
+      snapshot: fixtureSnapshot(
+        [
+          fixtureUser('读取文件并总结'),
+          fixtureAssistant([
+            { type: 'toolCall', id: 'call_1', name: 'read_file', arguments: { file_path: '/tmp/target.txt' } },
+          ]),
+          fixtureToolResult('call_1', 'read_file', `文件内容 ${'y'.repeat(4_000)}`),
+          fixtureAssistant('这是模型回复，必须保留'),
         ],
-        conversationMessages: [
-          { role: 'user', content: '读取文件并总结' },
-          { role: 'assistant', content: '这是模型回复，必须保留' },
-        ],
-        usageHistory: [],
-        lastUsage: undefined,
-      },
+        {
+          conversationMessages: [
+            { role: 'user', content: '读取文件并总结' },
+            { role: 'assistant', content: '这是模型回复，必须保留' },
+          ],
+        },
+      ),
     });
 
     const first = await runCli(['compact', '--tool-results-only', '--session', sessionId, '--dir', SESSION_CWD], {
@@ -437,14 +469,15 @@ suite('mica compact --tool-results-only flows', () => {
     const after = readSession(home, sessionId);
     const messages = (after.snapshot as Record<string, unknown[]>).messages as Array<Record<string, unknown>>;
     expect(messages.length).toBe(4);
-    expect(messages[0]!.content).toBe('读取文件并总结');
-    expect(messages[3]!.content).toBe('这是模型回复，必须保留');
-    // Tool arguments are part of the request, not the tool output: keep them.
-    expect(String(messages[1]!.arguments)).toContain('/tmp/target.txt');
-    // Only the tool result payload is cleared.
-    const output = String(messages[2]!.output);
-    expect(output).not.toContain('y'.repeat(50));
-    expect(output).toContain('cleared during compact');
+    const text = JSON.stringify(messages);
+    // 对话正文一条都不能少，工具过程则聚合成一条占位调用 + 一条占位结果。
+    expect(text).toContain('读取文件并总结');
+    expect(text).toContain('这是模型回复，必须保留');
+    expect(text).not.toContain('y'.repeat(50));
+    // 占位结果明确写着「不是真实结果」，模型据此知道要重读。
+    const [aggregateResult] = messages.filter((message) => message.role === 'toolResult');
+    expect(JSON.stringify(aggregateResult!.content)).toContain('not a real result');
+    expect(toolCallsOf(messages)).toHaveLength(1);
 
     // Running it again has nothing left to replace and must never drop rounds.
     const second = await runCli(['compact', '--tool-results-only', '--session', sessionId, '--dir', SESSION_CWD], {
@@ -462,7 +495,7 @@ suite('mica compact --tool-results-only flows', () => {
     >;
     expect(messagesSecond.length).toBe(4);
     expect(messagesSecond[0]!.content).toBe('读取文件并总结');
-    expect(messagesSecond[3]!.content).toBe('这是模型回复，必须保留');
+    expect(JSON.stringify(messagesSecond)).toContain('这是模型回复，必须保留');
   });
 
   itE2E('--tool-results-only clears pasted image base64 while keeping the conversation', async () => {
@@ -479,30 +512,21 @@ suite('mica compact --tool-results-only flows', () => {
       cwd: SESSION_CWD,
       turnState: 'completed',
       revision: 1,
-      snapshot: {
-        providerId: 'mock',
-        model: 'mock-chat',
-        effort: 'low',
-        role: 'default',
-        protocol: 'openai_responses',
-        messages: [
-          {
-            type: 'message',
-            role: 'user',
-            content: [
-              { type: 'input_text', text: '[Image](~/.mica/images/shot.png) 这个报错怎么修' },
-              { type: 'input_image', detail: 'auto', image_url: `data:image/png;base64,${imageBase64}` },
-            ],
-          },
-          { type: 'message', role: 'assistant', content: '这是模型回复，必须保留' },
+      snapshot: fixtureSnapshot(
+        [
+          fixtureUser([
+            { type: 'text', text: '[Image](~/.mica/images/shot.png) 这个报错怎么修' },
+            { type: 'image', data: imageBase64, mimeType: 'image/png' },
+          ]),
+          fixtureAssistant('这是模型回复，必须保留'),
         ],
-        conversationMessages: [
-          { role: 'user', content: '[Image](~/.mica/images/shot.png) 这个报错怎么修' },
-          { role: 'assistant', content: '这是模型回复，必须保留' },
-        ],
-        usageHistory: [],
-        lastUsage: undefined,
-      },
+        {
+          conversationMessages: [
+            { role: 'user', content: '[Image](~/.mica/images/shot.png) 这个报错怎么修' },
+            { role: 'assistant', content: '这是模型回复，必须保留' },
+          ],
+        },
+      ),
     });
 
     const first = await runCli(['compact', '--tool-results-only', '--session', sessionId, '--dir', SESSION_CWD], {
@@ -523,7 +547,7 @@ suite('mica compact --tool-results-only flows', () => {
     expect(messages.length).toBe(2);
     expect(JSON.stringify(messages[0])).toContain('[Image](~/.mica/images/shot.png)');
     expect(JSON.stringify(messages[0])).toContain('[image omitted during compact]');
-    expect(messages[1]!.content).toBe('这是模型回复，必须保留');
+    expect(JSON.stringify(messages)).toContain('这是模型回复，必须保留');
 
     // 图已清掉，再跑一次没有可清理内容，且不能把对话文本也削掉。
     const second = await runCli(['compact', '--tool-results-only', '--session', sessionId, '--dir', SESSION_CWD], {
@@ -549,33 +573,19 @@ suite('mica compact --tool-results-only flows', () => {
       cwd: SESSION_CWD,
       turnState: 'completed',
       revision: 1,
-      snapshot: {
-        providerId: 'mock',
-        model: 'mock-chat',
-        effort: 'low',
-        role: 'default',
-        protocol: 'openai_responses',
-        messages: [
-          { type: 'message', role: 'user', content: '设计一个架构图' },
-          {
-            type: 'reasoning',
-            id: 'rs_1',
-            summary: [{ type: 'summary_text', text: `推理过程 ${'r'.repeat(4_000)}` }],
-            encrypted_content: 'encrypted-chain',
-          },
-          {
-            type: 'function_call',
-            id: 'call_1',
-            call_id: 'call_1',
-            name: 'read_file',
-            arguments: JSON.stringify({ file_path: '/tmp/target.txt' }),
-          },
-          { type: 'function_call_output', call_id: 'call_1', output: `文件内容 ${'y'.repeat(4_000)}` },
+      snapshot: fixtureSnapshot(
+        [
+          fixtureUser('设计一个架构图'),
+          // 思考与工具调用同属一条 assistant 消息；签名（这里是加密链）是下一轮重放
+          // 所必需的，一旦思考被丢掉，这条签名也必须一起消失。
+          fixtureAssistant([
+            { type: 'thinking', thinking: `推理过程 ${'r'.repeat(4_000)}`, thinkingSignature: 'encrypted-chain' },
+            { type: 'toolCall', id: 'call_1', name: 'read_file', arguments: { file_path: '/tmp/target.txt' } },
+          ]),
+          fixtureToolResult('call_1', 'read_file', `文件内容 ${'y'.repeat(4_000)}`),
         ],
-        conversationMessages: [{ role: 'user', content: '设计一个架构图' }],
-        usageHistory: [],
-        lastUsage: undefined,
-      },
+        { conversationMessages: [{ role: 'user', content: '设计一个架构图' }] },
+      ),
     });
 
     const result = await runCli(['compact', '--tool-results-only', '--session', sessionId, '--dir', SESSION_CWD], {
@@ -588,14 +598,16 @@ suite('mica compact --tool-results-only flows', () => {
     // 剥掉 encrypted_content 后这条 reasoning 永远不会再被发送，必须整条丢弃，
     // 否则它只会让界面上的上下文占用虚高。
     expect(parsed.reasoningItemsDropped).toBe(1);
-    expect(parsed.afterCount).toBe(parsed.beforeCount - 1);
+    // 思考是 assistant 消息里的一个内容块，丢掉它不减少消息条数；工具过程则被聚合。
+    expect(parsed.afterCount).toBe(3);
 
     const after = readSession(home, sessionId);
     const messages = (after.snapshot as Record<string, unknown[]>).messages as Array<Record<string, unknown>>;
-    expect(messages.some((message) => message.type === 'reasoning')).toBe(false);
+    expect(JSON.stringify(messages)).not.toContain('encrypted-chain');
+    expect(JSON.stringify(messages)).not.toContain('推理过程');
     expect(messages.length).toBe(3);
-    // 工具参数与其余消息仍然原样保留。
-    expect(String(messages[1]!.arguments)).toContain('/tmp/target.txt');
+    // 聚合后只剩一条占位工具调用，用户请求仍然原样保留。
+    expect(toolCallsOf(messages)).toHaveLength(1);
     expect(messages[0]!.content).toBe('设计一个架构图');
   });
 });

@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { IMicaConfig } from './config.js';
+import { PROVIDER_PROTOCOLS } from './providerProtocol.js';
 import {
   DEFAULT_PROVIDER_PROTOCOL,
   ConfigValidationError,
@@ -44,6 +45,13 @@ afterEach(() => {
 });
 
 describe('startup config validation', () => {
+  it.each(PROVIDER_PROTOCOLS)('preserves the configured protocol %s', (protocol) => {
+    const input = { providers: [{ id: 'test', api_base: 'https://example.com', protocol, api_key: 'test' }] };
+    const result = validateConfig(input);
+    expect(result).toMatchObject({ ok: true, changed: false, config: input });
+    expect(result.issues).toEqual([]);
+  });
+
   it('fills a missing provider protocol and persists the migrated config', () => {
     const configPath = join(tempHome, 'legacy-config.json');
     writeFileSync(

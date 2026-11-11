@@ -1,4 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { Message } from '@earendil-works/pi-ai';
+import { piAssistant, piUser } from './piMessageFixtures.js';
 import type {
   AgentQueryContent,
   AgentQueryOptions,
@@ -92,6 +94,7 @@ function makeClient(options: ModelClientOptions): TestClient {
     preserveAbortedTurn: () => false,
     toConversationMessages: () => [],
     getSnapshot: () => ({
+      messageFormat: 'pi-ai-v1',
       model: options.model,
       messages: [],
       usageHistory: [],
@@ -129,26 +132,27 @@ function deferred<T>() {
 }
 
 /** 一条带长工具结果的历史：`quick` 压缩会把它换成占位符（条数不变、字符数变少）。 */
-function compactableToolHistory(): unknown[] {
+function compactableToolHistory(): Message[] {
   return [
-    { role: 'user', content: 'Requirement: keep this exact text.' },
+    piUser('Requirement: keep this exact text.'),
+    piAssistant([{ type: 'toolCall', id: 'call-1', name: 'probe', arguments: { command: 'echo test' } }]),
     {
-      role: 'assistant',
-      content: null,
-      tool_calls: [
-        { id: 'call-1', type: 'function', function: { name: 'probe', arguments: '{"command":"echo test"}' } },
-      ],
+      role: 'toolResult',
+      toolCallId: 'call-1',
+      toolName: 'probe',
+      content: [{ type: 'text', text: 'READ_RESULT ' + 'result '.repeat(9000) }],
+      isError: false,
+      timestamp: 0,
     },
-    { role: 'tool', tool_call_id: 'call-1', content: 'READ_RESULT ' + 'result '.repeat(9000) },
-    { role: 'assistant', content: 'done' },
+    piAssistant('done'),
   ];
 }
 
 /** 多轮对话：模型摘要会把较早的若干轮换成一条 checkpoint（条数变少）。 */
-function summarizableHistory(): unknown[] {
+function summarizableHistory(): Message[] {
   return Array.from({ length: 12 }, (_, index) => [
-    { role: 'user', content: `Requirement ${index}: keep this exact text. ` + 'context '.repeat(40) },
-    { role: 'assistant', content: `Answer ${index}: ` + 'detail '.repeat(40) },
+    piUser(`Requirement ${index}: keep this exact text. ` + 'context '.repeat(40)),
+    piAssistant(`Answer ${index}: ` + 'detail '.repeat(40)),
   ]).flat();
 }
 
@@ -193,7 +197,7 @@ describe('agent:observe', () => {
       client.onToolCall?.('read_file', '{"file_path":"a"}', 'tool-1');
       client.onToolResult?.('read_file', 'contents', 'tool-1');
       client.onUsage?.(usage);
-      await options?.rewriteIterationMessages?.([{ role: 'user' }, { role: 'assistant' }]);
+      await options?.rewriteIterationMessages?.([piUser('user'), piAssistant('assistant')]);
       options?.onRequestStart?.({ messageCount: 1 });
       return 'answer';
     };
@@ -243,7 +247,7 @@ describe('agent:observe', () => {
 
   it('counts explicit request starts without treating iteration callbacks as requests or null as a rewrite', async () => {
     const { runtime, client, events } = setup();
-    const messages = [{ role: 'user', content: 'hello' }];
+    const messages = [piUser('hello')];
     client.queryImpl = async (_question, options) => {
       options?.onRequestStart?.({ messageCount: 1 });
       expect(await options?.rewriteIterationMessages?.(messages)).toBeNull();
@@ -253,7 +257,7 @@ describe('agent:observe', () => {
     };
     await runtime.run('hello');
     expect(events.map((event) => event.type)).toEqual(['run:start', 'request:start', 'request:start', 'run:finish']);
-    expect(messages).toEqual([{ role: 'user', content: 'hello' }]);
+    expect(messages).toEqual([piUser('hello')]);
   });
 
   it.each(['failure', 'missing-key', 'missing-model', 'stale-reservation'] as const)(
@@ -358,7 +362,7 @@ describe('agent:observe', () => {
       await Promise.resolve();
       sentPrompt = prompt(client);
       options?.onRequestStart?.({ messageCount: 2, tools });
-      const messages = [{ role: 'user', content: 'original history' }];
+      const messages = [piUser('original history')];
       expect(await options?.rewriteIterationMessages?.(messages)).toBeNull();
       expect(messages[0].content).toBe('original history');
       client.onUsage?.(originalUsage);
@@ -465,10 +469,7 @@ describe('agent:observe', () => {
 
   it('reports compaction that found nothing to clean as not applied', async () => {
     const { runtime, client, events } = setup();
-    const history = [
-      { role: 'user', content: 'short' },
-      { role: 'assistant', content: 'ok' },
-    ];
+    const history = [piUser('short'), piAssistant('ok')];
     client.queryImpl = async () => {
       await expect(
         runtime.compactIterationMessages(history, { pluginId: 'session-compact', mode: 'quick' }),

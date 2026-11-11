@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { piUser } from './piMessageFixtures.js';
 import type { AgentRuntime } from './AgentRuntime.js';
 import {
   applyIterationRewrites,
@@ -37,7 +38,7 @@ describe('request history rewrite hosting', () => {
     (host.agent as unknown as { compactIterationMessages: unknown }).compactIterationMessages =
       compactIterationMessages;
     const controller = new AbortController();
-    const messages = [{ role: 'user', content: 'hello' }];
+    const messages = [piUser('hello')];
     registerIterationRewrite('session-compact', async (history, handle) => {
       await handle.compact(history, { mode: 'quick' });
       return null;
@@ -54,7 +55,7 @@ describe('request history rewrite hosting', () => {
   it('binds the originating owner and reuses request overhead without materializing a snapshot', async () => {
     const host = runtime();
     const controller = new AbortController();
-    const messages = [{ role: 'user', content: 'hello' }];
+    const messages = [piUser('hello')];
     registerIterationRewrite('probe', (history, handle) => {
       expect(handle.owner).toBe(host.agent);
       expect(handle.signal).toBe(controller.signal);
@@ -79,7 +80,7 @@ describe('request history rewrite hosting', () => {
         finish = resolve;
       });
       handle.setState({ late: true });
-      return [...messages, { role: 'user', content: 'late result' }];
+      return [...messages, piUser('late result')];
     });
     const result = applyIterationRewrites([], host.agent, controller.signal);
     controller.abort();
@@ -99,8 +100,8 @@ describe('request history rewrite hosting', () => {
     registerIterationRewrite('bad', () => {
       throw new Error('broken extension');
     });
-    registerIterationRewrite('good', (messages) => [...messages, { role: 'user', content: 'kept' }]);
-    await expect(applyIterationRewrites([], host.agent)).resolves.toEqual([{ role: 'user', content: 'kept' }]);
+    registerIterationRewrite('good', (messages) => [...messages, piUser('kept')]);
+    await expect(applyIterationRewrites([], host.agent)).resolves.toEqual([piUser('kept')]);
   });
 
   it('does not invoke an extension disposed while an earlier extension is waiting', async () => {

@@ -6,13 +6,15 @@ import type { PersistedSession, SessionStoreLike } from '@packages/mica-session/
 import type { MicaUiConversationMessage } from '@packages/mica-ui/index.js';
 import type { AgentRuntimeEvents, AgentRuntimeSnapshot } from '../agent/AgentRuntime.js';
 import type { SessionAgentAdapter } from './SessionController.js';
+import type { AssistantMessageEvent, UserMessage } from '@earendil-works/pi-ai';
+import type { PiRequest } from '@packages/mica-agent/providers/piTransport.js';
+import { piAssistant, piFromConversation, piUser } from './piTestMessages.js';
 import { buildSubagentUsageRecord } from '@packages/mica-agent/index.js';
 
-const responseMocks = vi.hoisted(() => ({ create: vi.fn() }));
-vi.mock('openai', () => ({
-  OpenAI: class MockOpenAI {
-    responses = { create: responseMocks.create };
-  },
+const transportMocks = vi.hoisted(() => ({ stream: vi.fn<(request: PiRequest) => AsyncIterable<AssistantMessageEvent>>() }));
+vi.mock('@packages/mica-agent/providers/piTransport.js', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@packages/mica-agent/providers/piTransport.js')>(),
+  streamPiRequest: transportMocks.stream,
 }));
 
 const previousHome = process.env.HOME;
@@ -44,7 +46,8 @@ const baseSnapshot: AgentRuntimeSnapshot = {
   model: 'm',
   effort: 'none',
   role: 'default',
-  messages: [{ role: 'user', content: 'work' }],
+        messageFormat: 'pi-ai-v1' as const,
+  messages: [piUser('work')],
   usageHistory: [],
   lastUsage: undefined,
 };
@@ -173,7 +176,8 @@ describe('SessionController', () => {
       model: 'm',
       effort: 'none',
       role: 'default',
-      messages: [{ role: 'user', content: 'work' }],
+        messageFormat: 'pi-ai-v1' as const,
+      messages: [piUser('work')],
       usageHistory: [],
       lastUsage: undefined,
       interruptedThinking: thinking,
@@ -228,7 +232,8 @@ describe('SessionController', () => {
       model: 'm',
       effort: 'none',
       role: 'default',
-      messages: [{ role: 'user', content: 'work' }],
+        messageFormat: 'pi-ai-v1' as const,
+      messages: [piUser('work')],
       usageHistory: [],
       lastUsage: undefined,
     };
@@ -306,21 +311,21 @@ describe('SessionController', () => {
     });
     const ruleSpy = vi.spyOn(micaConfig, 'getModelRule').mockReturnValue({ contextSize: 1000, supportsVision: true } as ReturnType<typeof micaConfig.getModelRule>);
     const rewriter = rewrite ? registerIterationRewrite('recovery-test', (messages) => [...messages]) : undefined;
-    responseMocks.create.mockReset();
+    transportMocks.stream.mockReset();
     const input = [
       { type: 'text' as const, text: 'What is in this picture?' },
       { type: 'image' as const, source: { type: 'base64' as const, media_type: 'image/png' as const, data: 'YWJj' } },
     ];
-    const expectedContent = [
-      { type: 'input_text', text: 'What is in this picture?' },
-      { type: 'input_image', detail: 'auto', image_url: 'data:image/png;base64,YWJj' },
+    const expectedContent: UserMessage['content'] = [
+      { type: 'text', text: 'What is in this picture?' },
+      { type: 'image', mimeType: 'image/png', data: 'YWJj' },
     ];
-    const completed = { type: 'response.completed', response: { model: 'test-model', status: 'completed' } };
+    const completed = piAssistant('', { provider: provider.id });
     const store = micaSession.createStore();
     const agent = new AgentRuntime();
     if (repeated) {
       agent.loadSnapshot({
-        ...agent.getSnapshot(), messages: [{ type: 'message', role: 'user', content: expectedContent }],
+        ...agent.getSnapshot(), messages: [piUser(expectedContent)],
       });
     }
     const controller = new SessionController({ agent, store, config: { apply: () => undefined }, ui: { restore: vi.fn() } });
@@ -334,19 +339,23 @@ describe('SessionController', () => {
     try {
       controller.saveCurrent({ allowEmpty: true, turnState: 'running', conversationMessages: [{ role: 'user', content: 'display' }] });
       for (let index = 0; index < iterations; index++) {
-        responseMocks.create.mockResolvedValueOnce((async function* () {
-          yield { type: 'response.output_item.done', output_index: 0, item: {
-            type: 'function_call', id: `fc_${index}`, call_id: `call_${index}`,
-            name: 'missing_test_tool', arguments: '{}', status: 'completed',
-          } };
-          yield completed;
-        })());
+        transportMocks.stream.mockImplementationOnce(async function* (request) {
+          // The real transport reports the encoded payload before the first event.
+          request.onPayload({ model: 'test-model', messages: request.context.messages });
+          const message = piAssistant([
+            { type: 'toolCall', id: `call_${index}`, name: 'missing_test_tool', arguments: {} },
+          ], { provider: provider.id, stopReason: 'toolUse' });
+          yield { type: 'done', reason: 'toolUse', message };
+        });
       }
-      responseMocks.create.mockResolvedValueOnce((async function* () {
-        yield { type: 'response.reasoning_summary_text.delta', item_id: 'rs_1', summary_index: 0, delta: 'complete' };
-        yield { type: 'response.reasoning_summary_text.done', item_id: 'rs_1', summary_index: 0, text: 'complete' };
+      transportMocks.stream.mockImplementationOnce(async function* (request) {
+        request.onPayload({ model: 'test-model', messages: request.context.messages });
+        const partial = piAssistant([{ type: 'thinking', thinking: 'complete' }], { provider: provider.id });
+        yield { type: 'thinking_start', contentIndex: 0, partial };
+        yield { type: 'thinking_delta', contentIndex: 0, delta: 'complete', partial };
+        yield { type: 'thinking_end', contentIndex: 0, content: 'complete', partial };
         await blocked;
-      })());
+      });
       agent.events.on('thinkingCheckpoint', () => {
         if (agent.getSnapshot().activeThinking?.text === 'complete') checkpoint();
       });
@@ -364,9 +373,8 @@ describe('SessionController', () => {
         committed: (iterations > 0 && !queued) || rewrite,
       });
       expect(saved.snapshot.messages).toEqual(agent.getSnapshot().messages);
-      const preCrashInput = structuredClone(
-        (responseMocks.create.mock.calls.at(-1)![0] as { input: Array<Record<string, unknown>> }).input,
-      );
+      expect(saved.snapshot.messageFormat).toBe('pi-ai-v1');
+      const preCrashInput = structuredClone(transportMocks.stream.mock.calls.at(-1)![0].context.messages);
 
       // The persisted running state remains as if the process had disappeared.
       agent.abort();
@@ -381,22 +389,33 @@ describe('SessionController', () => {
       });
       expect(next.resume(saved.id).ok).toBe(true);
       expect(restored.getSnapshot().interruptedThinking?.text).toBe(mismatch ? undefined : 'complete');
-      responseMocks.create.mockResolvedValueOnce((async function* () { yield completed; })());
+      transportMocks.stream.mockImplementationOnce(async function* () {
+        yield { type: 'done', reason: 'stop', message: completed };
+      });
       await restored.run('continue');
-      const request = responseMocks.create.mock.calls.at(-1)![0] as { input: Array<Record<string, unknown>> };
-      expect(request.input.slice(0, -1)).toEqual(preCrashInput);
-      const users = request.input.filter((item) => item.type === 'message' && item.role === 'user');
-      expect(users.filter((item) => JSON.stringify(item.content) === JSON.stringify(expectedContent))).toHaveLength(repeated ? 2 : 1);
-      expect(users.at(-1)?.content).toEqual([{ type: 'input_text', text: 'continue' }]);
-      expect(users.some((item) => JSON.stringify(item.content) === JSON.stringify([{ type: 'input_text', text: 'queued follow-up' }]))).toBe(queued);
-      expect(request.input.filter((item) => item.type === 'function_call_output')).toHaveLength(iterations);
-      expect(request.input).not.toContainEqual(expect.objectContaining({ content: 'complete' }));
+      const request = transportMocks.stream.mock.calls.at(-1)![0];
+      // Every committed message, including native assistant/tool metadata, survives the disk round trip.
+      // Timestamps are local bookkeeping (pi never sends them) and the crash checkpoint re-creates
+      // the pending turn input, so compare the replayable payload without them.
+      const wire = (messages: readonly { timestamp?: number }[]) =>
+        messages.map(({ timestamp: _timestamp, ...rest }) => rest);
+      expect(wire(request.context.messages.slice(0, preCrashInput.length))).toEqual(wire(preCrashInput));
+      expect(request.context.messages[preCrashInput.length]).toMatchObject({ role: 'user', content: 'continue' });
+      const users = request.context.messages.filter((item) => item.role === 'user');
+      // The pasted image is carried by the multimodal user message(s), not re-sent as text.
+      const mediaUsers = users.filter((item) => typeof item.content !== 'string');
+      expect(mediaUsers).toHaveLength(repeated ? 2 : 1);
+      expect(mediaUsers[0]?.content).toEqual(expectedContent);
+      expect(users.at(-1)?.content).toEqual('continue');
+      expect(users.some((item) => item.content === 'queued follow-up')).toBe(queued);
+      expect(request.context.messages.filter((item) => item.role === 'toolResult')).toHaveLength(iterations);
+      expect(request.context.messages).not.toContainEqual(expect.objectContaining({ content: 'complete' }));
     } finally {
       agent.abort();
       unblock();
       if (running) await running;
       lease?.release();
-      responseMocks.create.mockReset();
+      transportMocks.stream.mockReset();
       rewriter?.dispose();
       configSpy.mockRestore();
       ruleSpy.mockRestore();
@@ -419,7 +438,8 @@ describe('SessionController', () => {
       model: 'm',
       effort: 'none',
       role: 'default',
-      messages: [{ role: 'user', content: 'work' }],
+        messageFormat: 'pi-ai-v1' as const,
+      messages: [piUser('work')],
       usageHistory: [],
       lastUsage: undefined,
     };
@@ -535,7 +555,8 @@ describe('SessionController', () => {
       model: 'm',
       effort: 'none',
       role: 'default',
-      messages: [{ role: 'user', content: 'work' }],
+        messageFormat: 'pi-ai-v1' as const,
+      messages: [piUser('work')],
       usageHistory: [],
       lastUsage: undefined,
     };
@@ -600,7 +621,7 @@ describe('SessionController', () => {
         title: '原会话',
         createdAt: new Date(0).toISOString(),
         updatedAt: new Date(0).toISOString(),
-        snapshot: { messages: [{ role: 'user', content: '保留这段对话' }], subagentUsageHistory: [] },
+        snapshot: { messages: [piUser('保留这段对话')], subagentUsageHistory: [] },
       } as unknown as PersistedSession;
       const recordSubagentUsage = vi.fn();
       const agent = { recordSubagentUsage, isRunning: false } as unknown as SessionAgentAdapter;
@@ -737,6 +758,7 @@ describe('SessionController', () => {
       model: 'removed-model',
       effort: 'medium',
       role: 'default',
+        messageFormat: 'pi-ai-v1' as const,
       messages: [],
       conversationMessages: [],
       usageHistory: [],
@@ -781,6 +803,7 @@ describe('SessionController', () => {
       model: 'removed-model',
       effort: 'high',
       role: 'default',
+        messageFormat: 'pi-ai-v1' as const,
       messages: [],
       conversationMessages: [],
       usageHistory: [],
@@ -801,6 +824,7 @@ describe('SessionController', () => {
         model: 'test-model',
         effort: 'none' as const,
         role: 'default',
+        messageFormat: 'pi-ai-v1' as const,
         messages: [],
         usageHistory: [],
         lastUsage: undefined,
@@ -844,6 +868,7 @@ describe('SessionController', () => {
         model: 'test-model',
         effort: 'none' as const,
         role: 'default',
+        messageFormat: 'pi-ai-v1' as const,
         messages: [],
         usageHistory: [],
         lastUsage: undefined,
@@ -881,6 +906,7 @@ describe('SessionController', () => {
         model: 'test-model',
         effort: 'none' as const,
         role: 'default',
+        messageFormat: 'pi-ai-v1' as const,
         messages: [],
         usageHistory: [],
         lastUsage: undefined,
@@ -913,7 +939,7 @@ describe('SessionController', () => {
 
   it('keeps persisting after an empty save removed the session file', async () => {
     const { SessionController } = await import('./SessionController.js');
-    let messages: Array<{ role: string; content: string }> = [];
+    let messages: Array<{ role: 'user'; content: string }> = [];
     let persisted: PersistedSession | null = null;
     const agent: SessionAgentAdapter = {
       getSnapshot: vi.fn(() => ({
@@ -922,7 +948,8 @@ describe('SessionController', () => {
         model: 'test-model',
         effort: 'none' as const,
         role: 'default',
-        messages,
+        messageFormat: 'pi-ai-v1' as const,
+        messages: piFromConversation(messages),
         usageHistory: [],
         lastUsage: undefined,
       })),
@@ -930,7 +957,7 @@ describe('SessionController', () => {
       reloadConfig: vi.fn(),
       toConversationMessages: vi.fn(
         () =>
-          messages.map((message) => ({ role: message.role, content: message.content })) as MicaUiConversationMessage[],
+          messages.map((message) => ({ role: message.role, content: message.content })),
       ),
     };
     const store: SessionStoreLike = {
@@ -984,6 +1011,7 @@ describe('SessionController', () => {
         model: 'test-model',
         effort: 'none' as const,
         role: 'default',
+        messageFormat: 'pi-ai-v1' as const,
         messages: [],
         conversationMessages: [{ role: 'user', content: 'history that must survive' }],
         usageHistory: [],
@@ -998,6 +1026,7 @@ describe('SessionController', () => {
         model: 'test-model',
         effort: 'none' as const,
         role: 'default',
+        messageFormat: 'pi-ai-v1' as const,
         messages: [],
         usageHistory: [],
         lastUsage: undefined,
@@ -1031,6 +1060,7 @@ describe('SessionController', () => {
         model: 'test-model',
         effort: 'none' as const,
         role: 'default',
+        messageFormat: 'pi-ai-v1' as const,
         messages: [],
         usageHistory: [],
         lastUsage: undefined,
@@ -1064,7 +1094,8 @@ describe('SessionController', () => {
         model: 'test-model',
         effort: 'none' as const,
         role: 'default',
-        messages: [{ role: 'user', content: 'original prompt' }],
+        messageFormat: 'pi-ai-v1' as const,
+        messages: [piUser('original prompt')],
         usageHistory: [],
         lastUsage: undefined,
       })),
@@ -1146,7 +1177,8 @@ describe('SessionController', () => {
         model: 'test-model',
         effort: 'none',
         role: 'default',
-        messages: [{ role: 'user', content: 'Existing conversation' }],
+        messageFormat: 'pi-ai-v1' as const,
+        messages: [piUser('Existing conversation')],
         conversationMessages: [{ role: 'user', content: 'Existing conversation' }],
         usageHistory: [],
         lastUsage: undefined,
@@ -1254,7 +1286,8 @@ describe('SessionController', () => {
           model: 'test-model',
           effort: 'none',
           role: 'default',
-          messages: [{ role: 'user', content: 'my prompt' }],
+        messageFormat: 'pi-ai-v1' as const,
+          messages: [piUser('my prompt')],
           usageHistory: [usage],
           lastUsage,
         }),
@@ -1305,7 +1338,8 @@ describe('SessionController', () => {
         model: 'test-model',
         effort: 'none' as const,
         role: 'default',
-        messages: [{ role: 'user', content: 'my prompt' }],
+        messageFormat: 'pi-ai-v1' as const,
+        messages: [piUser('my prompt')],
         usageHistory: [],
         lastUsage: undefined,
       })),
@@ -1336,7 +1370,7 @@ describe('SessionController', () => {
       turnState: 'running',
       snapshot: {
         ...saves[0]!.snapshot,
-        messages: [{ role: 'user', content: 'written by another host' }],
+        messages: [piUser('written by another host')],
       },
     };
 
@@ -1345,7 +1379,7 @@ describe('SessionController', () => {
     // turn of its session otherwise).
     expect(controller.saveCurrent({ turnState: 'completed' })).toBe(true);
     expect(saves).toHaveLength(2);
-    expect(saves[1]!.snapshot.messages).toEqual([{ role: 'user', content: 'my prompt' }]);
+    expect(saves[1]!.snapshot.messages).toEqual([piUser('my prompt')]);
     expect(saves[1]!.turnState).toBe('completed');
     expect(saves[1]!.revision).toBe((saves[0]!.revision ?? 0) + 1);
   });
@@ -1360,7 +1394,8 @@ describe('SessionController', () => {
         model: 'test-model',
         effort: 'none' as const,
         role: 'default',
-        messages: [{ role: 'user', content: '[Mica compact boundary]\n\n{"mode":"pruned"}' }],
+        messageFormat: 'pi-ai-v1' as const,
+        messages: [piUser('[Mica compact boundary]\n\n{"mode":"pruned"}')],
         usageHistory: [],
         lastUsage: undefined,
       })),
@@ -1403,7 +1438,8 @@ describe('SessionController', () => {
         model: 'test-model',
         effort: 'none' as const,
         role: 'default',
-        messages,
+        messageFormat: 'pi-ai-v1' as const,
+        messages: piFromConversation(messages),
         usageHistory: [],
         lastUsage: undefined,
       })),
@@ -1446,7 +1482,8 @@ describe('SessionController', () => {
         model: 'test-model',
         effort: 'none' as const,
         role: 'default',
-        messages,
+        messageFormat: 'pi-ai-v1' as const,
+        messages: piFromConversation(messages),
         usageHistory: [],
         lastUsage: undefined,
       })),
@@ -1481,7 +1518,8 @@ describe('SessionController', () => {
         model: 'test-model',
         effort: 'none' as const,
         role: 'default',
-        messages,
+        messageFormat: 'pi-ai-v1' as const,
+        messages: piFromConversation(messages),
         usageHistory: [],
         lastUsage: undefined,
       })),
@@ -1524,9 +1562,10 @@ describe('SessionController', () => {
         model: 'test-model',
         effort: 'none' as const,
         role: 'default',
+        messageFormat: 'pi-ai-v1' as const,
         messages: compacted
-          ? [{ role: 'user', content: '[Mica compact checkpoint]\n\nsummary' }]
-          : [{ role: 'user', content: 'Original task title' }],
+          ? [piUser('[Mica compact checkpoint]\n\nsummary')]
+          : [piUser('Original task title')],
         usageHistory: [],
         lastUsage: undefined,
       })),
@@ -1579,6 +1618,7 @@ describe('SessionController', () => {
         model: 'test-model',
         effort: 'none',
         role: 'default',
+        messageFormat: 'pi-ai-v1' as const,
         messages: [],
         conversationMessages: [{ role: 'user', content: 'Original user prompt' }],
         usageHistory: [],
@@ -1624,7 +1664,8 @@ describe('SessionController', () => {
       model: 'test-model',
       effort: 'none' as const,
       role: 'default',
-      messages: [{ role: 'user', content: 'model prompt' }],
+        messageFormat: 'pi-ai-v1' as const,
+      messages: [piUser('model prompt')],
       conversationMessages: [
         { role: 'user' as const, content: 'model prompt' },
         { role: 'notice' as const, content: 'saved notice' },
@@ -1664,6 +1705,7 @@ describe('SessionController', () => {
           model: snapshot.model,
           effort: snapshot.effort,
           role: snapshot.role,
+      messageFormat: snapshot.messageFormat,
           messages: snapshot.messages,
           usageHistory: snapshot.usageHistory,
           lastUsage: snapshot.lastUsage,
@@ -1697,6 +1739,7 @@ describe('SessionController', () => {
       model: snapshot.model,
       effort: snapshot.effort,
       role: snapshot.role,
+      messageFormat: snapshot.messageFormat,
       messages: snapshot.messages,
       usageHistory: snapshot.usageHistory,
       lastUsage: snapshot.lastUsage,
@@ -1737,6 +1780,7 @@ describe('SessionController', () => {
         model: 'deepseek-v4-pro',
         effort: 'low',
         role: 'default',
+        messageFormat: 'pi-ai-v1' as const,
         messages: [],
         conversationMessages: [],
         usageHistory: [],
@@ -1787,6 +1831,7 @@ describe('SessionController', () => {
       model: session.snapshot.model,
       effort: session.snapshot.effort,
       role: session.snapshot.role,
+      messageFormat: session.snapshot.messageFormat,
       messages: session.snapshot.messages,
       usageHistory: session.snapshot.usageHistory,
       lastUsage: session.snapshot.lastUsage,
@@ -1857,9 +1902,10 @@ describe('SessionController', () => {
           model: 'test-model',
           effort: 'none',
           role: 'default',
+        messageFormat: 'pi-ai-v1' as const,
           capabilitySelection: { version: 1, disabledSkills: [], disabledTools: [], disabledMcpServers: [] },
           capabilitiesCustomized: false,
-          messages: [{ role: 'user', content: 'my prompt' }],
+          messages: [piUser('my prompt')],
           usageHistory: [],
           lastUsage: undefined,
         }),
@@ -1896,6 +1942,7 @@ describe('SessionController', () => {
         model: 'test-model',
         effort: 'none',
         role: 'default',
+        messageFormat: 'pi-ai-v1' as const,
         contextWindowSize: 128000,
         messages: [],
         conversationMessages: [
@@ -1914,6 +1961,7 @@ describe('SessionController', () => {
           model: 'test-model',
           effort: 'none',
           role: 'default',
+        messageFormat: 'pi-ai-v1' as const,
           capabilitySelection: { version: 1, disabledSkills: [], disabledTools: [], disabledMcpServers: [] },
           capabilitiesCustomized: false,
           messages: [],
@@ -1952,6 +2000,7 @@ describe('SessionController', () => {
           model: 'test-model',
           effort: 'none',
           role: 'default',
+        messageFormat: 'pi-ai-v1' as const,
           capabilitySelection: { version: 1, disabledSkills: [], disabledTools: [], disabledMcpServers: [] },
           capabilitiesCustomized: false,
           messages: [],

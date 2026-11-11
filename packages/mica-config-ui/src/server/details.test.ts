@@ -5,6 +5,27 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import { createRole, deleteRole, getRolesDetails, writeRole } from './details.js';
 import { estimateTextTokens } from './sessionAnalysis.js';
 import type { PersistedSession } from '@packages/mica-session/index.js';
+import type { AssistantMessage } from '@earendil-works/pi-ai';
+
+function assistant(text: string): AssistantMessage {
+  return {
+    role: 'assistant',
+    content: [{ type: 'text', text }],
+    api: 'openai-completions',
+    provider: 'openai',
+    model: 'gpt-5',
+    stopReason: 'stop',
+    timestamp: 2,
+    usage: {
+      input: 0,
+      output: 0,
+      cacheRead: 0,
+      cacheWrite: 0,
+      totalTokens: 0,
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+    },
+  };
+}
 
 let home = '';
 let previousMicaHome: string | undefined;
@@ -113,16 +134,17 @@ describe('config web sessions', () => {
       cwd: '/tmp/project',
       turnState: 'completed',
       snapshot: {
+        messageFormat: 'pi-ai-v1',
         providerId: 'openai',
         protocol: 'openai_chat_completions',
         model: 'gpt-5',
         effort: 'high',
         role: 'default',
         messages: [
-          { role: 'user', content: 'hello' },
-          { role: 'assistant', content: 'hi' },
-          { role: 'user', content: 'again' },
-          { role: 'assistant', content: 'ok' },
+          { role: 'user', content: 'hello', timestamp: 1 },
+          assistant('hi'),
+          { role: 'user', content: 'again', timestamp: 3 },
+          assistant('ok'),
         ],
         conversationMessages: [],
         usageHistory: [
@@ -213,8 +235,8 @@ describe('config web sessions', () => {
     const updated = JSON.parse(JSON.stringify(session)) as PersistedSession;
     updated.snapshot.messages = [
       ...session.snapshot.messages,
-      { role: 'user', content: 'one more' },
-      { role: 'assistant', content: 'sure' },
+      { role: 'user', content: 'one more', timestamp: 5 },
+      assistant('sure'),
     ];
     micaSession.createStore().save(updated);
 

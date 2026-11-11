@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { AgentRuntime, AgentRuntimeSnapshot } from '../../agent/AgentRuntime.js';
+import { piAssistant, piUser } from '../../session/piTestMessages.js';
 import { LocalRuntimeController } from './LocalRuntimeController.js';
 
 describe('LocalRuntimeController rewind history', () => {
@@ -10,11 +11,12 @@ describe('LocalRuntimeController rewind history', () => {
       model: 'test-model',
       effort: 'none',
       role: 'default',
+      messageFormat: 'pi-ai-v1',
       messages: [
-        { role: 'user', content: 'first' },
-        { role: 'assistant', content: 'first answer' },
-        { role: 'user', content: 'second' },
-        { role: 'assistant', content: 'second answer' },
+        piUser('first'),
+        piAssistant('first answer'),
+        piUser('second'),
+        piAssistant('second answer'),
       ],
       usageHistory: [],
       lastUsage: undefined,

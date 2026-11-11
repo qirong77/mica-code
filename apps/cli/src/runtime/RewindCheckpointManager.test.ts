@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { RuntimeInput } from '@packages/mica-runtime/index.js';
 import type { AgentRuntime, AgentRuntimeSnapshot } from '../agent/AgentRuntime.js';
+import { piAssistant, piToolResult, piUser } from '../session/piTestMessages.js';
 import { RewindCheckpointManager } from './RewindCheckpointManager.js';
 
 describe('RewindCheckpointManager conversation fallback', () => {
@@ -29,22 +30,14 @@ describe('RewindCheckpointManager conversation fallback', () => {
   it('rebuilds resumed turns and keeps the selected turn including tool messages', () => {
     const manager = makeManager();
     let currentSnapshot = makeSnapshot([
-      { role: 'user', content: 'first request' },
-      {
-        role: 'assistant',
-        content: null,
-        tool_calls: [{ id: 'call-1', type: 'function', function: { name: 'read_file', arguments: '{}' } }],
-      },
-      { role: 'tool', tool_call_id: 'call-1', content: 'first result' },
-      { role: 'assistant', content: 'first answer' },
-      { role: 'user', content: 'second request' },
-      {
-        role: 'assistant',
-        content: null,
-        tool_calls: [{ id: 'call-2', type: 'function', function: { name: 'run_shell', arguments: '{}' } }],
-      },
-      { role: 'tool', tool_call_id: 'call-2', content: 'second result' },
-      { role: 'assistant', content: 'second answer' },
+      piUser('first request'),
+      piAssistant([{ type: 'toolCall', id: 'call-1', name: 'read_file', arguments: {} }], { stopReason: 'toolUse' }),
+      piToolResult('call-1', 'read_file', 'first result'),
+      piAssistant('first answer'),
+      piUser('second request'),
+      piAssistant([{ type: 'toolCall', id: 'call-2', name: 'run_shell', arguments: {} }], { stopReason: 'toolUse' }),
+      piToolResult('call-2', 'run_shell', 'second result'),
+      piAssistant('second answer'),
     ]);
     const agent = makeAgent(
       () => currentSnapshot,
@@ -78,14 +71,10 @@ describe('RewindCheckpointManager conversation fallback', () => {
     expect(result.inputText).toBe('first request');
     expect(result.messageCountRemoved).toBe(4);
     expect(currentSnapshot.messages).toEqual([
-      { role: 'user', content: 'first request' },
-      {
-        role: 'assistant',
-        content: null,
-        tool_calls: [{ id: 'call-1', type: 'function', function: { name: 'read_file', arguments: '{}' } }],
-      },
-      { role: 'tool', tool_call_id: 'call-1', content: 'first result' },
-      { role: 'assistant', content: 'first answer' },
+      piUser('first request'),
+      piAssistant([{ type: 'toolCall', id: 'call-1', name: 'read_file', arguments: {} }], { stopReason: 'toolUse' }),
+      piToolResult('call-1', 'read_file', 'first result'),
+      piAssistant('first answer'),
     ]);
     expect(result.conversationMessagesBefore).toEqual([
       { role: 'user', content: 'first request' },
@@ -97,8 +86,8 @@ describe('RewindCheckpointManager conversation fallback', () => {
   it('restores old history before capturing the first new turn after resume', async () => {
     const manager = makeManager();
     let currentSnapshot = makeSnapshot([
-      { role: 'user', content: 'resumed request' },
-      { role: 'assistant', content: 'resumed answer' },
+      piUser('resumed request'),
+      piAssistant('resumed answer'),
     ]);
     const agent = makeAgent(
       () => currentSnapshot,
@@ -121,12 +110,12 @@ describe('RewindCheckpointManager conversation fallback', () => {
   it('only exposes visible user turns when provider history contains hidden inputs', () => {
     const manager = makeManager();
     const snapshot = makeSnapshot([
-      { role: 'user', content: 'first visible' },
-      { role: 'assistant', content: 'first answer' },
-      { role: 'user', content: 'hidden system continuation' },
-      { role: 'assistant', content: 'hidden answer' },
-      { role: 'user', content: 'second visible' },
-      { role: 'assistant', content: 'second answer' },
+      piUser('first visible'),
+      piAssistant('first answer'),
+      piUser('hidden system continuation'),
+      piAssistant('hidden answer'),
+      piUser('second visible'),
+      piAssistant('second answer'),
     ]);
     const agent = makeAgent(
       () => snapshot,
@@ -149,10 +138,10 @@ describe('RewindCheckpointManager conversation fallback', () => {
   it('does not expose compact metadata as a user-selectable turn', () => {
     const manager = makeManager();
     const snapshot = makeSnapshot([
-      { role: 'user', content: '[Mica compact boundary]\n\n{}' },
-      { role: 'user', content: '[Mica compact checkpoint]\n\nsummary' },
-      { role: 'user', content: 'recoverable request' },
-      { role: 'assistant', content: 'answer' },
+      piUser('[Mica compact boundary]\n\n{}'),
+      piUser('[Mica compact checkpoint]\n\nsummary'),
+      piUser('recoverable request'),
+      piAssistant('answer'),
     ]);
     const agent = makeAgent(
       () => snapshot,
@@ -175,14 +164,10 @@ describe('RewindCheckpointManager conversation fallback', () => {
     );
     const checkpointId = (await manager.capture(agent, makeInput('call a tool')))!;
     currentSnapshot = makeSnapshot([
-      { role: 'user', content: 'call a tool' },
-      {
-        role: 'assistant',
-        content: null,
-        tool_calls: [{ id: 'call-1', type: 'function', function: { name: 'read_file', arguments: '{}' } }],
-      },
-      { role: 'tool', tool_call_id: 'call-1', content: 'tool result' },
-      { role: 'assistant', content: 'done' },
+      piUser('call a tool'),
+      piAssistant([{ type: 'toolCall', id: 'call-1', name: 'read_file', arguments: {} }], { stopReason: 'toolUse' }),
+      piToolResult('call-1', 'read_file', 'tool result'),
+      piAssistant('done'),
     ]);
     await manager.finalize(agent, checkpointId, [
       { role: 'user', content: 'call a tool' },
@@ -198,14 +183,10 @@ describe('RewindCheckpointManager conversation fallback', () => {
     });
 
     expect(currentSnapshot.messages).toEqual([
-      { role: 'user', content: 'call a tool' },
-      {
-        role: 'assistant',
-        content: null,
-        tool_calls: [{ id: 'call-1', type: 'function', function: { name: 'read_file', arguments: '{}' } }],
-      },
-      { role: 'tool', tool_call_id: 'call-1', content: 'tool result' },
-      { role: 'assistant', content: 'done' },
+      piUser('call a tool'),
+      piAssistant([{ type: 'toolCall', id: 'call-1', name: 'read_file', arguments: {} }], { stopReason: 'toolUse' }),
+      piToolResult('call-1', 'read_file', 'tool result'),
+      piAssistant('done'),
     ]);
   });
 });
@@ -214,13 +195,14 @@ function makeInput(text: string): RuntimeInput {
   return { id: `input-${text}`, text, source: 'ui', createdAt: Date.now() };
 }
 
-function makeSnapshot(messages: unknown[]): AgentRuntimeSnapshot {
+function makeSnapshot(messages: AgentRuntimeSnapshot['messages']): AgentRuntimeSnapshot {
   return {
     providerId: 'openai',
     protocol: 'openai_chat_completions',
     model: 'test-model',
     effort: 'none',
     role: 'default',
+    messageFormat: 'pi-ai-v1',
     messages,
     usageHistory: [],
     lastUsage: undefined,

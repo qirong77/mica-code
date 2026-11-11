@@ -12,7 +12,7 @@
 - 多 agent 命令使用 `createActiveAgentProxy` / `createActiveSessionControllerProxy`。
 - 插件 `ctx.onDispose()` 登记的资源在正常卸载与启动失败时都按注册逆序释放；单项清理失败仍继续释放其余资源，正常卸载结束后汇总抛错。`actions.register`、`desktop.panel` 与 `desktop.sessionMenu` 的登记由 manager 自动回收，新增 capability 同步登记 disposer。
 - provider/model/effort/role 切换先 busy guard，完成后 `reloadConfig(false)`、保存 session、同步 UI。
-- 非空会话跨协议切换由 `applyConfigSwitchUpdate` 阻止；恢复旧会话协议不匹配时降级恢复 model/effort，不静默丢历史。
+- 所有协议共享 pi-ai 消息历史；跨协议切换保留历史，由 pi 按目标模型转换工具 ID、图片与思考签名。旧原生 OpenAI 历史只经 `evolution` 一次性迁移，运行时不保留旧格式分支。
 - `/resume` 与 `--resume` 切到会话自己的 `cwd`（目录缺失时保留当前目录并提示）；app-server 的 resume 以客户端传入的 cwd 为准。
 
 ## Turn 与队列
@@ -31,7 +31,7 @@
 
 - turn 级重试最多 5 次、间隔 10s；仅在错误可重试且本轮没有非只读工具调用时自动重试，先恢复 pre-turn snapshot。
 - 回滚快照只复制 provider 状态，不构建展示消息；每次恢复复制基线，避免失败尝试污染下一次回滚。禁用 turn 重试时不建立副本，发生非只读工具调用后尽早释放副本。持久化快照使用 `getSnapshot({ includeConversation: false })`，展示消息由运行时自己的展示记录提供。
-- provider 的 `withRetry` 只在尚无文本/工具输出时重发（thinking 不算输出），退避 2/4/8/16/30s。
+- provider 的 `withRetry` 只在无不可回滚输出时重发；展示端提供文本和思考回滚能力时按尝试恢复。没有回滚能力的消费者收到正文、思考或工具输入后不重发，退避 2/4/8/16/30s。pi SDK 自动重试关闭，避免双层重试和不可见尝试。
 - 4xx 一律不重试，唯一例外是网关自己解析请求体失败的 400（`invalid json: invalid character ...`）：那份请求体是本地 `JSON.stringify` 出来的合法 JSON，重发通常就过，当成确定性错误会让一次网关抖动把整个长会话打成 error 态。判定在 `core/retry.ts` 的 `isUpstreamBodyParseFailure`。
 - 流空闲超过 60s 视为超时（`core/streamIdleTimeout.ts`）：SDK 的超时只覆盖到响应头，网关握手成功却不再吐事件时由看门狗关流并抛 `TimeoutError`，交给上面的重试判定。
 - 重试清空 responseBuffer，按顺序重放已消费的 `after_iteration` 输入；再次失败时保留尚未重放的尾部，不能只恢复本次已消费项。等待能被 abort 立即打断。
@@ -43,16 +43,16 @@
 
 ## Provider 与 Prompt
 
-- `createModelClient` 按 `provider.protocol` 显式选择客户端，不按 `api_base` 猜协议。
-- adapter 负责 wire 参数、消息结构、history normalizer、usage 与 tool-call 转换；runtime 不拼请求。
+- `createModelClient` 为内置四协议创建 `PiModelClient`：`openai_chat_completions` / `openai_responses` / `anthropic_messages` / `google_generative_ai`。配置协议仍显式声明，不按 `api_base` 猜。
+- `piTransport` 调用 pi-ai 的 API 实现，pi 负责 wire 编码、SSE、工具参数增量 JSON、签名重放、多模态结果转换与缺失工具结果修复。`PiModelClient` 只保留共享业务循环、权限/调度、重试回滚、图片字节预算和用量归属；`PiHistoryNormalizer` 提供唯一展示投影。runtime 不拼厂商请求。
 - `executeProviderToolCalls` 把连续只读工具与 `Agent` 调用并发，写/执行工具作为串行屏障；结果按调用顺序回填，每组前后检查 abort。
 - `readOnly: true` 同时允许并发与安全重试，工具必须无共享可变状态。
-- 多模态工具结果：Chat Completions 先追加全部 tool 文本，再用一条 user 消息承载图片；Responses 用原生 `function_call_output`。UI、日志只取文本投影。
+- 多模态工具结果统一存为 pi `toolResult` 的 text/image 块，目标协议转换由 pi 负责。UI、日志只取文本投影。
 - 两种运行模式的 `[Image](路径)` 都先经 `parseImageRefs` 转成多模态块；headless 直接导入 `mica-ui/utils/imagePaste.js`，避免引入 React/Ink。
-- 运行中改写只能经 `rewriteIterationMessages` 改 provider loop 的本地数组；钩子输入不含 system prompt，Chat Completions 重写后须补回 system。
-- 无视觉模型经 `stripImagesForVision` 替换发送副本中的图片；持久化历史保留原图。
+- 运行中改写只能经 `rewriteIterationMessages` 改共享循环的本地数组；钩子输入是 pi 消息，不含 system prompt。每次发送由 pi 组装 system 与工具声明。
+- 无视觉模型由 pi 的发送转换降级图片；持久化历史保留原图。
 - 图片有三道闸：**准备阶段** `prepareImageForApi`（`mica-common/image.ts`）把 PNG 的长边压到 1568 并无损重编码（够小的图原样透传，其它格式不重编码），处理完长边仍超 `IMAGE_MAX_API_LONG_EDGE`（8192）就直接抛错——DeepSeek `/responses` 实测 8192 能过、8193 起 400，报错文案却说「不支持的图片格式」，这种 400 不可重试、整个 turn 会失败，所以要在本机拦住并让模型缩小 / 裁剪 / 分段重读；**发送阶段** `applyImageBudget`（`mica-agent/providers/imageBudget.ts`）按字节而不是 token 算账——一次请求的正文（文本 + 内联图片载荷）上限 20MB、单张 6MB，超了就把最旧的图换成 `[图片已省略]…` 占位文本，最新的图优先保留。三道都要有：token 口径看不出 53MB 的请求体，实测 DeepSeek 网关 32MB 能过、48MB 回 413（openresty 的 HTML 错误页），而压缩只覆盖能解码的 PNG。
-- Responses 带 reasoning 参数时保留 `summary: 'auto'`；历史 reasoning 经 `dropReplayedReasoningItems` 从发送副本移除。
+- Responses 带 reasoning 参数时请求 summary 与 encrypted content；签名、原生 item ID 和工具关联保存在 pi assistant 消息中，同模型重放由 pi 处理。思考显示按内容块 checkpoint，和协议重放数据独立。
 - `buildSystemPrompt()` 始终以 `mica-agent/prompt/system.md` 构建固定的 `<system>` 默认正文，不接受 `baseSystemPrompt` 覆盖；内置 `default` 只读，Role 页面展示其正文。磁盘与插件的非默认 role 统一通过 `rolePrompt` 追加为紧接 `<system>` 的 `<role>` 段，两段同属 system prompt，默认角色不重复追加；cwd 的 `AGENT.md` / `AGENTS.md` 合并注入，路径按 live cwd 解析。会话角色名是**配置**：`loadSnapshot` 与 `resolveCurrentRole` 解析不到它时只保留默认正文、不追加 Role，但绝不把名字改写成 `default`（插件 role 由插件 setup 之后才发布，那一刻查不到很正常；改写会让下一次保存真的把角色丢掉）。`agent.role` 因此报配置里的名字。
 - base prompt 只放通用协作底座：通用助手身份、指令与事实边界、工具与权限、任务推进与成果保护、验证与沟通；专业职责与工作风格由 Role 补充，不替换通用约束。计划、委派、笔记、记忆这类策略由对应插件注册 `ctx.prompt.section()` 注入，随插件停用一起消失——不要为了「提示词完整」把工具用法抄回 base。
 - 工具用法（参数、超时、并发、等待语义）只写在工具 schema 描述里，base prompt 不重复：两处都写必然漂移，且每次改工具都在改 prompt cache 前缀。

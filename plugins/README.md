@@ -350,7 +350,7 @@ const { text, usage } = await ctx.models.request({
   user: transcript,
   baseUrl, // 地址 / Key / 协议 / 模型由调用方给出
   apiKey,
-  protocol: 'openai_chat_completions', // 或 openai_responses
+  protocol: 'openai_chat_completions', // 也支持 openai_responses / anthropic_messages / google_generative_ai
   model,
   timeoutMs: 60_000, // 可选，宿主会真的中断请求而不是只 reject
 });
@@ -358,7 +358,7 @@ const { text, usage } = await ctx.models.request({
 
 只有搞不清「这次请求该用哪份配置」的场合才直接用 `ctx.models`（例如 `mica plugin-action`
 的一次性进程里试连接）；能用 `llm` 就不要把四项拆回 `settings` 里手写。请求由宿主发出，
-所以三件事只有一份实现：协议分支（Chat Completions / Responses）、超时与中断、
+所以三件事只有一份实现：pi-ai 的多厂商协议适配、超时与中断、
 **用量记账**——这笔开销会以 `origin: 'plugin'` + `pluginId` 记进发起请求时的会话的
 `subagentUsageHistory`，在 Stats 的「By source」卡片与会话详情里能看到；插件用
 `ctx.subagents.run/background/thread` 起的后台子代理同样记在插件名下（主对话经工具委派的那条

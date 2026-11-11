@@ -9,7 +9,7 @@ import type {
 import { createBtwThread, type BtwThread } from '@packages/mica-builtin-commands/shared/btwThread.js';
 import { recordHelperSubagentUsage } from '@packages/mica-builtin-commands/subagentUsage.js';
 import type { CommandAgent, CommandSessionController } from '@packages/mica-builtin-commands/services.js';
-import type { AgentQueryContent } from '@packages/mica-agent/index.js';
+import type { AgentQueryContent, ModelMessage } from '@packages/mica-agent/index.js';
 // 与 headless 的对话输入同一条链路：草稿里的 `[Image](路径)` 要变成多模态内容块，
 // 模型才真的看得到图（桌面端 By The Way 的粘贴图片就走这里）。
 import { parseImageRefs } from '@packages/mica-ui/utils/imagePaste.js';
@@ -143,22 +143,25 @@ export function parseBtwToolArgs(args: string): unknown {
 /**
  * 落盘前把消息里的媒体块整条丢掉。
  *
- * 图片/文档在 wire 上是 base64，一条线程只要读过一次图就能让持久化文件涨到几十 MB，
+ * 图片在 pi 消息里是 base64 内容块，一条线程只要读过一次图就能让持久化文件涨到几十 MB，
  * 而它换来的是「重启后模型还能看到那张图」——这个收益与代价不成比例。丢的方式是
- * **整条消息丢掉**而不是换成占位符：不同协议的媒体块结构不同（`image_url` /
- * `input_image` / `document`），替换错形状会让下一次请求直接 400，而少一条历史消息
- * 只会让模型少一点背景。问答文本本身留在 `entries` 里，界面上一条都不少。
+ * **整条消息丢掉**而不是换成占位符：媒体块散落在 user 消息与 toolResult 里，替换错
+ * 形状会让下一次请求直接 400，而少一条历史消息只会让模型少一点背景。问答文本本身
+ * 留在 `entries` 里，界面上一条都不少。
  */
 export function persistableBtwMessages(messages: unknown[]): unknown[] {
-  const kept: unknown[] = [];
-  for (const message of messages) {
-    const text = JSON.stringify(message ?? null);
-    if (!text) continue;
-    if (text.includes('"input_image"') || text.includes('"image_url"') || text.includes('"document"'))
-      continue;
-    kept.push(message);
-  }
-  return kept;
+  return messages.filter((message) => !hasImageBlock(message));
+}
+
+/** pi 的消息内容块里只有 `{ type: 'image' }` 带 base64；文本与工具调用都是小的。 */
+function hasImageBlock(message: unknown): boolean {
+  if (!message || typeof message !== 'object') return false;
+  const content = (message as { content?: unknown }).content;
+  if (!Array.isArray(content)) return false;
+  return content.some((block) => {
+    if (!block || typeof block !== 'object') return false;
+    return (block as { type?: unknown }).type === 'image';
+  });
 }
 
 export class BtwThreadController {
@@ -349,10 +352,10 @@ export class BtwThreadController {
       return { ok: false, message: '这条 By The Way 线程还没有可压缩的对话' };
     try {
       const result = await new micaContext.CompactionService().compact({
-        messages: snapshot.messages,
+        messages: snapshot.messages as ModelMessage[],
         options: { toolResultsOnly: true },
       });
-      subagent.loadSnapshot({ ...snapshot, messages: result.messages });
+      subagent.loadSnapshot({ ...snapshot, messages: result.messages as ModelMessage[] });
       // 压缩后到下一次真实请求之前，界面读这份估算（lastUsage 描述的是压缩前那次）。
       this.compacted = { tokens: result.afterTokenEstimate, at: Date.now() };
       this.options.onUpdate(this.snapshot());

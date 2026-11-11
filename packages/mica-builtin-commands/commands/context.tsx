@@ -1,4 +1,5 @@
 import { Box, Text } from '@anthropic/ink';
+import type { ImageContent, Message, TextContent, ToolResultMessage } from '@earendil-works/pi-ai';
 import { formatTokenCount } from '@packages/mica-common/format.js';
 import {
   calculateUsageCachedTokenRate,
@@ -6,9 +7,9 @@ import {
   type ConversationContentBlock,
   type ConversationItem,
 } from '@packages/mica-agent/index.js';
-import { ChatCompletionsHistoryNormalizer } from '@packages/mica-agent/providers/ChatCompletionsHistoryNormalizer.js';
-import { ResponsesHistoryNormalizer } from '@packages/mica-agent/providers/ResponsesHistoryNormalizer.js';
+import { PiHistoryNormalizer } from '@packages/mica-agent/providers/PiHistoryNormalizer.js';
 import type { ProviderProtocol } from '@packages/mica-config/index.js';
+import { estimateContextTokens, estimateTextTokens as estimateTokens } from '@packages/mica-context/tokenEstimate.js';
 import { micaSkills } from '@packages/mica-skills/index.js';
 import { micaTools } from '@packages/mica-tools/index.js';
 import type { Tool } from '@packages/mica-tools/index.js';
@@ -87,10 +88,6 @@ type ContextOverview = {
   filesEdited: number;
   shellCommands: number;
   backgroundTasks: number;
-};
-
-type UnknownNormalizer = {
-  normalize(messages: unknown[]): ConversationItem[];
 };
 
 export function createContextCommand(agent: CommandAgent) {
@@ -233,7 +230,7 @@ function showContextDetailPanel(overview: ContextOverview) {
   });
 }
 
-function buildContextOverview(agent: CommandAgent): ContextOverview {
+export function buildContextOverview(agent: CommandAgent): ContextOverview {
   const { provider, model, effort } = agent.config;
   const protocol = provider.protocol;
   const snapshot = agent.getSnapshot();
@@ -242,7 +239,7 @@ function buildContextOverview(agent: CommandAgent): ContextOverview {
   const tools = micaTools.getDefinitions();
   const promptBreakdown = estimatePromptBreakdown(agent);
   const toolSchemaBreakdown = estimateToolSchemas(tools, protocol);
-  const conversationStats = analyzeConversation(normalizeMessages(protocol, snapshot.messages));
+  const conversationStats = analyzeConversation(new PiHistoryNormalizer().normalize(snapshot.messages as Message[]));
 
   const rawBuckets: Bucket[] = [
     { key: 'toolSchemas', label: 'Tool schemas', tokens: toolSchemaBreakdown.totalTokens },
@@ -367,25 +364,16 @@ function toProviderToolPayload(tool: Tool, protocol: ProviderProtocol): unknown 
       strict: false,
     };
   }
+  if (protocol === 'google_generative_ai') {
+    return {
+      functionDeclarations: [{ name: tool.name, description: tool.description, parametersJsonSchema: tool.input_schema }],
+    };
+  }
   return {
     name: tool.name,
     description: tool.description,
     input_schema: tool.input_schema,
   };
-}
-
-function normalizeMessages(protocol: ProviderProtocol, messages: unknown[]): ConversationItem[] {
-  try {
-    const normalizer = getNormalizer(protocol);
-    return normalizer.normalize(messages);
-  } catch {
-    return messages.map((content) => ({ type: 'unknown', content }));
-  }
-}
-
-function getNormalizer(protocol: ProviderProtocol): UnknownNormalizer {
-  if (protocol === 'openai_responses') return new ResponsesHistoryNormalizer() as unknown as UnknownNormalizer;
-  return new ChatCompletionsHistoryNormalizer() as unknown as UnknownNormalizer;
 }
 
 function analyzeConversation(items: ConversationItem[]): ConversationStats {
@@ -409,9 +397,8 @@ function analyzeConversation(items: ConversationItem[]): ConversationStats {
 
   for (const item of items) {
     if (item.type === 'user' || item.type === 'assistant' || item.type === 'system') {
-      const text = contentBlocksToEstimateText(item.content);
-      if (item.type === 'user' && text.trim()) stats.userTurns++;
-      stats.conversationTokens += estimateTokens(text);
+      if (item.type === 'user' && item.content.length > 0) stats.userTurns++;
+      stats.conversationTokens += estimateContentBlocks(item.content);
       continue;
     }
 
@@ -419,14 +406,15 @@ function analyzeConversation(items: ConversationItem[]): ConversationStats {
       stats.toolCalls++;
       toolNamesById.set(item.id, item.name);
       toolArgsById.set(item.id, item.args);
-      stats.toolCallTokens += estimateTokens(item.argsText ?? stringifyForEstimate(item.args));
+      stats.toolCallTokens += estimateTokens(item.name) + estimateTokens(item.argsText ?? stringifyForEstimate(item.args));
       recordToolCallWorkset(stats, item.name, item.args);
       continue;
     }
 
     if (item.type === 'tool_result') {
       const toolName = item.name ?? toolNamesById.get(item.id) ?? 'tool';
-      const tokens = estimateTokens(item.content);
+      const message = item.providerMetadata as ToolResultMessage;
+      const tokens = estimateContextTokens([message]) - 2;
       if (toolName === 'Skill') {
         stats.skillOutputTokens += tokens;
         stats.skillOutputCount++;
@@ -555,31 +543,11 @@ function extractPromptSectionBlock(prompt: string, section: string): string {
   return match?.[0] ?? '';
 }
 
-function contentBlocksToEstimateText(blocks: ConversationContentBlock[]): string {
-  return blocks.map((block) => (block.type === 'text' ? block.text : '[Image]')).join('\n');
-}
-
-function estimateTokens(text: string): number {
-  if (!text) return 0;
-  let ascii = 0;
-  let cjk = 0;
-  for (const ch of text) {
-    const code = ch.codePointAt(0) ?? 0;
-    if (isCjkCodePoint(code)) cjk++;
-    else ascii++;
-  }
-  return Math.max(1, Math.ceil(ascii / 4 + cjk / 1.5));
-}
-
-function isCjkCodePoint(code: number): boolean {
-  return (
-    (code >= 0x4e00 && code <= 0x9fff) ||
-    (code >= 0x3400 && code <= 0x4dbf) ||
-    (code >= 0x20000 && code <= 0x2ceaf) ||
-    (code >= 0xf900 && code <= 0xfaff) ||
-    (code >= 0x3000 && code <= 0x303f) ||
-    (code >= 0xff00 && code <= 0xffef)
+function estimateContentBlocks(blocks: ConversationContentBlock[]): number {
+  const content = blocks.map((block): TextContent | ImageContent =>
+    block.type === 'text' ? block : block.source as ImageContent,
   );
+  return estimateContextTokens([{ role: 'user', content, timestamp: 0 }]) - 2;
 }
 
 function stringifyForEstimate(value: unknown): string {

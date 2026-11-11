@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest';
+import { PROVIDER_PROTOCOLS } from '@packages/mica-config/providerProtocol.js';
+import { providerProtocolLabel } from './labels.js';
 import {
   addProviderDraft,
   parseConfigDraft,
@@ -47,6 +49,16 @@ describe('config draft parsing', () => {
 });
 
 describe('config draft providers', () => {
+  it.each(PROVIDER_PROTOCOLS)('round trips and validates %s without replacing it', (protocol) => {
+    const draft = draftOf({ providers: [{ ...SOURCE.providers[0], protocol }] });
+    const fields = readProviderDraft(providerEntries(draft)[0]);
+    expect(fields.protocol).toBe(protocol);
+    const restored = draftOf(JSON.parse(serializeConfigDraft(writeProviderDraft(draft, 0, fields))));
+    expect(readProviderDraft(providerEntries(restored)[0]).protocol).toBe(protocol);
+    expect(validateConfigDraft(restored)).toEqual([]);
+    expect(providerProtocolLabel(protocol)).not.toBe(protocol);
+  });
+
   it('reads form fields from a raw provider', () => {
     expect(readProviderDraft(providerEntries(draftOf(SOURCE))[0])).toEqual({
       id: 'deepseek',

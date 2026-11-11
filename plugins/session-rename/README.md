@@ -12,9 +12,9 @@
 
 | 键                   | 类型   | 说明                                                            |
 | -------------------- | ------ | --------------------------------------------------------------- |
-| `baseUrl` *          | 文本   | OpenAI 兼容接口地址，含 `/v1`，例如 `https://api.openai.com/v1` |
+| `baseUrl` *          | 文本   | 对应协议的服务地址，例如 `https://api.openai.com/v1` |
 | `apiKey` *           | 密码   | 该接口的 Key，可写 `${MY_KEY}` 从环境变量读                     |
-| `protocol` *         | 枚举   | `openai_chat_completions`（默认）或 `openai_responses`          |
+| `protocol` *         | 枚举   | `openai_chat_completions`（默认）、`openai_responses`、`anthropic_messages` 或 `google_generative_ai` |
 | `model` *            | 文本   | 用于起标题的模型，建议选便宜的小模型                            |
 | `prompt`             | 长文本 | 生成标题的提示词，留空则用插件内置默认值                        |
 | `maxMessages`        | 数字   | 最多带多少条对话作为上下文（从最近往前取），默认 `12`           |

@@ -115,7 +115,15 @@ function createMockProvider() {
         const finishText = () => {
           emit({ type: 'response.created', response: { id: 'resp_1', object: 'response' } });
           emit({ type: 'response.in_progress', response: { id: 'resp_1', object: 'response' } });
+          // Every output item is announced first and owns one output_index; the
+          // assistant message therefore moves to index 1 when reasoning is on.
+          const messageIndex = state.includeReasoning ? 1 : 0;
           if (state.includeReasoning) {
+            emit({
+              type: 'response.output_item.added',
+              output_index: 0,
+              item: { id: 'reasoning_1', type: 'reasoning', status: 'in_progress', summary: [] },
+            });
             emit({
               type: 'response.reasoning_summary_text.delta',
               item_id: 'reasoning_1',
@@ -124,35 +132,38 @@ function createMockProvider() {
               delta: 'thinking...',
             });
             emit({
-              type: 'response.reasoning_summary_text.done',
-              item_id: 'reasoning_1',
+              type: 'response.output_item.done',
               output_index: 0,
-              content_index: 0,
-              text: 'thinking...',
+              item: {
+                id: 'reasoning_1',
+                type: 'reasoning',
+                status: 'completed',
+                summary: [{ type: 'summary_text', text: 'thinking...' }],
+              },
             });
           }
           emit({
             type: 'response.output_item.added',
-            output_index: 0,
+            output_index: messageIndex,
             item: { id: 'msg_1', type: 'message', status: 'in_progress', role: 'assistant', content: [] },
           });
           emit({
             type: 'response.output_text.delta',
             item_id: 'msg_1',
-            output_index: 0,
+            output_index: messageIndex,
             content_index: 0,
             delta: text,
           });
           emit({
             type: 'response.output_text.done',
             item_id: 'msg_1',
-            output_index: 0,
+            output_index: messageIndex,
             content_index: 0,
             text,
           });
           emit({
             type: 'response.output_item.done',
-            output_index: 0,
+            output_index: messageIndex,
             item: {
               id: 'msg_1',
               type: 'message',
@@ -167,6 +178,13 @@ function createMockProvider() {
         };
         if (state.mode === 'stream-error') {
           emit({ type: 'response.created', response: { id: 'resp_failed', object: 'response' } });
+          // Text deltas only reach a slot the item announced first; the partial
+          // answer is what the failure must preserve.
+          emit({
+            type: 'response.output_item.added',
+            output_index: 0,
+            item: { id: 'msg_failed', type: 'message', status: 'in_progress', role: 'assistant', content: [] },
+          });
           emit({
             type: 'response.output_text.delta',
             item_id: 'msg_failed',
@@ -861,7 +879,12 @@ suite('mica exec real-user flows (mock provider)', () => {
     });
 
     expect(result.code).toBe(0);
-    expect(mock!.state.requests[0]?.instructions).toContain('EXEC_ROLE_MARKER: review every answer.');
+    // pi 把系统提示词作为 input 里的首条 system/developer 消息发送（Responses 的
+    // `instructions` 字段只给 codex 变体用）。
+    const firstRequest = mock!.state.requests[0];
+    expect(JSON.stringify(firstRequest?.instructions ?? firstRequest?.input ?? '')).toContain(
+      'EXEC_ROLE_MARKER: review every answer.',
+    );
     const sessionFiles = readdirSync(join(home, 'sessions')).filter((file) => file.endsWith('.json'));
     expect(sessionFiles).toHaveLength(1);
     const session = JSON.parse(readFileSync(join(home, 'sessions', sessionFiles[0]!), 'utf8')) as {

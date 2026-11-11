@@ -5,6 +5,7 @@ import type {
   PluginMaintenanceWindow,
 } from '@packages/mica-plugin/index.js';
 import { estimateContextTokens, estimateTextTokens } from '@packages/mica-context/index.js';
+import type { Message } from '@earendil-works/pi-ai';
 import type { AgentRuntime } from './AgentRuntime.js';
 
 /**
@@ -137,7 +138,7 @@ function createAgentHandle(agent: AgentRuntime, pluginId: string, signal?: Abort
     signal,
     estimateTokens: (messages: unknown[]) => {
       overheadTokens ??= agent.estimateRequestOverheadTokens?.() ?? estimateTextTokens(agent.systemPrompt ?? '');
-      return estimateContextTokens(messages) + overheadTokens;
+      return estimateContextTokens(messages as Message[]) + overheadTokens;
     },
     lastUsage: () => {
       const usage = agent.getLastUsage();

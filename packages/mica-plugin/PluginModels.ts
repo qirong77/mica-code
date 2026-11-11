@@ -13,8 +13,8 @@
  * 会话用量以外的任何东西。
  */
 
-/** 插件请求支持的协议，与主配置的 `ProviderProtocol` 同义。 */
-export type PluginModelProtocol = 'openai_chat_completions' | 'openai_responses';
+/** 插件请求与主会话共用 pi-ai 支持的协议。 */
+export type PluginModelProtocol = import('@packages/mica-config/index.js').ProviderProtocol;
 
 export type PluginModelUsage = {
   inputTokens: number;
@@ -36,7 +36,7 @@ export type PluginModelRequest = {
   /** 唯一的用户消息正文。 */
   user: string;
   model: string;
-  /** OpenAI 兼容的 base URL；写到 `/v1` 即可，端点由宿主按协议补。 */
+  /** 服务商 base URL，端点由宿主按协议补。 */
   baseUrl: string;
   apiKey?: string;
   protocol?: PluginModelProtocol;

@@ -1,4 +1,5 @@
 import type { TurnTimingRecord } from '@packages/mica-common/turnTiming.js';
+import type { ProviderProtocol } from '@packages/mica-config/providerProtocol.js';
 
 export type ConfigWebSection =
   | 'config'
@@ -155,7 +156,7 @@ export type ConfigWebConversationItem = {
 
 export type ConfigWebConversationDetails = {
   providerId: string;
-  protocol: 'openai_chat_completions' | 'openai_responses';
+  protocol: ProviderProtocol;
   model: string;
   updatedAt: string;
   items: ConfigWebConversationItem[];
@@ -700,9 +701,8 @@ export type ConfigWebContextEntry = {
 };
 
 /**
- * 上下文占用的类别。同一份 provider 历史可能是两种形态：
- * - Chat Completions：`{ role, content, tool_calls }` / `{ role: 'tool', tool_call_id }`
- * - Responses：扁平的 `{ type: 'message' | 'function_call' | 'function_call_output' | 'reasoning' }`
+ * 上下文占用的类别。所有协议共用 Pi Message[]：assistant content 包含 text / thinking /
+ * toolCall，工具结果使用 role: 'toolResult'。
  *
  * `envelope` 是每条消息的 role / type / call_id / name 等结构字段——线上请求同样会带上，
  * 混进正文会让「持久化消息体」明显偏小、差额全被算成 system prompt。

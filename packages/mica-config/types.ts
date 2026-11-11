@@ -1,4 +1,7 @@
 import { resolveMicaHomePath } from './brand.js';
+import type { ProviderProtocol } from './providerProtocol.js';
+
+export { PROVIDER_PROTOCOLS, isProviderProtocol, type ProviderProtocol } from './providerProtocol.js';
 
 /**
  * 我们认得名字的档位，只用于排序与界面文案。
@@ -8,14 +11,12 @@ import { resolveMicaHomePath } from './brand.js';
  * `xhigh` 会被拒绝，`minimal` 被折成 `low` 则根本不是用户选的那一档。
  */
 export const KNOWN_EFFORT_LEVELS = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'ultra', 'max', 'on'] as const;
-export const PROVIDER_PROTOCOLS = ['openai_chat_completions', 'openai_responses'] as const;
 export const DEFAULT_MODEL_CONTEXT_SIZE = 256;
 export const CONFIG_PATH = resolveMicaHomePath('config.json');
 
 export type KnownEffortLevel = (typeof KNOWN_EFFORT_LEVELS)[number];
 /** 模型声明的档位名；已知名字有提示，其余厂商自定义的名字同样合法。 */
 export type EffortOption = KnownEffortLevel | (string & {});
-export type ProviderProtocol = (typeof PROVIDER_PROTOCOLS)[number];
 export type ModelRequestPatch = Record<string, unknown>;
 export type ModelEffortRule = Partial<Record<ProviderProtocol, ModelRequestPatch>>;
 
@@ -30,8 +31,8 @@ export interface ProviderDefinition {
    * 该服务端真实接受的档位名，按从弱到强排列。
    *
    * 只用于 models.dev 没有收录的模型（自建网关、私有部署）：有元数据时一律以模型自己的
-   * 档位为准，这里不参与。填进来的名字会原样作为 `reasoning_effort` / `reasoning.effort`
-   * 发出，所以必须写服务端认的取值，而不是我们习惯的叫法。
+   * 档位为准，这里不参与。填进来的名字会原样写入该协议的 effort / thinking level
+   * 字段，所以必须写服务端认的取值，而不是我们习惯的叫法。
    */
   effortLevels?: EffortOption[];
 }
@@ -105,10 +106,6 @@ export function isPositiveNumber(value: unknown): value is number {
  */
 export function isEffortLevelName(value: unknown): value is EffortOption {
   return typeof value === 'string' && /^[a-z][a-z0-9_-]{0,31}$/.test(value);
-}
-
-export function isProviderProtocol(value: unknown): value is ProviderProtocol {
-  return PROVIDER_PROTOCOLS.includes(value as ProviderProtocol);
 }
 
 export function providerSupportsModel(provider: ProviderDefinition, model: string): boolean {

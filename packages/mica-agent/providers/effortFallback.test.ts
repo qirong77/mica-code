@@ -1,21 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { micaConfig, type ProviderProtocol } from '@packages/mica-config/index.js';
-import { ChatCompletionsClient } from './ChatCompletionsClient.js';
-import { ResponsesClient } from './ResponsesClient.js';
+import { micaConfig } from '@packages/mica-config/index.js';
 import { isUnsupportedReasoningError } from './effortFallback.js';
-import type { ModelClientOptions } from './types.js';
-
-const openaiMocks = vi.hoisted(() => ({
-  chatCreate: vi.fn(),
-  responsesCreate: vi.fn(),
-}));
-
-vi.mock('openai', () => ({
-  OpenAI: class MockOpenAI {
-    chat = { completions: { create: openaiMocks.chatCreate } };
-    responses = { create: openaiMocks.responsesCreate };
-  },
-}));
 
 /**
  * 真实报错（krill 的 codex 网关，gpt-6.1-terra）：models.dev 声明该模型有 `none` 这一档，
@@ -63,8 +48,6 @@ afterEach(() => {
   while (disposers.length > 0) disposers.pop()?.();
   disposers = [];
   micaConfig.resetRejectedEffortLevels();
-  openaiMocks.chatCreate.mockReset();
-  openaiMocks.responsesCreate.mockReset();
   vi.spyOn(console, 'error').mockRestore();
 });
 
@@ -86,56 +69,6 @@ describe('unsupported effort fallback', () => {
         { reasoning: { effort: 'none' } },
       ),
     ).toBe(false);
-  });
-
-  it('Responses drops the reasoning params and retries once, then remembers the level', async () => {
-    vi.spyOn(console, 'error').mockImplementation(() => {});
-    openaiMocks.responsesCreate
-      .mockRejectedValueOnce(effortRejected())
-      .mockImplementation(() => Promise.resolve(responsesStream('ok')));
-
-    const client = new ResponsesClient(options('openai_responses', 'krill-effort', 'none'));
-    await expect(client.query('hello')).resolves.toBe('ok');
-
-    expect(openaiMocks.responsesCreate).toHaveBeenCalledTimes(2);
-    expect(openaiMocks.responsesCreate.mock.calls[0]?.[0]).toMatchObject({ reasoning: { effort: 'none' } });
-    // 第二次真的不带推理参数，而不是换个档位偷偷发。
-    expect(Object.keys(openaiMocks.responsesCreate.mock.calls[1]?.[0] ?? {})).not.toContain('reasoning');
-
-    // 压缩摘要每次都新建客户端：靠 mica-config 记住的拒绝记录，下一次直接不发。
-    openaiMocks.responsesCreate.mockClear();
-    openaiMocks.responsesCreate.mockImplementation(() => Promise.resolve(responsesStream('again')));
-    const next = new ResponsesClient(options('openai_responses', 'krill-effort', 'none'));
-    await expect(next.query('hello')).resolves.toBe('again');
-
-    expect(openaiMocks.responsesCreate).toHaveBeenCalledTimes(1);
-    expect(Object.keys(openaiMocks.responsesCreate.mock.calls[0]?.[0] ?? {})).not.toContain('reasoning');
-  });
-
-  it('Chat Completions drops reasoning_effort and retries once', async () => {
-    vi.spyOn(console, 'error').mockImplementation(() => {});
-    openaiMocks.chatCreate
-      .mockRejectedValueOnce(effortRejected())
-      .mockImplementation(() => Promise.resolve(chatStream('ok')));
-
-    const client = new ChatCompletionsClient(options('openai_chat_completions', 'test', 'none'));
-    await expect(client.query('hello')).resolves.toBe('ok');
-
-    expect(openaiMocks.chatCreate).toHaveBeenCalledTimes(2);
-    expect(openaiMocks.chatCreate.mock.calls[0]?.[0]).toMatchObject({ reasoning_effort: 'none' });
-    expect(Object.keys(openaiMocks.chatCreate.mock.calls[1]?.[0] ?? {})).not.toContain('reasoning_effort');
-  });
-
-  it('keeps a single attempt when the model accepts the level', async () => {
-    openaiMocks.responsesCreate.mockImplementation(() => Promise.resolve(responsesStream('ok')));
-
-    const client = new ResponsesClient(options('openai_responses', 'krill-effort', 'medium'));
-    await expect(client.query('hello')).resolves.toBe('ok');
-
-    expect(openaiMocks.responsesCreate).toHaveBeenCalledTimes(1);
-    expect(openaiMocks.responsesCreate.mock.calls[0]?.[0]).toMatchObject({
-      reasoning: { effort: 'medium', summary: 'auto' },
-    });
   });
 
   it('stops offering and sending a level the server rejected', () => {
@@ -170,33 +103,3 @@ describe('unsupported effort fallback', () => {
     ).toEqual({ reasoning: { effort: 'high' } });
   });
 });
-
-function options(protocol: ProviderProtocol, providerId: string, effort: string): ModelClientOptions {
-  return {
-    model: 'gpt-6.1-terra',
-    effort: effort as never,
-    apiKey: 'test-key',
-    baseURL: 'https://example.com/v1',
-    provider: {
-      id: providerId,
-      api_base: 'https://example.com/v1',
-      protocol,
-    },
-  };
-}
-
-async function* responsesStream(text: string): AsyncGenerator<unknown> {
-  yield { type: 'response.output_text.delta', delta: text };
-  yield {
-    type: 'response.completed',
-    response: { model: 'gpt-6.1-terra', usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 } },
-  };
-}
-
-async function* chatStream(text: string): AsyncGenerator<unknown> {
-  yield {
-    model: 'gpt-6.1-terra',
-    choices: [{ delta: { content: text }, finish_reason: 'stop' }],
-    usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
-  };
-}

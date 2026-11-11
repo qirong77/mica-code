@@ -89,10 +89,7 @@ function extractMessageText(content: unknown): string {
   for (const block of content) {
     if (!block || typeof block !== 'object') continue;
     const record = block as Record<string, unknown>;
-    const type = record.type;
-    if (type === 'text' || type === 'input_text' || type === 'output_text') {
-      if (typeof record.text === 'string') parts.push(record.text);
-    }
+    if (record.type === 'text' && typeof record.text === 'string') parts.push(record.text);
   }
   return parts.join('\n').trim();
 }

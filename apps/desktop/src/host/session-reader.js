@@ -24,7 +24,7 @@ function projectSession(raw) {
     [snapshot?.activeThinking, true]
   ]) {
     if (
-      thinking?.protocol === 'openai_responses' && thinking.protocol === snapshot?.protocol &&
+      thinking && thinking.protocol === snapshot?.protocol &&
       thinking.providerId === snapshot?.providerId && thinking.model === snapshot?.model &&
       typeof thinking.text === 'string' && thinking.text
     ) {
@@ -73,17 +73,11 @@ function projectSession(raw) {
           // 参数不是合法 JSON 就当这次 todo_write 没发生。
         }
       }
-      for (const call of Array.isArray(message?.tool_calls) ? message.tool_calls : []) {
-        remember(call.id, call.function?.name, call.function?.arguments)
-      }
-      if (message?.type === 'function_call') remember(message.call_id, message.name, message.arguments)
       for (const block of blocks) {
-        if (block?.type === 'tool_use') remember(block.id, block.name, block.input)
+        if (block?.type === 'toolCall') remember(block.id, block.name, block.arguments)
       }
       const finish = (id, result, output) => { if (calls.has(id) && !failed(result, output)) todoInput = calls.get(id) }
-      if (message?.role === 'tool') finish(message.tool_call_id, message, message.content)
-      if (message?.type === 'function_call_output') finish(message.call_id, message, message.output)
-      for (const block of blocks) if (block?.type === 'tool_result') finish(block.tool_use_id, block, block.content)
+      if (message?.role === 'toolResult') finish(message.toolCallId, message, message.content)
     }
     const usages = Array.isArray(snapshot.usageHistory) ? snapshot.usageHistory : []
     const input = usages.reduce((sum, usage) => sum + Math.max(0, Number(usage?.inputTokens) || 0), 0)

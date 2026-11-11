@@ -6,7 +6,9 @@
 
 - 提供 `IAgent`、conversation message 等公共 agent 类型。
 - `IAgent.getSnapshot({ includeConversation: false })` 只取 provider 状态，省去展示消息投影；默认仍包含 `conversationMessages`。保存和回滚热路径可按需关闭投影。
-- 提供 OpenAI Chat Completions 与 OpenAI Responses 两类协议 client。
+- `PiModelClient` 通过 `@earendil-works/pi-ai` 统一支持 OpenAI Chat Completions、OpenAI Responses、Anthropic Messages 和 Google Generative AI；请求编码、SSE、思考重放、工具参数的增量 JSON 解析和多模态工具结果编码由 pi 处理。
+- `ModelMessage` 是 pi-ai 的消息类型，所有协议使用同一种历史；`PiHistoryNormalizer` 投影成展示用的正文与工具记录。快照写 `messageFormat: 'pi-ai-v1'`。旧 OpenAI 原生历史不再直接加载，由 `evolution` 一次性迁移。
+- `AgentCallbacks.onToolInput` 提供模型生成工具输入的 start/delta/end 事件；`onToolCall` / `onToolResult` 继续表示实际执行。思考显示按 pi 内容块有序提交 checkpoint，签名与加密数据保存在模型历史中。
 - `AgentQueryOptions.onRequestStart` 在实际发起每轮请求前提供消息数量与本轮工具定义；包括首个失败请求，transport 重试另走 `onRetry`，观察回调抛错不影响请求。
 - 提供子 agent 创建入口：`createSubAgent`。
 - 提供 usage 汇总与 subagent usage 记录类型：`summarizeUsageHistory`、`SubagentUsageRecord`。
@@ -42,6 +44,9 @@ const agent = micaAgent.createModelClient({
 
 - 本包不依赖 UI、session、commands 等应用层模块。
 - provider adapter 只负责模型协议适配，不感知多 agent 协作或命令系统。
+- Pi 提供协议、签名和工具结果的转换；Mica 的共享循环保留权限过滤、只读并发、写入屏障、等待重叠、队列输入、压缩、展示回滚与用量归属。Pi SDK 的自动重试关闭，可见重试由 Mica 统一管理。
+- 不引用 pi 的完整 agent 应用；`pi-agent-core` 的执行模式不能表达 Mica 按工具输入判断的等待重叠与写入屏障，因此不额外叠加第二个执行循环。
+- pi-ai 固定版本为 `1.5.2`，Node 运行时要求 `>=22.19.0`。真实 API 冒烟用显式开关 `MICA_PI_LIVE=1 MICA_PI_SOURCE_HOME=/path/to/.mica MICA_PI_PROVIDER=<id> bunx vitest run --project unit packages/mica-agent/providers/piLive.test.ts`；默认跳过，不读取真实凭据。每种选中协议最多三次模型请求，验证工具循环与序列化后重放。
 - prompt 构建集中放在 `prompt/`，避免散落在运行时流程中。
 - `<system>` 始终保留内置默认正文；磁盘与插件的非默认 role 都经 `rolePrompt` 追加成紧接其后的 `<role>` 段，两段同属 system prompt，`default` 不重复追加。`AgentRole` 不再包含 `append` 标志；project instructions、skills 索引和环境 context 仍由 prompt builder 注入。
 - UI/Ink 相关的日志 item 工厂放在 `packages/mica-ui`，本包只暴露 provider 与 agent 类型。

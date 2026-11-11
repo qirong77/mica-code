@@ -1,5 +1,6 @@
 import { getModelRule } from './getModelRule.js';
 import { isEffortLevelRejected } from './effortRejections.js';
+import { getNativeModelRule, isNativeProtocol, nativeEffortPatch } from './nativeModelRules.js';
 import type { EffortOption, ProviderDefinition, ProviderProtocol, ResolvedEffortParams } from './types.js';
 
 export type EffortParamsRequest = {
@@ -28,10 +29,12 @@ export function resolveEffortParams({ provider, model, effort, protocol }: Effor
   if (isEffortLevelRejected(provider, model, level)) return {};
   // 档位补丁必须按「实际服务这次请求的 provider」查：同一个模型挂在网关上时档位集合
   // 可能与厂商自己的条目不同（OpenRouter 的 kimi-k3 多一个 `none`）。
-  const rule = getModelRule(model, provider);
+  const rule = getModelRule(model, { ...provider, protocol });
   const fromModel = rule.efforts[level]?.[protocol];
   if (fromModel) return fromModel;
   if (Object.keys(rule.efforts).length > 0) return {};
+  if (getNativeModelRule(model, protocol)) return {};
   if (!provider.effortLevels?.includes(level)) return {};
+  if (isNativeProtocol(protocol)) return nativeEffortPatch(protocol, level) ?? {};
   return protocol === 'openai_responses' ? { reasoning: { effort: level } } : { reasoning_effort: level };
 }

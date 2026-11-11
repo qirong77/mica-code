@@ -93,7 +93,7 @@ export function mcpTypeLabel(type: string | undefined): string {
 }
 
 /**
- * provider 协议：`openai_chat_completions` / `openai_responses`。
+ * provider 协议的人读名称。
  *
  * 表单里要给人看，所以用厂商自己的叫法而不是配置里的下划线枚举值；未知值原样返回，
  * 免得以后新增协议被显示成「未知」。
@@ -101,5 +101,7 @@ export function mcpTypeLabel(type: string | undefined): string {
 export function providerProtocolLabel(protocol: string | undefined): string {
   if (protocol === 'openai_chat_completions') return 'Chat Completions';
   if (protocol === 'openai_responses') return 'Responses';
+  if (protocol === 'anthropic_messages') return 'Anthropic Messages';
+  if (protocol === 'google_generative_ai') return 'Google Generative AI';
   return protocol || '未知';
 }

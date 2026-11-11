@@ -82,16 +82,14 @@ export function userMessageIndexes(messages: unknown[]): number[] {
 }
 
 /**
- * 用量记录与消息下标对齐：chat completions 的一条 usage 覆盖「含本条消息」的
- * 请求，responses 覆盖「本条消息之前」的请求，所以要分协议调整边界。
+ * 用量记录与 pi 消息下标对齐：每条 usage 记录请求发出前的历史长度，不含 system。
  */
 export function usageBeforeMessage(
-  protocol: AgentRuntimeSnapshot['protocol'],
+  _protocol: AgentRuntimeSnapshot['protocol'],
   usageHistory: AgentRuntimeSnapshot['usageHistory'],
   messageIndex: number,
 ): AgentRuntimeSnapshot['usageHistory'] {
-  const messageCountLimit = protocol === 'openai_chat_completions' ? messageIndex + 1 : messageIndex;
-  return usageHistory.filter((usage) => usage.messageCount <= messageCountLimit);
+  return usageHistory.filter((usage) => usage.messageCount <= messageIndex);
 }
 
 /**
@@ -117,14 +115,14 @@ export function findUserMessageCutIndex(messages: unknown[], prompt: string, occ
   return matches.length === 1 ? matches[0]! : -1;
 }
 
-export type TruncatedHistory = {
-  messages: unknown[];
+export type TruncatedHistory<TMessage = unknown> = {
+  messages: TMessage[];
   usageHistory: AgentRuntimeSnapshot['usageHistory'];
   lastUsage: AgentRuntimeSnapshot['usageHistory'][number] | undefined;
 };
 
-export type TruncateHistoryResult =
-  | { ok: true; snapshot: TruncatedHistory; removedMessages: number }
+export type TruncateHistoryResult<TMessage = unknown> =
+  | { ok: true; snapshot: TruncatedHistory<TMessage>; removedMessages: number }
   | { ok: false; message: string };
 
 /**
@@ -133,10 +131,10 @@ export type TruncateHistoryResult =
  * conversationMessages 由 client 从 provider messages 派生
  * （`toConversationMessages`），loadSnapshot 会一并重建，所以这里不动 UI 层。
  */
-export function truncateHistoryBeforeUserMessage(
-  snapshot: Pick<AgentRuntimeSnapshot, 'messages' | 'usageHistory' | 'protocol'>,
+export function truncateHistoryBeforeUserMessage<TMessage>(
+  snapshot: Pick<AgentRuntimeSnapshot, 'usageHistory' | 'protocol'> & { messages: TMessage[] },
   options: { prompt: string; occurrenceFromEnd?: number },
-): TruncateHistoryResult {
+): TruncateHistoryResult<TMessage> {
   const cutIndex = findUserMessageCutIndex(snapshot.messages, options.prompt, options.occurrenceFromEnd);
   if (cutIndex < 0) {
     return { ok: false, message: describeLocateFailure(snapshot.messages, options.prompt) };

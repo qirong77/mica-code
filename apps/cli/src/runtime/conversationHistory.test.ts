@@ -74,7 +74,7 @@ describe('conversationHistory', () => {
     expect(result.snapshot.lastUsage).toEqual({ turnId: 1, messageCount: 1, inputTokens: 10 });
   });
 
-  it('keeps the usage boundary protocol-specific (chat completions counts the message itself)', () => {
+  it('uses the same pi message usage boundary for every wire protocol', () => {
     const messages = [
       { role: 'user', content: 'first' },
       { role: 'assistant', content: 'answer one' },
@@ -92,7 +92,7 @@ describe('conversationHistory', () => {
       prompt: 'second',
     });
     expect(responses.ok && responses.snapshot.usageHistory).toHaveLength(1);
-    expect(chat.ok && chat.snapshot.usageHistory).toHaveLength(2);
+    expect(chat.ok && chat.snapshot.usageHistory).toHaveLength(1);
   });
 
   it('reports a miss instead of silently truncating nothing', () => {

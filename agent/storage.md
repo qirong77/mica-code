@@ -5,7 +5,7 @@
 - 旧版本写在 `config.json` 的 `searxngUrl` 在启动时迁进 `plugin-settings/web-search.json`（已有值不覆盖）并删掉原键；搜索改成插件后只有插件设置生效。
 - 配置迁移与语义校验统一在 `startup/validate-config.js`，配置页保存复用它。
 - 仅当所有 provider 都没有 api_key 时，`envProvider.ts` 从 `OPENAI_API_KEY` / `OPENAI_BASE_URL` 合成运行时 provider；环境 provider 永不写回 config.json。
-- session 是 version 1 JSON；新增字段要有版本策略、默认值与 sanitize，字段类型不对按损坏拒绝。
+- session 是 version 1 JSON；模型历史固定为 `messageFormat: 'pi-ai-v1'` 与 pi-ai `Message[]`，不按 wire 协议存两份结构。这个标记与它被拒时的提示统一由 `packages/mica-common/messageFormat.ts` 提供（会话读写、`AgentRuntime.loadSnapshot`、`PiModelClient` 与 evolution 迁移共用一份），不要在各处再写字面量。旧 OpenAI 原生历史不再直接读取，由 `evolution` 的 `pi-messages-v1` 幂等迁移保留正文、图片、工具和思考签名。新增字段要有版本策略、默认值与 sanitize，字段类型不对按损坏拒绝。
 - `parentSessionId` 是顶层元信息（与 `cwd` 同级），记录「谁派生的这条会话」：`--parent`、`thread/start`、fork（父会话换成源会话）。非法值（非字符串、id 形状不对、自指）丢弃而不是拒绝整个会话——它只影响侧栏嵌套。`$MICA_HOME/session-index.json` 的版本号跟着升，旧索引直接重建。
 - `awaitingInput` 是顶层可选字符串（≤120 字符），表示「这条会话正在等用户做一个选择」（插件 `ctx.ask` 的 `summary`）；`turnState === 'completed'` 时读盘丢弃。它**不进快照、也不走完整保存**：`SessionStore.patchAwaitingInput` 只改这一个字段并原子写回，键位置固定在 `turnState` 之后、`snapshot` 之前——侧栏只读文件头 4KB，排在快照后面就永远看不到。绕开完整保存的原因是那一次保存会先过「还没有对话内容就别落盘」的保护，而提问恰好发生在第一个答案之前。轮次结束时 `saveCurrent` 清掉它，改名（`renameCurrent`）不动它。
 - 会话级状态都在快照里：`capabilitySelection` / `capabilitiesCustomized`、`pluginState`（插件自己的 JSON）、`pluginSessionSettings`（插件设置的会话覆盖，只存改过的键）、`notes`。`startNewSession` 清空，resume/fork 沿用，rewind 随 checkpoint 回滚。`turnTimings`（最近 50 轮的耗时分解）是例外：它记录这条会话跑过的轮次，`startNewSession` 与 fork 都清空，读盘时坏掉的条目丢掉而不是判整份会话损坏。

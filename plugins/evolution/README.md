@@ -47,6 +47,9 @@ mica 选后者，这个插件就是「洗」的地方。
 | `usage-source-owner`     | 给没有归属的用量记录补上发起它的插件：委派（内置子代理类型）→ `subagent`，`btw` / `commit` / `memory-curator` → 各自插件；`compact` 是内核命令，不动。 |
 | `generation-timing-v2`   | 将没有 `generationOutputTokens` 的旧 `generationDurationMs` 归档为 `legacyGenerationDurationMs`；旧形态不再参与生成速率统计，token 用量与响应等待不变。 |
 | `quick-buttons-accent-color` | 只为会话 `snapshot.pluginState['quick-buttons'].buttons` 中缺失的 `style.color` 补 `accent`；已有颜色、图标、形状、纯图标配置与按钮内容、动作和顺序保持不变，其它插件不受影响。 |
+| `pi-messages-v1` | 将旧 Chat Completions / Responses 原生历史转换为完整 pi `Message[]`，写入 `snapshot.messageFormat: 'pi-ai-v1'`。身份由快照 provider/model/协议决定；保留正文、内联图片、reasoning 原项签名、工具调用与结果，展示对话及用量账本保留。已标记的快照不再改写。 |
+
+`pi-messages-v1` 只读文档本身：内联图片保留数据与 MIME，远程图片 URL / 文件引用保留为 `[Image](引用)` 文本（pi 图片块只支持内联数据）。Responses reasoning 的完整原项保存到 `thinkingSignature`，正文项的 id / phase 保存到 `textSignature`，函数调用与结果共享 pi 的 `call_id|item_id`。缺失的时间取会话创建时间，缺失的用量填零；现有用量记录的 token 数映射到消息内的 pi usage，不改原账本。无法识别的消息会使该文件转换失败，保留原文，不会把半份历史标成 pi。运行时不再支持旧 wire 历史，必须先经此迁移。
 
 ### 其它数据
 

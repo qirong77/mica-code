@@ -108,7 +108,15 @@ function createMockProvider() {
         const emitTextEvents = () => {
           emit({ type: 'response.created', response: { id: 'resp_1', object: 'response' } });
           emit({ type: 'response.in_progress', response: { id: 'resp_1', object: 'response' } });
+          // Every output item is announced first and owns one output_index; the
+          // assistant message therefore moves to index 1 when reasoning is on.
+          const messageIndex = state.includeReasoning ? 1 : 0;
           if (state.includeReasoning) {
+            emit({
+              type: 'response.output_item.added',
+              output_index: 0,
+              item: { id: 'reasoning_1', type: 'reasoning', status: 'in_progress', summary: [] },
+            });
             emit({
               type: 'response.reasoning_summary_text.delta',
               item_id: 'reasoning_1',
@@ -117,35 +125,38 @@ function createMockProvider() {
               delta: 'thinking...',
             });
             emit({
-              type: 'response.reasoning_summary_text.done',
-              item_id: 'reasoning_1',
+              type: 'response.output_item.done',
               output_index: 0,
-              content_index: 0,
-              text: 'thinking...',
+              item: {
+                id: 'reasoning_1',
+                type: 'reasoning',
+                status: 'completed',
+                summary: [{ type: 'summary_text', text: 'thinking...' }],
+              },
             });
           }
           emit({
             type: 'response.output_item.added',
-            output_index: 0,
+            output_index: messageIndex,
             item: { id: 'msg_1', type: 'message', status: 'in_progress', role: 'assistant', content: [] },
           });
           emit({
             type: 'response.output_text.delta',
             item_id: 'msg_1',
-            output_index: 0,
+            output_index: messageIndex,
             content_index: 0,
             delta: text,
           });
           emit({
             type: 'response.output_text.done',
             item_id: 'msg_1',
-            output_index: 0,
+            output_index: messageIndex,
             content_index: 0,
             text,
           });
           emit({
             type: 'response.output_item.done',
-            output_index: 0,
+            output_index: messageIndex,
             item: {
               id: 'msg_1',
               type: 'message',
@@ -416,27 +427,44 @@ function createMockProvider() {
           }
           if (state.mode === 'thinking-interrupt') {
             emit({ type: 'response.created', response: { id: 'resp_thinking', object: 'response' } });
-            for (const [index, text] of ['first thought', 'second thought'].entries()) {
+            // One reasoning item per thought: each is announced on its own
+            // output_index and closed by `output_item.done`, so a finished item
+            // is a durable checkpoint while the last one stays open.
+            const thoughts = ['first thought', 'second thought'];
+            thoughts.forEach((text, index) => {
+              emit({
+                type: 'response.output_item.added',
+                output_index: index,
+                item: { id: `reasoning_${index}`, type: 'reasoning', status: 'in_progress', summary: [] },
+              });
               emit({
                 type: 'response.reasoning_summary_text.delta',
-                item_id: 'reasoning_1',
-                output_index: 0,
-                summary_index: index,
+                item_id: `reasoning_${index}`,
+                output_index: index,
+                content_index: 0,
                 delta: text,
               });
               emit({
-                type: 'response.reasoning_summary_text.done',
-                item_id: 'reasoning_1',
-                output_index: 0,
-                summary_index: index,
-                text,
+                type: 'response.output_item.done',
+                output_index: index,
+                item: {
+                  id: `reasoning_${index}`,
+                  type: 'reasoning',
+                  status: 'completed',
+                  summary: [{ type: 'summary_text', text }],
+                },
               });
-            }
+            });
+            emit({
+              type: 'response.output_item.added',
+              output_index: thoughts.length,
+              item: { id: 'reasoning_open', type: 'reasoning', status: 'in_progress', summary: [] },
+            });
             emit({
               type: 'response.reasoning_summary_text.delta',
-              item_id: 'reasoning_1',
-              output_index: 0,
-              summary_index: 2,
+              item_id: 'reasoning_open',
+              output_index: thoughts.length,
+              content_index: 0,
               delta: 'unfinished thought',
             });
             return;
@@ -457,6 +485,24 @@ function createMockProvider() {
 }
 
 type MockProvider = ReturnType<typeof createMockProvider>;
+
+/**
+ * 请求里的系统提示词正文。
+ *
+ * pi 对 Responses 协议把 system prompt 作为 input 的首条 `system` / `developer`
+ * 消息发送（`instructions` 字段只有 codex 变体用），所以检查提示词要看这条消息，
+ * 而不是请求体的 `instructions`。
+ */
+function systemPromptOf(request: { instructions?: unknown; input?: unknown } | undefined): string {
+  if (typeof request?.instructions === 'string' && request.instructions) return request.instructions;
+  const input = Array.isArray(request?.input) ? request.input : [];
+  const first = input[0] as { role?: string; content?: unknown } | undefined;
+  if (!first || (first.role !== 'system' && first.role !== 'developer')) return '';
+  if (typeof first.content === 'string') return first.content;
+  return Array.isArray(first.content)
+    ? first.content.map((block) => String((block as { text?: unknown }).text ?? '')).join('')
+    : '';
+}
 
 /** Everything one test owns: its own mock provider (its own port, its own
  * programmable state), its own hosts, and the `MICA_HOME` dirs to clean up.
@@ -1072,8 +1118,9 @@ suite('mica app-server real-user flows (mock provider)', () => {
     // 子代理的提示词带上了主流程的对话记录（btw 模式说明 + 背景记录）。
     expect(mock!.state.requests.length).toBe(requestsBeforeBtw + 1);
     const btwRequest = mock!.state.requests.at(-1)!;
-    expect(btwRequest.instructions).toContain('btw');
-    expect(btwRequest.instructions).toContain('你好');
+    const btwPrompt = systemPromptOf(btwRequest);
+    expect(btwPrompt).toContain('btw');
+    expect(btwPrompt).toContain('你好');
 
     // 主流程完全不受影响：会话里没有 btw 的问答，turn 仍是正常完成，用量单独记账。
     const sessionFiles = readdirSync(join(host.home, 'sessions')).filter((file) => file.endsWith('.json'));
@@ -2488,7 +2535,7 @@ suite('mica app-server real-user flows (mock provider)', () => {
     await send(host, 3, 'turn/start', { threadId: '', input: [{ type: 'text', text: '开始干活' }] });
     const started = await waitFor(host, (m) => m.method === 'turn/started', 'notes turn started', 30_000);
     await waitFor(host, turnCompleted((started.params?.turn as { id?: string }).id!), 'notes turn completed', 30_000);
-    const instructions = mock!.state.requests[0]?.instructions ?? '';
+    const instructions = systemPromptOf(mock!.state.requests[0]);
     expect(instructions).toContain('<session-notes>');
     expect(instructions).toContain('- 用 Bun 跑测试');
     // 插件段落由宿主包在 <injection> 里，段落正文之后紧跟的是这层边界。
@@ -2853,7 +2900,8 @@ suite('mica app-server real-user flows (mock provider)', () => {
     expect(JSON.stringify(disk)).toContain('B-1 第三条（B 的 turn）');
     expect(disk.turnState).toBe('completed');
     const userTexts = (disk.snapshot?.messages ?? [])
-      .filter((m) => (m as { type?: string }).type === 'message' && (m as { role?: string }).role === 'user')
+      // pi 的用户消息就是 `{ role: 'user', content, timestamp }`，没有 wire 的 `type`。
+      .filter((m) => (m as { role?: string }).role === 'user')
       .map((m) => JSON.stringify(m));
     expect(JSON.stringify(userTexts)).toContain('A-1 第一条');
     expect(JSON.stringify(userTexts)).toContain('A-2 第二条');
@@ -2933,7 +2981,7 @@ suite('mica app-server real-user flows (mock provider)', () => {
       30_000,
     );
     // 角色提示词真的进了这次请求，而不只是渲染层显示成 reviewer。
-    expect(mock!.state.requests[0]?.instructions ?? '').toContain('Always review the change');
+    expect(systemPromptOf(mock!.state.requests[0])).toContain('Always review the change');
     // 落盘：下次打开这个 session，role 就是 reviewer（桌面端据此显示在会话框里）。
     const sessionPath = join(home, 'sessions', `${sessionId}.json`);
     const afterFirst = JSON.parse(readFileSync(sessionPath, 'utf-8')) as {
@@ -2961,7 +3009,7 @@ suite('mica app-server real-user flows (mock provider)', () => {
       'role-switch turn 2 completed',
       30_000,
     );
-    expect(mock!.state.requests[1]?.instructions ?? '').toContain('Answer as a short poem');
+    expect(systemPromptOf(mock!.state.requests[1])).toContain('Answer as a short poem');
     const afterSecond = JSON.parse(readFileSync(sessionPath, 'utf-8')) as {
       snapshot?: { role?: string };
     };

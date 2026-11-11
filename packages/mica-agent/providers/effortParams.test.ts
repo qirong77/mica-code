@@ -1,11 +1,9 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { micaConfig, type ProviderDefinition, type ProviderProtocol } from '@packages/mica-config/index.js';
-import { ChatCompletionsClient } from './ChatCompletionsClient.js';
-import { ResponsesClient } from './ResponsesClient.js';
+import { resolveEffortParams } from '@packages/mica-config/index.js';
 
 /**
- * 这些断言盯的是「真正发给上游的字段」，而不是中间变量：effort 出问题时几乎都不是
- * 配置没传到，而是到了 client 这里又被规则覆盖成别的值、换成了别名，或者干脆没发出去。
+ * Mica owns effort selection; piWireIntegration verifies the final SDK payload.
  */
 const disposers: Array<() => void> = [];
 
@@ -26,22 +24,14 @@ function provider(protocol: ProviderProtocol, supportsEffort?: boolean): Provide
   };
 }
 
-function chatParams(model: string, effort: string | undefined, supportsEffort?: boolean) {
-  const client = new ChatCompletionsClient({
-    model,
-    effort: effort as never,
-    provider: provider('openai_chat_completions', supportsEffort),
-  });
-  return (client as unknown as { reasoningParams: Record<string, unknown> }).reasoningParams;
+function params(protocol: ProviderProtocol, model: string, effort: string | undefined, supportsEffort?: boolean) {
+  return resolveEffortParams({ provider: provider(protocol, supportsEffort), model, effort, protocol });
 }
-
+function chatParams(model: string, effort: string | undefined, supportsEffort?: boolean) {
+  return params('openai_chat_completions', model, effort, supportsEffort);
+}
 function responsesParams(model: string, effort: string | undefined, supportsEffort?: boolean) {
-  const client = new ResponsesClient({
-    model,
-    effort: effort as never,
-    provider: provider('openai_responses', supportsEffort),
-  });
-  return (client as unknown as { reasoningParams: Record<string, unknown> }).reasoningParams;
+  return params('openai_responses', model, effort, supportsEffort);
 }
 
 /** 声明了 `low/high/max` 的真实档位；模型自己就叫 `max`，不是我们内部的 `xhigh`。 */
@@ -78,7 +68,7 @@ describe('effort wire params', () => {
 
     // `max` 就是 `max`：不能再折算成 `xhigh`，反向也一样。
     expect(chatParams('max-model', 'max')).toEqual({ reasoning_effort: 'max' });
-    expect(responsesParams('max-model', 'max')).toEqual({ reasoning: { effort: 'max', summary: 'auto' } });
+    expect(responsesParams('max-model', 'max')).toEqual({ reasoning: { effort: 'max' } });
     expect(micaConfig.getModelEffortOptions('max-model')).toEqual(['low', 'high', 'max']);
   });
 
@@ -90,7 +80,7 @@ describe('effort wire params', () => {
     expect(chatParams('max-model', undefined)).toEqual({});
   });
 
-  it('keeps the responses summary request only when reasoning is actually sent', () => {
+  it('resolves Responses-only patches without inventing a Chat effort', () => {
     registerRules({
       'responses-only-model': {
         contextSize: 400000,
@@ -102,7 +92,7 @@ describe('effort wire params', () => {
     });
 
     expect(responsesParams('responses-only-model', 'medium')).toEqual({
-      reasoning: { effort: 'medium', summary: 'auto' },
+      reasoning: { effort: 'medium' },
     });
     expect(chatParams('responses-only-model', 'medium')).toEqual({});
   });

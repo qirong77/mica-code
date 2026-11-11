@@ -137,7 +137,9 @@ mica exec --model "openai/YOUR_MODEL_ID" --no-save "概述当前项目结构"`;
             <code>protocol</code>
           </td>
           <td>
-            <code>openai_chat_completions</code> 或 <code>openai_responses</code>，须与服务实际支持的协议一致。
+            <code>openai_chat_completions</code>、<code>openai_responses</code>、<code>anthropic_messages</code>
+            或 <code>google_generative_ai</code>，须与服务实际支持的协议一致。四种协议共用同一份 pi-ai 消息历史，
+            实时正文、思考内容与工具调用都由这一层解析。
           </td>
         </tr>
         <tr>
@@ -246,7 +248,7 @@ mica exec --model "openai/YOUR_MODEL_ID" --no-save "概述当前项目结构"`;
             <code>MICA_PROVIDER_PROTOCOL</code>
           </td>
           <td>
-            仅覆盖环境 provider 的协议，默认 <code>openai_responses</code>。可设为上述两种协议之一。
+            仅覆盖环境 provider 的协议，默认 <code>openai_responses</code>。可设为上述四种协议之一。
           </td>
         </tr>
         <tr>

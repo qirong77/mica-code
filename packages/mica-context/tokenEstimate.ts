@@ -1,3 +1,6 @@
+import type { Message, TextContent, ImageContent } from '@earendil-works/pi-ai';
+import { getSystemMessageText } from '@earendil-works/pi-ai/utils/text';
+
 /**
  * 每类字符的实测折算（token/字符），用 10 万字符的真实语料向 provider 标定：英文文档
  * 0.263、中文文档 0.666、TypeScript 源码 0.254、内联 base64 0.692，再补一份「真实被
@@ -89,63 +92,51 @@ function estimateInlineImageTokens(chars: number): number {
   return Math.min(1_760, Math.round(scaled));
 }
 
-const IMAGE_BLOCK_TYPES = new Set(['image', 'input_image', 'image_url']);
-/** 历史里的思考条目发送前一律被剥掉（`dropReplayedReasoningItems`），别把它们算进请求成本。 */
-const REPLAY_DROPPED_TYPES = new Set(['reasoning']);
-/**
- * 每条消息的固定开销。实测：把同一句 "ok" 的消息从 20 条加到 220 条，输入只涨 400
- * token——每条 2 token，含角色与分隔符。旧值 6 在几百条工具的会话里会凭空多出几千
- * token，还会把「实测开销」挤成负数，逼着通知退回确定性估算。
- */
+/** 实测每条消息约 2 token，含角色与分隔符。 */
 const TOKENS_PER_MESSAGE = 2;
 
-/** 最长的那段字符串就是图本身（`image_url` 可能是字符串，也可能是 `{ url }`）。 */
-function longestString(value: unknown): number {
-  if (typeof value === 'string') return value.length;
-  if (!value || typeof value !== 'object') return 0;
-  let longest = 0;
-  for (const child of Object.values(value)) longest = Math.max(longest, longestString(child));
-  return longest;
+function estimateContent(content: string | readonly (TextContent | ImageContent)[]): number {
+  if (typeof content === 'string') return estimateTextTokens(content);
+  let tokens = 0;
+  for (const block of content) {
+    tokens += block.type === 'image' ? estimateInlineImageTokens(block.data.length) : estimateTextTokens(block.text);
+  }
+  return tokens;
+}
+
+function estimateJson(value: unknown): number {
+  try {
+    return estimateTextTokens(JSON.stringify(value) ?? '');
+  } catch {
+    return 0;
+  }
 }
 
 /**
- * 估算结构化 provider 消息，不序列化也不复制单条几十 MB 的载荷。
+ * 只估算 pi 消息里会消费的正文、图片与工具参数，不序列化整份历史。
  *
- * 图片块按张计价：把它的 base64 当正文算会把一张截图估成二三十万 token，压缩阈值
- * 与界面上的上下文占用都会跟着虚高。反过来，工具输出里以 `data:` 开头的**文本**
- * 仍按文本算——provider 也是按文本计费的。
+ * 不使用 pi 的 usage 驱动估算：压缩前后的历史已经不同，旧 usage 不能描述新请求；
+ * thinking、签名、provider/model、时间戳、工具 details/usage 等记录元信息也不参与预算。
+ * 图片按张计价；工具输出里写成文本的 base64 仍按文本计价。
  */
-export function estimateContextTokens(messages: readonly unknown[]): number {
-  const visiting = new Set<object>();
-  function estimate(value: unknown): number {
-    if (typeof value === 'string') return estimateTextTokens(value);
-    if (value === null || value === undefined) return 0;
-    if (typeof value !== 'object') return 1;
-    if (visiting.has(value)) return 0;
-    visiting.add(value);
-    const type = Array.isArray(value) ? '' : String((value as { type?: unknown }).type);
-    if (REPLAY_DROPPED_TYPES.has(type)) {
-      visiting.delete(value);
-      return 0;
-    }
-    if (IMAGE_BLOCK_TYPES.has(type)) {
-      visiting.delete(value);
-      return estimateInlineImageTokens(longestString(value));
-    }
-    // 结构与键单独计价是实测不支持的：真实请求里一条消息的整套信封（角色、分隔符、
-    // 键名）加起来才 ~2 token（见 TOKENS_PER_MESSAGE）。旧实现按「每个键 +1 再加键名
-    // 文本」计价，在几百轮工具调用的会话里凭空多出上万 token。
-    let tokens = 0;
-    if (Array.isArray(value)) {
-      for (const item of value) tokens += estimate(item);
-    } else {
-      for (const child of Object.values(value)) tokens += estimate(child);
-    }
-    visiting.delete(value);
-    return tokens;
-  }
+export function estimateContextTokens(messages: readonly Message[]): number {
   let total = 0;
-  for (const message of messages) total += estimate(message) + TOKENS_PER_MESSAGE;
+  for (const message of messages) {
+    let tokens = 0;
+    if (message.role === 'system') {
+      tokens = estimateTextTokens(getSystemMessageText(message));
+      if (message.toolsAdded) tokens += estimateJson(message.toolsAdded);
+      if (message.toolsRemoved) tokens += estimateJson(message.toolsRemoved);
+    } else if (message.role === 'assistant') {
+      for (const block of message.content) {
+        if (block.type === 'text') tokens += estimateTextTokens(block.text);
+        else if (block.type === 'toolCall') tokens += estimateTextTokens(block.name) + estimateJson(block.arguments);
+      }
+    } else {
+      tokens = estimateContent(message.content);
+    }
+    total += tokens + TOKENS_PER_MESSAGE;
+  }
   return total;
 }
 

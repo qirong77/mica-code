@@ -12,7 +12,7 @@ import type { PluginLlmApi } from '@packages/mica-plugin/index.js';
  * 失败面变大。
  */
 
-export type CuratorProtocol = 'openai_chat_completions' | 'openai_responses';
+export type CuratorProtocol = import('@packages/mica-plugin/index.js').PluginModelProtocol;
 
 export type CuratorCompletionRequest = {
   system: string;

@@ -1,7 +1,7 @@
 // 从具体文件取类型：这个模块会被桌面运行时复用，经 `index.js` 会拖进整个 agent 包
 import type { ConversationContentBlock, ConversationItem } from '@packages/mica-agent/core/Conversation.js';
-import { ChatCompletionsHistoryNormalizer } from '@packages/mica-agent/providers/ChatCompletionsHistoryNormalizer.js';
-import { ResponsesHistoryNormalizer } from '@packages/mica-agent/providers/ResponsesHistoryNormalizer.js';
+import { PiHistoryNormalizer } from '@packages/mica-agent/providers/PiHistoryNormalizer.js';
+import type { Message } from '@earendil-works/pi-ai';
 import type { ProviderProtocol } from '@packages/mica-config/index.js';
 import type { ConfigWebConversationDetails, ConfigWebConversationItem } from '../shared/types.js';
 
@@ -10,17 +10,13 @@ export type ConfigWebConversationSource = {
   protocol: ProviderProtocol;
   model: string;
   systemPrompt: string;
-  messages: unknown[];
-};
-
-type UnknownNormalizer = {
-  normalize(messages: unknown[]): ConversationItem[];
+  messages: Message[];
 };
 
 /** Normalizes provider messages into display items. Reasoning items are kept with a safe
  *  summary as content and the encrypted payload length as `sizeHint` (never the payload itself). */
 export function buildConfigWebConversationItems(source: ConfigWebConversationSource): ConfigWebConversationItem[] {
-  const normalized = normalizeMessages(source.protocol, source.messages);
+  const normalized = normalizeMessages(source.messages);
   const toolNamesById = new Map<string, string>();
   const items: ConfigWebConversationItem[] = [
     {
@@ -104,9 +100,9 @@ function toReasoningItem(
 ): Pick<ConfigWebConversationItem, 'type' | 'content' | 'sizeHint'> | null {
   if (item.type !== 'unknown' || !item.content || typeof item.content !== 'object') return null;
   const raw = item.content as Record<string, unknown>;
-  if (raw.type !== 'reasoning') return null;
-  const sizeHint = typeof raw.encrypted_content === 'string' ? raw.encrypted_content.length : undefined;
-  const summary = extractReasoningSummary(raw);
+  if (raw.type !== 'thinking') return null;
+  const sizeHint = typeof raw.thinkingSignature === 'string' ? raw.thinkingSignature.length : undefined;
+  const summary = typeof raw.thinking === 'string' ? raw.thinking : '';
   return {
     type: 'reasoning',
     content: summary || '(推理内容未保存在会话中)',
@@ -114,38 +110,17 @@ function toReasoningItem(
   };
 }
 
-function extractReasoningSummary(raw: Record<string, unknown>): string {
-  const parts: string[] = [];
-  if (Array.isArray(raw.summary)) {
-    for (const entry of raw.summary) {
-      if (entry && typeof entry === 'object' && typeof (entry as Record<string, unknown>).text === 'string') {
-        parts.push((entry as Record<string, unknown>).text as string);
-      }
-    }
-  }
-  if (parts.length === 0 && Array.isArray(raw.content)) {
-    for (const entry of raw.content) {
-      if (entry && typeof entry === 'object' && typeof (entry as Record<string, unknown>).text === 'string') {
-        parts.push((entry as Record<string, unknown>).text as string);
-      }
-    }
-  }
-  return parts.join('\n');
-}
-
-function normalizeMessages(protocol: ProviderProtocol, messages: unknown[]): ConversationItem[] {
-  try {
-    return getNormalizer(protocol).normalize(messages);
-  } catch {
-    return messages.map((content) => ({ type: 'unknown', content }));
-  }
-}
-
-function getNormalizer(protocol: ProviderProtocol): UnknownNormalizer {
-  if (protocol === 'openai_responses') {
-    return new ResponsesHistoryNormalizer() as unknown as UnknownNormalizer;
-  }
-  return new ChatCompletionsHistoryNormalizer() as unknown as UnknownNormalizer;
+function normalizeMessages(messages: Message[]): ConversationItem[] {
+  const normalizer = new PiHistoryNormalizer();
+  return messages.flatMap((message): ConversationItem[] => {
+    // The shared normalizer projects visible messages and tools. Context analysis also
+    // needs thinking sizes; retain those blocks internally, then expose only safe text/lengths.
+    const thinking: ConversationItem[] =
+      message.role === 'assistant'
+        ? message.content.filter((part) => part.type === 'thinking').map((content) => ({ type: 'unknown', content }))
+        : [];
+    return [...thinking, ...normalizer.normalize([message])];
+  });
 }
 
 function contentBlocksToDisplayText(blocks: ConversationContentBlock[]): string {

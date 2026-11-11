@@ -59,7 +59,7 @@ Mica 是一个可以实际动手的 coding agent：阅读项目、修改代码�
 
 ### 1. 安装 CLI
 
-准备 **Node.js 22+** 和支持工具调用的模型服务。macOS / Linux 可以安装预构建 CLI（Apple Silicon、Intel、x64 / ARM64 Linux）：
+准备 **Node.js 22.19+** 和支持工具调用的模型服务。macOS / Linux 可以安装预构建 CLI（Apple Silicon、Intel、x64 / ARM64 Linux）：
 
 ```bash
 curl -fsSL https://github.com/qirong77/mica-code/releases/latest/download/install.sh | sh
@@ -70,7 +70,9 @@ mica --version
 
 ### 2. 连接模型
 
-在项目目录启动 Mica，输入 `/config` 打开配置页，填写服务商的 API 地址、API key 和可用的模型 ID，按服务实际支持的接口选择 `openai_chat_completions` 或 `openai_responses`。模型列表需要手动配置。配置页会自动保存有效设置；回到终端后用 `/model` 选择模型。
+在项目目录启动 Mica，输入 `/config` 打开配置页，填写服务商的 API 地址、API key 和可用的模型 ID，按服务实际支持的接口选择 `openai_chat_completions`、`openai_responses`、`anthropic_messages` 或 `google_generative_ai`。模型请求通过开源 pi-ai 统一适配，支持实时正文、服务端返回的思考内容和工具调用。模型列表需要手动配置。配置页会自动保存有效设置；回到终端后用 `/model` 选择模型。
+
+模型历史统一使用 pi-ai 消息格式；升级后的旧会话由内置 `evolution` 迁移后恢复。旧的 OpenAI 原生历史格式不再直接加载；若升级后某条旧会话尚未就绪，可在新会话执行 `/evolution run` 后恢复。
 
 ```bash
 cd your-project

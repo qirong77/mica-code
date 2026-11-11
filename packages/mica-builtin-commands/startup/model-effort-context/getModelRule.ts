@@ -5,6 +5,7 @@ import { randomUUID } from 'node:crypto';
 import { gunzipSync } from 'node:zlib';
 import { clearResolvedModelRules, orderEffortLevels } from '@packages/mica-config/getModelRule.js';
 import type { ModelRule } from '@packages/mica-config/types.js';
+import { nativeEffortPatch } from '@packages/mica-config/nativeModelRules.js';
 import { modelsDevSeedBase64 } from './seed/models-dev.seed.js';
 
 const MODELS_URL = 'https://models.dev/api.json';
@@ -137,7 +138,7 @@ function buildRule(match: ModelMatch, requestedName: string): ResolvedRule {
     contextSize,
     defaultEffort: chooseDefaultEffort(effort.levels),
     supportsVision: modelSupportsVision(match.model),
-    efforts: buildEfforts(effort),
+    efforts: buildEfforts(effort, inferOwner(requestedName) ?? inferOwner(match.modelId) ?? match.providerId),
   };
 }
 
@@ -447,13 +448,13 @@ function resolveEffortMetadata(model: ModelMetadata, gatewayStyle: boolean): Eff
 }
 
 /**
- * 每个档位同时为两种协议生成补丁，且只取决于模型自己怎么说。
+ * 每个档位为 OpenAI 两种协议生成补丁；能确定厂商原生字段时也补上对应协议。
  *
  * 不能按 models.dev 的 providerId 猜协议、把补丁只挂在那一个协议上：用户完全可能把
  * 同一个模型挂在另一种协议下（例如把 DeepSeek 挂在 `openai_responses`），那样最高档
  * 就会以错误的字段名发出去，该关掉的 thinking 也关不掉。
  */
-function buildEfforts(meta: EffortMetadata): ModelRule['efforts'] {
+function buildEfforts(meta: EffortMetadata, owner?: string): ModelRule['efforts'] {
   const efforts: ModelRule['efforts'] = {};
   const declared = new Set(meta.declaredLevels);
   for (const level of meta.levels) {
@@ -486,6 +487,13 @@ function buildEfforts(meta: EffortMetadata): ModelRule['efforts'] {
       if (meta.hasEffort && level === 'none') {
         rule.openai_responses = { reasoning: { effort: 'none' } };
       }
+    }
+    // 原生接口只接受自己的真实 effort 枚举，不把其它厂商的档位放进原生参数里。
+    const nativeProtocol = owner === 'anthropic' ? 'anthropic_messages'
+      : owner === 'google' ? 'google_generative_ai' : undefined;
+    if (nativeProtocol && (declared.has(level) || (meta.hasToggle && level === 'none'))) {
+      const patch = nativeEffortPatch(nativeProtocol, level);
+      if (patch) rule[nativeProtocol] = patch;
     }
     efforts[level] = rule;
   }

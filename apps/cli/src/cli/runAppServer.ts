@@ -1430,7 +1430,7 @@ async function handleCodexRequest(
       const cwdParam = paramString(params, 'cwd');
       if (cwdParam) process.chdir(resolve(cwdParam));
       // 截断只动 provider history：UI conversationMessages 由 client 从 provider
-      // messages 派生（ChatCompletionsClient/ResponsesClient.toConversationMessages），
+      // messages 派生（PiModelClient.toConversationMessages），
       // loadSnapshot 会一并重建，所以这里不能单独截 UI 层，否则两边错位。
       ctx.agent.loadSnapshot({ ...previous, ...truncated.snapshot, interruptedThinking: undefined });
       // 必须在 loadSnapshot 之后：loadSnapshot 会按快照里的 role 重置 currentRole，

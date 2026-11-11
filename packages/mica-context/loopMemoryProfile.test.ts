@@ -1,5 +1,7 @@
+import type { Message } from '@earendil-works/pi-ai';
 import { describe, it, expect } from 'vitest';
 import { micaContext, isCompactionNotNeededError } from './index.js';
+import { assistant, user } from './testFixtures.js';
 
 const LOOP_OPTIONS = {
   aggressive: true,
@@ -13,16 +15,14 @@ const LOOP_OPTIONS = {
   contextWindowSize: 200_000,
 };
 
-/** chat_messages 格式：user/assistant 交替，assistant 带 file 引用放大体积。 */
-function round(turn: number): unknown[] {
+/** pi 消息：user/assistant 交替，assistant 带 file 引用放大体积。 */
+function round(turn: number): Message[] {
   return [
-    { role: 'user', content: `loop 任务轮次 ${turn}：请阅读并汇报 packages/example${turn}.ts 的导出。` },
-    {
-      role: 'assistant',
-      content:
+    user(`loop 任务轮次 ${turn}：请阅读并汇报 packages/example${turn}.ts 的导出。`),
+    assistant(
         `第 ${turn} 轮结果：packages/example${turn}.ts 导出了 helper。` +
         `\n\`\`\`\n${'export function helper() { return ' + turn + '; }\n'.repeat(40)}${turn}\`\`\``,
-    },
+    ),
   ];
 }
 
@@ -33,7 +33,7 @@ function usage(turn: number): { provider: string; turnId: number; inputTokens: n
 describe('loop memory profile (unit, real CompactionService)', () => {
   it('grows usageHistory unbounded while messages are kept bounded by prune-only compact', async () => {
     const service = new micaContext.CompactionService();
-    let messages: unknown[] = [];
+    let messages: Message[] = [];
     const usageHistory: unknown[] = [];
     let skipped = 0;
     let applied = 0;

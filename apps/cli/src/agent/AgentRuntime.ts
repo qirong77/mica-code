@@ -1,4 +1,5 @@
 import mitt from 'mitt';
+import type { Message } from '@earendil-works/pi-ai';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import {
   DEFAULT_ROLE_NAME,
@@ -13,6 +14,7 @@ import {
 import type { MicaUiConversationMessage } from '@packages/mica-ui/index.js';
 import type { EffortOption, ProviderProtocol } from '@packages/mica-config/index.js';
 import { micaConfig } from '@packages/mica-config/index.js';
+import { PI_MESSAGE_FORMAT, PI_MESSAGE_FORMAT_ERROR } from '@packages/mica-common/messageFormat.js';
 import { micaCommon, cloneCapabilitySelection, normalizeCapabilitySelection } from '@packages/mica-common/index.js';
 import type { CapabilitySelection } from '@packages/mica-common/index.js';
 import {
@@ -28,7 +30,7 @@ import {
 } from '@packages/mica-common/turnTiming.js';
 import { micaSkills, type Skill } from '@packages/mica-skills/index.js';
 import { mcpToolNamePrefix, micaTools } from '@packages/mica-tools/index.js';
-import { estimateContextTokens, estimateTextTokens } from '@packages/mica-context/tokenEstimate.js';
+import { estimateTextTokens } from '@packages/mica-context/tokenEstimate.js';
 import type {
   AgentObservationEvent,
   HookRegistry,
@@ -110,14 +112,15 @@ export type AgentRuntimeSnapshot = {
    * 只随会话快照落盘供界面查看，不会用来重建请求：下一轮仍然重新拼装。
    */
   systemPrompt?: string;
-  messages: AgentSnapshot<unknown, AgentUsageRecord>['messages'];
+  messageFormat?: 'pi-ai-v1';
+  messages: Message[];
   usageHistory: AgentUsageRecord[];
   lastUsage: AgentUsageRecord | undefined;
   /** Display-only checkpoint. It is never included in a model request. */
   interruptedThinking?: InterruptedThinking;
-  /** Completed Responses thinking while the current turn is still running. */
+  /** Completed thinking while the current turn is still running. */
   activeThinking?: InterruptedThinking;
-  /** Input associated with the running Responses history, for crash recovery. */
+  /** Input associated with the running history, for crash recovery. */
   activeTurn?: { input: AgentQueryContent; committed: boolean };
   /** Usage of subagent tasks spawned by this agent, appended at task end. */
   subagentUsageHistory?: SubagentUsageRecord[];
@@ -806,7 +809,6 @@ export class AgentRuntime {
     if (this.isRunning) {
       throw new Error('Cannot reload config while agent is running');
     }
-    const previousProtocol = this.currentConfig.provider.protocol;
     const previousSnapshot = !resetSession ? this.client?.getSnapshot() : null;
     if (resetSession) {
       this.runId++;
@@ -818,7 +820,7 @@ export class AgentRuntime {
       if (thinkingModelChanged) this.events.emit('thinkingReset', undefined);
     }
     this.recreateClient();
-    if (!resetSession && previousProtocol === this.currentConfig.provider.protocol && previousSnapshot && this.client) {
+    if (!resetSession && previousSnapshot && this.client) {
       this.client.loadSnapshot({
         ...previousSnapshot,
         model: this.currentConfig.model,
@@ -835,18 +837,12 @@ export class AgentRuntime {
       throw new Error('Cannot configure agent while it is running');
     }
     const previousSnapshot = preserveSession ? this.client?.getSnapshot() : null;
-    const previousProtocol = this.currentConfig.provider.protocol;
     const providerId = override.providerId ?? this.currentConfig.provider.id;
     const next = readAgentRuntimeConfig({
       providerId,
       model: override.model ?? (providerId === this.currentConfig.provider.id ? this.currentConfig.model : undefined),
       effort: override.effort ?? this.currentConfig.effort,
     });
-    if (previousSnapshot && previousProtocol !== next.provider.protocol) {
-      throw new Error(
-        `Cannot resume a ${previousProtocol} session with ${next.provider.protocol}; start a fresh session instead.`,
-      );
-    }
     this.currentConfig = next;
     if (this.interruptedThinking && (!preserveSession || !this.matchesThinkingModel(this.interruptedThinking))) {
       this.interruptedThinking = undefined;
@@ -860,7 +856,7 @@ export class AgentRuntime {
 
   abort() {
     // Invalidate runId only after the UI has rolled back the unfinished request.
-    if (this.activeAbortController && this.currentConfig.provider.protocol === 'openai_responses') {
+    if (this.activeAbortController) {
       this.rollbackIncompleteThinking();
     }
     this.runId++;
@@ -918,7 +914,7 @@ export class AgentRuntime {
   estimateRequestOverheadTokens(): number {
     return (
       estimateTextTokens(this.systemPrompt ?? '') +
-      estimateContextTokens(micaTools.getDefinitions(this.isToolEnabledByCapabilities))
+      estimateTextTokens(JSON.stringify(micaTools.getDefinitions(this.isToolEnabledByCapabilities)))
     );
   }
 
@@ -941,11 +937,12 @@ export class AgentRuntime {
       pluginSessionSettings: this.pluginSessionSettings,
       contextWindowSize: this.currentConfig.provider.contextWindowSize,
       systemPrompt: this.lastSystemPrompt,
-      messages: snapshot?.messages ?? [],
+      messageFormat: 'pi-ai-v1',
+      messages: (snapshot?.messages ?? []) as Message[],
       usageHistory: snapshot?.usageHistory ?? [],
       lastUsage: snapshot?.lastUsage,
       ...(this.interruptedThinking ? { interruptedThinking: { ...this.interruptedThinking } } : {}),
-      ...(this.isRunning && this.currentConfig.provider.protocol === 'openai_responses' && this.completedThinking
+      ...(this.isRunning && this.completedThinking
         ? { activeThinking: this.makeInterruptedThinking(this.completedThinking) }
         : {}),
       ...(this.isRunning && this.activeTurn
@@ -1005,6 +1002,7 @@ export class AgentRuntime {
     // 回滚只使用 provider 状态。跳过展示投影与 JSON 文本中间副本；一次 clone 也会
     // 保留 lastUsage 与 usageHistory 尾项的共享引用，而不是复制两遍。
     return structuredClone({
+      messageFormat: 'pi-ai-v1' as const,
       model: this.client.model,
       messages: this.client.messages,
       usageHistory: this.client.usageHistory,
@@ -1021,6 +1019,7 @@ export class AgentRuntime {
     if (this.isRunning) {
       throw new Error('Cannot load snapshot while agent is running');
     }
+    if (snapshot.messageFormat !== PI_MESSAGE_FORMAT) throw new Error(PI_MESSAGE_FORMAT_ERROR);
     this.runId++;
     this.currentConfig = agentRuntimeConfigFromSnapshot(snapshot);
     const recovered = options.recoverActiveThinking ? snapshot.activeThinking : undefined;
@@ -1046,7 +1045,8 @@ export class AgentRuntime {
     this.lastSystemPrompt = typeof snapshot.systemPrompt === 'string' ? snapshot.systemPrompt : undefined;
     this.recreateClient();
     this.client?.loadSnapshot({
-      model: snapshot.model,
+      messageFormat: 'pi-ai-v1',
+      model: this.currentConfig.model,
       messages: snapshot.messages,
       usageHistory: snapshot.usageHistory,
       lastUsage: snapshot.lastUsage,
@@ -1113,10 +1113,7 @@ export class AgentRuntime {
       }
       abortController = new AbortController();
       this.activeAbortController = abortController;
-      this.activeTurn =
-        this.currentConfig.provider.protocol === 'openai_responses'
-          ? { runId, input: cloneJson(question), committed: false }
-          : undefined;
+      this.activeTurn = { runId, input: cloneJson(question), committed: false };
       this.activeRunStartedAt = startedAt;
       this.activeRunUsageStartIndex = this.client.usageHistory.length;
       this.activeRunCompleteUsageLength = this.client.usageHistory.length;
@@ -1171,12 +1168,11 @@ export class AgentRuntime {
             this.events.emit('textRollback', undefined);
           }
         : undefined;
-      client.onThinkingCheckpoint = (boundary) => {
+      client.onThinkingCheckpoint = () => {
         if (!this.isCurrent(runId)) return;
         this.completedThinking = this.pendingThinking;
-        // The Responses client supplies separators between parts in one stream.
-        // Only a new request needs a separator supplied by the runtime.
-        if (boundary === 'request') this.thinkingNeedsSeparator = Boolean(this.pendingThinking);
+        // Pi supplies separators for blocks and later requests in the same run.
+        // The runtime only separates a restored checkpoint from the next run.
         this.events.emit('thinkingCheckpoint', undefined);
       };
       const signal = abortController.signal;
@@ -1264,7 +1260,7 @@ export class AgentRuntime {
       const message = error instanceof Error ? error.message : String(error);
       outcome = 'error';
       observationError = message;
-      if (abortController && this.currentConfig.provider.protocol === 'openai_responses') {
+      if (abortController) {
         this.rollbackIncompleteThinking();
       }
       if (this.isCurrent(runId)) this.emitStatus({ type: 'error', message });
@@ -1348,7 +1344,6 @@ export class AgentRuntime {
       typeof thinking.text === 'string' &&
       thinking.text.length > 0 &&
       thinking.providerId === this.currentConfig.provider.id &&
-      thinking.protocol === 'openai_responses' &&
       thinking.protocol === this.currentConfig.provider.protocol &&
       thinking.model === this.currentConfig.model &&
       thinking.apiBase === this.currentConfig.provider.api_base
@@ -1375,7 +1370,7 @@ export class AgentRuntime {
         at: Date.now(),
         chars: typeof thinking === 'string' ? thinking.length : 0,
       });
-      if (this.currentConfig.provider.protocol === 'openai_responses' && thinking) {
+      if (thinking) {
         if (this.thinkingNeedsSeparator) this.pendingThinking += '\n\n';
         this.pendingThinking += thinking;
         this.thinkingNeedsSeparator = false;

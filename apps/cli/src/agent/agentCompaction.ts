@@ -1,4 +1,5 @@
 import { recordSubagentTaskUsage } from '@packages/mica-agent/index.js';
+import type { Message } from '@earendil-works/pi-ai';
 import { micaContext } from '@packages/mica-context/index.js';
 import type { CompactResult } from '@packages/mica-context/index.js';
 import type { MicaUiConversationMessage } from '@packages/mica-ui/index.js';
@@ -17,7 +18,7 @@ import type { SessionController } from '../session/SessionController.js';
 export type CompactMessagesMode = 'quick' | 'model';
 
 export type CompactMessagesResult = {
-  messages: unknown[];
+  messages: Message[];
   savedTokens: number;
 };
 
@@ -43,12 +44,15 @@ export async function compactAgentMessages(
     preserveLatestUserMessage: options.preserveLatestUserMessage,
   };
   if (mode === 'quick') {
-    const result = await service.compact({ messages, options: { toolResultsOnly: true, ...budget } });
+    const result = await service.compact({
+      messages: messages as Message[],
+      options: { toolResultsOnly: true, ...budget },
+    });
     return { messages: result.messages, savedTokens: Math.max(0, result.savedTokenEstimate) };
   }
 
   const result = await service.compact({
-    messages,
+    messages: messages as Message[],
     signal: options.signal,
     // 插件给了自己的摘要请求就用它：换模型是插件的策略，分段、预算与重试仍归内核。
     summarize: summarize ?? ((transcript, prompt) => summarizeWithSubAgent(agent, transcript, prompt, options.signal)),
@@ -72,9 +76,12 @@ export async function summarizeWithSubAgent(
   signal?: AbortSignal,
   pluginId?: string,
 ): Promise<string> {
-  const subAgent = agent.createSubAgent({ systemPrompt: prompt, tools: false }, {
-    helper: { kind: 'compaction', purpose: 'summarize', ...(pluginId ? { pluginId } : {}) },
-  });
+  const subAgent = agent.createSubAgent(
+    { systemPrompt: prompt, tools: false },
+    {
+      helper: { kind: 'compaction', purpose: 'summarize', ...(pluginId ? { pluginId } : {}) },
+    },
+  );
   const startedAt = new Date().toISOString();
   let status: 'completed' | 'failed' | 'aborted' = 'failed';
   try {
@@ -183,8 +190,7 @@ export async function compactIdleSessionHistory(input: {
             // 插件给了自己的摘要请求就用它（换模型是插件的策略），否则走会话模型的摘要子代理。
             summarize:
               input.summarize ??
-              ((transcript, prompt) =>
-                summarizeWithSubAgent(agent, transcript, prompt, undefined, input.pluginId)),
+              ((transcript, prompt) => summarizeWithSubAgent(agent, transcript, prompt, undefined, input.pluginId)),
             options: { summaryInput: 'dialogue', contextWindowSize: snapshot.contextWindowSize },
           })
         : await service.compact({

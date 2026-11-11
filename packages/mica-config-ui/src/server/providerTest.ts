@@ -16,7 +16,7 @@ export async function testProviderConnection(input: ConfigWebProviderTestInput):
   const baseUrl = input.apiBase.trim();
   const model = input.model.trim();
   if (!isProviderProtocol(input.protocol)) {
-    return { ok: false, message: '协议只能是 Chat Completions 或 Responses', latencyMs: 0, model };
+    return { ok: false, message: '请选择支持的模型协议', latencyMs: 0, model };
   }
   if (!model) {
     return { ok: false, message: '先给这个服务商填一个模型，才能发请求验证', latencyMs: 0, model };

@@ -17,7 +17,7 @@
 
 | 包                            | 职责与限制                                                              |
 | ----------------------------- | ----------------------------------------------------------------------- |
-| `mica-agent`                  | agent、provider adapter、prompt；不依赖 UI、session、commands 或入口    |
+| `mica-agent`                  | pi-ai 协议适配、统一消息/事件、共享工具循环、prompt；不依赖 UI、session、commands 或入口 |
 | `mica-runtime`                | runtime 协议、事件、状态、队列原语；不编排 turn loop                    |
 | `mica-tools`                  | 唯一工具 registry，接入内置工具、插件工具与 MCP                         |
 | `mica-mcp`                    | MCP server 生命周期                                                     |

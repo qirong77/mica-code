@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { PersistedSession, SessionStoreLike } from '@packages/mica-session/index.js';
 import type { AgentRuntimeEvents, AgentRuntimeSnapshot } from '../agent/AgentRuntime.js';
+import { piAssistant, piToolResult, piUser } from './piTestMessages.js';
 import type { SessionAgentAdapter } from './SessionController.js';
 
 const previousMicaHome = process.env.MICA_HOME;
@@ -26,9 +27,10 @@ function historySnapshot(): AgentRuntimeSnapshot {
     model: 'test-model',
     effort: 'none',
     role: 'default',
+    messageFormat: 'pi-ai-v1',
     messages: [
-      { role: 'user', content: 'work' },
-      { role: 'assistant', content: 'long history '.repeat(100_000) },
+      piUser('work'),
+      piAssistant('long history '.repeat(100_000)),
     ],
     usageHistory: [],
     lastUsage: undefined,
@@ -127,7 +129,7 @@ describe('SessionController long-session work', () => {
     disk.replace(externallyUpdated);
     disk.load.mockClear();
     disk.save.mockClear();
-    snapshot = { ...snapshot, messages: [...snapshot.messages, { role: 'assistant', content: 'next iteration' }] };
+    snapshot = { ...snapshot, messages: [...snapshot.messages, piAssistant('next iteration')] };
 
     const stringify = vi.spyOn(JSON, 'stringify');
     try {
@@ -176,7 +178,7 @@ describe('SessionController long-session work', () => {
     running = true;
     snapshot = {
       ...snapshot,
-      messages: [...snapshot.messages, { type: 'function_call_output', call_id: 'call-1', output: 'result' }],
+      messages: [...snapshot.messages, piToolResult('call-1', 'read_file', 'result')],
       activeThinking: {
         providerId: 'test',
         protocol: 'openai_responses',

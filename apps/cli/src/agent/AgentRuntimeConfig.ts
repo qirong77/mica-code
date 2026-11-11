@@ -70,29 +70,8 @@ export function agentRuntimeConfigFromSnapshot(snapshot: AgentRuntimeConfigSnaps
     }
     throw new Error(`Provider not found: ${snapshot.providerId || '(empty)'}`);
   }
-  if (provider.protocol !== snapshot.protocol) {
-    // provider 存在但协议已迁移（例如 krill 从 chat_completions 升级到
-    // responses）：同 provider 的协议变化也降级恢复（保持 model/effort），
-    // 而不是 throw——否则迁移前的旧会话每次 resume 都会崩溃，app-server
-    // 直接 exit(1) 显示 "mica 进程已退出（code 1）"。
-    const fallback = config.providers.find((item) => item.id === config.provider) ?? config.providers[0];
-    if (fallback) {
-      const model = fallback.models?.includes(snapshot.model)
-        ? snapshot.model
-        : fallback.id === provider.id
-          ? snapshot.model
-          : (fallback.models?.[0] ?? config.model ?? '');
-      return {
-        provider: normalizeProviderForModel(fallback, model),
-        model,
-        effort:
-          fallback.supportsEffort === false
-            ? 'none'
-            : micaConfig.normalizeModelEffort(model, snapshot.effort, fallback),
-      };
-    }
-    throw new Error(`Session protocol mismatch: ${snapshot.protocol} -> ${provider.protocol}`);
-  }
+  // The transcript is pi-ai regardless of transport. A provider changing its
+  // protocol keeps its identity, model and history when this session resumes.
   const model = snapshot.model;
   const normalizedProvider = normalizeProviderForModel(provider, model);
   return {

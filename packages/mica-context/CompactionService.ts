@@ -1,3 +1,5 @@
+import type { AssistantMessage, Message, TextContent, ToolCall, UserMessage } from '@earendil-works/pi-ai';
+import { contentText } from '@earendil-works/pi-ai/utils/text';
 import { estimateContextTokens, estimateTextTokens } from './tokenEstimate.js';
 
 export const COMPACT_SUMMARY_PREFIX = '[Mica compact checkpoint]';
@@ -7,9 +9,8 @@ const DEFAULT_MIN_MESSAGES = 4;
 const MAX_SUMMARY_TRANSCRIPT_CHARS = 16_000;
 const RETRY_DROP_RATIO = 0.2;
 // ── 摘要输入的块状呈现 ──────────────────────────────────────────────────
-// provider 历史里的「一次模型回复」是好几条消息：思考一条、正文一条、每个工具调用
-// 一条、每个工具结果一条。压缩摘要请求若按消息逐条铺开，同一件事要占几倍篇幅，摘要
-// 模型还得自己把散落的调用与结果配对。这里按「轮」重组：一轮里的正文、思考、工具
+// pi 消息里一次模型回复包含正文、思考与工具调用，工具结果单独成条。摘要输入按
+// 「轮」重组，避免模型自己配对散落的调用与结果：一轮里的正文、思考、工具
 // 调用合成一块，所有工具结果合成一块，同类工具再聚合，指向性参数（路径 / 命令 /
 // pattern）与错误信号保留。
 const TRANSCRIPT_USER_CHARS = 6_000;
@@ -46,8 +47,6 @@ const TRANSCRIPT_ARGUMENT_HINTS = [
   'url',
   'name',
 ];
-/** 只取正文的块类型：reasoning / thinking 块走思考那一路，不算正文。 */
-const TRANSCRIPT_TEXT_BLOCK_TYPES = new Set(['text', 'input_text', 'output_text']);
 const OLD_MESSAGE_STRING_CHARS = 4_000;
 const DEFAULT_MAX_RECENT_TOKENS = 12_000;
 const AGGRESSIVE_MAX_RECENT_TOKENS = 8_000;
@@ -58,12 +57,11 @@ const DEFAULT_SUMMARY_INPUT_TOKENS = 80_000;
 const DEFAULT_SUMMARY_INPUT_CONTEXT_RATIO = 0.5;
 const MIN_SUMMARY_INPUT_TOKENS = 8_000;
 const TOOL_RESULT_PLACEHOLDER = '[Old tool result content cleared during compact]';
-const TOOL_ARGUMENTS_PLACEHOLDER = '{"_truncated":true,"note":"tool arguments cleared during compact"}';
+const TOOL_ARGUMENTS_PLACEHOLDER = { _truncated: true, note: 'tool arguments cleared during compact' };
 // ── 快速压缩的聚合形态 ──────────────────────────────────────────────────
 // 压缩区（受保护区之前的历史）里的全部工具调用与结果合并成「一条调用 + 一条结果」：
-// 协议要求两者必须配对（Responses 的 function_call 对 function_call_output，Chat 的
-// tool_calls 对 tool 消息），而结果清空后留下的只是信封。说明文本里写明「不是真实
-// 结果」，模型据此知道要重读 / 重跑，而不是以为自己真的看过这些文件。
+// pi 的 toolCall 与 toolResult 必须配对，而结果清空后留下的只是信封。说明文本
+// 里写明「不是真实结果」，模型据此知道要重读 / 重跑。
 const AGGREGATE_CALL_ID = 'mica_compact';
 const AGGREGATE_NOTE_PREFIX = '[Mica compact]';
 /** 说明里最多列几种工具，其余折成 `+N more kinds`。 */
@@ -79,7 +77,7 @@ const MIN_LOCAL_ROUND_DROP_SAVED_TOKENS = 8_000;
 const MIN_LOCAL_ROUND_DROP_SAVED_RATIO = 0.05;
 
 export type CompactInput = {
-  messages: unknown[];
+  messages: Message[];
   /**
    * 生成摘要的模型调用。只有需要 checkpoint 的路径（`/compact llm`、headless
    * `mica compact --session`、自动模型压缩）会用到它；`toolResultsOnly` 只做本地
@@ -135,7 +133,7 @@ export type CompactOptions = {
 };
 
 export type CompactResult = {
-  messages: unknown[];
+  messages: Message[];
   summary: string;
   mode: CompactMode;
   strategy: CompactStrategy;
@@ -161,7 +159,7 @@ export type CompactResult = {
   reducedRecentRounds?: number;
   /** toolResultsOnly：被聚合成占位调用的工具结果消息数。 */
   toolResultsReplaced?: number;
-  /** toolResultsOnly：被丢弃的思考条目（Responses reasoning / Chat reasoning_content）数。 */
+  /** toolResultsOnly：被丢弃的 thinking 块数。 */
   reasoningItemsDropped?: number;
   /** toolResultsOnly：被聚合成一条占位调用的工具调用数。 */
   toolCallsAggregated?: number;
@@ -212,7 +210,6 @@ export class CompactionService {
     }
 
     const beforeTokenEstimate = estimateMessagesTokens(originalMessages);
-    const userMessageTemplate = findUserMessageTemplate(activeMessages) ?? findUserMessageTemplate(originalMessages);
     const compactedActiveMessages = options.lightweightPrune
       ? compactMessagesForCheckpoint(activeMessages, options)
       : cloneJson(activeMessages);
@@ -236,7 +233,6 @@ export class CompactionService {
           pruneOnlyThresholdRatio,
           targetContextRatio,
         },
-        userMessageTemplate,
       );
       const lightweightMessages = [lightweightBoundaryMessage, ...compactedActiveMessages];
       lightweightTokenEstimate = estimateMessagesTokens(lightweightMessages);
@@ -291,7 +287,6 @@ export class CompactionService {
         beforeTokenEstimate,
         boundaryIndex: activeStartIndex - 1,
         budget,
-        userMessageTemplate,
         pruneOnlyThresholdRatio,
         targetContextRatio,
       });
@@ -317,7 +312,8 @@ export class CompactionService {
     }
 
     let messagesToSummarize = compactedActiveMessages.slice(0, splitIndex);
-    let keptMessages = (protectedStart < activeMessages.length ? activeMessages : compactedActiveMessages).slice(splitIndex);
+    let keptMessages = (protectedStart < activeMessages.length || options.preserveLatestUserMessage
+      ? activeMessages : compactedActiveMessages).slice(splitIndex);
     if (messagesToSummarize.length === 0 && options.force && protectedStart === activeMessages.length) {
       messagesToSummarize = compactedActiveMessages;
       keptMessages = [];
@@ -330,6 +326,8 @@ export class CompactionService {
     if (latestUserIndex >= 0 && latestUserIndex < splitIndex) {
       keptMessages = [activeMessages[latestUserIndex], ...keptMessages];
     }
+    const protectedMessages = new Set(activeMessages.slice(protectedStart));
+    if (latestUserIndex >= 0) protectedMessages.add(activeMessages[latestUserIndex]!);
     let summarizedMessageCount = messagesToSummarize.length;
     messagesToSummarize = fitMessagesToSummaryBudget(
       messagesToSummarize,
@@ -406,7 +404,6 @@ export class CompactionService {
       const candidateMessages = buildSummarizedMessages(
         summary,
         finalKeptMessages,
-        userMessageTemplate,
         beforeCount,
         beforeTokenEstimate,
         summarizedMessageCount,
@@ -422,12 +419,12 @@ export class CompactionService {
 
       const nextKeptMessages = dropOldestRecentRound(finalKeptMessages);
       if (nextKeptMessages.length === finalKeptMessages.length) break;
-      if (activeMessages.length - nextKeptMessages.length > protectedStart) break;
 
       const movedToSummary = finalKeptMessages.slice(0, finalKeptMessages.length - nextKeptMessages.length);
+      if (movedToSummary.some((message) => protectedMessages.has(message))) break;
       summarizedMessageCount += movedToSummary.length;
       messagesToSummarize = fitMessagesToSummaryBudget(
-        [createCompactSummaryMessage(summary, true, userMessageTemplate), ...movedToSummary],
+        [createCompactSummaryMessage(summary, true), ...movedToSummary],
         getSummaryInputTokenBudget(options),
         options,
       );
@@ -445,7 +442,7 @@ export class CompactionService {
       reducedRecentRounds = Math.max(reducedRecentRounds, initialKeptRounds);
     }
 
-    const summaryMessage = createCompactSummaryMessage(summary, finalKeptMessages.length > 0, userMessageTemplate);
+    const summaryMessage = createCompactSummaryMessage(summary, finalKeptMessages.length > 0);
     const boundaryMessage = createCompactBoundaryMessage(
       {
         mode: 'summarized',
@@ -466,7 +463,6 @@ export class CompactionService {
         summaryInputTokenEstimate,
         reducedRecentRounds,
       },
-      userMessageTemplate,
     );
     const compactMessages = [boundaryMessage, summaryMessage, ...finalKeptMessages];
     const afterTokenEstimate = estimateMessagesTokens(compactMessages);
@@ -536,7 +532,7 @@ function getPruneOnlyThresholdRatio(options: CompactOptions): number {
   );
 }
 
-function chooseRecentStartIndex(messages: unknown[], compactedMessages: unknown[], options: CompactOptions): number {
+function chooseRecentStartIndex(messages: Message[], compactedMessages: Message[], options: CompactOptions): number {
   const rounds = groupMessagesByRound(messages);
   if (rounds.length < 2) return 0;
   if (options.keepRecentRounds !== undefined) {
@@ -563,8 +559,8 @@ function chooseRecentStartIndex(messages: unknown[], compactedMessages: unknown[
 }
 
 function chooseForcedRecentStartIndex(
-  messages: unknown[],
-  compactedMessages: unknown[],
+  messages: Message[],
+  compactedMessages: Message[],
   options: CompactOptions,
 ): number {
   const rounds = groupMessagesByRound(messages);
@@ -597,7 +593,7 @@ function getSummaryInputTokenBudget(options: CompactOptions): number {
   return Math.max(MIN_SUMMARY_INPUT_TOKENS, Math.floor(contextWindowSize * DEFAULT_SUMMARY_INPUT_CONTEXT_RATIO));
 }
 
-function fitMessagesToSummaryBudget(messages: unknown[], tokenBudget: number, options: CompactOptions): unknown[] {
+function fitMessagesToSummaryBudget(messages: Message[], tokenBudget: number, options: CompactOptions): Message[] {
   let next = messages;
   // 预算按「摘要请求实际会发出去的那份正文」量：`summaryInput: 'dialogue'` 时工具过程
   // 不进摘要，用全文估计会白白截掉真正要发的对话。
@@ -611,7 +607,7 @@ function fitMessagesToSummaryBudget(messages: unknown[], tokenBudget: number, op
   return next;
 }
 
-function dropOldestRecentRound(messages: unknown[]): unknown[] {
+function dropOldestRecentRound(messages: Message[]): Message[] {
   const rounds = groupMessagesByRound(messages);
   if (rounds.length <= 1) return [];
   return messages.slice(rounds[1]?.start ?? messages.length);
@@ -623,21 +619,28 @@ function dropOldestRecentRound(messages: unknown[]): unknown[] {
 // 拆散 tool call/result 配对，节省量低于阈值时返回 null 交给上层报
 // "暂无可快速清理内容"。
 function buildLocalRoundDrop(params: {
-  messages: unknown[];
-  compactedMessages: unknown[];
-  previewMessages: unknown[];
+  messages: Message[];
+  compactedMessages: Message[];
+  previewMessages: Message[];
   options: CompactOptions;
   beforeCount: number;
   beforeTokenEstimate: number;
   boundaryIndex: number;
   budget: CompactBudget;
-  userMessageTemplate: unknown;
   pruneOnlyThresholdRatio: number;
   targetContextRatio: number;
 }): CompactResult | null {
   if (groupMessagesByRound(params.messages).length < 2) return null;
 
-  let splitIndex = chooseRecentStartIndex(params.messages, params.compactedMessages, params.options);
+  let protectedStart = protectedRecentStart(params.messages, params.options);
+  if (params.options.preserveLatestUserMessage) {
+    const latestUserIndex = findLatestUserIndex(params.messages);
+    if (latestUserIndex >= 0) protectedStart = Math.min(protectedStart, latestUserIndex);
+  }
+  let splitIndex = Math.min(
+    chooseRecentStartIndex(params.messages, params.compactedMessages, params.options),
+    protectedStart,
+  );
   splitIndex = adjustStartForToolPairs(params.messages, splitIndex);
   if (splitIndex <= 0) return null;
 
@@ -660,7 +663,6 @@ function buildLocalRoundDrop(params: {
       pruneOnlyThresholdRatio: params.pruneOnlyThresholdRatio,
       targetContextRatio: params.targetContextRatio,
     },
-    params.userMessageTemplate,
   );
   const compactMessages = [boundaryMessage, ...keptMessages];
   const afterTokenEstimate = estimateMessagesTokens(compactMessages);
@@ -703,8 +705,7 @@ function buildLocalRoundDrop(params: {
 
 function buildSummarizedMessages(
   summary: string,
-  keptMessages: unknown[],
-  template: unknown,
+  keptMessages: Message[],
   beforeCount: number,
   beforeTokenEstimate: number,
   summarizedCount: number,
@@ -715,8 +716,8 @@ function buildSummarizedMessages(
   strategy: CompactStrategy,
   pruneOnlyThresholdRatio: number,
   targetContextRatio: number,
-): unknown[] {
-  const summaryMessage = createCompactSummaryMessage(summary, keptMessages.length > 0, template);
+): Message[] {
+  const summaryMessage = createCompactSummaryMessage(summary, keptMessages.length > 0);
   const boundaryMessage = createCompactBoundaryMessage(
     {
       mode: 'summarized',
@@ -734,12 +735,11 @@ function buildSummarizedMessages(
       lightweightTokenEstimate,
       forced: Boolean(options.force),
     },
-    template,
   );
   return [boundaryMessage, summaryMessage, ...keptMessages];
 }
 
-function adjustStartForToolPairs(messages: unknown[], start: number): number {
+function adjustStartForToolPairs(messages: Message[], start: number): number {
   if (start <= 0 || start >= messages.length) return start;
   let nextStart = start;
   let changed = true;
@@ -759,42 +759,14 @@ function adjustStartForToolPairs(messages: unknown[], start: number): number {
   return nextStart;
 }
 
-function getToolCallIds(message: unknown): string[] {
-  if (!message || typeof message !== 'object') return [];
-  const record = message as Record<string, unknown>;
-  const ids: string[] = [];
-
-  if (Array.isArray(record.tool_calls)) {
-    for (const toolCall of record.tool_calls) {
-      if (toolCall && typeof toolCall === 'object' && typeof (toolCall as Record<string, unknown>).id === 'string') {
-        ids.push((toolCall as Record<string, string>).id);
-      }
-    }
-  }
-  if (record.type === 'function_call' && typeof record.call_id === 'string') ids.push(record.call_id);
-  for (const block of contentBlocks(record)) {
-    if (block.type === 'tool_use' && typeof block.id === 'string') ids.push(block.id);
-  }
-  return ids;
-}
-
-function getToolResultIds(message: unknown): string[] {
-  if (!message || typeof message !== 'object') return [];
-  const record = message as Record<string, unknown>;
-  const ids: string[] = [];
-
-  if (record.role === 'tool' && typeof record.tool_call_id === 'string') ids.push(record.tool_call_id);
-  if (record.type === 'function_call_output' && typeof record.call_id === 'string') ids.push(record.call_id);
-  for (const block of contentBlocks(record)) {
-    if (block.type === 'tool_result' && typeof block.tool_use_id === 'string') ids.push(block.tool_use_id);
-  }
-  return ids;
-}
-
-function contentBlocks(record: Record<string, unknown>): Array<Record<string, unknown>> {
-  return Array.isArray(record.content)
-    ? record.content.filter((block): block is Record<string, unknown> => Boolean(block && typeof block === 'object'))
+function getToolCallIds(message: Message): string[] {
+  return message.role === 'assistant'
+    ? message.content.filter((block) => block.type === 'toolCall').map((call) => call.id)
     : [];
+}
+
+function getToolResultIds(message: Message): string[] {
+  return message.role === 'toolResult' ? [message.toolCallId] : [];
 }
 
 function positiveNumber(value: unknown): number | undefined {
@@ -808,30 +780,27 @@ function clampRatio(value: unknown, fallback: number): number {
   return Math.min(1, number);
 }
 
-function compactMessagesForCheckpoint(messages: unknown[], options: CompactOptions): unknown[] {
-  const placeholder = options.toolResultPlaceholder ?? TOOL_RESULT_PLACEHOLDER;
-  return messages.map((message) =>
-    pruneValue(message, { maxStringChars: OLD_MESSAGE_STRING_CHARS, placeholder, mode: 'old' }),
+function compactMessagesForCheckpoint(messages: Message[], options: CompactOptions): Message[] {
+  const protectedStart = protectedRecentStart(messages, options);
+  const latestUserIndex = options.preserveLatestUserMessage ? findLatestUserIndex(messages) : -1;
+  return messages.map((message, index) =>
+    index >= protectedStart || index === latestUserIndex
+      ? message
+      : pruneMessage(message, {
+          maxStringChars: OLD_MESSAGE_STRING_CHARS,
+          placeholder: options.toolResultPlaceholder,
+          mode: 'old',
+        }),
   );
 }
 
-// 快速压缩（/compact 与请求前的本地清理）只做本地清理，不调用模型。
-//
-// 它处理「压缩区」——受保护区（最近若干条消息）之前的历史——里的三件事：
-//   1. 把全部工具调用与工具结果聚合成一条调用 + 一条结果（见 AGGREGATE_*）；
-//   2. 丢掉这一区的思考内容（Responses 的 reasoning 条目、Chat 的 reasoning_content）；
-//   3. 把图片 / 文档块替换为占位符。
-// 用户与助手的正文一律原样保留、顺序不变，也不插入 boundary/summary 消息，所以它
-// 改写的是「工具过程」而不是对话本身。
-//
-// 为什么整块聚合：工具结果换成占位符后，一轮工具调用剩下的只有信封（role / call_id /
-// name）与已经失去价值的参数正文，几百轮下来信封本身就有几千 token。代价是这一区不再
-// 逐条重放（工具时序只剩计数），需要细节时模型重新读文件、重跑命令即可。
-function compactToolResultsOnly(messages: unknown[], options: CompactOptions): CompactResult {
+// 快速压缩只处理受保护区之前的工具过程、思考与图片，保留对话正文的顺序。
+function compactToolResultsOnly(messages: Message[], options: CompactOptions): CompactResult {
   const zone = quickCompactZone(messages, options);
   const scan = scanCompressedZone(messages, zone);
-  const aggregate =
-    scan.counts.size > 0 ? aggregatePair(scan.counts, scan.totalCalls, scan.extraKinds, scan.protocol) : [];
+  const aggregate = scan.template
+    ? aggregatePair(scan.counts, scan.totalCalls, scan.extraKinds, scan.template)
+    : [];
   const compactedMessages = [...scan.kept, ...aggregate, ...messages.slice(zone.boundary)];
 
   if (
@@ -843,9 +812,7 @@ function compactToolResultsOnly(messages: unknown[], options: CompactOptions): C
     throw new CompactionNotNeededError('当前会话没有可清理的内容，暂不需要快速压缩');
   }
 
-  // 「压缩前」要按 provider 真正收到的内容算：reasoning 条目发送前就被剥掉，把它们算进
-  // 基准会让通知里的压缩前数字偏高，节省量看着比实际更大。
-  const beforeTokenEstimate = Math.max(0, estimateMessagesTokens(messages) - scan.droppedReasoningTokens);
+  const beforeTokenEstimate = estimateMessagesTokens(messages);
   const afterTokenEstimate = estimateMessagesTokens(compactedMessages);
   const savedTokenEstimate = Math.max(0, beforeTokenEstimate - afterTokenEstimate);
   const contextWindowSize = positiveNumber(options.contextWindowSize);
@@ -880,133 +847,98 @@ function compactToolResultsOnly(messages: unknown[], options: CompactOptions): C
   };
 }
 
-type ToolProtocol = 'responses' | 'chat';
-
 type CompressedZoneScan = {
-  /** 压缩区里原样保留的消息（正文留下，思考与媒体已清理）。 */
-  kept: unknown[];
-  /** 工具名 → 调用次数；上一次压缩留下的聚合说明里的计数已并入。 */
+  kept: Message[];
   counts: Map<string, number>;
-  /** 说明里列不全的种类数（沿用上一次压缩的 `+N more kinds`）。 */
   extraKinds: number;
   totalCalls: number;
-  /** 本次新聚合掉的调用数，用来判断「这次到底压出了什么」。 */
   newToolCalls: number;
-  protocol: ToolProtocol;
+  /** 元信息沿用最后一个被聚合的 assistant，不制造虚构的 provider/model。 */
+  template?: AssistantMessage;
   toolResultsReplaced: number;
   reasoningItemsDropped: number;
-  droppedReasoningTokens: number;
   mediaItemsReplaced: number;
 };
 
 type QuickCompactZone = {
-  /** 它之前的历史被聚合，它之后的原样保留。 */
   boundary: number;
-  /** 落在压缩区内但要原样留下的那条消息（最新用户消息），-1 表示没有。 */
+  /** 压缩区内仍需原样留下的最新用户消息；-1 表示没有。 */
   verbatimIndex: number;
 };
 
-/**
- * 压缩区。`preserveLatestUserMessage` 保护最新那条用户消息时，连同它之后的当前轮
- * 一起留下：把这一轮的工具调用并进聚合，聚合就会出现在它自己的提问之前，时序反了。
- * 用户消息本身就在开头时没有更早的对话可留，退化成「只保这一条、其余照压」。
- */
-function quickCompactZone(messages: unknown[], options: CompactOptions): QuickCompactZone {
+function quickCompactZone(messages: Message[], options: CompactOptions): QuickCompactZone {
   const protectedStart = protectedRecentStart(messages, options);
   if (!options.preserveLatestUserMessage) return { boundary: protectedStart, verbatimIndex: -1 };
   const latestUserIndex = findLatestUserIndex(messages);
   if (latestUserIndex < 0) return { boundary: protectedStart, verbatimIndex: -1 };
+  // 单轮长工具循环允许压缩旧批次，但请求（含图片）必须保留。
   if (latestUserIndex === 0) return { boundary: protectedStart, verbatimIndex: 0 };
   return { boundary: Math.min(protectedStart, adjustStartForToolPairs(messages, latestUserIndex)), verbatimIndex: -1 };
 }
 
-function scanCompressedZone(messages: unknown[], zone: QuickCompactZone): CompressedZoneScan {
+function scanCompressedZone(messages: Message[], zone: QuickCompactZone): CompressedZoneScan {
   const scan: CompressedZoneScan = {
-    kept: [],
-    counts: new Map(),
-    extraKinds: 0,
-    totalCalls: 0,
-    newToolCalls: 0,
-    protocol: 'responses',
-    toolResultsReplaced: 0,
-    reasoningItemsDropped: 0,
-    droppedReasoningTokens: 0,
-    mediaItemsReplaced: 0,
+    kept: [], counts: new Map(), extraKinds: 0, totalCalls: 0, newToolCalls: 0,
+    toolResultsReplaced: 0, reasoningItemsDropped: 0, mediaItemsReplaced: 0,
   };
   for (let index = 0; index < zone.boundary; index++) {
-    const message = messages[index];
+    const message = messages[index]!;
     if (index === zone.verbatimIndex) {
       scan.kept.push(message);
       continue;
     }
-    const record = asRecord(message);
-    if (!record) {
+    if (message.role === 'toolResult') {
+      if (message.toolCallId === AGGREGATE_CALL_ID) {
+        const previous = aggregateNoteOf(contentText(message.content));
+        if (previous) {
+          for (const [name, count] of previous.counts) scan.counts.set(name, (scan.counts.get(name) ?? 0) + count);
+          scan.extraKinds = Math.max(scan.extraKinds, previous.extraKinds);
+          scan.totalCalls += previous.total;
+        }
+      } else {
+        scan.toolResultsReplaced++;
+        scan.mediaItemsReplaced += message.content.filter((block) => block.type === 'image').length;
+      }
+      continue;
+    }
+    if (message.role === 'assistant') {
+      const content: AssistantMessage['content'] = [];
+      let changed = false;
+      for (const block of message.content) {
+        if (block.type === 'thinking') {
+          scan.reasoningItemsDropped++;
+          changed = true;
+        } else if (block.type === 'toolCall') {
+          scan.template = message;
+          if (block.id !== AGGREGATE_CALL_ID) {
+            scan.counts.set(block.name, (scan.counts.get(block.name) ?? 0) + 1);
+            scan.newToolCalls++;
+            scan.totalCalls++;
+          }
+          changed = true;
+        } else {
+          content.push(block);
+        }
+      }
+      if (content.length > 0) scan.kept.push(changed ? rewrittenAssistant(message, content) : message);
+      continue;
+    }
+    if (message.role === 'user' && Array.isArray(message.content)) {
+      const content = message.content.map((block): TextContent | typeof block => {
+        if (block.type !== 'image') return block;
+        scan.mediaItemsReplaced++;
+        return imagePlaceholder();
+      });
+      scan.kept.push(content.some((block, index) => block !== message.content[index]) ? { ...message, content } : message);
+    } else {
       scan.kept.push(message);
-      continue;
     }
-
-    // 上一次压缩留下的聚合对：并入计数后统一重建，call_id 与说明文本因此保持不变。
-    if (isAggregateRecord(record)) {
-      const previous = aggregateNoteOf(record);
-      if (previous) {
-        for (const [name, count] of previous.counts) scan.counts.set(name, (scan.counts.get(name) ?? 0) + count);
-        scan.extraKinds = Math.max(scan.extraKinds, previous.extraKinds);
-        scan.totalCalls += previous.total;
-        scan.protocol = previous.protocol;
-      }
-      continue;
-    }
-
-    // 思考：调用聚合成一条后 call_id 全变了，reasoning 条目留着就是无效引用
-    // （Responses 会报 reasoning item 缺少它之后的条目），所以压缩区的思考一律
-    // 丢弃，而不是只丢已经失效的那些。
-    if (record.type === 'reasoning') {
-      scan.reasoningItemsDropped++;
-      scan.droppedReasoningTokens += estimateMessagesTokens([message]);
-      continue;
-    }
-
-    const calls = recordToolCalls(record);
-    if (calls) {
-      scan.protocol = calls.protocol;
-      for (const name of calls.names) {
-        scan.counts.set(name, (scan.counts.get(name) ?? 0) + 1);
-        scan.newToolCalls++;
-        scan.totalCalls++;
-      }
-      // Chat 的一条 assistant 里既有正文又有 tool_calls：抽走调用后正文单独留下，
-      // 正文为空就整条丢掉（空 assistant 消息对 provider 没有意义）。
-      const stripped = withoutToolCalls(record, calls.protocol);
-      if (stripped) scan.kept.push(cleanZoneMessage(stripped, scan));
-      continue;
-    }
-
-    if (isToolResultRecord(record)) {
-      scan.toolResultsReplaced++;
-      continue;
-    }
-
-    scan.kept.push(cleanZoneMessage(record, scan));
   }
   return scan;
 }
 
-function isAggregateRecord(record: Record<string, unknown>): boolean {
-  if (record.type === 'function_call' || record.type === 'function_call_output') {
-    return record.call_id === AGGREGATE_CALL_ID;
-  }
-  if (record.tool_call_id === AGGREGATE_CALL_ID) return true;
-  return (
-    Array.isArray(record.tool_calls) &&
-    record.tool_calls.some((entry) => asRecord(entry)?.id === AGGREGATE_CALL_ID)
-  );
-}
-
-/** 从既有的聚合说明里还原计数；调用侧没有文本，返回 null。 */
-function aggregateNoteOf(
-  record: Record<string, unknown>,
-): { counts: Map<string, number>; total: number; extraKinds: number; protocol: ToolProtocol } | null {
-  const text = typeof record.output === 'string' ? record.output : typeof record.content === 'string' ? record.content : '';
+/** 从上一次聚合结果里还原计数；调用侧只有结构化空参数。 */
+function aggregateNoteOf(text: string): { counts: Map<string, number>; total: number; extraKinds: number } | null {
   if (!text.startsWith(AGGREGATE_NOTE_PREFIX)) return null;
   const markerAt = text.indexOf(AGGREGATE_NOTE_KINDS_MARKER);
   if (markerAt < 0) return null;
@@ -1017,101 +949,23 @@ function aggregateNoteOf(
   let extraKinds = 0;
   for (const part of kindsText.split(', ')) {
     const extra = AGGREGATE_NOTE_EXTRA.exec(part);
-    if (extra) {
-      extraKinds += Number(extra[1]);
-      continue;
-    }
+    if (extra) { extraKinds += Number(extra[1]); continue; }
     const match = AGGREGATE_NOTE_KIND.exec(part);
-    if (!match) continue;
-    counts.set(match[1], (counts.get(match[1]) ?? 0) + Number(match[2]));
+    if (match) counts.set(match[1]!, (counts.get(match[1]!) ?? 0) + Number(match[2]));
   }
-  const total = totalMatch
-    ? Number(totalMatch[1])
-    : [...counts.values()].reduce((sum, count) => sum + count, 0);
-  return {
-    counts,
-    total,
-    extraKinds,
-    protocol: record.type === 'function_call' || record.type === 'function_call_output' ? 'responses' : 'chat',
-  };
+  return { counts, total: totalMatch ? Number(totalMatch[1]) : [...counts.values()].reduce((sum, count) => sum + count, 0), extraKinds };
 }
 
-function recordToolCalls(record: Record<string, unknown>): { protocol: ToolProtocol; names: string[] } | null {
-  if (record.type === 'function_call') {
-    return { protocol: 'responses', names: [toolNameOf(record)] };
-  }
-  if (Array.isArray(record.tool_calls) && record.tool_calls.length > 0) {
-    return {
-      protocol: 'chat',
-      names: record.tool_calls.map((entry) => {
-        const call = asRecord(entry);
-        const fn = call ? asRecord(call.function) : null;
-        return toolNameOf(fn ?? {});
-      }),
-    };
-  }
-  return null;
-}
-
-function toolNameOf(record: Record<string, unknown>): string {
-  return typeof record.name === 'string' && record.name.trim() ? record.name : 'unknown_tool';
-}
-
-/** 抽掉调用后还能留下正文的消息；Responses 的 function_call 条目没有正文，整条丢掉。 */
-function withoutToolCalls(
-  record: Record<string, unknown>,
-  protocol: ToolProtocol,
-): Record<string, unknown> | null {
-  if (protocol !== 'chat') return null;
-  const rest = { ...record };
-  delete rest.tool_calls;
-  return hasVisibleContent(rest.content) ? rest : null;
-}
-
-function hasVisibleContent(value: unknown): boolean {
-  if (typeof value === 'string') return value.trim().length > 0;
-  if (Array.isArray(value)) return value.length > 0;
-  return false;
-}
-
-/** 留下的正文消息也要清理：思考与媒体是这一路径要腾出去的两大块。 */
-function cleanZoneMessage(message: unknown, scan: CompressedZoneScan): unknown {
-  let next = message;
-  const record = asRecord(next);
-  if (record && typeof record.reasoning_content === 'string') {
-    const stripped = { ...record };
-    delete stripped.reasoning_content;
-    next = stripped;
-    scan.reasoningItemsDropped++;
-  }
-  const mediaCounter = { replaced: 0 };
-  const replaced = replaceMediaWithPlaceholder(next, mediaCounter);
-  scan.mediaItemsReplaced += mediaCounter.replaced;
-  return replaced;
-}
-
-/** 聚合后的那「一条调用 + 一条结果」；两种协议的配对形状不同，但表达的是同一件事。 */
-function aggregatePair(
-  counts: Map<string, number>,
-  total: number,
-  extraKinds: number,
-  protocol: ToolProtocol,
-): unknown[] {
+function aggregatePair(counts: Map<string, number>, total: number, extraKinds: number, template: AssistantMessage): Message[] {
   const name = primaryToolName(counts);
-  const note = aggregateNote(counts, total, extraKinds);
-  if (protocol === 'chat') {
-    return [
-      {
-        role: 'assistant',
-        content: '',
-        tool_calls: [{ id: AGGREGATE_CALL_ID, type: 'function', function: { name, arguments: '{}' } }],
-      },
-      { role: 'tool', tool_call_id: AGGREGATE_CALL_ID, content: note },
-    ];
-  }
+  const assistant = rewrittenAssistant(template, [{ type: 'toolCall', id: AGGREGATE_CALL_ID, name, arguments: {} }]);
   return [
-    { type: 'function_call', call_id: AGGREGATE_CALL_ID, name, arguments: '{}' },
-    { type: 'function_call_output', call_id: AGGREGATE_CALL_ID, output: note },
+    { ...assistant, stopReason: 'toolUse' },
+    {
+      role: 'toolResult', toolCallId: AGGREGATE_CALL_ID, toolName: name,
+      content: [{ type: 'text', text: aggregateNote(counts, total, extraKinds) }],
+      isError: false, timestamp: template.timestamp,
+    },
   ];
 }
 
@@ -1141,20 +995,14 @@ function aggregateNote(counts: Map<string, number>, total: number, extraKinds: n
   return `${AGGREGATE_NOTE_PREFIX} Placeholder for ${total} collapsed tool ${calls} ${AGGREGATE_NOTE_KINDS_MARKER}${shown.join(', ')}${AGGREGATE_NOTE_KINDS_END}; re-run or re-read if needed.`;
 }
 
-function asRecord(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === 'object' && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : null;
-}
-
-function findLatestUserIndex(messages: unknown[]): number {
+function findLatestUserIndex(messages: Message[]): number {
   for (let index = messages.length - 1; index >= 0; index--) {
-    if (isConversationUserMessage(messages[index])) return index;
+    if (isConversationUserMessage(messages[index]!)) return index;
   }
   return -1;
 }
 
-function protectedRecentStart(messages: unknown[], options: CompactOptions): number {
+function protectedRecentStart(messages: Message[], options: CompactOptions): number {
   let start = messages.length;
   if (Number.isFinite(options.preserveRecentMessages) && options.preserveRecentMessages! > 0) {
     start = Math.max(0, messages.length - Math.ceil(options.preserveRecentMessages!));
@@ -1166,41 +1014,7 @@ function protectedRecentStart(messages: unknown[], options: CompactOptions): num
   return adjustStartForToolPairs(messages, start);
 }
 
-
-// 与 prune-only 路径共用 mediaPlaceholder()：识别到的媒体块（图片/文档/文件）
-// 整体换成一行占位文本，base64 随之从历史里消失。只替换能识别的块类型——未知
-// 结构里的 url/data 字段是 schema-bearing 值，改了会让 provider 报 400。
-// 未改动时返回原引用，避免无谓的深拷贝。
-function replaceMediaWithPlaceholder(value: unknown, counter: { replaced: number }): unknown {
-  if (Array.isArray(value)) {
-    let changed = false;
-    const next = value.map((item) => {
-      const replaced = replaceMediaWithPlaceholder(item, counter);
-      if (replaced !== item) changed = true;
-      return replaced;
-    });
-    return changed ? next : value;
-  }
-  if (!value || typeof value !== 'object') return value;
-
-  const record = value as Record<string, unknown>;
-  const mediaReplacement = mediaPlaceholder(record);
-  if (mediaReplacement) {
-    counter.replaced++;
-    return mediaReplacement;
-  }
-
-  let changed = false;
-  const next: Record<string, unknown> = {};
-  for (const [key, child] of Object.entries(record)) {
-    const replaced = replaceMediaWithPlaceholder(child, counter);
-    if (replaced !== child) changed = true;
-    next[key] = replaced;
-  }
-  return changed ? next : value;
-}
-
-function countChangedMessages(before: unknown[], after: unknown[]): number {
+function countChangedMessages(before: Message[], after: Message[]): number {
   let changed = Math.abs(before.length - after.length);
   for (let index = 0; index < Math.min(before.length, after.length); index++) {
     if (stringifyValue(before[index]) !== stringifyValue(after[index])) changed++;
@@ -1208,221 +1022,64 @@ function countChangedMessages(before: unknown[], after: unknown[]): number {
   return changed;
 }
 
-type PruneMode = 'old' | 'kept';
+type PruneOptions = { maxStringChars: number; placeholder?: string; mode: 'old' | 'kept' };
 
-type PruneOptions = {
-  maxStringChars: number;
-  placeholder?: string;
-  mode: PruneMode;
-};
+function imagePlaceholder(): TextContent {
+  return { type: 'text', text: '[image omitted during compact]' };
+}
 
-function pruneValue(value: unknown, options: PruneOptions): unknown {
-  if (typeof value === 'string') {
-    return options.mode === 'old'
-      ? pruneOldString(value, options.maxStringChars)
-      : pruneString(value, options.maxStringChars);
-  }
-  if (Array.isArray(value)) return value.map((item) => pruneValue(item, options));
-  if (!value || typeof value !== 'object') return value;
-
-  const record = value as Record<string, unknown>;
-  const mediaReplacement = mediaPlaceholder(record);
-  if (mediaReplacement) return mediaReplacement;
-
-  if (isProtocolSensitiveRecord(record)) {
-    return pruneProtocolSensitiveRecord(record, options);
-  }
-
-  const next: Record<string, unknown> = {};
-  for (const [key, child] of Object.entries(record)) {
-    // Never carry Responses reasoning ciphertext across a compaction. These
-    // payloads are opaque, authenticated ciphertext bound to the exact prior
-    // context; prune-only/summarized compact rewrites tool results & media, so
-    // replaying a stale chain makes the model stall (reasoning-only turns
-    // committed as empty responses). Dropping encrypted_content lets
-    // stripUnusableResponseInputItems (ResponsesClient) discard the item on
-    // replay, so the model re-reasons cleanly against the compacted context.
-    if (key === 'encrypted_content') {
-      continue;
+/** 签名绑定原始块/响应。只要改写 assistant，就不能再重放其签名或 response id。 */
+function rewrittenAssistant(message: AssistantMessage, content: AssistantMessage['content']): AssistantMessage {
+  const next = { ...message, content: content.map((block) => {
+    if (block.type === 'text') {
+      const { textSignature: _signature, ...text } = block;
+      return text;
     }
-    if (key === 'toolUseResult') {
-      if (options.mode === 'old') {
-        next[key] = options.placeholder ?? TOOL_RESULT_PLACEHOLDER;
-      }
-      continue;
+    if (block.type === 'thinking') {
+      const { thinkingSignature: _signature, redacted: _redacted, ...thinking } = block;
+      return thinking;
     }
-    if (options.mode === 'old' && isToolResultRecord(record) && (key === 'content' || key === 'output')) {
-      next[key] = options.placeholder ?? TOOL_RESULT_PLACEHOLDER;
-      continue;
-    }
-    if (key === 'data' && typeof child === 'string') {
-      if (options.mode === 'old' && shouldOmitBase64String(child)) {
-        next[key] = `[omitted base64 data: ${child.length} chars]`;
-        continue;
-      }
-      if (options.mode === 'kept' && child.length > options.maxStringChars) {
-        next[key] = `[omitted base64 data: ${child.length} chars]`;
-        continue;
+    const { thoughtSignature: _signature, ...call } = block;
+    return call;
+  }) };
+  delete next.responseId;
+  return next;
+}
+
+function pruneMessage(message: Message, options: PruneOptions): Message {
+  const pruneText = (text: string): string => options.mode === 'old'
+    ? pruneOldString(text, options.maxStringChars) : pruneString(text, options.maxStringChars);
+  if (message.role === 'assistant') {
+    const content: AssistantMessage['content'] = [];
+    for (const block of message.content) {
+      if (block.type === 'thinking') continue;
+      if (block.type === 'toolCall') {
+        const replaceArguments = options.mode === 'old' || stringifyValue(block.arguments).length > options.maxStringChars;
+        if (replaceArguments && stringifyValue(block.arguments) !== stringifyValue(TOOL_ARGUMENTS_PLACEHOLDER)) {
+          const { argumentsError: _error, ...call } = block;
+          content.push({ ...call, arguments: { ...TOOL_ARGUMENTS_PLACEHOLDER } });
+        } else {
+          content.push(block);
+        }
+      } else {
+        const text = pruneText(block.text);
+        content.push(text === block.text ? block : { ...block, text });
       }
     }
-    // URL fields are schema-bearing values. Known media parts are replaced as a
-    // whole by mediaPlaceholder(); unknown URLs must remain valid and exact.
-    if ((key === 'url' || key === 'image_url' || key === 'file_url') && typeof child === 'string') {
-      next[key] = child;
-      continue;
-    }
-    if (isProtocolSensitiveKey(key)) {
-      next[key] = preserveProtocolSensitiveValue(child, options, key);
-      continue;
-    }
-    next[key] = pruneValue(child, options);
+    return content.length === message.content.length && content.every((block, index) => block === message.content[index])
+      ? message : rewrittenAssistant(message, content);
   }
-  return next;
-}
-
-function isProtocolSensitiveRecord(record: Record<string, unknown>): boolean {
-  return (
-    record.type === 'function_call' ||
-    record.type === 'tool_use' ||
-    record.type === 'function' ||
-    (Array.isArray(record.tool_calls) && (record.role === 'assistant' || record.role === undefined)) ||
-    // Chat Completions tool_calls[] entries look like { id, type, function: { name, arguments } }.
-    (record.type === 'function' && typeof record.function === 'object') ||
-    (typeof record.function === 'object' && record.function !== null && 'arguments' in (record.function as object))
-  );
-}
-
-function pruneProtocolSensitiveRecord(record: Record<string, unknown>, options: PruneOptions): Record<string, unknown> {
-  const next: Record<string, unknown> = {};
-  for (const [key, child] of Object.entries(record)) {
-    if (key === 'encrypted_content') {
-      continue;
-    }
-    if (key === 'tool_calls' && Array.isArray(child)) {
-      next[key] = child.map((item) => pruneValue(item, options));
-      continue;
-    }
-    if (key === 'function') {
-      next[key] = preserveProtocolSensitiveValue(child, options, key);
-      continue;
-    }
-    if (isProtocolSensitiveKey(key)) {
-      next[key] = preserveProtocolSensitiveValue(child, options, key);
-      continue;
-    }
-    // Keep assistant text/refusal/content structure intact when tool_calls exist,
-    // but still allow media placeholders and soft string truncation on free text.
-    if (key === 'content' || key === 'refusal') {
-      next[key] = pruneValue(child, options);
-      continue;
-    }
-    next[key] = pruneValue(child, options);
+  if (message.role === 'toolResult') {
+    return { ...message, content: options.mode === 'old'
+      ? [{ type: 'text', text: options.placeholder ?? TOOL_RESULT_PLACEHOLDER }]
+      : message.content.map((block) => block.type === 'image' ? imagePlaceholder() : { ...block, text: pruneText(block.text) }) };
   }
-  return next;
-}
-
-function isProtocolSensitiveKey(key: string): boolean {
-  return (
-    key === 'arguments' ||
-    key === 'input' ||
-    key === 'id' ||
-    key === 'call_id' ||
-    key === 'tool_call_id' ||
-    key === 'tool_use_id' ||
-    key === 'name' ||
-    key === 'type'
-  );
-}
-
-function preserveProtocolSensitiveValue(value: unknown, options: PruneOptions, key?: string): unknown {
-  if (typeof value === 'string') {
-    if (key === 'arguments') return preserveToolArguments(value, options);
-    // IDs/names/types must stay exact; free-text truncation would break tool pairing.
-    return value;
+  if (typeof message.content === 'string') {
+    const content = pruneText(message.content);
+    return content === message.content ? message : { ...message, content };
   }
-  if (Array.isArray(value)) {
-    return value.map((item) => preserveProtocolSensitiveValue(item, options));
-  }
-  if (!value || typeof value !== 'object') return value;
-
-  // Anthropic tool_use.input is structured JSON. Keep object shape valid; only drop huge leaf strings carefully.
-  if (key === 'input') {
-    return preserveToolInput(value, options);
-  }
-
-  const record = value as Record<string, unknown>;
-  const next: Record<string, unknown> = {};
-  for (const [childKey, child] of Object.entries(record)) {
-    if (
-      isProtocolSensitiveKey(childKey) ||
-      childKey === 'function' ||
-      childKey === 'tool_calls' ||
-      key === 'function'
-    ) {
-      next[childKey] = preserveProtocolSensitiveValue(child, options, childKey);
-      continue;
-    }
-    next[childKey] = pruneValue(child, options);
-  }
-  return next;
-}
-
-function preserveToolArguments(value: string, options: PruneOptions): string {
-  // Chat Completions / Responses tool-call arguments must remain valid JSON strings.
-  // Free-form head/tail truncation makes the next provider request 400.
-  // 快速压缩（mode: old）时工具参数也全部替换为合法 JSON 占位符，只保留占位；
-  // 其他模式（保留的最近轮次）只截断超长参数，保持工具调用的可读性。
-  if (options.mode === 'old') return TOOL_ARGUMENTS_PLACEHOLDER;
-  if (isValidJsonText(value)) {
-    return value.length <= options.maxStringChars ? value : TOOL_ARGUMENTS_PLACEHOLDER;
-  }
-  return TOOL_ARGUMENTS_PLACEHOLDER;
-}
-
-function preserveToolInput(value: unknown, options: PruneOptions): unknown {
-  if (typeof value === 'string') {
-    if (isValidJsonText(value)) {
-      return value.length <= options.maxStringChars ? value : TOOL_ARGUMENTS_PLACEHOLDER;
-    }
-    return value.length <= options.maxStringChars ? value : TOOL_ARGUMENTS_PLACEHOLDER;
-  }
-  if (Array.isArray(value)) return value.map((item) => preserveToolInput(item, options));
-  if (!value || typeof value !== 'object') return value;
-
-  const record = value as Record<string, unknown>;
-  const next: Record<string, unknown> = {};
-  for (const [childKey, child] of Object.entries(record)) {
-    if (typeof child === 'string' && child.length > options.maxStringChars) {
-      next[childKey] = `[omitted tool input field: ${child.length} chars]`;
-      continue;
-    }
-    next[childKey] = preserveToolInput(child, options);
-  }
-  return next;
-}
-
-function isValidJsonText(value: string): boolean {
-  try {
-    JSON.parse(value);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function mediaPlaceholder(record: Record<string, unknown>): Record<string, unknown> | null {
-  if (record.type === 'image') return { type: 'text', text: '[image omitted during compact]' };
-  if (record.type === 'document') return { type: 'text', text: '[document omitted during compact]' };
-  if (record.type === 'image_url') return { type: 'text', text: '[image omitted during compact]' };
-  if (record.type === 'input_image') return { type: 'input_text', text: '[image omitted during compact]' };
-  if (record.type === 'file') return { type: 'text', text: '[document omitted during compact]' };
-  if (record.type === 'resource') return { type: 'text', text: '[document omitted during compact]' };
-  if (record.type === 'input_file') return { type: 'input_text', text: '[document omitted during compact]' };
-  return null;
-}
-
-function isToolResultRecord(record: Record<string, unknown>): boolean {
-  return record.role === 'tool' || record.type === 'tool_result' || record.type === 'function_call_output';
+  const content = message.content.map((block) => block.type === 'image' ? imagePlaceholder() : { ...block, text: pruneText(block.text) });
+  return { ...message, content };
 }
 
 function pruneOldString(value: string, maxChars: number): string {
@@ -1448,18 +1105,19 @@ function usageRatio(tokens: number, contextWindowSize: number | undefined): numb
 }
 
 function compactKeptMessages(
-  messages: unknown[],
+  messages: Message[],
   options: CompactOptions,
   tokenBudget = getRecentTokenBudget(options),
-): unknown[] {
+): Message[] {
   const budget = Math.max(1, tokenBudget);
-  const sanitized = messages.map((message) =>
-    pruneValue(message, { maxStringChars: Number.MAX_SAFE_INTEGER, mode: 'kept' }),
-  );
+  const latestUserIndex = options.preserveLatestUserMessage ? findLatestUserIndex(messages) : -1;
+  const prune = (message: Message, index: number, maxStringChars: number): Message => index === latestUserIndex
+    ? message : pruneMessage(message, { maxStringChars, mode: 'kept' });
+  const sanitized = messages.map((message, index) => prune(message, index, Number.MAX_SAFE_INTEGER));
   if (estimateMessagesTokens(sanitized) <= budget) return sanitized;
 
   for (const maxStringChars of options.aggressive ? [6_000, 2_000, 800] : [12_000, 4_000, 1_200]) {
-    const compacted = sanitized.map((message) => pruneValue(message, { maxStringChars, mode: 'kept' }));
+    const compacted = sanitized.map((message, index) => prune(message, index, maxStringChars));
     if (estimateMessagesTokens(compacted) <= Math.ceil(budget * 1.25) || maxStringChars <= 1_200) {
       return compacted;
     }
@@ -1473,7 +1131,7 @@ function pruneString(value: string, maxChars: number): string {
   return headSignalsTail(value, maxChars);
 }
 
-function groupMessagesByRound(messages: unknown[]): Array<{ start: number; end: number }> {
+function groupMessagesByRound(messages: Message[]): Array<{ start: number; end: number }> {
   const starts: number[] = [];
   for (let index = 0; index < messages.length; index++) {
     if (isConversationUserMessage(messages[index])) starts.push(index);
@@ -1489,10 +1147,8 @@ function groupMessagesByRound(messages: unknown[]): Array<{ start: number; end: 
   return rounds;
 }
 
-function isConversationUserMessage(message: unknown): boolean {
-  if (getRole(message) !== 'user') return false;
-  if (getToolResultIds(message).length > 0) return false;
-  return !getStringContent(message).startsWith('Image output from ');
+function isConversationUserMessage(message: Message): boolean {
+  return message.role === 'user' && !isCompactBoundary(message) && !isCompactSummary(message);
 }
 
 type TranscriptToolCall = { id: string; name: string; detail: string; files: string[] };
@@ -1514,73 +1170,50 @@ type TranscriptTurn = {
  * `dialogueOnly` 只留用户与助手的对话（外加之前的 checkpoint 摘要），工具调用、工具结果
  * 与思考一概不进——手动「模型压缩」要的是对话本身，过程占了九成篇幅却几乎不进摘要结论。
  */
-export function buildTranscript(messages: unknown[], options: { dialogueOnly?: boolean } = {}): string {
+export function buildTranscript(messages: Message[], options: { dialogueOnly?: boolean } = {}): string {
   const dialogueOnly = options.dialogueOnly === true;
   const summaries: string[] = [];
   const turns: TranscriptTurn[] = [];
-  // 工具结果只带 call id，名字要从对应的调用消息里找回来。
-  const callNames = new Map<string, string>();
   let turn: TranscriptTurn | null = null;
-
   const openTurn = (): TranscriptTurn => {
     const next: TranscriptTurn = { user: [], model: [], thinking: [], calls: [], results: [] };
     turns.push(next);
     return next;
   };
   const currentTurn = (): TranscriptTurn => turn ?? (turn = openTurn());
-  const pushResult = (id: string | null, text: string): void => {
-    const body = text.trim();
-    if (!body) return;
-    currentTurn().results.push({ name: (id && callNames.get(id)) || 'tool', text: body });
-  };
 
   for (const message of messages) {
-    if (!message || typeof message !== 'object') continue;
     if (isCompactBoundary(message)) continue;
     if (isCompactSummary(message)) {
-      // 上一个 checkpoint 是「已知的旧对话」，单独成块，不跟后面的轮次混在一起。
-      summaries.push(
-        headSignalsTail(stripCompactSummaryHeader(getStringContent(message)), MAX_SUMMARY_TRANSCRIPT_CHARS),
-      );
+      summaries.push(headSignalsTail(stripCompactSummaryHeader(getStringContent(message)), MAX_SUMMARY_TRANSCRIPT_CHARS));
       turn = null;
       continue;
     }
-    const record = message as Record<string, unknown>;
-    const calls = dialogueOnly ? [] : transcriptToolCalls(record);
-    for (const call of calls) {
-      if (call.id) callNames.set(call.id, call.name);
-    }
-
-    if (getToolResultIds(message).length > 0) {
-      if (dialogueOnly) continue;
-      const blocks = contentBlocks(record).filter((block) => block.type === 'tool_result');
-      if (blocks.length > 0) {
-        for (const block of blocks) {
-          pushResult(
-            typeof block.tool_use_id === 'string' ? block.tool_use_id : null,
-            extractText(block.content),
-          );
-        }
-      } else {
-        const id = record.role === 'tool' ? record.tool_call_id : record.call_id;
-        pushResult(typeof id === 'string' ? id : null, extractText(record.content) || extractText(record.output));
+    if (message.role === 'system') continue;
+    if (message.role === 'toolResult') {
+      if (!dialogueOnly) {
+        const text = transcriptText(message).trim();
+        if (text) currentTurn().results.push({ name: message.toolName, text: message.isError ? `[error] ${text}` : text });
       }
       continue;
     }
-
-    const thinking = dialogueOnly ? '' : transcriptThinking(record);
-    const text = transcriptText(record);
-    if (isConversationUserMessage(message)) {
+    const text = transcriptText(message).trim();
+    if (message.role === 'user') {
       turn = openTurn();
-      if (text.trim()) turn.user.push(headSignalsTail(text.trim(), TRANSCRIPT_USER_CHARS));
+      if (text) turn.user.push(headSignalsTail(text, TRANSCRIPT_USER_CHARS));
       continue;
     }
     const target = currentTurn();
-    if (thinking) target.thinking.push(headSignalsTail(thinking, TRANSCRIPT_THINKING_CHARS));
-    if (text.trim()) target.model.push(headSignalsTail(text.trim(), TRANSCRIPT_MODEL_CHARS));
-    for (const call of calls) {
-      target.calls.push({ id: call.id, name: call.name, detail: call.detail, files: call.files });
+    if (!dialogueOnly) {
+      for (const block of message.content) {
+        if (block.type === 'thinking' && block.thinking.trim()) {
+          target.thinking.push(headSignalsTail(block.thinking, TRANSCRIPT_THINKING_CHARS));
+        } else if (block.type === 'toolCall') {
+          target.calls.push({ id: block.id, name: block.name, ...summarizeToolCall(block.arguments) });
+        }
+      }
     }
+    if (text) target.model.push(headSignalsTail(text, TRANSCRIPT_MODEL_CHARS));
   }
 
   return renderTranscript(summaries, turns);
@@ -1679,74 +1312,9 @@ function indentLines(text: string, first: string, rest: string): string {
 }
 
 /** 一条消息里的正文：只算真正的文本块，图片压成一行占位。 */
-function transcriptText(record: Record<string, unknown>): string {
-  const content = record.content;
-  if (typeof content === 'string') return content;
-  if (!Array.isArray(content)) return '';
-  const parts: string[] = [];
-  for (const block of content) {
-    if (typeof block === 'string') {
-      parts.push(block);
-      continue;
-    }
-    if (!block || typeof block !== 'object') continue;
-    const item = block as Record<string, unknown>;
-    const type = typeof item.type === 'string' ? item.type : '';
-    if (typeof item.text === 'string' && (type === '' || TRANSCRIPT_TEXT_BLOCK_TYPES.has(type))) {
-      parts.push(item.text);
-    } else if (type.includes('image')) {
-      parts.push('[图片]');
-    }
-  }
-  return parts.join('\n');
-}
-
-function transcriptThinking(record: Record<string, unknown>): string {
-  if (typeof record.reasoning_content === 'string' && record.reasoning_content.trim()) {
-    return record.reasoning_content;
-  }
-  if (record.type === 'reasoning') return extractText(record.summary) || extractText(record.content);
-  const parts: string[] = [];
-  for (const block of contentBlocks(record)) {
-    if (typeof block.text === 'string' && (block.type === 'reasoning_text' || block.type === 'summary_text')) {
-      parts.push(block.text);
-    } else if (block.type === 'thinking' && typeof block.thinking === 'string') {
-      parts.push(block.thinking);
-    }
-  }
-  return parts.join('\n');
-}
-
-function transcriptToolCalls(record: Record<string, unknown>): TranscriptToolCall[] {
-  const calls: TranscriptToolCall[] = [];
-  for (const entry of Array.isArray(record.tool_calls) ? record.tool_calls : []) {
-    if (!entry || typeof entry !== 'object') continue;
-    const call = entry as Record<string, unknown>;
-    const fn = call.function && typeof call.function === 'object'
-      ? (call.function as Record<string, unknown>)
-      : {};
-    calls.push({
-      id: typeof call.id === 'string' ? call.id : '',
-      name: typeof fn.name === 'string' ? fn.name : 'tool',
-      ...summarizeToolCall(fn.arguments),
-    });
-  }
-  if (record.type === 'function_call' || record.type === 'custom_tool_call') {
-    calls.push({
-      id: typeof record.call_id === 'string' ? record.call_id : '',
-      name: typeof record.name === 'string' ? record.name : 'tool',
-      ...summarizeToolCall(record.arguments ?? record.input),
-    });
-  }
-  for (const block of contentBlocks(record)) {
-    if (block.type !== 'tool_use') continue;
-    calls.push({
-      id: typeof block.id === 'string' ? block.id : '',
-      name: typeof block.name === 'string' ? block.name : 'tool',
-      ...summarizeToolCall(block.input),
-    });
-  }
-  return calls;
+function transcriptText(message: Message): string {
+  if (typeof message.content === 'string') return message.content;
+  return message.content.map((block) => block.type === 'text' ? block.text : block.type === 'image' ? '[图片]' : '').filter(Boolean).join('\n');
 }
 
 /**
@@ -1754,13 +1322,14 @@ function transcriptToolCalls(record: Record<string, unknown>): TranscriptToolCal
  * 同时把参数里出现的文件单独收集起来——同一工具跑十几次时，正文只显示前几次，
  * 但「一共碰了哪些文件」必须完整。
  */
-function summarizeToolCall(value: unknown): { detail: string; files: string[] } {
+function summarizeToolCall(value: ToolCall['arguments']): { detail: string; files: string[] } {
   // 参数可能是空 / 规范化后变成 undefined（`JSON.stringify(undefined)` 返回 undefined），
   // 那种调用只是「这个工具没传参」，正文留空即可。
-  const raw = typeof value === 'string' ? value : (stringifyValue(value) ?? '');
+  const raw = stringifyValue(value);
+  const patchText = Object.values(value).filter((item) => typeof item === 'string').join('\n');
   const files = uniqueResultPaths([raw]);
   // apply_patch 的正文里第一行就是「改了哪些文件」，比截断后的前 200 字符有用得多。
-  const patched = [...raw.matchAll(/\*\*\* (?:Update|Add|Delete) File: (.+)$/gm)].map((match) =>
+  const patched = [...patchText.matchAll(/\*\*\* (?:Update|Add|Delete) File: (.+)$/gm)].map((match) =>
     match[1]!.trim(),
   );
   if (patched.length > 0) {
@@ -1771,7 +1340,7 @@ function summarizeToolCall(value: unknown): { detail: string; files: string[] } 
     };
   }
 
-  const parsed = typeof value === 'string' ? parseJsonRecord(value) : value;
+  const parsed = value;
   if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
     const record = parsed as Record<string, unknown>;
     for (const key of TRANSCRIPT_ARGUMENT_HINTS) {
@@ -1788,14 +1357,6 @@ function summarizeToolCall(value: unknown): { detail: string; files: string[] } 
     return { detail: clipTranscriptLine(JSON.stringify(record), TRANSCRIPT_TOOL_ARGUMENT_CHARS), files };
   }
   return { detail: clipTranscriptLine(raw, TRANSCRIPT_TOOL_ARGUMENT_CHARS), files };
-}
-
-function parseJsonRecord(value: string): unknown {
-  try {
-    return JSON.parse(value);
-  } catch {
-    return null;
-  }
 }
 
 function clipTranscriptLine(text: string, maxChars: number): string {
@@ -1820,88 +1381,46 @@ function stringifyValue(value: unknown): string {
   }
 }
 
-function createCompactBoundaryMessage(metadata: Record<string, unknown>, template: unknown) {
+function createCompactBoundaryMessage(metadata: Record<string, unknown>) {
   return createUserTextMessage(
     `${COMPACT_BOUNDARY_PREFIX}\n\n${JSON.stringify({ ...metadata, createdAt: new Date().toISOString() })}`,
-    template,
   );
 }
 
-function createCompactSummaryMessage(summary: string, recentMessagesRetained: boolean, template: unknown) {
+function createCompactSummaryMessage(summary: string, recentMessagesRetained: boolean) {
   const recentNote = recentMessagesRetained
     ? '\n\nRecent messages are retained after this checkpoint, with bulky payloads and tool results pruned when needed.'
     : '';
   const coverage = recentMessagesRetained ? 'the earlier portion of the conversation' : 'the compacted conversation';
   return createUserTextMessage(
     `${COMPACT_SUMMARY_PREFIX}\n\nThis session is being continued from a previous conversation. The summary below covers ${coverage}.\n\n${summary}${recentNote}`,
-    template,
   );
 }
 
-function createUserTextMessage(text: string, template: unknown): unknown {
-  if (isResponsesMessageTemplate(template)) {
-    return { type: 'message', role: 'user', content: [{ type: 'input_text', text }] };
-  }
-  if (isArrayContentMessageTemplate(template)) {
-    return { role: 'user', content: [{ type: 'text', text }] };
-  }
-  return { role: 'user', content: text };
+function createUserTextMessage(text: string): UserMessage {
+  return { role: 'user', content: text, timestamp: Date.now() };
 }
 
-function findUserMessageTemplate(messages: unknown[]): unknown {
-  return messages.find((message) => getRole(message) === 'user');
-}
-
-function isResponsesMessageTemplate(message: unknown): boolean {
-  return Boolean(message && typeof message === 'object' && (message as Record<string, unknown>).type === 'message');
-}
-
-function isArrayContentMessageTemplate(message: unknown): boolean {
-  return Boolean(message && typeof message === 'object' && Array.isArray((message as Record<string, unknown>).content));
-}
-
-function findLastCompactBoundaryIndex(messages: unknown[]): number {
+function findLastCompactBoundaryIndex(messages: Message[]): number {
   for (let index = messages.length - 1; index >= 0; index--) {
     if (isCompactBoundary(messages[index])) return index;
   }
   return -1;
 }
 
-function isCompactBoundary(message: unknown): boolean {
+function isCompactBoundary(message: Message): boolean {
   return getStringContent(message).startsWith(COMPACT_BOUNDARY_PREFIX);
 }
 
-function isCompactSummary(message: unknown): boolean {
+function isCompactSummary(message: Message): boolean {
   return getStringContent(message).startsWith(COMPACT_SUMMARY_PREFIX);
 }
 
-function getStringContent(message: unknown): string {
-  if (!message || typeof message !== 'object') return '';
-  const content = (message as Record<string, unknown>).content;
-  return typeof content === 'string' ? content : extractText(content);
+function getStringContent(message: Message | undefined): string {
+  return message ? contentText(message.content) : '';
 }
 
-function getRole(message: unknown): string | null {
-  if (!message || typeof message !== 'object') return null;
-  const record = message as Record<string, unknown>;
-  if (typeof record.role === 'string') return record.role;
-  if (record.type === 'message' && typeof record.role === 'string') return record.role;
-  if (record.type === 'function_call' || record.type === 'function_call_output') return 'tool';
-  return null;
-}
-
-function extractText(value: unknown): string {
-  if (typeof value === 'string') return value;
-  if (Array.isArray(value)) return value.map(extractText).filter(Boolean).join('\n');
-  if (!value || typeof value !== 'object') return '';
-  const record = value as Record<string, unknown>;
-  if (typeof record.text === 'string') return record.text;
-  if (typeof record.content === 'string') return record.content;
-  if (Array.isArray(record.content)) return extractText(record.content);
-  return '';
-}
-
-function estimateMessagesTokens(messages: unknown[]): number {
+function estimateMessagesTokens(messages: Message[]): number {
   return estimateContextTokens(messages);
 }
 
@@ -1995,14 +1514,14 @@ function foldRepeats(text: string): string {
   return result.join('\n');
 }
 
-function truncateHeadForPromptTooLongRetry(messages: unknown[]): unknown[] {
+function truncateHeadForPromptTooLongRetry(messages: Message[]): Message[] {
   const input = stripPromptTooLongRetryMarker(messages);
   const protectedSummaries = input.filter(isCompactSummary);
   const ordinaryMessages = input.filter((message) => !isCompactSummary(message));
   const rounds = groupMessagesByRound(ordinaryMessages);
   if (rounds.length < 2) {
     return [
-      { role: 'user', content: '[earlier conversation truncated for compaction retry]' },
+      createUserTextMessage('[earlier conversation truncated for compaction retry]'),
       ...protectedSummaries,
       ...ordinaryMessages,
     ];
@@ -2010,13 +1529,13 @@ function truncateHeadForPromptTooLongRetry(messages: unknown[]): unknown[] {
   const dropRounds = Math.min(rounds.length - 1, Math.max(1, Math.ceil(rounds.length * RETRY_DROP_RATIO)));
   const start = rounds[dropRounds]?.start ?? ordinaryMessages.length;
   return [
-    { role: 'user', content: '[earlier conversation truncated for compaction retry]' },
+    createUserTextMessage('[earlier conversation truncated for compaction retry]'),
     ...protectedSummaries,
     ...ordinaryMessages.slice(start),
   ];
 }
 
-function stripPromptTooLongRetryMarker(messages: unknown[]): unknown[] {
+function stripPromptTooLongRetryMarker(messages: Message[]): Message[] {
   const [first] = messages;
   return getStringContent(first) === '[earlier conversation truncated for compaction retry]'
     ? messages.slice(1)

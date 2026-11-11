@@ -797,6 +797,7 @@ function toPersistedSnapshot(
     // 提示词不进对话历史，但属于会话事实：存最近一次请求真实发出去的那一份，界面据此
     // 展示完整内容（角色 + AGENT.md + skills + 插件段落），不必自己再拼一遍。
     ...(snapshot.systemPrompt ? { systemPrompt: snapshot.systemPrompt } : {}),
+    messageFormat: snapshot.messageFormat,
     messages: snapshot.messages,
     conversationMessages,
     ...(snapshot.interruptedThinking ? { interruptedThinking: snapshot.interruptedThinking } : {}),
@@ -824,6 +825,7 @@ function fromPersistedSnapshot(
     pluginState: snapshot.pluginState,
     pluginSessionSettings: snapshot.pluginSessionSettings,
     systemPrompt: snapshot.systemPrompt,
+    messageFormat: snapshot.messageFormat,
     messages: snapshot.messages,
     usageHistory: snapshot.usageHistory,
     lastUsage: snapshot.lastUsage,

@@ -1,8 +1,19 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  statSync,
+  utimesSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { PersistedSession } from './sessionStore.js';
+import { PI_MESSAGE_FORMAT_ERROR } from '@packages/mica-common/messageFormat.js';
 
 const previousMicaHome = process.env.MICA_HOME;
 
@@ -26,6 +37,9 @@ describe('SessionStore path', () => {
       const { SessionStore, takeLastSerializedSession } = await import('./sessionStore.js');
       const store = new SessionStore();
       const session = makeSession('handoff', '/tmp', '2026-01-01T00:00:00.000Z');
+      expect(() => store.save({ ...session, snapshot: { ...session.snapshot, messageFormat: undefined } })).toThrow(
+        PI_MESSAGE_FORMAT_ERROR,
+      );
       store.save(session);
       expect(takeLastSerializedSession(session)).toBe(JSON.stringify(session));
       // 一次性：拿走即清，对象之后被改动也不会再拿到过期文本。
@@ -149,6 +163,7 @@ describe('SessionStore metadata index', () => {
         turnState: 'completed',
         parentSessionId: 'parent-1',
         snapshot: {
+          messageFormat: 'pi-ai-v1',
           providerId: 'test',
           protocol: 'openai_responses',
           model: 'mock-chat',
@@ -348,57 +363,58 @@ describe('SessionStore.replaceValidated', () => {
     ).toBeUndefined();
   });
 
-  it('round-trips and sanitizes active thinking using the same rules as interrupted thinking', async () => {
-    const micaHome = mkdtempSync(join(tmpdir(), 'mica-session-active-thinking-'));
-    try {
-      process.env.MICA_HOME = micaHome;
-      vi.resetModules();
-      const { SessionStore, parsePersistedSession } = await import('./sessionStore.js');
-      const store = new SessionStore();
-      const session = makeSession('active-thinking', '/tmp', '2026-01-01T00:00:00.000Z');
-      session.turnState = 'running';
-      session.snapshot.protocol = 'openai_responses';
-      const thinking = {
-        providerId: session.snapshot.providerId,
-        protocol: 'openai_responses' as const,
-        model: session.snapshot.model,
-        apiBase: 'https://example.com',
-        text: 'completed part',
-      };
-      session.snapshot.activeThinking = thinking;
-      session.snapshot.interruptedThinking = { ...thinking, text: 'earlier part' };
-      store.save(session);
-      expect(store.load(session.id)?.snapshot).toMatchObject({
-        activeThinking: thinking,
-        interruptedThinking: { ...thinking, text: 'earlier part' },
-      });
-      for (const invalid of [
-        { providerId: 'other' },
-        { model: 'other' },
-        { protocol: 'openai_chat_completions' },
-        { apiBase: 12 },
-        { text: '' },
-      ]) {
-        const parsed = parsePersistedSession({
-          ...session,
-          snapshot: { ...session.snapshot, activeThinking: { ...thinking, ...invalid } },
+  it.each(['openai_chat_completions', 'openai_responses', 'anthropic_messages', 'google_generative_ai'] as const)(
+    'round-trips and sanitizes %s active thinking using the same rules as interrupted thinking',
+    async (protocol) => {
+      const micaHome = mkdtempSync(join(tmpdir(), 'mica-session-active-thinking-'));
+      try {
+        process.env.MICA_HOME = micaHome;
+        vi.resetModules();
+        const { SessionStore, parsePersistedSession } = await import('./sessionStore.js');
+        const store = new SessionStore();
+        const session = makeSession('active-thinking', '/tmp', '2026-01-01T00:00:00.000Z');
+        session.turnState = 'running';
+        session.snapshot.protocol = protocol;
+        const thinking = {
+          providerId: session.snapshot.providerId,
+          protocol,
+          model: session.snapshot.model,
+          apiBase: 'https://example.com',
+          text: 'completed part',
+        };
+        session.snapshot.activeThinking = thinking;
+        session.snapshot.interruptedThinking = { ...thinking, text: 'earlier part' };
+        store.save(session);
+        expect(store.load(session.id)?.snapshot).toMatchObject({
+          activeThinking: thinking,
+          interruptedThinking: { ...thinking, text: 'earlier part' },
         });
-        expect(parsed?.snapshot.activeThinking).toBeUndefined();
-        expect(parsed?.snapshot.interruptedThinking?.text).toBe('earlier part');
+        for (const invalid of [
+          { providerId: 'other' },
+          { model: 'other' },
+          { protocol: protocol === 'openai_responses' ? 'openai_chat_completions' : 'openai_responses' },
+          { apiBase: 12 },
+          { text: '' },
+        ]) {
+          const parsed = parsePersistedSession({
+            ...session,
+            snapshot: { ...session.snapshot, activeThinking: { ...thinking, ...invalid } },
+          });
+          expect(parsed?.snapshot.activeThinking).toBeUndefined();
+          expect(parsed?.snapshot.interruptedThinking?.text).toBe('earlier part');
+        }
+      } finally {
+        rmSync(micaHome, { recursive: true, force: true });
       }
-    } finally {
-      rmSync(micaHome, { recursive: true, force: true });
-    }
-  });
+    },
+  );
 
   it('keeps awaitingInput only while the turn is unfinished, and trims it', async () => {
     const { parsePersistedSession } = await import('./sessionStore.js');
     const session = makeSession('awaiting-input', '/tmp', '2026-01-01T00:00:00.000Z');
     session.turnState = 'running';
 
-    expect(parsePersistedSession({ ...session, awaitingInput: '  等你选方案  ' })?.awaitingInput).toBe(
-      '等你选方案',
-    );
+    expect(parsePersistedSession({ ...session, awaitingInput: '  等你选方案  ' })?.awaitingInput).toBe('等你选方案');
     // 这一轮已经跑完了，还挂着「等你选」会让侧栏一直喊一个已经不存在的问题。
     expect(
       parsePersistedSession({ ...session, turnState: 'completed', awaitingInput: '等你选方案' })?.awaitingInput,
@@ -431,7 +447,7 @@ describe('SessionStore.replaceValidated', () => {
     expect(
       parsePersistedSession({ ...session, snapshot: { ...session.snapshot, protocol: 'openai_chat_completions' } })
         ?.snapshot.activeTurn,
-    ).toBeUndefined();
+    ).toEqual({ input, committed: false });
     for (const invalid of [
       { input, committed: 'false' },
       { input: [{ type: 'unknown' }], committed: false },
@@ -460,7 +476,9 @@ describe('SessionStore.replaceValidated', () => {
       updatedAt: '2026-01-01T00:00:00.000Z',
       cwd: '/tmp/project',
       snapshot: {
+        messageFormat: 'pi-ai-v1',
         providerId: 'test',
+        protocol: 'openai_chat_completions',
         model: 'test-model',
         effort: 'none',
         messages: [],
@@ -480,7 +498,7 @@ describe('SessionStore.replaceValidated', () => {
     expect(parsed?.title).toBe('Timed');
   });
 
-  it('parses legacy defaults without mutating the caller value', async () => {
+  it('parses current optional defaults without mutating the caller value', async () => {
     const { parsePersistedSession } = await import('./sessionStore.js');
     const raw = {
       version: 1,
@@ -490,7 +508,9 @@ describe('SessionStore.replaceValidated', () => {
       updatedAt: '2026-01-01T00:00:00.000Z',
       cwd: '/tmp/project',
       snapshot: {
+        messageFormat: 'pi-ai-v1',
         providerId: 'test',
+        protocol: 'openai_chat_completions',
         model: 'test-model',
         effort: 'none',
         messages: [],
@@ -506,6 +526,74 @@ describe('SessionStore.replaceValidated', () => {
     });
     expect(JSON.stringify(raw)).toBe(before);
     expect(parsePersistedSession({ ...raw, snapshot: { ...raw.snapshot, usageHistory: {} } })).toBeNull();
+    expect(parsePersistedSession({ ...raw, snapshot: { ...raw.snapshot, messageFormat: undefined } })).toBeNull();
+    expect(parsePersistedSession({ ...raw, snapshot: { ...raw.snapshot, messageFormat: 'openai-wire' } })).toBeNull();
+    expect(parsePersistedSession({ ...raw, snapshot: { ...raw.snapshot, protocol: undefined } })).toBeNull();
+  });
+
+  it('requires complete pi messages and round-trips signed thinking and multimodal tools', async () => {
+    const { parsePersistedSession } = await import('./sessionStore.js');
+    const session = makeSession('pi-transcript', '/tmp', '2026-01-01T00:00:00.000Z');
+    session.snapshot.messages = [
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text: 'inspect' },
+          { type: 'image', mimeType: 'image/png', data: 'AAAA' },
+        ],
+        timestamp: 1,
+      },
+      {
+        role: 'assistant',
+        content: [
+          { type: 'thinking', thinking: 'plan', thinkingSignature: 'opaque-signed-data' },
+          { type: 'text', text: 'checking', textSignature: '{"v":1,"id":"msg_1"}' },
+          {
+            type: 'toolCall',
+            id: 'call_1|fc_1',
+            name: 'read_image',
+            arguments: { source: '/tmp/a.png' },
+            thoughtSignature: 'tool-signature',
+          },
+        ],
+        api: 'openai-responses',
+        provider: 'test',
+        model: 'test-model',
+        usage: {
+          input: 10,
+          output: 5,
+          cacheRead: 2,
+          cacheWrite: 0,
+          totalTokens: 17,
+          cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+        },
+        stopReason: 'toolUse',
+        timestamp: 2,
+      },
+      {
+        role: 'toolResult',
+        toolCallId: 'call_1|fc_1',
+        toolName: 'read_image',
+        isError: false,
+        content: [
+          { type: 'text', text: 'found' },
+          { type: 'image', data: 'BBBB', mimeType: 'image/webp' },
+        ],
+        timestamp: 3,
+      },
+    ];
+    const json = JSON.parse(JSON.stringify(session));
+    expect(parsePersistedSession(json)?.snapshot.messages).toEqual(session.snapshot.messages);
+    for (const invalid of [
+      { role: 'user', content: 'missing timestamp' },
+      { role: 'user', content: [{ type: 'image_url', image_url: 'data:image/png;base64,AAAA' }], timestamp: 1 },
+      { ...session.snapshot.messages[1], content: 'old assistant body' },
+      { ...session.snapshot.messages[1], api: undefined },
+      { ...session.snapshot.messages[1], usage: { input: 10 } },
+      { ...session.snapshot.messages[2], isError: undefined },
+    ]) {
+      expect(parsePersistedSession({ ...session, snapshot: { ...session.snapshot, messages: [invalid] } })).toBeNull();
+    }
   });
 
   it('keeps a parent session id only when it could be a real session', async () => {
@@ -519,7 +607,9 @@ describe('SessionStore.replaceValidated', () => {
       cwd: '/tmp/project',
       parentSessionId: 'parent',
       snapshot: {
+        messageFormat: 'pi-ai-v1',
         providerId: 'test',
+        protocol: 'openai_chat_completions',
         model: 'test-model',
         effort: 'none',
         messages: [],
@@ -549,7 +639,9 @@ describe('SessionStore.replaceValidated', () => {
       updatedAt: '2026-01-01T00:00:00.000Z',
       cwd: '/tmp/project',
       snapshot: {
+        messageFormat: 'pi-ai-v1',
         providerId: 'test',
+        protocol: 'openai_chat_completions',
         model: 'test-model',
         effort: 'none',
         systemPrompt: '<system>\nbe brief\n</system>',
@@ -787,6 +879,7 @@ function makeSession(id: string, cwd: string, updatedAt: string): PersistedSessi
     cwd,
     turnState: 'completed',
     snapshot: {
+      messageFormat: 'pi-ai-v1',
       providerId: 'test',
       protocol: 'openai_chat_completions',
       model: 'test-model',
@@ -810,6 +903,7 @@ function junkSession(id: string, turnState: 'running' | 'completed'): PersistedS
     cwd: '/tmp',
     turnState,
     snapshot: {
+      messageFormat: 'pi-ai-v1',
       providerId: 'test',
       protocol: 'openai_chat_completions',
       model: 'test-model',
@@ -837,12 +931,13 @@ function placeholderSession(id: string, turnState: 'running' | 'completed'): Per
     cwd: '/tmp',
     turnState,
     snapshot: {
+      messageFormat: 'pi-ai-v1',
       providerId: 'test',
       protocol: 'openai_chat_completions',
       model: 'test-model',
       effort: 'none',
       role: 'default',
-      messages: withConversation ? [{ role: 'user', content: 'hello' }] : [],
+      messages: withConversation ? [{ role: 'user', content: 'hello', timestamp: 0 }] : [],
       conversationMessages: withConversation ? [{ role: 'user', content: 'hello' }] : [],
       usageHistory: withConversation
         ? []

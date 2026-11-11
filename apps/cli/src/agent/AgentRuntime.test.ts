@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { piAssistant, piUser } from './piMessageFixtures.js';
 import type { IMicaConfig } from '@packages/mica-config/index.js';
 import DEFAULT_SYSTEM_PROMPT from '@packages/mica-agent/prompt/system.md' with { type: 'text' };
 import { applyBrandTemplate } from '@packages/mica-agent/prompt/brandTemplate.js';
@@ -93,7 +94,9 @@ describe('AgentRuntime tool status', () => {
   it('captures only provider state and keeps a retry checkpoint independent across repeated restores', async () => {
     const { AgentRuntime } = await import('./AgentRuntime.js');
     const agent = new AgentRuntime();
-    const message = { role: 'user', content: [{ type: 'text', text: 'original' }] };
+    const message = piUser([{ type: 'text', text: 'original' }]) as ReturnType<typeof piUser> & {
+      content: [{ type: 'text'; text: string }];
+    };
     const usage: AgentUsageRecord = {
       provider: 'openai_chat_completions',
       model: 'test-model',
@@ -118,7 +121,7 @@ describe('AgentRuntime tool status', () => {
     expect(checkpoint.lastUsage).toBe(checkpoint.usageHistory[0]);
     message.content[0]!.text = 'changed';
     modelClient.usageHistory.push({ ...usage, requestIndex: 2 });
-    expect(checkpoint.messages).toEqual([{ role: 'user', content: [{ type: 'text', text: 'original' }] }]);
+    expect(checkpoint.messages).toEqual([piUser([{ type: 'text', text: 'original' }])]);
     expect(checkpoint.usageHistory).toHaveLength(1);
 
     agent.restoreClientSnapshot(checkpoint);
@@ -178,106 +181,113 @@ describe('AgentRuntime tool status', () => {
     await agent.run('two');
   });
 
-  it('persists only completed Responses thinking on interrupt and clears it on model switch', async () => {
-    configState = {
-      ...testConfig,
-      providers: [{ ...testConfig.providers[0]!, protocol: 'openai_responses', models: ['test-model', 'other-model'] }],
-    };
-    const { AgentRuntime } = await import('./AgentRuntime.js');
-    const agent = new AgentRuntime();
-    const events: string[] = [];
-    agent.events.on('thinkingCheckpoint', () => events.push('checkpoint'));
-    agent.events.on('thinkingRollback', () => events.push('rollback'));
-    agent.events.on('status', (status) => {
-      if (status.type === 'idle') events.push('idle');
-    });
-    let ready!: () => void;
-    const started = new Promise<void>((resolve) => {
-      ready = resolve;
-    });
-    modelClient.queryImpl = async (_question, options) => {
-      modelClient.onThinking?.('first');
-      modelClient.onThinkingCheckpoint?.('part');
-      modelClient.onThinking?.('\n\n'); // ResponsesClient separates parts in one response.
-      modelClient.onThinking?.('second');
-      modelClient.onThinkingCheckpoint?.('part');
-      modelClient.onThinkingCheckpoint?.('request');
-      modelClient.onThinking?.('third');
-      modelClient.onThinkingCheckpoint?.('request');
-      modelClient.onThinking?.('unfinished');
-      ready();
-      await new Promise<void>((_resolve, reject) =>
-        options?.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError'))),
-      );
-      return '';
-    };
-    const run = agent.run('hello');
-    await started;
-    expect(agent.getSnapshot().activeThinking?.text).toBe('first\n\nsecond\n\nthird');
-    agent.abort();
-    await expect(run).rejects.toMatchObject({ name: 'AgentAbortError' });
-    expect(events).toEqual(['checkpoint', 'checkpoint', 'checkpoint', 'checkpoint', 'rollback', 'idle']);
-    const snapshot = agent.getSnapshot();
-    expect(snapshot.interruptedThinking).toEqual({
-      providerId: 'test-provider',
-      protocol: 'openai_responses',
-      model: 'test-model',
-      apiBase: 'https://example.com/v1',
-      text: 'first\n\nsecond\n\nthird',
-    });
-    const restored = new AgentRuntime();
-    restored.loadSnapshot(snapshot);
-    expect(restored.getSnapshot().interruptedThinking?.text).toBe('first\n\nsecond\n\nthird');
-    const resumedStarted = new Promise<void>((resolve) => {
-      ready = resolve;
-    });
-    modelClient.queryImpl = async (_question, options) => {
-      modelClient.onThinking?.('fourth');
-      modelClient.onThinkingCheckpoint?.('request');
-      modelClient.onThinking?.('unfinished again');
-      ready();
-      await new Promise<void>((_resolve, reject) =>
-        options?.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError'))),
-      );
-      return '';
-    };
-    const resumedRun = restored.run('continue');
-    await resumedStarted;
-    restored.abort();
-    await expect(resumedRun).rejects.toMatchObject({ name: 'AgentAbortError' });
-    expect(restored.getSnapshot().interruptedThinking?.text).toBe('first\n\nsecond\n\nthird\n\nfourth');
-    const reset = vi.fn();
-    restored.events.on('thinkingReset', reset);
-    restored.configureForRun({ model: 'other-model' });
-    expect(restored.getSnapshot().interruptedThinking).toBeUndefined();
-    expect(reset).toHaveBeenCalledTimes(1);
-    restored.configureForRun({ model: 'test-model' });
-    expect(restored.getSnapshot().interruptedThinking).toBeUndefined();
-    restored.loadSnapshot(snapshot);
-    restored.configureForRun({}, false);
-    expect(restored.getSnapshot().interruptedThinking).toBeUndefined();
-  });
+  it.each(['openai_chat_completions', 'openai_responses', 'anthropic_messages', 'google_generative_ai'] as const)(
+    'persists completed %s thinking on interrupt and clears it on model switch',
+    async (protocol) => {
+      configState = {
+        ...testConfig,
+        providers: [{ ...testConfig.providers[0]!, protocol, models: ['test-model', 'other-model'] }],
+      };
+      const { AgentRuntime } = await import('./AgentRuntime.js');
+      const agent = new AgentRuntime();
+      const events: string[] = [];
+      agent.events.on('thinkingCheckpoint', () => events.push('checkpoint'));
+      agent.events.on('thinkingRollback', () => events.push('rollback'));
+      agent.events.on('status', (status) => {
+        if (status.type === 'idle') events.push('idle');
+      });
+      let ready!: () => void;
+      const started = new Promise<void>((resolve) => {
+        ready = resolve;
+      });
+      modelClient.queryImpl = async (_question, options) => {
+        modelClient.onThinking?.('first');
+        modelClient.onThinkingCheckpoint?.('part');
+        modelClient.onThinking?.('\n\n'); // Pi separates parts and requests.
+        modelClient.onThinking?.('second');
+        modelClient.onThinkingCheckpoint?.('part');
+        modelClient.onThinkingCheckpoint?.('request');
+        modelClient.onThinking?.('\n\n');
+        modelClient.onThinking?.('third');
+        modelClient.onThinkingCheckpoint?.('request');
+        modelClient.onThinking?.('unfinished');
+        ready();
+        await new Promise<void>((_resolve, reject) =>
+          options?.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError'))),
+        );
+        return '';
+      };
+      const run = agent.run('hello');
+      await started;
+      expect(agent.getSnapshot().activeThinking?.text).toBe('first\n\nsecond\n\nthird');
+      agent.abort();
+      await expect(run).rejects.toMatchObject({ name: 'AgentAbortError' });
+      expect(events).toEqual(['checkpoint', 'checkpoint', 'checkpoint', 'checkpoint', 'rollback', 'idle']);
+      const snapshot = agent.getSnapshot();
+      expect(snapshot.interruptedThinking).toEqual({
+        providerId: 'test-provider',
+        protocol,
+        model: 'test-model',
+        apiBase: 'https://example.com/v1',
+        text: 'first\n\nsecond\n\nthird',
+      });
+      const restored = new AgentRuntime();
+      restored.loadSnapshot(snapshot);
+      expect(restored.getSnapshot().interruptedThinking?.text).toBe('first\n\nsecond\n\nthird');
+      const resumedStarted = new Promise<void>((resolve) => {
+        ready = resolve;
+      });
+      modelClient.queryImpl = async (_question, options) => {
+        modelClient.onThinking?.('fourth');
+        modelClient.onThinkingCheckpoint?.('request');
+        modelClient.onThinking?.('unfinished again');
+        ready();
+        await new Promise<void>((_resolve, reject) =>
+          options?.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError'))),
+        );
+        return '';
+      };
+      const resumedRun = restored.run('continue');
+      await resumedStarted;
+      restored.abort();
+      await expect(resumedRun).rejects.toMatchObject({ name: 'AgentAbortError' });
+      expect(restored.getSnapshot().interruptedThinking?.text).toBe('first\n\nsecond\n\nthird\n\nfourth');
+      const reset = vi.fn();
+      restored.events.on('thinkingReset', reset);
+      restored.configureForRun({ model: 'other-model' });
+      expect(restored.getSnapshot().interruptedThinking).toBeUndefined();
+      expect(reset).toHaveBeenCalledTimes(1);
+      restored.configureForRun({ model: 'test-model' });
+      expect(restored.getSnapshot().interruptedThinking).toBeUndefined();
+      restored.loadSnapshot(snapshot);
+      restored.configureForRun({}, false);
+      expect(restored.getSnapshot().interruptedThinking).toBeUndefined();
+    },
+  );
 
-  it('clears the active input before notifying completed listeners', async () => {
-    configState = {
-      ...testConfig,
-      providers: [{ ...testConfig.providers[0]!, protocol: 'openai_responses' }],
-    };
-    const { AgentRuntime } = await import('./AgentRuntime.js');
-    const agent = new AgentRuntime();
-    let completedSnapshot: ReturnType<typeof agent.getSnapshot> | undefined;
-    agent.events.on('status', (status) => {
-      if (status.type === 'completed') completedSnapshot = agent.getSnapshot();
-    });
-    modelClient.queryImpl = async () => {
-      expect(agent.getSnapshot().activeTurn).toEqual({ input: 'work', committed: false });
+  it.each(['openai_chat_completions', 'openai_responses', 'anthropic_messages', 'google_generative_ai'] as const)(
+    'clears the %s active input before notifying completed listeners',
+    async (protocol) => {
+      configState = {
+        ...testConfig,
+        providers: [{ ...testConfig.providers[0]!, protocol }],
+      };
+      const { AgentRuntime } = await import('./AgentRuntime.js');
+      const agent = new AgentRuntime();
+      let completedSnapshot: ReturnType<typeof agent.getSnapshot> | undefined;
+      agent.events.on('status', (status) => {
+        if (status.type === 'completed') completedSnapshot = agent.getSnapshot();
+      });
+      modelClient.queryImpl = async () => {
+        expect(agent.getSnapshot().activeTurn).toEqual({ input: 'work', committed: false });
+        expect(agent.getForkSnapshot().activeTurn).toBeUndefined();
+        return 'done';
+      };
+      await agent.run('work');
+      expect(completedSnapshot?.activeTurn).toBeUndefined();
       expect(agent.getForkSnapshot().activeTurn).toBeUndefined();
-      return 'done';
-    };
-    await agent.run('work');
-    expect(completedSnapshot?.activeTurn).toBeUndefined();
-    expect(agent.getForkSnapshot().activeTurn).toBeUndefined();
-  });
+    },
+  );
 
   it('rolls back completed thinking from a failed provider attempt before interruption', async () => {
     configState = {
@@ -314,6 +324,7 @@ describe('AgentRuntime tool status', () => {
       modelClient.onThinking?.('first');
       modelClient.onThinkingCheckpoint?.('request');
       modelClient.onTextAttemptStart?.();
+      modelClient.onThinking?.('\n\n');
       modelClient.onThinking?.('failed complete');
       modelClient.onThinkingCheckpoint?.('part');
       expect(agent.getSnapshot().activeThinking?.text).toBe('first\n\nfailed complete');
@@ -550,8 +561,9 @@ describe('AgentRuntime tool status', () => {
         : { name: 'default', prompt: 'Default prompt.', builtIn: true },
     );
     modelClient.getSnapshot = vi.fn(() => ({
+      messageFormat: 'pi-ai-v1' as const,
       model: 'test-model',
-      messages: [{ role: 'user', content: 'keep this' }],
+      messages: [piUser('keep this')],
       usageHistory: [],
       lastUsage: undefined,
       conversationMessages: [],
@@ -563,7 +575,7 @@ describe('AgentRuntime tool status', () => {
 
     expect(agent.role).toBe('reviewer');
     expect(reviewerClient.loadSnapshot).toHaveBeenCalledWith(
-      expect.objectContaining({ messages: [{ role: 'user', content: 'keep this' }] }),
+      expect.objectContaining({ messages: [piUser('keep this')] }),
     );
     expect(agent.getSnapshot().role).toBe('reviewer');
     const options = createModelClient.mock.calls.at(-1)?.[0];
@@ -613,6 +625,7 @@ describe('AgentRuntime tool status', () => {
     const { AgentRuntime } = await import('./AgentRuntime.js');
     const agent = new AgentRuntime();
     agent.loadSnapshot({
+      messageFormat: 'pi-ai-v1',
       providerId: 'test-provider',
       protocol: 'openai_chat_completions',
       model: 'test-model',
@@ -696,6 +709,7 @@ describe('AgentRuntime tool status', () => {
     expect(agent.getSnapshot().subagentUsageHistory).toHaveLength(1);
 
     agent.loadSnapshot({
+      messageFormat: 'pi-ai-v1',
       providerId: 'test-provider',
       protocol: 'openai_chat_completions',
       model: 'test-model',
@@ -722,11 +736,9 @@ describe('AgentRuntime tool status', () => {
       totalTokens: 128,
       paidTokenRate: 1,
     };
-    const messages = [
-      { role: 'user', content: 'hello' },
-      { role: 'assistant', content: 'hi' },
-    ];
+    const messages = [piUser('hello'), piAssistant('hi')];
     vi.mocked(modelClient.getSnapshot).mockReturnValue({
+      messageFormat: 'pi-ai-v1',
       model: 'test-model',
       messages,
       usageHistory: [usage],
@@ -752,6 +764,73 @@ describe('AgentRuntime tool status', () => {
     // 上下文与它的占用照常继承，界面 ctx 与聊天状态栏需要 lastUsage。
     expect(fork.messages).toBe(messages);
     expect(fork.lastUsage).toBe(usage);
+  });
+
+  it('preserves complete pi messages when configure, reload and restore cross protocols', async () => {
+    const { AgentRuntime } = await import('./AgentRuntime.js');
+    const { micaAgent } = await import('@packages/mica-agent/index.js');
+    const nextProvider = {
+      ...testConfig.providers[0]!,
+      id: 'other-provider',
+      protocol: 'anthropic_messages' as const,
+      models: ['other-model'],
+    };
+    configState = { ...testConfig, providers: [...testConfig.providers, nextProvider] };
+    const agent = new AgentRuntime();
+    const messages = [
+      piUser([
+        { type: 'text', text: 'keep image' },
+        { type: 'image', mimeType: 'image/png', data: 'AAAA' },
+      ]),
+      piAssistant([
+        { type: 'thinking', thinking: 'signed', thinkingSignature: 'opaque' },
+        { type: 'toolCall', id: 'call-1', name: 'read_file', arguments: { file_path: 'a.ts' } },
+      ]),
+    ];
+    const snapshot = { ...agent.getSnapshot(), messages };
+    modelClient.getSnapshot = vi.fn(() => ({ ...snapshot, conversationMessages: [] }));
+    const replacement = createModelClientStub();
+    vi.mocked(micaAgent.createModelClient)
+      .mockReturnValueOnce(replacement)
+      .mockReturnValueOnce(replacement)
+      .mockReturnValueOnce(replacement);
+
+    agent.configureForRun({ providerId: nextProvider.id, model: 'other-model' });
+    expect(replacement.loadSnapshot).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        messageFormat: 'pi-ai-v1',
+        messages,
+        model: 'other-model',
+      }),
+    );
+    replacement.getSnapshot = vi.fn(() => ({ ...snapshot, conversationMessages: [] }));
+    configState = {
+      ...configState,
+      provider: 'test-provider',
+      model: 'test-model',
+      providers: [{ ...testConfig.providers[0]!, protocol: 'google_generative_ai' }, nextProvider],
+    };
+    agent.reloadConfig(false);
+    expect(agent.config.provider.protocol).toBe('google_generative_ai');
+    expect(replacement.loadSnapshot).toHaveBeenLastCalledWith(
+      expect.objectContaining({ messages, messageFormat: 'pi-ai-v1' }),
+    );
+
+    agent.loadSnapshot(snapshot);
+    expect(agent.config.provider.protocol).toBe('google_generative_ai');
+    expect(replacement.loadSnapshot).toHaveBeenLastCalledWith(
+      expect.objectContaining({ messages, messageFormat: 'pi-ai-v1' }),
+    );
+  });
+
+  it('rejects unmarked wire history before mutating runtime state', async () => {
+    const { AgentRuntime } = await import('./AgentRuntime.js');
+    const { PI_MESSAGE_FORMAT_ERROR } = await import('@packages/mica-common/messageFormat.js');
+    const agent = new AgentRuntime();
+    const snapshot = agent.getSnapshot();
+    expect(snapshot.messageFormat).toBe('pi-ai-v1');
+    expect(() => agent.loadSnapshot({ ...snapshot, messageFormat: undefined })).toThrow(PI_MESSAGE_FORMAT_ERROR);
+    expect(agent.getSnapshot()).toEqual(snapshot);
   });
 
   it('applies a run-selected model without mutating global config and forwards maxTurns', async () => {
@@ -887,6 +966,7 @@ function createModelClientStub(): IAgent<ModelClientOptions> & {
     preserveAbortedTurn: vi.fn(() => false),
     toConversationMessages: vi.fn(() => []),
     getSnapshot: vi.fn(() => ({
+      messageFormat: 'pi-ai-v1' as const,
       model: 'test-model',
       messages: [],
       usageHistory: [] as AgentUsageRecord[],

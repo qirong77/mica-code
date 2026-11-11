@@ -57,6 +57,7 @@
 - `mica/queue/hold` 冻结待撤回条目，结果由 `chat-recall.js.resolveQueueRecall` 判定为回输入框 / 已发送 / 保留。
 - `run.events` / `run.prompt` 每轮重置；恢复先用 `historyBeforeRunReplay` 裁掉本轮已保存回答再重放。
 - 每次模型请求后立即转发 usage；实时 usage 不改 turnState / updatedAt。
+- 会话读取只消费 pi-ai `toolCall` / `toolResult` 历史，所有协议的思考 checkpoint 都可恢复；未知退出后的补读不再只限 Responses。
 - 阶段文案与计时读 `statusLinePhase`；`mica/turn/retrying` 让状态行显示 `retrying n/5`。
 - 文件补全 CLI / desktop 共用 `mica-file-mentions`；`@` 与 `/` skill 补全只在词首触发，选中只插文本（文件插 `@路径`，skill 插 `[skill:name](SKILL.md 绝对路径)`）。
 - `/` 浮层混排 skill、MCP server 与插件清单声明的条目（`completions`，类型标记「指令」）；前两类插入的是一枚 markdown 链接：`[skill:name](SKILL.md 绝对路径)`、`[mcp:name](接口地址)`（http 的 server 才有地址，stdio 退回 `config.json`），第三类插入清单里写好的那段提示词（`insert`）。目标含空白或括号时整条包进 `<…>`（CommonMark 允许），**不**做百分号编码——那会让模型读到一个要再解一次才成路径的东西。消息体里这类引用由 `splitTextByCapabilityRefs` 收成 `skill:name` 一枚短标签，点开仍是完整目标（原文一个字不改，编辑重发靠它定位）。两边都包含**内置能力**，不需要用户配置：skill 来自磁盘扫描 + 插件发布的 `$MICA_HOME/plugin-skills` 索引 + **插件清单声明的 skill 目录**（后者只解析 `plugin.json`、不导入插件代码，所以第一次打开就看得见随包 skill，不用等插件 setup 过一次；`skills-core.js`；索引里声明了角色的条目按会话当前角色过滤，`skills:list` 的 `role` 参数就是它，取输入条上还未发送的 `activeRole`），MCP 来自 `config.json` + 运行时按 socket 能力算出的 `mica-browser` / `mica-terminal`（`mcp-candidates-core.js`）；插入文本与普通条目一致。

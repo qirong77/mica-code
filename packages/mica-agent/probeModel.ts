@@ -1,4 +1,5 @@
 import { runModelTextRequest, type ModelTextRequest } from './modelText.js';
+import type { ProviderProtocol } from '@packages/mica-config/providerProtocol.js';
 
 /**
  * 「这个配置能通吗」的一次最小请求。
@@ -11,7 +12,7 @@ import { runModelTextRequest, type ModelTextRequest } from './modelText.js';
 export type ModelProbeConfig = {
   baseUrl: string;
   apiKey?: string;
-  protocol?: 'openai_chat_completions' | 'openai_responses';
+  protocol?: ProviderProtocol;
   model: string;
   timeoutMs?: number;
 };

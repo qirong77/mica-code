@@ -10,10 +10,12 @@ import {
   statSync,
   writeFileSync,
 } from 'node:fs';
+import type { Message } from '@earendil-works/pi-ai';
 import { basename, resolve } from 'node:path';
 import { resolveMicaHome } from '@packages/mica-config/brand.js';
 import { deleteBtwState } from '@packages/mica-common/btwState.js';
 import { stripMediaPlaceholders } from '@packages/mica-common/promptText.js';
+import { PI_MESSAGE_FORMAT, PI_MESSAGE_FORMAT_ERROR } from '@packages/mica-common/messageFormat.js';
 import { readHeadString, readSessionFileHead } from './sessionFileHead.js';
 import { normalizeTurnTimings, type TurnTimingRecord } from '@packages/mica-common/turnTiming.js';
 import type { CapabilitySelection } from '@packages/mica-common/capabilities.js';
@@ -74,11 +76,12 @@ export type PersistedRuntimeSnapshot = {
    * 仍然重新拼装。缺失表示这条会话还没发过请求（或早于本字段出现）。
    */
   systemPrompt?: string;
-  messages: unknown[];
+  messageFormat?: 'pi-ai-v1';
+  messages: Message[];
   conversationMessages: unknown[];
-  /** Completed display text from an interrupted Responses turn; never sent to the model. */
+  /** Completed display text from an interrupted turn; never sent to the model. */
   interruptedThinking?: PersistedThinking;
-  /** Completed display text in a running Responses turn. */
+  /** Completed display text in a running turn. */
   activeThinking?: PersistedThinking;
   /** The input and its commit state relative to the saved provider messages. */
   activeTurn?: { input: AgentQueryContent; committed: boolean };
@@ -263,7 +266,7 @@ export class SessionStore implements SessionStoreLike {
       .map((session) => ({ ...session }));
   }
 
-  /** Reads current snapshots plus the legacy message-array format used by older Mica builds. */
+  /** Read only current snapshots; evolution owns all session format conversion. */
   listAllForUsage(): PersistedSession[] {
     ensureSessionDir();
     return readdirSync(SESSION_DIR)
@@ -290,6 +293,7 @@ export class SessionStore implements SessionStoreLike {
   }
 
   save(session: PersistedSession): void {
+    if (session.snapshot.messageFormat !== PI_MESSAGE_FORMAT) throw new Error(PI_MESSAGE_FORMAT_ERROR);
     ensureSessionDir();
     const safeId = sanitizeSessionId(session.id);
     if (!safeId || safeId !== session.id) throw new Error(`Invalid session id: ${session.id}`);
@@ -581,7 +585,7 @@ export class SessionStore implements SessionStoreLike {
     try {
       if (!existsSync(path)) return null;
       const data = JSON.parse(readFileSync(path, 'utf-8')) as unknown;
-      return parsePersistedSession(data) ?? (Array.isArray(data) ? parseLegacySessionForUsage(path, data) : null);
+      return parsePersistedSession(data);
     } catch {
       return null;
     }
@@ -895,8 +899,11 @@ export function parsePersistedSession(value: unknown): PersistedSession | null {
     return null;
   }
   if (!session.snapshot || typeof session.snapshot !== 'object') return null;
+  // Legacy wire histories are converted once by evolution, never while loading.
+  if (session.snapshot.messageFormat !== PI_MESSAGE_FORMAT) return null;
   if (!isNonEmptyString(session.snapshot.providerId) || !isNonEmptyString(session.snapshot.model)) return null;
   if (!Array.isArray(session.snapshot.messages)) return null;
+  if (!session.snapshot.messages.every(isPiMessage)) return null;
   if (!Array.isArray(session.snapshot.conversationMessages)) return null;
   if (!Array.isArray(session.snapshot.usageHistory)) return null;
   if (session.snapshot.subagentUsageHistory !== undefined && !Array.isArray(session.snapshot.subagentUsageHistory)) {
@@ -923,13 +930,8 @@ export function parsePersistedSession(value: unknown): PersistedSession | null {
   // 「在等你选」只属于还没跑完的那一轮：轮次结束后残留的标记会让侧栏一直亮着一个
   // 不存在的问题。形状不对按缺省处理（同 parentSessionId），不为一个提示字段拒绝整条会话。
   const awaitingInput = normalizeAwaitingInput(session.awaitingInput, turnState);
-  let protocol = session.snapshot.protocol;
-  if (!isProviderProtocol(protocol)) {
-    const provider: ProviderProtocol | undefined = session.snapshot.usageHistory
-      ?.map((record) => record?.provider)
-      .find(isProviderProtocol);
-    protocol = provider ?? 'openai_chat_completions';
-  }
+  const protocol = session.snapshot.protocol;
+  if (!isProviderProtocol(protocol)) return null;
   // 档位名随模型而变（`max`、`minimal`、`on` …），只做语法校验；是否被当前模型支持由
   // `normalizeModelEffort` 在恢复会话时收敛。
   if (!isEffortLevelName(session.snapshot.effort)) return null;
@@ -962,12 +964,78 @@ export function parsePersistedSession(value: unknown): PersistedSession | null {
         protocol,
         session.snapshot.model,
       ),
-      activeTurn:
-        turnState === 'running' && protocol === 'openai_responses'
-          ? normalizeActiveTurn(session.snapshot.activeTurn)
-          : undefined,
+      activeTurn: turnState === 'running' ? normalizeActiveTurn(session.snapshot.activeTurn) : undefined,
     },
   } as PersistedSession;
+}
+
+/** Validate the persisted transcript without dropping signed or provider metadata. */
+function isPiMessage(value: unknown): value is Message {
+  if (!isPlainRecord(value) || !isNonnegativeNumber(value.timestamp)) return false;
+  if (value.role === 'user' || value.role === 'system') {
+    return (
+      typeof value.content === 'string' ||
+      (Array.isArray(value.content) &&
+        value.content.every((block) => isPiText(block) || (value.role === 'user' && isPiImage(block))))
+    );
+  }
+  if (value.role === 'toolResult') {
+    return (
+      typeof value.toolCallId === 'string' &&
+      isNonEmptyString(value.toolName) &&
+      typeof value.isError === 'boolean' &&
+      Array.isArray(value.content) &&
+      value.content.every((block) => isPiText(block) || isPiImage(block))
+    );
+  }
+  if (value.role !== 'assistant' || !Array.isArray(value.content)) return false;
+  if (!isNonEmptyString(value.api) || !isNonEmptyString(value.provider) || !isNonEmptyString(value.model)) return false;
+  if (!['pending', 'stop', 'length', 'toolUse', 'error', 'aborted', 'deferred'].includes(String(value.stopReason)))
+    return false;
+  const usage = value.usage;
+  if (!isPlainRecord(usage) || !isPlainRecord(usage.cost)) return false;
+  if (!['input', 'output', 'cacheRead', 'cacheWrite', 'totalTokens'].every((key) => isNonnegativeNumber(usage[key])))
+    return false;
+  const cost = usage.cost;
+  if (!['input', 'output', 'cacheRead', 'cacheWrite', 'total'].every((key) => isNonnegativeNumber(cost[key])))
+    return false;
+  return value.content.every((block) => {
+    if (isPiText(block)) return true;
+    if (!isPlainRecord(block)) return false;
+    if (block.type === 'thinking')
+      return (
+        typeof block.thinking === 'string' &&
+        (block.thinkingSignature === undefined || typeof block.thinkingSignature === 'string') &&
+        (block.redacted === undefined || typeof block.redacted === 'boolean')
+      );
+    return (
+      block.type === 'toolCall' &&
+      typeof block.id === 'string' &&
+      isNonEmptyString(block.name) &&
+      isPlainRecord(block.arguments) &&
+      (block.thoughtSignature === undefined || typeof block.thoughtSignature === 'string') &&
+      (block.argumentsError === undefined || typeof block.argumentsError === 'string')
+    );
+  });
+}
+
+function isPiText(value: unknown): boolean {
+  return (
+    isPlainRecord(value) &&
+    value.type === 'text' &&
+    typeof value.text === 'string' &&
+    (value.textSignature === undefined || typeof value.textSignature === 'string')
+  );
+}
+
+function isPiImage(value: unknown): boolean {
+  return (
+    isPlainRecord(value) && value.type === 'image' && typeof value.data === 'string' && isNonEmptyString(value.mimeType)
+  );
+}
+
+function isNonnegativeNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0;
 }
 
 function normalizeActiveTurn(value: unknown): PersistedRuntimeSnapshot['activeTurn'] {
@@ -1009,7 +1077,6 @@ function normalizeInterruptedThinking(
   if (!value || typeof value !== 'object') return undefined;
   const thinking = value as Partial<NonNullable<PersistedRuntimeSnapshot['interruptedThinking']>>;
   if (
-    protocol !== 'openai_responses' ||
     thinking.protocol !== protocol ||
     thinking.providerId !== providerId ||
     thinking.model !== model ||
@@ -1035,10 +1102,7 @@ function normalizeParentSessionId(value: unknown, selfId: string): string | unde
  */
 const MAX_AWAITING_INPUT = 120;
 
-function normalizeAwaitingInput(
-  value: unknown,
-  turnState: PersistedSessionTurnState,
-): string | undefined {
+function normalizeAwaitingInput(value: unknown, turnState: PersistedSessionTurnState): string | undefined {
   if (turnState === 'completed') return undefined;
   if (typeof value !== 'string') return undefined;
   const text = value.trim();
@@ -1072,60 +1136,6 @@ function isPlainRecord(value: unknown): value is Record<string, unknown> {
   return prototype === Object.prototype || prototype === null;
 }
 
-function parseLegacySessionForUsage(path: string, messages: unknown[]): PersistedSession | null {
-  const usageHistory: AgentUsageRecord[] = [];
-  for (const message of messages) {
-    if (!message || typeof message !== 'object') continue;
-    const raw = (message as { usage?: unknown }).usage;
-    if (!raw || typeof raw !== 'object') continue;
-    const usage = raw as Record<string, unknown>;
-    const uncached = finiteNumber(usage.input_tokens);
-    const cacheRead = finiteNumber(usage.cache_read_input_tokens);
-    const cacheWrite = finiteNumber(usage.cache_creation_input_tokens);
-    const output = finiteNumber(usage.output_tokens);
-    if (uncached + cacheRead + cacheWrite + output === 0) continue;
-    const input = uncached + cacheRead + cacheWrite;
-    usageHistory.push({
-      provider: 'openai_chat_completions',
-      turnId: usageHistory.length + 1,
-      requestIndex: 0,
-      messageCount: messages.length,
-      inputTokens: input,
-      cachedInputTokens: cacheRead,
-      outputTokens: output,
-      totalTokens: input + output,
-      paidTokenRate: input > 0 ? (uncached + cacheWrite) / input : 1,
-    });
-  }
-  if (usageHistory.length === 0) return null;
-  const id = basename(path, '.json');
-  const updatedAt = statSync(path).mtime.toISOString();
-  return {
-    version: 1,
-    id,
-    title: id,
-    createdAt: updatedAt,
-    updatedAt,
-    cwd: '',
-    turnState: 'completed',
-    snapshot: {
-      providerId: 'legacy',
-      protocol: 'openai_chat_completions',
-      model: 'legacy',
-      effort: 'none',
-      role: 'default',
-      messages: [],
-      conversationMessages: [],
-      usageHistory,
-      lastUsage: usageHistory.at(-1),
-    },
-  };
-}
-
 function isPersistedSessionTurnState(value: unknown): value is PersistedSessionTurnState {
   return value === 'running' || value === 'completed' || value === 'aborted' || value === 'error';
-}
-
-function finiteNumber(value: unknown): number {
-  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : 0;
 }

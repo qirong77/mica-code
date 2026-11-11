@@ -38,6 +38,7 @@ lease 并应用配置后、保存用户输入前执行，可通过事件上的 `
 - 会话状态：`ctx.sessionState` 按插件 id 存进会话快照，resume / fork / rewind 跟着走。
 - 会话标注：`sessionAnnotations.ts` 按 session 存插件自己的标注（标签色点等），供 `session-tags` 插件与桌面端会话列表共用。
 - 模型请求重写：`ctx.agent.onIterationRewrite()` 在两次模型请求之间改写要发送的历史（自动压缩用它）；`ctx.agent.mode` 回答宿主形态（`session` / `one-shot`），一次性运行里不该跑会额外花钱的后台策略。
+- 插件模型请求与主会话共用 pi-ai 适配器；`PluginModelProtocol` 使用主配置的 `ProviderProtocol`，支持 OpenAI Chat/Responses、Anthropic Messages 和 Google Generative AI。历史重写接收 pi 消息，厂商专属思考签名仅由模型适配层解释。
 - 委派子代理：`ctx.subagents` 注册子代理类型、前台/后台跑一个、管后台任务。`tasks.restart(taskId)` 在原 owner 下创建带原任务与最近活动的替代任务，返回新任务 ID，不是断点续跑；与 `tasks.get` 一样限于本插件可访问的任务，不存在或不能重启时抛错。机制（建子代理、用量记账、路径租约、完成回注）由宿主提供，插件只决定有哪些类型与工具形状。
 - 会话归属：`ctx.session.captureOwner?.(context)` 捕获工具上下文所属 owner，不传上下文则捕获当前会话；异步 notice 传回该 owner，临时状态按生命周期事件的 owner 隔离。
 - 内置 skill：**清单 `skills` 声明相对插件目录的路径**（目录里有 `SKILL.md` 就是一条，否则扫一层子目录），

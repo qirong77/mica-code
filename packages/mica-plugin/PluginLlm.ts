@@ -19,6 +19,8 @@ import { resolveUseMainProvider } from '@packages/mica-common/index.js';
 export const PLUGIN_LLM_PROTOCOLS: PluginSettingOption[] = [
   { value: 'openai_chat_completions', label: 'Chat Completions' },
   { value: 'openai_responses', label: 'Responses' },
+  { value: 'anthropic_messages', label: 'Anthropic Messages' },
+  { value: 'google_generative_ai', label: 'Google Generative AI' },
 ];
 
 export const DEFAULT_PLUGIN_LLM_PROTOCOL: PluginModelProtocol = 'openai_chat_completions';
@@ -166,7 +168,8 @@ export function expandEnvPlaceholders(value: string): string {
 export function describePluginLlm(config: PluginLlmConfig): string {
   if (config.useMainProvider) return '复用当前会话模型';
   if (!config.baseUrl || !config.model) return '未配置';
-  return `${config.protocol === 'openai_responses' ? 'Responses' : 'Chat Completions'} · ${config.model}`;
+  const label = PLUGIN_LLM_PROTOCOLS.find((option) => option.value === config.protocol)?.label ?? config.protocol;
+  return `${label} · ${config.model}`;
 }
 
 /**

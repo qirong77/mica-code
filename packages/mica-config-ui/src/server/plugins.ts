@@ -312,7 +312,12 @@ function readLlm(
     try {
       const active = micaConfig.readActiveProviderConfig();
       const model = active.model;
-      const protocol = active.protocol === 'openai_responses' ? 'Responses' : 'Chat Completions';
+      const protocol = {
+        openai_chat_completions: 'Chat Completions',
+        openai_responses: 'Responses',
+        anthropic_messages: 'Anthropic Messages',
+        google_generative_ai: 'Google Generative AI',
+      }[active.protocol];
       main = {
         summary: model ? `复用当前会话 · ${protocol} · ${model}` : '当前会话没有可用的模型',
         available: Boolean(active.baseUrl && model),

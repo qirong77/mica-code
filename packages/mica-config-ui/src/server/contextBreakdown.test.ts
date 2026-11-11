@@ -6,9 +6,9 @@ describe('summarizeContextItems', () => {
     const { items, categories } = summarizeContextItems([
       {
         role: 'assistant',
-        content: 'reading the file',
-        tool_calls: [
-          { id: 'call-1', type: 'function', function: { name: 'read_file', arguments: '{"file_path":"a.ts"}' } },
+        content: [
+          { type: 'text', text: 'reading the file' },
+          { id: 'call-1', type: 'toolCall', name: 'read_file', arguments: { file_path: 'a.ts' } },
         ],
       },
     ]);
@@ -20,11 +20,9 @@ describe('summarizeContextItems', () => {
     expect(item.toolCalls?.[0]).toMatchObject({ id: 'call-1', name: 'read_file' });
     expect(item.parts.assistant).toBe('reading the file'.length);
     expect(item.parts.tool_call).toBe('{"file_path":"a.ts"}'.length);
-    // 结构字段（role / tool_calls 的 id、type）单列一类，不与正文混在一起。
+    // 结构字段（role / toolCall 的 id、type）单列一类，不与正文混在一起。
     expect(item.parts.envelope).toBeGreaterThan(0);
-    expect(item.chars).toBe(
-      (item.parts.assistant ?? 0) + (item.parts.tool_call ?? 0) + (item.parts.envelope ?? 0),
-    );
+    expect(item.chars).toBe((item.parts.assistant ?? 0) + (item.parts.tool_call ?? 0) + (item.parts.envelope ?? 0));
 
     const byKind = new Map(categories.map((row) => [row.kind, row]));
     expect(byKind.get('assistant')?.count).toBe(1);
@@ -37,7 +35,7 @@ describe('summarizeContextItems', () => {
         role: 'user',
         content: [
           { type: 'text', text: 'look' },
-          { type: 'image_url', image_url: { url: `data:image/png;base64,${'A'.repeat(50_000)}` } },
+          { type: 'image', data: 'A'.repeat(50_000), mimeType: 'image/png' },
         ],
       },
     ]);
@@ -52,10 +50,8 @@ describe('summarizeContextItems', () => {
   it('counts encrypted reasoning payloads as size, not as readable content', () => {
     const { items, categories } = summarizeContextItems([
       {
-        type: 'reasoning',
-        id: 'rs_1',
-        summary: [{ type: 'summary_text', text: 'thought' }],
-        encrypted_content: 'x'.repeat(400),
+        role: 'assistant',
+        content: [{ type: 'thinking', thinking: 'thought', thinkingSignature: 'x'.repeat(400) }],
       },
     ]);
 
@@ -69,7 +65,11 @@ describe('summarizeContextItems', () => {
 
   it('marks tool results cleared by compact', () => {
     const { items, clearedResults } = summarizeContextItems([
-      { role: 'tool', tool_call_id: 'call-1', content: '[Old tool result content cleared during compact]' },
+      {
+        role: 'toolResult',
+        toolCallId: 'call-1',
+        content: [{ type: 'text', text: '[Old tool result content cleared during compact]' }],
+      },
     ]);
 
     expect(items[0].cleared).toBe(true);
@@ -79,11 +79,34 @@ describe('summarizeContextItems', () => {
   it('sorts categories by volume and keeps tiny categories', () => {
     const { categories } = summarizeContextItems([
       { role: 'user', content: 'small' },
-      { role: 'tool', tool_call_id: 'c', content: 'x'.repeat(4_000) },
+      { role: 'toolResult', toolCallId: 'c', content: [{ type: 'text', text: 'x'.repeat(4_000) }] },
     ]);
 
     expect(categories[0].kind).toBe('tool_result');
     expect(categories.map((row) => row.kind)).toContain('user');
     expect(categories.map((row) => row.kind)).toContain('envelope');
+  });
+
+  it('keeps Pi accounting metadata out of input estimates and hides thinking signatures', () => {
+    const content = [
+      { type: 'thinking', thinking: 'checking', thinkingSignature: 'private-signature' },
+      { type: 'toolCall', id: 'call', name: 'read_file', arguments: { file_path: 'a.ts' } },
+    ];
+    const plain = summarizeContextItems([{ role: 'assistant', content }]);
+    const metadata = summarizeContextItems([
+      {
+        role: 'assistant',
+        content,
+        timestamp: 1234,
+        api: 'anthropic-messages',
+        provider: 'anthropic',
+        usage: { input: 100000, output: 1000, cost: { total: 300 } },
+        stopReason: 'toolUse',
+      },
+    ]);
+    expect(metadata.messageChars).toBe(plain.messageChars);
+    expect(metadata.items[0].parts.reasoning).toBe('checking'.length + 'private-signature'.length);
+    expect(metadata.items[0].parts.tool_call).toBe(JSON.stringify({ file_path: 'a.ts' }).length);
+    expect(JSON.stringify(metadata)).not.toContain('private-signature');
   });
 });

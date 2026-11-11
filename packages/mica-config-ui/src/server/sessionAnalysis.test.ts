@@ -1,5 +1,26 @@
 import { describe, expect, it } from 'vitest';
 import { buildConfigWebContextAnalysis, estimateTextTokens } from './sessionAnalysis.js';
+import type { AssistantMessage } from '@earendil-works/pi-ai';
+
+function assistant(content: string | AssistantMessage['content']): AssistantMessage {
+  return {
+    role: 'assistant',
+    content: typeof content === 'string' ? [{ type: 'text', text: content }] : content,
+    api: 'openai-responses',
+    provider: 'openai',
+    model: 'gpt-5',
+    stopReason: 'stop',
+    timestamp: 2,
+    usage: {
+      input: 0,
+      output: 0,
+      cacheRead: 0,
+      cacheWrite: 0,
+      totalTokens: 0,
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+    },
+  };
+}
 
 const SOURCE = {
   providerId: 'openai',
@@ -22,22 +43,22 @@ describe('buildConfigWebContextAnalysis', () => {
     const analysis = buildConfigWebContextAnalysis({
       ...SOURCE,
       messages: [
-        { role: 'user', content: 'inspect the project' },
+        { role: 'user', content: 'inspect the project', timestamp: 1 },
+        assistant([
+          { type: 'text', text: 'I will read it.' },
+          { id: 'call-1', type: 'toolCall', name: 'read_file', arguments: { file_path: 'README.md' } },
+        ]),
         {
-          role: 'assistant',
-          content: 'I will read it.',
-          tool_calls: [
-            { id: 'call-1', type: 'function', function: { name: 'read_file', arguments: '{"file_path":"README.md"}' } },
-          ],
+          role: 'toolResult',
+          toolCallId: 'call-1',
+          toolName: 'read_file',
+          isError: false,
+          timestamp: 3,
+          content: [{ type: 'text', text: 'a very long tool output that goes on and on for many characters' }],
         },
-        {
-          role: 'tool',
-          tool_call_id: 'call-1',
-          content: 'a very long tool output that goes on and on for many characters',
-        },
-        { role: 'assistant', content: 'Done.' },
-        { role: 'user', content: '谢谢' },
-        { role: 'assistant', content: '不客气' },
+        assistant('Done.'),
+        { role: 'user', content: '谢谢', timestamp: 4 },
+        assistant('不客气'),
       ],
     });
 
@@ -74,10 +95,10 @@ describe('buildConfigWebContextAnalysis', () => {
       {
         ...SOURCE,
         messages: [
-          { role: 'user', content: 'first' },
-          { role: 'assistant', content: 'answer one' },
-          { role: 'user', content: 'second' },
-          { role: 'assistant', content: 'answer two' },
+          { role: 'user', content: 'first', timestamp: 1 },
+          assistant('answer one'),
+          { role: 'user', content: 'second', timestamp: 3 },
+          assistant('answer two'),
         ],
       },
       {
@@ -131,14 +152,9 @@ describe('buildConfigWebContextAnalysis', () => {
       model: 'gpt-5',
       systemPrompt: 'a fairly long system prompt that tells the agent how to behave',
       messages: [
-        { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'go' }] },
-        {
-          type: 'reasoning',
-          id: 'rs_1',
-          summary: [{ type: 'summary_text', text: 'summary' }],
-          encrypted_content: 'x'.repeat(400),
-        },
-        { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'ok' }] },
+        { role: 'user', content: [{ type: 'text', text: 'go' }], timestamp: 1 },
+        assistant([{ type: 'thinking', thinking: 'summary', thinkingSignature: 'x'.repeat(400) }]),
+        assistant('ok'),
       ],
     });
 

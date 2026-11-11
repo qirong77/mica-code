@@ -1,4 +1,5 @@
 import { isFindingAssessment } from '../harness-review/assessments.js';
+import { migratePiMessages } from './piMessages.js';
 
 /**
  * 旧数据迁移：把 mica 某个历史形态的持久化数据就地改成当前形态。
@@ -280,6 +281,12 @@ export const quickButtonsAccentColor: Migration = {
   },
 };
 
+export const piMessagesV1: Migration = {
+  id: 'pi-messages-v1',
+  description: '将 Chat / Responses 原生历史转换为统一 pi-ai 消息，保留图文、思考签名、工具与用量',
+  apply: migratePiMessages,
+};
+
 export const MIGRATIONS: Migration[] = [
   usageOccurredAt,
   sessionCompactRename,
@@ -287,4 +294,5 @@ export const MIGRATIONS: Migration[] = [
   usageSourceOwner,
   generationTimingV2,
   quickButtonsAccentColor,
+  piMessagesV1,
 ];

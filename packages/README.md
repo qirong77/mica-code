@@ -22,7 +22,7 @@
 用于原生客户端插件数据授权。`api.client` 的本机数据、探活和窗口动作不随当前远程运行时切换；
 本机外壳仅开放显式声明且未停用的随包插件数据，浏览器里该能力为 null。
 
-- `mica-agent`：agent 抽象、模型 provider adapter、prompt 构建；请求用量可附服务商 ID、总耗时与首字等待。生成速率另用成对的 `generationOutputTokens`（扣推理与首 token）/ `generationDurationMs`（正文首末增量），只采纳明细可归因且足够长的正文流，仍为客户端估算。`IAgent.getSnapshot({ includeConversation: false })` 可省去展示消息投影。
+- `mica-agent`：agent 抽象、pi-ai 模型适配、共享工具循环与 prompt 构建。`PiModelClient` 统一处理 Chat Completions、Responses、Anthropic Messages 和 Google Generative AI；`ModelMessage`、`PiHistoryNormalizer` 提供跨协议历史与展示投影，快照标记 `messageFormat: 'pi-ai-v1'`。请求用量可附服务商 ID、总耗时与首字等待。生成速率使用成对的 `generationOutputTokens` / `generationDurationMs`，只采纳上游明确报告推理用量且足够长的正文流。`IAgent.getSnapshot({ includeConversation: false })` 可省去展示消息投影。
 - `mica-tools`：内置工具、支持文本/图片的工具结果、工具 registry、MCP 工具接入；`MicaTool.canOverlap(input)` 与 `micaTools.isOverlappable(name, input)` 为 provider 提供按调用输入判断的重叠调度能力。
 - `mica-mcp`：MCP 配置读取、server 连接管理和工具注册；工具适配保留标准图片块、混合图文顺序及文本资源，二进制不转成截断的 JSON/base64 文本。
 - `mica-ui`：Ink 终端 UI 组件和 UI 状态。

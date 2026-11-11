@@ -36,6 +36,17 @@ micaConfig.update((current) => ({
 
 ## 新会话默认模型
 
+`providers[].protocol` 支持以下显式协议；OpenAI 配置名保持原样，原生协议同样由 `PiModelClient` 使用 pi-ai 发送：
+
+| 配置值                    | 接口                    |
+| ------------------------- | ----------------------- |
+| `openai_chat_completions` | OpenAI Chat Completions |
+| `openai_responses`        | OpenAI Responses        |
+| `anthropic_messages`      | Anthropic Messages      |
+| `google_generative_ai`    | Google Generative AI    |
+
+`providerProtocol.ts` 是协议枚举、`ProviderProtocol` 和 `isProviderProtocol` 的纯模块入口，浏览器表单、启动校验和 helper/probe 共用它。
+
 在 `config.json` 中配置 `defaultModel`，provider 和 model 必填，effort 可选：
 
 ```json
@@ -71,17 +82,18 @@ micaConfig.update((current) => ({
 
 ## 模型规则
 
-模型规则默认由 models.dev 元数据生成（磁盘缓存 24h → 内置种子 → 在线刷新），查不到时回退 1M contextSize，并且**不带任何 effort 档位**。
+OpenAI 协议的模型规则由 models.dev 元数据生成（磁盘缓存 24h → 内置种子 → 在线刷新）。Anthropic / Google 原生协议优先读取 pi-ai 随包的静态模型目录；这只复用能力元数据，不发现或改写配置中的模型列表，也不读取凭据或发网络请求。pi 未收录的模型继续查 models.dev；两边都查不到时回退 1M contextSize，并且**不带任何 effort 档位**。
 
-- 档位名就是模型声明的那一组真实取值，不做归一化也不落别名：Anthropic 系的最高档是 `max`，OpenAI 系的 `minimal` 就是 `minimal`，`gpt-6.1` 同时声明 `xhigh` 与 `max` 时两者都能选。可选档位由 `getModelEffortOptions(model, protocol?, provider?)` 从规则里读，UI 不再有硬编码的五档。
-- 规则里的每个档位同时带 `openai_chat_completions` 与 `openai_responses` 两份补丁——models.dev 只说明「模型支持哪些档位」，不说明用户会用哪种协议，所以补丁不能按猜出来的协议只存一份。传了 `protocol` 时，该协议下没有等价参数的档位会被过滤掉（例如只有 toggle 的模型在 responses 下没有可控档位）。
+- 档位名就是模型声明的那一组真实取值，不做归一化也不落别名：`minimal` 就是 `minimal`，同时支持 `xhigh` 与 `max` 的模型保留两个选项。可选档位由 `getModelEffortOptions(model, protocol?, provider?)` 从规则里读，UI 不再有硬编码的五档。
+- models.dev 的规则继续带 `openai_chat_completions` 与 `openai_responses` 两份补丁，保持既有 OpenAI effort 语义；能确定 Anthropic / Google 厂商及原生字段时也附上对应补丁。传了 `protocol` 时，该协议下没有等价参数的档位会被过滤掉（例如只有 toggle 的模型在 responses 下没有可控档位）。原生协议的规则缓存包含协议，防止同一 provider 改协议后复用旧规则。
+- 原生能力读取复用 pi-ai 的 `getSupportedThinkingLevels` 与 `thinkingLevelMap`，只保留模型实际原生值：Anthropic adaptive thinking 使用 `thinking` / `output_config.effort`，Google 离散档位使用 SDK payload 的 `config.thinkingConfig.thinkingLevel`（如 `MINIMAL` / `HIGH`）。`max` 不变成 `xhigh`；不把 Pi simple API 为旧模型生成的 token budget 当成真实 effort 档位。
 - 只有开关的模型（models.dev `toggle`）档位是 `none` / `on`；同时声明了 toggle 与 effort 取值的模型多一个 `none`，用来发 `thinking: disabled`。
 - 只声明 `budget_tokens`、或根本没声明 reasoning 的模型没有档位：选什么都不发参数，`/effort` 与 desktop 选择器都会直说「该模型不提供推理强度选项」。
 - 模型未知时默认没有档位，不发任何推理参数；猜出来的档位会被不支持该参数的端点直接 400。自建网关的模型名 models.dev 不认识，可以在 provider 上用 `effortLevels` 声明服务端真实接受的档位名（如 `["low","medium","high"]`），这些名字原样发出；有 models.dev 元数据时以模型自己的档位为准，`effortLevels` 不参与。
 - 档位怎么收敛由调用方声明，不是一处全局策略：`mica exec --variant` 这类命令行显式参数走 `strict`（档位名不合法、模型没声明该档位、或模型完全没有档位也都直接报错并列出可用档位，不会被静默改成别的值）；桌面端/Codex 驱动带上来的 model+effort 走 `clamp`（收敛到目标模型自己的档位，或丢掉模型没声明的档位，并由 host 用 warning 通知说明实际发了什么）。客户端选择不是用户当场敲的参数，让它把 host 拦下来就等于一条永远发不出去的消息。
 - 两种策略都要求先 `ensureModelRule(model)` 再解析档位：档位集合来自 models.dev，磁盘缓存是异步读的，先算会把「缓存里有、随包种子里没有」的模型误判成没有档位。
 - Provider 可通过设置 `supportsEffort: false` 禁用 effort：它在 `resolveEffortParams` 里最先判断，模型补丁不能绕过它。
-- 请求侧只有一个入口 `resolveEffortParams({ provider, model, effort, protocol })`，两个 provider client 都调它，不再各自拼参数。
+- 请求侧只有一个入口 `resolveEffortParams({ provider, model, effort, protocol })`，`PiModelClient` 在 `onPayload` 上应用返回补丁；Google 的 `config` 与现有 SDK 参数应递归合并。
 - 服务端可能拒绝 models.dev 声明的档位（同一模型名在不同网关上的真实枚举并不一致）：provider 用 400/422 明确拒绝时，客户端经 `markEffortLevelRejected` 记下这台服务商不收这一档，`resolveEffortParams` 之后不再发它。
 
 ## 目录说明
@@ -90,11 +102,13 @@ micaConfig.update((current) => ({
 - `micaStorage.ts`：共享输入框历史、用户偏好和使用记录等本地状态读写。
 - `effort.ts`：effort 档位名到 wire 参数的唯一转换入口。
 - `getModelRule.ts`：注册与解析模型规则（effort 档位、contextSize、请求参数补丁）。
+- `nativeModelRules.ts`：读取 Pi 的静态原生能力目录、生成 Anthropic / Google 的真实档位补丁。
+- `providerProtocol.ts`：浏览器安全的协议枚举、类型与校验函数。
 - `persistence.ts`：配置文件 IO。
 - `envProvider.ts`：环境变量 provider 的合成与识别（`synthesizeEnvProviders` / `isEnvOnlyProvider`）。
 - `atomicWrite.ts`：文本文件的原子写盘（临时文件 + rename，保留原文件权限）。
 
-模型 client 使用协议注册表创建。当前配置只开放两种已实现的 OpenAI 协议；未来接入 Anthropic 等实现时，可新增 client 并通过 `registerModelClient` 注册，无需修改 `AgentRuntime`。
+模型 client 使用协议注册表创建，四种协议统一交给 `PiModelClient`；协议选择不按 `api_base` 猜测。
 
 - `runtimeEnv.ts`：运行时环境变量读取。
 - `brand.ts`：构建期品牌常量（`RUNTIME_NAME`/`VERSION_LABEL`/`APP_NAME`/`CONFIG_DIR_NAME`）与 `resolveMicaHome`/`resolveMicaHomePath`，默认 `~/.mica` 目录由 `MICA_CONFIG_DIR_NAME` 决定。

@@ -5061,7 +5061,7 @@ export function ChatView({
       if (!finished) {
         todoInterruptedRef.current.set(nodeIdRef.current, true)
         setTodoInterrupted(true)
-        if (metaRef.current?.protocol === 'openai_responses') {
+        if (metaRef.current?.protocol) {
           const exitNodeId = nodeIdRef.current
           const exitTurnId = turnRef.current
           void window.mica.chat.history(exitNodeId).then((rows) => {

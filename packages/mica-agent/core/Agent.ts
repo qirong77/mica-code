@@ -38,6 +38,8 @@ export type AgentCallbacks = {
   onThinking?: (thinking: string) => void;
   /** Save a complete Responses thinking part or completed request for display. */
   onThinkingCheckpoint?: (boundary: 'part' | 'request') => void;
+  /** Model input generation; distinct from starting the actual tool execution. */
+  onToolInput?: (event: { phase: 'start' | 'delta' | 'end'; index: number; id?: string; name?: string; delta?: string }) => void;
   onToolCall?: (name: string, args: string, id?: string) => void;
   onToolResult?: (name: string, result: string, id?: string) => void;
   onUsage?: (usage: AgentUsageRecord) => void;
@@ -112,6 +114,8 @@ export function throwIfAgentMaxTurnsReached(
 }
 
 export type AgentSnapshot<TMessage = unknown, TUsage extends AgentUsageRecord = AgentUsageRecord> = {
+  /** Persisted model history uses pi-ai messages, independently of the wire protocol. */
+  messageFormat?: 'pi-ai-v1';
   model: string;
   messages: TMessage[];
   usageHistory: TUsage[];
@@ -154,6 +158,7 @@ export abstract class BaseAgent<
   canRollbackThinking = false;
   onThinking: ((thinking: string) => void) | undefined;
   onThinkingCheckpoint: ((boundary: 'part' | 'request') => void) | undefined;
+  onToolInput: AgentCallbacks['onToolInput'];
   onToolCall: ((name: string, args: string, id?: string) => void) | undefined;
   onToolResult: ((name: string, result: string, id?: string) => void) | undefined;
   onUsage: ((usage: AgentUsageRecord) => void) | undefined;

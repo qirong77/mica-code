@@ -22,11 +22,11 @@ function makeConfig(overrides: Partial<IMicaConfig> = {}): IMicaConfig {
 }
 
 describe('agentRuntimeConfigFromSnapshot', () => {
-  it('degrades to the default provider when the snapshot protocol no longer matches the same provider', async () => {
+  it('keeps the snapshot provider when its current protocol changes and another provider is the default', async () => {
     vi.resetModules();
     vi.doMock('@packages/mica-config/index.js', () => ({
       micaConfig: {
-        get: () => makeConfig(),
+        get: () => makeConfig({ provider: 'deepseek', model: 'deepseek-v4' }),
         normalizeModelEffort: () => 'medium',
         getModelRule: () => ({ contextSize: 256000 }),
       },

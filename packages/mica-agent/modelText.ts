@@ -1,6 +1,7 @@
 import { createSubAgent } from './providers/createModelClient.js';
 import type { AgentUsageRecord, IAgent, ModelClientOptions } from './index.js';
 import type { AgentQueryOptions } from './core/Agent.js';
+import type { ProviderProtocol } from '@packages/mica-config/providerProtocol.js';
 
 /**
  * 「发一次 system + user，拿回一段文本」的唯一实现。
@@ -11,7 +12,7 @@ import type { AgentQueryOptions } from './core/Agent.js';
  *   请求结束把用量记进会话；
  * - 配置页的「测试连接」：同样的一次最小请求，只是不记账。
  *
- * 协议分支（Chat Completions / Responses）、endpoint 拼接、超时与中断因此不会出现
+ * 协议选择、endpoint 拼接、超时与中断因此不会出现
  * 「插件一条路、测试一条路」，测通了的配置就是插件真正会用的那条路。
  */
 
@@ -22,7 +23,7 @@ export type ModelTextClient = Pick<IAgent, 'query' | 'usageHistory'> & {
 export type ModelTextRequest = {
   baseUrl: string;
   apiKey?: string;
-  protocol?: 'openai_chat_completions' | 'openai_responses';
+  protocol?: ProviderProtocol;
   providerId?: string;
   model: string;
   system: string;
@@ -101,7 +102,7 @@ function buildProvider(
   name: string;
   api_base: string;
   api_key: string;
-  protocol: 'openai_chat_completions' | 'openai_responses';
+  protocol: ProviderProtocol;
   models: string[];
   supportsEffort: boolean;
 } {

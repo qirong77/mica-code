@@ -7,13 +7,14 @@ import {
   type ProviderProtocol,
 } from './types.js';
 import { isEffortLevelRejected } from './effortRejections.js';
+import { getNativeModelRule, isNativeProtocol, nativeEffortPatch } from './nativeModelRules.js';
 
 type RegisteredModelRule = Omit<ModelRule, 'name' | 'modelKeysIncludes'>;
 /**
  * 解析档位/上下文时带上「这次请求走哪个服务商」：同一个模型名在不同网关下的档位可以不一样。
  * 只给模型名也能工作（退回模型厂商的条目），但网关特有的档位就查不到。
  */
-type ModelRuleScope = { id?: string; api_base?: string };
+type ModelRuleScope = { id?: string; api_base?: string; protocol?: ProviderProtocol };
 type ModelRuleResolver = (
   modelName: string,
   signal?: AbortSignal,
@@ -72,6 +73,7 @@ export async function ensureModelRule(
 ): Promise<ModelRule> {
   const key = ruleKey(modelName, scope);
   if (registeredRules.has(key)) return getModelRule(modelName, scope);
+  if (getNativeModelRule(modelName, scope?.protocol)) return getModelRule(modelName, scope);
   if (!modelRuleResolver) return getModelRule(modelName, scope);
 
   const existing = pendingRules.get(key);
@@ -100,7 +102,8 @@ export async function ensureModelRule(
  */
 function ruleKey(modelName: string, scope?: ModelRuleScope): string {
   const providerId = scope?.id?.trim();
-  return providerId ? `${providerId.toLowerCase()}::${modelName}` : modelName;
+  const modelKey = isNativeProtocol(scope?.protocol) ? `${scope.protocol}::${modelName}` : modelName;
+  return providerId ? `${providerId.toLowerCase()}::${modelKey}` : modelKey;
 }
 
 /**
@@ -112,17 +115,19 @@ function ruleKey(modelName: string, scope?: ModelRuleScope): string {
  */
 export function getModelRule(modelName: string, scope?: ModelRuleScope): ModelRule {
   const registered = registeredRules.get(ruleKey(modelName, scope));
-  if (registered) return { name: modelName, modelKeysIncludes: [modelName], ...registered };
+  if (registered) return describeRule(modelName, registered, scope?.protocol);
+  const native = getNativeModelRule(modelName, scope?.protocol);
+  if (native) return describeRule(modelName, native, scope?.protocol);
   const fromSnapshot = modelRuleSyncResolver?.(modelName, scope);
-  if (fromSnapshot) return { name: modelName, modelKeysIncludes: [modelName], ...fromSnapshot };
+  if (fromSnapshot) return describeRule(modelName, fromSnapshot, scope?.protocol);
   // 带服务商查不到时退回不带服务商的那份（进程启动早期只按模型名注册过），
   // 保证同步读至少能拿到模型厂商的元数据而不是空规则。
   if (scope) {
     const fallback = registeredRules.get(modelName);
-    if (fallback) return { name: modelName, modelKeysIncludes: [modelName], ...fallback };
+    if (fallback) return describeRule(modelName, fallback, scope.protocol);
     const fromFallbackSnapshot = modelRuleSyncResolver?.(modelName);
     if (fromFallbackSnapshot) {
-      return { name: modelName, modelKeysIncludes: [modelName], ...fromFallbackSnapshot };
+      return describeRule(modelName, fromFallbackSnapshot, scope.protocol);
     }
   }
   return {
@@ -133,6 +138,23 @@ export function getModelRule(modelName: string, scope?: ModelRuleScope): ModelRu
     supportsVision: true,
     efforts: {},
   };
+}
+
+function describeRule(modelName: string, rule: RegisteredModelRule, protocol?: ProviderProtocol): ModelRule {
+  const result = { name: modelName, modelKeysIncludes: [modelName], ...rule };
+  if (isNativeProtocol(protocol)) {
+    const levels = Object.entries(rule.efforts)
+      .filter(([, effort]) => effort?.[protocol])
+      .map(([level]) => level);
+    if (!levels.includes(rule.defaultEffort)) {
+      result.defaultEffort = levels.includes('medium')
+        ? 'medium'
+        : levels.includes('high')
+          ? 'high'
+          : (levels[0] ?? 'none');
+    }
+  }
+  return result;
 }
 
 /**
@@ -149,12 +171,21 @@ export function getModelEffortOptions(
   protocol?: ProviderProtocol,
   provider?: ProviderDefinition,
 ): EffortOption[] {
-  const efforts = getModelRule(modelName, provider).efforts;
+  const effectiveProtocol = protocol ?? (isNativeProtocol(provider?.protocol) ? provider.protocol : undefined);
+  const efforts = getModelRule(modelName, protocol ? { ...provider, protocol } : provider).efforts;
   if (Object.keys(efforts).length === 0) {
-    return acceptedLevels(provider, modelName, provider?.effortLevels ?? []);
+    if (getNativeModelRule(modelName, effectiveProtocol)) return [];
+    const declared = provider?.effortLevels ?? [];
+    return acceptedLevels(
+      provider,
+      modelName,
+      isNativeProtocol(effectiveProtocol)
+        ? declared.filter((level) => Boolean(nativeEffortPatch(effectiveProtocol, level)))
+        : declared,
+    );
   }
   const levels = Object.entries(efforts)
-    .filter(([, rule]) => !protocol || Boolean(rule?.[protocol]))
+    .filter(([, rule]) => !effectiveProtocol || Boolean(rule?.[effectiveProtocol]))
     .map(([level]) => level);
   return acceptedLevels(provider, modelName, levels);
 }
@@ -185,6 +216,12 @@ export function normalizeModelEffort(
   provider?: ProviderDefinition,
 ): EffortOption {
   const rule = getModelRule(modelName, provider);
+  if (isNativeProtocol(provider?.protocol)) {
+    const nativeLevels = getModelEffortOptions(modelName, provider.protocol, provider);
+    if (nativeLevels.length === 0) return 'none';
+    if (nativeLevels.includes(effort)) return effort;
+    return nativeLevels.includes(rule.defaultEffort) ? rule.defaultEffort : nativeLevels[0]!;
+  }
   const levels = Object.keys(rule.efforts);
   if (levels.length === 0) {
     const declared = provider?.effortLevels ?? [];

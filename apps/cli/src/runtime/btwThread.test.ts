@@ -213,20 +213,22 @@ describe('BtwThreadController', () => {
         role: 'assistant',
         content: [
           {
-            type: 'function_call',
-            call_id: 'c1',
+            type: 'toolCall',
+            id: 'c1',
             name: 'read_file',
-            arguments: '{"path":"src/a.ts"}',
+            arguments: { path: 'src/a.ts' },
           },
         ],
       },
       {
-        role: 'tool',
+        role: 'toolResult',
+        toolCallId: 'c1',
+        toolName: 'read_file',
         content: [{ type: 'text', text: 'x'.repeat(4000) }],
-        tool_call_id: 'c1',
+        isError: false,
       },
-      { role: 'user', content: [{ type: 'input_image', image_url: 'data:image/png;base64,AAAA' }] },
-      { role: 'assistant', content: '看完了' },
+      { role: 'user', content: [{ type: 'image', data: 'AAAA', mimeType: 'image/png' }] },
+      { role: 'assistant', content: [{ type: 'text', text: '看完了' }] },
     ];
 
     const result = await harness.controller.compact();
@@ -234,7 +236,7 @@ describe('BtwThreadController', () => {
     // 对话文本一律保留，只把工具结果与媒体块换掉
     expect(JSON.stringify(harness.subagent.messages)).toContain('看完了');
     expect(JSON.stringify(harness.subagent.messages)).not.toContain('xxxx');
-    expect(JSON.stringify(harness.subagent.messages)).not.toContain('base64');
+    expect(JSON.stringify(harness.subagent.messages)).not.toContain('"image"');
     // 压缩后界面读这份估算（lastUsage 描述的是压缩前那次请求）
     expect(harness.controller.snapshot().context?.estimated).toBe(true);
 
@@ -415,9 +417,11 @@ describe('BtwThreadController', () => {
       messages: [
         { role: 'user', content: '主流程问题' },
         {
-          role: 'tool',
-          tool_call_id: 'call_1',
-          content: `巨大的工具输出 ${'x'.repeat(4000)}`,
+          role: 'toolResult',
+          toolCallId: 'call_1',
+          toolName: 'run_shell',
+          content: [{ type: 'text', text: `巨大的工具输出 ${'x'.repeat(4000)}` }],
+          isError: false,
         },
       ],
     });
@@ -480,15 +484,15 @@ describe('BtwThreadController', () => {
   it('drops media blocks before persisting, keeping the rest of the history', () => {
     const messages = [
       { role: 'user', content: '看看这张图' },
-      { role: 'user', content: [{ type: 'input_image', image_url: 'data:image/png;base64,AAAA' }] },
+      { role: 'user', content: [{ type: 'image', data: 'AAAA', mimeType: 'image/png' }] },
       { role: 'assistant', content: '是只猫' },
-      { role: 'user', content: [{ type: 'input_text', text: '谢谢' }] },
+      { role: 'user', content: [{ type: 'text', text: '谢谢' }] },
     ];
     const kept = persistableBtwMessages(messages);
     // base64 图片能让落盘文件涨到几十 MB，重启后模型也不再需要它；
     // 但同一批里的纯文本消息一条都不能少（那是「还能接着追问」的上下文）。
     expect(kept).toHaveLength(3);
-    expect(JSON.stringify(kept)).not.toContain('input_image');
+    expect(JSON.stringify(kept)).not.toContain('"image"');
     expect(JSON.stringify(kept)).toContain('谢谢');
   });
 });

@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { PROVIDER_PROTOCOLS, isEffortLevelName } from '@packages/mica-config/types.js';
+import { PROVIDER_PROTOCOLS, isEffortLevelName, isProviderProtocol } from '@packages/mica-config/types.js';
 
 export { PROVIDER_PROTOCOLS };
 export const DEFAULT_PROVIDER_PROTOCOL = PROVIDER_PROTOCOLS[0];
@@ -191,7 +191,7 @@ export function validateConfig(input: unknown): ConfigValidationResult {
         `provider "${providerName}" 的 api_base 不能为空。`,
       );
     }
-    if (!(PROVIDER_PROTOCOLS as readonly string[]).includes(provider.protocol as string)) {
+    if (!isProviderProtocol(provider.protocol)) {
       add(
         'error',
         'provider_protocol_invalid',

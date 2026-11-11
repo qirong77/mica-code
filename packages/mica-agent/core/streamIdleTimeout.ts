@@ -40,14 +40,16 @@ function closeStream<T>(stream: AsyncIterable<T>, iterator: AsyncIterator<T>): v
 /** 包装一个异步流：超过 idleMs 没有下一个事件就中止并抛可重试超时错误。 */
 export async function* withIdleTimeout<T>(
   stream: AsyncIterable<T>,
-  options?: { idleMs?: number },
+  options?: { idleMs?: number; signal?: AbortSignal },
 ): AsyncGenerator<T> {
   const idleMs = options?.idleMs ?? STREAM_IDLE_TIMEOUT_MS;
   const iterator = stream[Symbol.asyncIterator]();
   let drained = false;
   try {
     while (true) {
+      options?.signal?.throwIfAborted();
       let timer: ReturnType<typeof setTimeout> | undefined;
+      let onAbort: (() => void) | undefined;
       const stalled = new Promise<never>((_, reject) => {
         timer = setTimeout(() => reject(streamIdleTimeoutError(idleMs)), idleMs);
       });
@@ -56,9 +58,16 @@ export async function* withIdleTimeout<T>(
       next.catch(() => {});
       let step: IteratorResult<T>;
       try {
-        step = await Promise.race([next, stalled]);
+        const aborted = new Promise<never>((_, reject) => {
+          if (!options?.signal) return;
+          onAbort = () => reject(Object.assign(new Error('Agent query aborted'), { name: 'AbortError' }));
+          options.signal.addEventListener('abort', onAbort, { once: true });
+          if (options.signal.aborted) onAbort();
+        });
+        step = await Promise.race([next, stalled, aborted]);
       } finally {
         clearTimeout(timer);
+        if (onAbort) options?.signal?.removeEventListener('abort', onAbort);
       }
       if (step.done) {
         drained = true;

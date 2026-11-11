@@ -37,12 +37,11 @@ export function messageText(content: unknown): string {
   for (const block of content) {
     if (!block || typeof block !== 'object') continue;
     const record = block as Record<string, unknown>;
-    if (['text', 'input_text', 'output_text'].includes(String(record.type)) && typeof record.text === 'string') {
+    if (record.type === 'text' && typeof record.text === 'string') {
       parts.push(replaceImageReferences(record.text));
       previousImageRef = /^\s*\[Image\]\([^)]+\)\s*$/.test(record.text);
     } else {
-      if (['image', 'image_url', 'input_image', 'output_image'].includes(String(record.type)) && !previousImageRef)
-        parts.push('[图片]');
+      if (record.type === 'image' && !previousImageRef) parts.push('[图片]');
       previousImageRef = false;
     }
   }

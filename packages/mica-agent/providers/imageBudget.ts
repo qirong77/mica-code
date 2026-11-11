@@ -20,7 +20,7 @@ export const MAX_REQUEST_BODY_BYTES = 20 * 1024 * 1024;
 /** 单张图的上限：超过就换占位符（PNG 已在准备阶段压过，走到这里多半是别的格式）。 */
 export const MAX_SINGLE_IMAGE_BYTES = 6 * 1024 * 1024;
 
-const IMAGE_PART_TYPES = new Set(['input_image', 'image_url']);
+const IMAGE_PART_TYPES = new Set(['input_image', 'image_url', 'image']);
 
 export type ImageBudgetReport = {
   /** 裁剪前的请求正文字节数（文本 + 内联图片载荷）。 */
@@ -149,7 +149,7 @@ function rewriteImages<T>(node: T, omissions: Map<number, string>, counter: { in
     const index = counter.index++;
     const omission = omissions.get(index);
     if (!omission) return node;
-    return omissionPart(record.type === 'image_url', role, omission) as T;
+    return (record.type === 'image' ? { type: 'text', text: omission } : omissionPart(record.type === 'image_url', role, omission)) as T;
   }
   const nextRole = record.type === 'message' && typeof record.role === 'string' ? record.role : role;
   let changed = false;
@@ -166,6 +166,7 @@ function rewriteImages<T>(node: T, omissions: Map<number, string>, counter: { in
 function imagePayload(record: Record<string, unknown>): string | null {
   const type = record.type;
   if (typeof type !== 'string' || !IMAGE_PART_TYPES.has(type)) return null;
+  if (type === 'image') return typeof record.data === 'string' ? record.data : '';
   const source = record.image_url ?? record.url;
   if (typeof source === 'string') return source;
   if (source && typeof source === 'object') {

@@ -8,7 +8,7 @@
 两边对不上是「口径不同 + 覆盖范围不同」，平台计费口径本身无误：
 
 1. **「输入」口径不同（最大的数字误解源）**
-   - mica 记录的 `inputTokens = prompt_tokens`，**包含缓存**（`packages/mica-agent/providers/ChatCompletionsClient.ts` 与 `ResponsesClient.ts` 的 `recordUsage`），缓存单列 `cachedInputTokens`。
+   - mica 记录的 `inputTokens` **包含缓存**（`packages/mica-agent/providers/PiModelClient.ts` 的 `recordUsage` 将 pi 的 `input + cacheRead + cacheWrite` 归一为输入量），缓存读取单列 `cachedInputTokens`。
    - krill 平台的 `input_tokens` 是**未缓存**部分，缓存单列 `cache_read_input_tokens`。
    - 所以同一批请求：mica 输入 ≈ 平台 input_tokens + cache_read，直接对比会差 10~30 倍。
    - 1:1 四元组匹配（model + 未缓存输入 + 缓存 + 输出）证明两边 token 数值本身一致。

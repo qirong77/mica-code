@@ -1,9 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
 import * as micaAgent from '@packages/mica-agent/index.js';
 import { testProviderConnection } from './providerTest.js';
+import { PROVIDER_PROTOCOLS } from '@packages/mica-config/providerProtocol.js';
 
 describe('testProviderConnection', () => {
-  it('probes the four values the page is showing', async () => {
+  it.each(PROVIDER_PROTOCOLS)('probes the current form values using %s', async (protocol) => {
     const probe = vi.spyOn(micaAgent, 'probeModelConnection').mockResolvedValue({
       ok: true,
       message: '',
@@ -15,14 +16,14 @@ describe('testProviderConnection', () => {
     const result = await testProviderConnection({
       apiBase: ' https://api.deepseek.com ',
       apiKey: 'sk-test',
-      protocol: 'openai_chat_completions',
+      protocol,
       model: ' deepseek-chat ',
     });
 
     expect(probe).toHaveBeenCalledWith({
       baseUrl: 'https://api.deepseek.com',
       apiKey: 'sk-test',
-      protocol: 'openai_chat_completions',
+      protocol,
       model: 'deepseek-chat',
     });
     expect(result).toMatchObject({ ok: true, model: 'deepseek-chat' });
@@ -54,7 +55,7 @@ describe('testProviderConnection', () => {
     ).resolves.toMatchObject({ ok: false, message: '先给这个服务商填一个模型，才能发请求验证' });
     await expect(
       testProviderConnection({ apiBase: 'https://api.test', protocol: 'grpc', model: 'm' }),
-    ).resolves.toMatchObject({ ok: false, message: '协议只能是 Chat Completions 或 Responses' });
+    ).resolves.toMatchObject({ ok: false, message: '请选择支持的模型协议' });
     expect(probe).not.toHaveBeenCalled();
   });
 });

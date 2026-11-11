@@ -173,6 +173,7 @@ describe('AgentRuntime capability selection', () => {
 
     // 旧快照：没有 capabilitiesCustomized，里面那份副本是「创建时的默认值」。
     agent.loadSnapshot({
+      messageFormat: 'pi-ai-v1',
       providerId: 'test-provider',
       protocol: 'openai_chat_completions',
       model: 'test-model',
@@ -188,6 +189,7 @@ describe('AgentRuntime capability selection', () => {
 
     // 新快照：标志为 true 时用会话自己的选择。
     agent.loadSnapshot({
+      messageFormat: 'pi-ai-v1',
       providerId: 'test-provider',
       protocol: 'openai_chat_completions',
       model: 'test-model',
