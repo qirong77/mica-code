@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'bun:test'
 import {
+  createDocumentTaskQueue,
   documentKey,
   editorOptionsForTab,
   editorSurface,
@@ -7,6 +8,7 @@ import {
   isMarkdownFile,
   planDocumentOpen,
   planTextReplacement,
+  saveDocumentTab,
   uniqueDocumentTitle,
   writeModelText
 } from './files-document'
@@ -196,5 +198,186 @@ describe('writeModelText', () => {
     const model = fakeModel('same')
     expect(writeModelText(model, 'same')).toBe(false)
     expect(model.edits).toHaveLength(0)
+  })
+})
+
+function deferred() {
+  let resolve
+  const promise = new Promise((done) => {
+    resolve = done
+  })
+  return { promise, resolve }
+}
+
+describe('createDocumentTaskQueue', () => {
+  it('waits for pending input before switching, then runs the next switch in order', async () => {
+    const enqueue = createDocumentTaskQueue()
+    const input = deferred()
+    const events = []
+    const first = enqueue(async () => {
+      events.push('flush A')
+      await input.promise
+      events.push('show B')
+    })
+    const second = enqueue(() => events.push('show C'))
+    await Promise.resolve()
+    expect(events).toEqual(['flush A'])
+    input.resolve()
+    await Promise.all([first, second])
+    expect(events).toEqual(['flush A', 'show B', 'show C'])
+  })
+
+  it('allows retry after a failed flush', async () => {
+    const enqueue = createDocumentTaskQueue()
+    await expect(
+      enqueue(() => {
+        throw new Error('flush failed')
+      })
+    ).rejects.toThrow('flush failed')
+    expect(await enqueue(() => 'retried')).toBe('retried')
+  })
+})
+
+function saveFixture() {
+  let text = 'disk'
+  let version = 1
+  const model = {
+    getValue: () => text,
+    getAlternativeVersionId: () => version
+  }
+  let current = {
+    path: '/notes.md',
+    model,
+    savedVersion: 1,
+    diskVersion: 'disk-1',
+    dirty: false,
+    saving: false
+  }
+  const original = current
+  const writes = []
+  return {
+    tab: original,
+    findTab: (tab) => (current?.model === tab.model ? current : null),
+    updateTab(tab, patch) {
+      if (current?.model === tab.model) current = { ...current, ...patch }
+    },
+    synchronize: async () => {},
+    async write(...args) {
+      writes.push(args)
+      return { version: 'disk-2' }
+    },
+    get current() {
+      return current
+    },
+    replace(tab) {
+      current = tab
+    },
+    edit(value) {
+      text = value
+      version += 1
+      current = { ...current, dirty: true }
+    },
+    writes
+  }
+}
+
+describe('saveDocumentTab', () => {
+  it('locks before flush and saves pending input even when the tab was clean', async () => {
+    const state = saveFixture()
+    const result = await saveDocumentTab({
+      ...state,
+      synchronize: async () => {
+        expect(state.current.saving).toBe(true)
+        state.edit('pending input')
+      }
+    })
+    expect(state.writes).toEqual([['/notes.md', 'pending input', 'disk-1']])
+    expect(result).toEqual({ dirty: false })
+    expect(state.current).toMatchObject({
+      saving: false,
+      dirty: false,
+      savedVersion: 2,
+      diskVersion: 'disk-2'
+    })
+  })
+
+  it('flushes an unchanged tab without writing it again', async () => {
+    const state = saveFixture()
+    let synchronized = false
+    expect(
+      await saveDocumentTab({
+        ...state,
+        synchronize: async () => {
+          synchronized = true
+        }
+      })
+    ).toBeNull()
+    expect(synchronized).toBe(true)
+    expect(state.writes).toEqual([])
+    expect(state.current.saving).toBe(false)
+  })
+
+  it('does not save stale model content after synchronization fails and releases the lock', async () => {
+    const state = saveFixture()
+    state.edit('model before flush')
+    await expect(
+      saveDocumentTab({
+        ...state,
+        synchronize: async () => {
+          throw new Error('runtime unavailable')
+        }
+      })
+    ).rejects.toThrow('runtime unavailable')
+    expect(state.writes).toEqual([])
+    expect(state.current).toMatchObject({ saving: false, dirty: true, diskVersion: 'disk-1' })
+  })
+
+  it('keeps new edits and cloned tab fields while a write is pending', async () => {
+    const state = saveFixture()
+    state.edit('first edit')
+    const writing = deferred()
+    const started = deferred()
+    const saving = saveDocumentTab({
+      ...state,
+      write: async () => {
+        started.resolve()
+        return writing.promise
+      }
+    })
+    await started.promise
+    state.edit('second edit')
+    state.replace({ ...state.current, pendingPosition: { line: 9 }, name: 'renamed' })
+    writing.resolve({ version: 'disk-2' })
+    expect(await saving).toEqual({ dirty: true })
+    expect(state.current).toMatchObject({
+      saving: false,
+      dirty: true,
+      savedVersion: 2,
+      diskVersion: 'disk-2',
+      pendingPosition: { line: 9 },
+      name: 'renamed'
+    })
+  })
+
+  it('blocks a duplicate save during flush', async () => {
+    const state = saveFixture()
+    const input = deferred()
+    const saving = saveDocumentTab({ ...state, synchronize: () => input.promise })
+    expect(state.current.saving).toBe(true)
+    expect(await saveDocumentTab(state)).toBeNull()
+    input.resolve()
+    await saving
+    expect(state.current.saving).toBe(false)
+  })
+
+  it('never patches a replacement model at the same path', async () => {
+    const state = saveFixture()
+    const replacement = { ...state.current, model: {}, saving: false }
+    await saveDocumentTab({
+      ...state,
+      synchronize: async () => state.replace(replacement)
+    })
+    expect(state.current).toBe(replacement)
+    expect(state.writes).toEqual([])
   })
 })

@@ -18,6 +18,7 @@ import {useSettings} from './context/SettingsContext';
 import {useSynchronizeSettings} from './hooks/useSynchronizeSettings';
 import AutoEmbedPlugin from './plugins/AutoEmbedPlugin';
 import CodeActionMenuPlugin from './plugins/CodeActionMenuPlugin';
+import MermaidPreviewPlugin from './plugins/MermaidPreviewPlugin';
 import CommentPlugin from './plugins/CommentPlugin';
 import ComponentPickerPlugin from './plugins/ComponentPickerPlugin';
 import ContextMenuPlugin from './plugins/ContextMenuPlugin';
@@ -148,6 +149,7 @@ export default function Editor(): JSX.Element {
             {floatingAnchorElem && (
               <>
                 <CodeActionMenuPlugin anchorElem={floatingAnchorElem} />
+                <MermaidPreviewPlugin anchorElem={floatingAnchorElem} />
                 <FloatingLinkEditorPlugin
                   anchorElem={floatingAnchorElem}
                   isLinkEditMode={isLinkEditMode}

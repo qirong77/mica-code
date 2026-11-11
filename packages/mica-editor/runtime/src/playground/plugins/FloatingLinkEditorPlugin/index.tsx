@@ -44,6 +44,7 @@ import {
   $removeLink,
   $restoreLinkSelection,
   type LinkEditSession,
+  type LinkUrlStrategy,
   normalizeLinkUrl,
   registerLinkDraftRequests,
 } from './linkEditing';
@@ -53,12 +54,15 @@ function FloatingLinkEditor({
   anchorElem,
   isLinkEditMode,
   setIsLinkEditMode,
+  markdownOnly,
 }: {
   editor: LexicalEditor;
   anchorElem: HTMLElement;
   isLinkEditMode: boolean;
   setIsLinkEditMode: Dispatch<boolean>;
+  markdownOnly: boolean;
 }): JSX.Element {
+  const urlStrategy: LinkUrlStrategy = markdownOnly ? 'markdown' : 'rich-text';
   const [activeEditor, setActiveEditor] = useState(editor);
   const popupRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<RefInputType>(null);
@@ -186,7 +190,7 @@ function FloatingLinkEditor({
       return;
     }
     dismissedSelection.current = null;
-    const next = $createLinkEditSession(activeEditor);
+    const next = $createLinkEditSession(activeEditor, urlStrategy);
     if (!next?.linkKey) {
       hide();
       return;
@@ -194,7 +198,7 @@ function FloatingLinkEditor({
     targetRef.current = next;
     setTarget(next);
     $positionAtSelection(next);
-  }, [activeEditor, hide, $positionAtSelection]);
+  }, [activeEditor, hide, $positionAtSelection, urlStrategy]);
 
   useEffect(
     () =>
@@ -211,7 +215,7 @@ function FloatingLinkEditor({
           },
           COMMAND_PRIORITY_CRITICAL,
         ),
-        registerLinkDraftRequests(editor, beginEditing),
+        registerLinkDraftRequests(editor, beginEditing, urlStrategy),
         editor.registerCommand(
           CLICK_COMMAND,
           (event, originatingEditor) => {
@@ -232,7 +236,7 @@ function FloatingLinkEditor({
             // shortcut for opening, and follows the same validation as the dialog.
             event.preventDefault();
             if (event.metaKey || event.ctrlKey) {
-              const result = normalizeLinkUrl(clickedLink.url);
+              const result = normalizeLinkUrl(clickedLink.url, urlStrategy);
               if (result.ok) {
                 getRootOwnerDocument(originatingEditor.getRootElement()).defaultView?.open(
                   result.url,
@@ -246,7 +250,7 @@ function FloatingLinkEditor({
             // selection change. Reopen its link without changing the selection.
             dismissedSelection.current = null;
             originatingEditor.read('pending', () => {
-              const session = $createLinkEditSession(originatingEditor);
+              const session = $createLinkEditSession(originatingEditor, urlStrategy);
               if (session?.linkKey === clickedLink.key) {
                 targetRef.current = session;
                 setActiveEditor(originatingEditor);
@@ -259,7 +263,7 @@ function FloatingLinkEditor({
           COMMAND_PRIORITY_HIGH,
         ),
       ),
-    [editor, beginEditing, hide, $positionAtSelection],
+    [editor, beginEditing, hide, $positionAtSelection, urlStrategy],
   );
 
   useEffect(() => {
@@ -329,7 +333,7 @@ function FloatingLinkEditor({
     let saved = false;
     session.editor.update(
       () => {
-        const result = $applyLinkEdit(session, editedUrl);
+        const result = $applyLinkEdit(session, editedUrl, urlStrategy);
         if (!result.ok) {
           setError(result.error);
           return;
@@ -371,7 +375,7 @@ function FloatingLinkEditor({
 
   const openLink = () => {
     if (!target) return;
-    const result = normalizeLinkUrl(target.url);
+    const result = normalizeLinkUrl(target.url, urlStrategy);
     if (!result.ok) {
       setError(result.error);
       return;
@@ -408,7 +412,7 @@ function FloatingLinkEditor({
               id={inputId}
               size="small"
               value={editedUrl}
-              placeholder="https://example.com"
+              placeholder={markdownOnly ? 'https://example.com 或 ./README.md' : 'https://example.com'}
               autoComplete="off"
               spellCheck={false}
               aria-label="链接地址"
@@ -436,7 +440,9 @@ function FloatingLinkEditor({
               id={`${inputId}-message`}
               className={error ? 'mica-link-editor__error' : 'mica-link-editor__hint'}
               role={error ? 'alert' : undefined}>
-              {error ?? '支持网址、邮箱和电话；Enter 保存，Esc 取消。'}
+              {error ?? (markdownOnly
+                ? '支持网址、邮箱、电话、本地路径和 #锚点；空格请写为 %20。Enter 保存，Esc 取消。'
+                : '支持网址、邮箱和电话；Enter 保存，Esc 取消。')}
             </p>
             <div className="mica-link-editor__actions">
               <Button htmlType="button" size="mini" onClick={() => dismiss(true)}>
@@ -485,10 +491,12 @@ export default function FloatingLinkEditorPlugin({
   anchorElem = document.body,
   isLinkEditMode,
   setIsLinkEditMode,
+  markdownOnly = false,
 }: {
   anchorElem?: HTMLElement;
   isLinkEditMode: boolean;
   setIsLinkEditMode: Dispatch<boolean>;
+  markdownOnly?: boolean;
 }): JSX.Element {
   const [editor] = useLexicalComposerContext();
   return (
@@ -497,6 +505,7 @@ export default function FloatingLinkEditorPlugin({
       anchorElem={anchorElem}
       isLinkEditMode={isLinkEditMode}
       setIsLinkEditMode={setIsLinkEditMode}
+      markdownOnly={markdownOnly}
     />
   );
 }

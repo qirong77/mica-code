@@ -17,6 +17,7 @@ export type MarkdownRuntimeMessage =
   | { type: 'ready' }
   | { type: 'loaded'; requestId: string; documentId: string }
   | { type: 'change'; documentId: string; value: string }
+  | { type: 'save'; documentId: string; value: string }
   | { type: 'result'; requestId: string; documentId: string; value: string }
   | { type: 'error'; requestId?: string; message: string };
 

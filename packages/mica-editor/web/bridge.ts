@@ -2,6 +2,37 @@ import { MARKDOWN_CHANNEL, type MarkdownDocument, type MarkdownHostMessage } fro
 
 export type MarkdownEditorStatus = 'loading' | 'ready' | 'fallback';
 export const MARKDOWN_TIMEOUT_MS = 15_000;
+export const MARKDOWN_ECHO_LIMIT = 256;
+
+function fingerprint(value: string) {
+  let first = 0x811c9dc5;
+  let second = 0x9e3779b9;
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index);
+    first = Math.imul(first ^ code, 0x01000193);
+    second = Math.imul(second ^ code, 0x85ebca6b);
+  }
+  return `${value.length}:${first >>> 0}:${second >>> 0}`;
+}
+
+/** Only a small window of fingerprints is retained, never past copies of the document. */
+export function createMarkdownEchoHistory() {
+  const entries: string[] = [];
+  return {
+    remember(value: string) {
+      entries.push(fingerprint(value));
+      if (entries.length > MARKDOWN_ECHO_LIMIT) entries.shift();
+    },
+    consume(value: string) {
+      const index = entries.indexOf(fingerprint(value));
+      if (index === -1) return false;
+      entries.splice(0, index + 1);
+      return true;
+    },
+    clear() { entries.length = 0; },
+    get size() { return entries.length; },
+  };
+}
 
 type Request = {
   documentId: string;
@@ -17,6 +48,7 @@ export function createMarkdownBridge(options: {
   token: string;
   target(): Window | null;
   onChange(documentId: string, value: string): void;
+  onSave?(documentId: string, value: string): void;
   onStatus(status: MarkdownEditorStatus, message?: string): void;
   onReady?(): void;
   timeoutMs?: number;
@@ -25,7 +57,7 @@ export function createMarkdownBridge(options: {
   const requests = new Map<string, Request>();
   let current: MarkdownDocument | null = null;
   let propValue = '';
-  let echoes: string[] = [];
+  const echoes = createMarkdownEchoHistory();
   let generation = 0;
   let sequence = 0;
   let ready = false;
@@ -86,11 +118,10 @@ export function createMarkdownBridge(options: {
   function setDocument(next: MarkdownDocument) {
     if (disposed) return;
     const sameDocument = current?.documentId === next.documentId;
-    const echoIndex = echoes.indexOf(next.value);
-    const echo = sameDocument && (next.value === current!.value || next.value === propValue || echoIndex !== -1);
+    const knownEcho = sameDocument && echoes.consume(next.value);
+    const echo = sameDocument && (next.value === current!.value || next.value === propValue || knownEcho);
     propValue = next.value;
     if (echo) {
-      if (echoIndex !== -1) echoes.splice(0, echoIndex + 1);
       if (current!.readOnly !== next.readOnly) {
         current!.readOnly = next.readOnly;
         if (ready && !fallback) post({ type: 'editable', readOnly: next.readOnly });
@@ -98,7 +129,7 @@ export function createMarkdownBridge(options: {
       return;
     }
     generation += 1;
-    echoes = [];
+    echoes.clear();
     rejectRequests('Markdown 文档已切换，请重试。');
     loading = null;
     current = { ...next };
@@ -109,7 +140,7 @@ export function createMarkdownBridge(options: {
   function accept(value: string) {
     if (!current || current.readOnly || value === current.value) return;
     current.value = value;
-    echoes.push(value);
+    echoes.remember(value);
     // Synchronous: flush() must register the autosave before its promise resolves.
     options.onChange(current.documentId, value);
   }
@@ -133,8 +164,14 @@ export function createMarkdownBridge(options: {
       return;
     }
     if (!current || data.documentId !== current.documentId) return;
-    if (data.type === 'change') {
-      if (loaded && typeof data.value === 'string') accept(data.value);
+    if (data.type === 'change' || data.type === 'save') {
+      if (!loaded || current.readOnly || typeof data.value !== 'string') return;
+      const document = current;
+      const expectedGeneration = generation;
+      accept(data.value);
+      // onChange can synchronously replace the document or make it read-only.
+      if (data.type === 'save' && current === document && generation === expectedGeneration && !current.readOnly)
+        options.onSave?.(current.documentId, current.value);
       return;
     }
     if (data.type !== 'loaded' && data.type !== 'result') return;
@@ -197,6 +234,7 @@ export function createMarkdownBridge(options: {
     dispose() {
       disposed = true;
       clearTimeout(bootTimer);
+      echoes.clear();
       rejectRequests('Markdown 编辑器已关闭。');
     },
   };

@@ -123,3 +123,39 @@ export function writeModelText(model, next) {
   ])
   return true
 }
+
+/** 文档操作按发起顺序执行；一次失败不阻塞后续的保存、切换或关闭。 */
+export function createDocumentTaskQueue() {
+  let tail = Promise.resolve()
+  return (operation) => {
+    const result = tail.then(operation)
+    tail = result.catch(() => {})
+    return result
+  }
+}
+
+/**
+ * 保存绑定到发起时的 model。先加锁、取得最新 Markdown，再检查版本是否需要写盘。
+ * findTab / updateTab 必须按 model 身份查找，不能把等待期间产生的新页签或 dirty 状态覆盖掉。
+ */
+export async function saveDocumentTab({ tab, findTab, updateTab, synchronize, write }) {
+  const current = findTab(tab)
+  if (!current?.model || current.readOnly || current.loading || current.saving) return null
+  const model = current.model
+  updateTab(current, { saving: true })
+  try {
+    await synchronize(current)
+    const latest = findTab(current)
+    if (!latest) return null
+    const content = model.getValue()
+    const savedVersion = model.getAlternativeVersionId()
+    if (savedVersion === latest.savedVersion) return null
+    const result = await write(latest.path, content, latest.diskVersion)
+    if (!findTab(current)) return null
+    const dirty = model.getAlternativeVersionId() !== savedVersion
+    updateTab(current, { savedVersion, diskVersion: result.version, dirty })
+    return { dirty }
+  } finally {
+    updateTab(current, { saving: false })
+  }
+}

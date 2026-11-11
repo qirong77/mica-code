@@ -1,12 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createMarkdownBridge, type MarkdownEditorStatus } from './bridge.js';
+import { createMarkdownBridge, createMarkdownEchoHistory, MARKDOWN_ECHO_LIMIT, type MarkdownEditorStatus } from './bridge.js';
 import { MARKDOWN_CHANNEL } from '../protocol.js';
 
 function fixture(value = '# Original\r\n\r\n', readOnly = false) {
   const target = { postMessage: vi.fn() } as unknown as Window;
   const changes = vi.fn();
+  const saves = vi.fn();
   const statuses = vi.fn<(status: MarkdownEditorStatus, message?: string) => void>();
-  const bridge = createMarkdownBridge({ token: 'secret', target: () => target, onChange: changes, onStatus: statuses, timeoutMs: 100 });
+  const bridge = createMarkdownBridge({ token: 'secret', target: () => target, onChange: changes, onSave: saves, onStatus: statuses, timeoutMs: 100 });
   const send = (data: Record<string, unknown>, overrides: Record<string, unknown> = {}) => bridge.receive({
     source: target,
     data: { channel: MARKDOWN_CHANNEL, token: 'secret', ...data },
@@ -16,13 +17,70 @@ function fixture(value = '# Original\r\n\r\n', readOnly = false) {
   const last = (type: string) => messages().filter((message) => message.type === type).at(-1)!;
   bridge.setDocument({ documentId: 'a', value, readOnly });
   const loaded = (id = 'a') => send({ type: 'loaded', requestId: last('load').requestId, documentId: id });
-  return { bridge, changes, statuses, target, send, last, loaded, messages };
+  return { bridge, changes, saves, statuses, target, send, last, loaded, messages };
 }
 
 beforeEach(() => vi.useFakeTimers());
 afterEach(() => { vi.clearAllTimers(); vi.useRealTimers(); });
 
 describe('Markdown iframe bridge', () => {
+  it('accepts the shortcut snapshot before invoking the host save, including an initially clean file', () => {
+    const f = fixture('initial');
+    f.send({ type: 'ready' });
+    f.loaded();
+    f.saves.mockImplementation(() => expect(f.bridge.getValue()).toBe('last input'));
+    f.send({ type: 'save', documentId: 'a', value: 'last input' });
+    expect(f.changes).toHaveBeenCalledWith('a', 'last input');
+    expect(f.saves).toHaveBeenCalledWith('a', 'last input');
+    expect(f.changes.mock.invocationCallOrder[0]).toBeLessThan(f.saves.mock.invocationCallOrder[0]);
+    f.send({ type: 'save', documentId: 'a', value: 'last input' });
+    expect(f.changes).toHaveBeenCalledTimes(1);
+    expect(f.saves).toHaveBeenCalledTimes(2);
+    f.bridge.dispose();
+  });
+
+  it('ignores save requests before load and from stale, readonly or unauthenticated documents', () => {
+    const f = fixture('original');
+    const request = { type: 'save', documentId: 'a', value: 'wrong' };
+    f.send(request);
+    f.send({ type: 'ready' });
+    f.send(request);
+    f.loaded();
+    f.send(request, { source: {} });
+    f.send({ ...request, token: 'wrong' });
+    f.send({ ...request, channel: 'wrong' });
+    f.send({ ...request, documentId: 'old' });
+    f.send({ ...request, value: null });
+    f.bridge.setDocument({ documentId: 'a', value: 'original', readOnly: true });
+    f.send(request);
+    expect(f.changes).not.toHaveBeenCalled();
+    expect(f.saves).not.toHaveBeenCalled();
+    expect(f.bridge.getValue()).toBe('original');
+    f.bridge.dispose();
+  });
+
+  it('does not save the wrong document if change handling switches documents synchronously', () => {
+    const f = fixture('initial');
+    f.send({ type: 'ready' });
+    f.loaded();
+    f.changes.mockImplementation(() => f.bridge.setDocument({ documentId: 'b', value: 'other', readOnly: false }));
+    f.send({ type: 'save', documentId: 'a', value: 'last input' });
+    expect(f.saves).not.toHaveBeenCalled();
+    expect(f.bridge.getValue()).toBe('other');
+    f.bridge.dispose();
+  });
+
+  it('bounds delayed echo memory while retaining recent controlled updates', () => {
+    const history = createMarkdownEchoHistory();
+    for (let index = 0; index < MARKDOWN_ECHO_LIMIT * 2; index++) history.remember(`revision ${index}`);
+    expect(history.size).toBe(MARKDOWN_ECHO_LIMIT);
+    expect(history.consume('revision 0')).toBe(false);
+    expect(history.consume(`revision ${MARKDOWN_ECHO_LIMIT * 2 - 2}`)).toBe(true);
+    expect(history.size).toBe(1);
+    expect(history.consume(`revision ${MARKDOWN_ECHO_LIMIT * 2 - 1}`)).toBe(true);
+    expect(history.size).toBe(0);
+  });
+
   it('preserves source during hydration and validates the source window, channel and token', () => {
     const f = fixture();
     f.send({ type: 'ready' }, { source: {} });

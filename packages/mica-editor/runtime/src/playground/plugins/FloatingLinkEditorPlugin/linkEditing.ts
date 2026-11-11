@@ -31,12 +31,65 @@ import {getSelectedNode} from '../../utils/getSelectedNode';
 import {sanitizeUrl} from '../../utils/url';
 
 type LinkResult = {ok: true; url: string} | {ok: false; error: string};
+export type LinkUrlStrategy = 'rich-text' | 'markdown';
 
 const INVALID_ADDRESS = '请输入完整的网址，例如 https://example.com。';
 const STALE_SELECTION = '原来的选区已变化，请重新选择文字或链接。';
+const HOST_WITH_PORT = /^(?:localhost|[^/:?#]+\.[^/:?#]+):\d+(?:[/?#]|$)/i;
+const URI_SCHEME = /^[a-z][a-z\d+.-]*:/i;
+const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f-\u009f]/u;
+
+function normalizeMarkdownLinkUrl(value: string): LinkResult {
+  // Check before trimming: URL parsers silently discard tabs and line endings.
+  // Encoded spaces are useful in Markdown paths; encoded controls are not.
+  if (CONTROL_CHARACTERS.test(value) || /%(?:[01][\da-f]|7f|c2%[89][\da-f])/i.test(value)) {
+    return {ok: false, error: '链接地址不能包含换行或控制字符。'};
+  }
+  const input = value.trim();
+  if (URI_SCHEME.test(input) || HOST_WITH_PORT.test(input)) {
+    return normalizeLinkUrl(input);
+  }
+  if (!input || /\s/u.test(input)) {
+    return normalizeLinkUrl(input);
+  }
+  if (input.includes('\\') || input.startsWith('//')) {
+    return {ok: false, error: '请输入相对路径、以 / 开头的本地路径或完整网址。'};
+  }
+
+  const path = input.split(/[?#]/u, 1)[0];
+  const firstSegment = path.split('/', 1)[0];
+  const explicitPath = /^(?:\.{1,2}\/|\/|#)/u.test(input);
+  // Bare .md filenames are common document links. A dotted first directory is
+  // ambiguous with a hostname, so example.com/guide.md keeps the web policy;
+  // ./example.com/guide.md makes a local directory explicit.
+  const markdownFile = /\.md$/i.test(path) && (!path.includes('/') || !firstSegment.includes('.'));
+  if (!explicitPath && !markdownFile) {
+    return normalizeLinkUrl(input);
+  }
+
+  let decoded: string;
+  try {
+    decoded = decodeURIComponent(input);
+  } catch {
+    return {ok: false, error: '路径中的百分号需要使用有效编码，例如空格写为 %20。'};
+  }
+  if (
+    CONTROL_CHARACTERS.test(decoded) ||
+    decoded.includes('\\') ||
+    decoded.startsWith('//') ||
+    URI_SCHEME.test(decoded) ||
+    sanitizeUrl(input) === 'about:blank'
+  ) {
+    return {ok: false, error: '请输入安全的本地路径或锚点。'};
+  }
+  return {ok: true, url: input};
+}
 
 /** These stricter rules belong to the link dialog, not Markdown/paste parsing. */
-export function normalizeLinkUrl(value: string): LinkResult {
+export function normalizeLinkUrl(value: string, strategy: LinkUrlStrategy = 'rich-text'): LinkResult {
+  if (strategy === 'markdown') {
+    return normalizeMarkdownLinkUrl(value);
+  }
   const input = value.trim();
   if (!input) {
     return {ok: false, error: '请输入链接地址；移除链接请使用“移除链接”。'};
@@ -47,8 +100,7 @@ export function normalizeLinkUrl(value: string): LinkResult {
 
   // A host with a port is not a URI scheme. All other explicit schemes must
   // pass the allowlist, including ones the browser's URL parser accepts.
-  const hostWithPort = /^(?:localhost|[^/:?#]+\.[^/:?#]+):\d+(?:[/?#]|$)/i;
-  const hasScheme = /^[a-z][a-z\d+.-]*:/i.test(input) && !hostWithPort.test(input);
+  const hasScheme = URI_SCHEME.test(input) && !HOST_WITH_PORT.test(input);
   const candidate = hasScheme ? input : `https://${input}`;
   let parsed: URL;
   try {
@@ -137,9 +189,13 @@ export type LinkEditSession = {
   selection: RangeSelection | NodeSelection;
   linkKey: NodeKey | null;
   url: string;
+  urlStrategy: LinkUrlStrategy;
 };
 
-export function $createLinkEditSession(editor: LexicalEditor): LinkEditSession | null {
+export function $createLinkEditSession(
+  editor: LexicalEditor,
+  urlStrategy: LinkUrlStrategy = 'rich-text',
+): LinkEditSession | null {
   const selection = $getSelection();
   if (!editor.isEditable() || (!$isRangeSelection(selection) && !$isNodeSelection(selection))) {
     return null;
@@ -148,7 +204,7 @@ export function $createLinkEditSession(editor: LexicalEditor): LinkEditSession |
     return null;
   }
   const link = $getSelectedLinkNode(selection);
-  return {editor, linkKey: link?.getKey() ?? null, selection: selection.clone(), url: link?.getURL() ?? ''};
+  return {editor, linkKey: link?.getKey() ?? null, selection: selection.clone(), url: link?.getURL() ?? '', urlStrategy};
 }
 
 /** Restore a clone: Lexical mutates selections as nodes split or move. */
@@ -177,8 +233,12 @@ export function $restoreLinkSelection(session: LinkEditSession): boolean {
   return true;
 }
 
-export function $applyLinkEdit(session: LinkEditSession, value: string): LinkResult {
-  const result = normalizeLinkUrl(value);
+export function $applyLinkEdit(
+  session: LinkEditSession,
+  value: string,
+  strategy: LinkUrlStrategy = session.urlStrategy,
+): LinkResult {
+  const result = normalizeLinkUrl(value, strategy);
   if (!result.ok) {
     return result;
   }
@@ -266,6 +326,7 @@ export function $removeLink(session: LinkEditSession): boolean {
 export function registerLinkDraftRequests(
   editor: LexicalEditor,
   onRequest: (session: LinkEditSession) => void,
+  strategy: LinkUrlStrategy = 'rich-text',
 ): () => void {
   return editor.registerCommand(
     TOGGLE_LINK_COMMAND,
@@ -275,7 +336,7 @@ export function registerLinkDraftRequests(
       }
       // Command propagation executes a parent listener in the parent's context.
       // Read the originating editor's pending state, without forcing a commit.
-      const session = originatingEditor.read('pending', () => $createLinkEditSession(originatingEditor));
+      const session = originatingEditor.read('pending', () => $createLinkEditSession(originatingEditor, strategy));
       if (session) {
         onRequest(session);
       }

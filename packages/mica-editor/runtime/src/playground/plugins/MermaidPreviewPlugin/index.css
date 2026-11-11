@@ -1,0 +1,173 @@
+/* CodeNode stays the only source of document data. Reserve the diagram's
+   measured height in its box while the actual preview lives outside the root. */
+[data-mermaid-view='preview'] {
+  height: var(--mermaid-preview-height, 88px) !important;
+  min-height: var(--mermaid-preview-height, 88px) !important;
+  max-height: var(--mermaid-preview-height, 88px) !important;
+  box-sizing: border-box;
+  padding-block: 0 !important;
+  overflow: hidden !important;
+  opacity: 0;
+  pointer-events: none;
+}
+
+[data-mermaid-view='source'] {
+  padding-bottom: calc(var(--mermaid-preview-height, 88px) + 12px) !important;
+}
+
+.mermaid-preview {
+  position: absolute;
+  z-index: 2;
+  width: 100%;
+  min-width: 0;
+  min-height: 64px;
+  max-width: 100%;
+  box-sizing: border-box;
+  padding: 36px 12px 10px;
+  border: 1px solid var(--color-line-soft, #dce0e7);
+  border-radius: 5px;
+  color: var(--color-fg-soft, #5c6472);
+  background: var(--color-panel, #f5f6f8);
+  font: 12px/1.5 var(--notebook-font-family, var(--chat-font-family, system-ui, sans-serif));
+  white-space: normal;
+  text-align: start;
+  overflow: hidden;
+  pointer-events: auto;
+}
+
+.mermaid-preview-live {
+  border-top-style: dashed;
+}
+
+.mermaid-preview-actions {
+  position: absolute;
+  inset: 4px 5px auto;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 3px;
+  min-width: 0;
+  height: 25px;
+  user-select: none;
+}
+
+.mermaid-preview-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding-inline-start: 5px;
+  color: var(--color-fg-faint, #78818e);
+  font-size: 11px;
+}
+
+.mermaid-preview-actions .arco-btn {
+  flex: none;
+  height: 24px;
+  min-width: 24px;
+  padding: 0 5px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: var(--color-panel, #f5f6f8);
+  color: var(--color-fg-soft, #5c6472);
+  font: inherit;
+}
+
+.mermaid-preview-actions .arco-btn:hover,
+.mermaid-preview-actions .arco-btn:focus-visible {
+  background: var(--color-active, #e6eaf0);
+}
+
+.mermaid-preview-actions .arco-btn:focus-visible {
+  outline: 2px solid var(--color-accent, #4269c2);
+  outline-offset: -2px;
+}
+
+.mermaid-preview-actions .code-copy-button.success {
+  color: var(--color-success, #238253);
+}
+
+.mermaid-preview-actions .code-copy-button.error,
+.mermaid-preview-error {
+  color: var(--color-danger, #c04545);
+}
+
+.mermaid-preview .code-action-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.mermaid-preview-diagram {
+  max-height: min(600px, 70vh);
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  text-align: center;
+}
+
+.mermaid-preview-diagram > svg {
+  display: block;
+  height: auto;
+  max-width: 100%;
+  margin: 0 auto;
+}
+
+.mermaid-preview-status {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 3px 6px;
+  min-height: 24px;
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+
+.mermaid-preview-status-quiet {
+  min-height: 0;
+  color: var(--color-fg-faint, #78818e);
+  font-size: 11px;
+}
+
+.mermaid-preview-status-quiet:empty {
+  display: none;
+}
+
+.mermaid-preview-error .arco-btn {
+  height: 22px;
+  padding: 0 4px;
+  color: inherit;
+  font: inherit;
+}
+
+@media (max-width: 480px) {
+  .mermaid-preview {
+    padding-inline: 6px;
+  }
+
+  .mermaid-preview-label {
+    font-size: 10px;
+  }
+}
+
+@media print {
+  .mermaid-preview-actions,
+  .mermaid-preview-status-quiet {
+    display: none;
+  }
+
+  .mermaid-preview {
+    padding-top: 10px;
+  }
+
+  .mermaid-preview-diagram {
+    max-height: none;
+    overflow: visible;
+  }
+}

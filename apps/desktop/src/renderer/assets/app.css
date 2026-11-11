@@ -936,13 +936,6 @@ html[data-appearance='light'] .chat-modal-arco-wrap {
   flex-direction: column;
 }
 
-/* 按实际对话区域宽度启用（ChatView 的 ResizeObserver），抽屉打开后也会重新判断。
-   过程卡片浮在右上角而不是自带一列：占一列会永久吃掉 340–440px 的阅读宽度，
-   卡片下面还留一整片空灰。对话区因此始终是整宽。 */
-.chat-conversation-layout.has-process-sidebar {
-  --chat-process-width: clamp(300px, 30%, 400px);
-}
-
 .chat-scroll {
   min-height: 0;
   flex: 1 1 0%;
@@ -2284,10 +2277,6 @@ html[data-appearance='light'] .chat-markdown code:not(pre code) {
   right: 22px;
 }
 
-.chat-view .chat-conversation-layout.has-process-sidebar > .chat-find {
-  right: calc(var(--chat-process-width) + 22px);
-}
-
 /* 焦点态由外框 `.chat-find-field:focus-within` 的橙色描边表示；再叠全局
    `input:focus-visible` 的 1px 白描边就成了框里套框（截图里那层内边框）。 */
 
@@ -2632,103 +2621,9 @@ html[data-appearance='light'] .chat-markdown code:not(pre code) {
  *
  * 思考是例外：它不是日志行，而是这一轮在想的什么，照旧整段折行。
  */
-/* 右上角浮卡：宽度固定、高度跟着内容长（上限 62% / 520px），超出自己在卡内滚。
-   不再占一列，所以对话区是整宽的；卡片浮在上层，滚动正文从它下面经过。 */
-.chat-turn-log.is-sidebar {
-  position: absolute;
-  top: 8px;
-  right: 10px;
-  z-index: 6;
-  width: var(--chat-process-width);
-  max-height: min(62%, 520px);
-  overflow: hidden;
-  border: 1px solid var(--color-line);
-  border-radius: 8px;
-  background: var(--color-panel);
-  box-shadow: 0 10px 28px var(--color-overlay-strong);
-  font-size: 12px;
-  line-height: 1.6;
-}
-
-.chat-turn-log.is-sidebar .chat-turn-log-head {
-  height: 34px;
-  min-height: 34px;
-  flex: none;
-  gap: 8px;
-  border-top: 0;
-  border-bottom: 1px solid var(--color-line-soft);
-  padding: 0 10px;
-  cursor: default;
-  touch-action: auto;
-}
-
-.chat-process-state,
 .chat-process-empty {
   color: var(--color-fg-faint);
   font-size: 11px;
-}
-
-.chat-process-placement {
-  display: inline-flex;
-  flex: none;
-  margin-left: auto;
-}
-
-.chat-turn-log-rounds-toggle + .chat-process-placement {
-  margin-left: 0;
-}
-
-.chat-process-plan {
-  min-height: 0;
-  max-height: 35%;
-  flex: 0 1 auto;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-}
-
-.chat-process-plan:has(.chat-todo-dock) {
-  border-bottom: 1px solid var(--color-line-soft);
-  padding: 8px 0;
-}
-
-.chat-process-plan .chat-task-description {
-  white-space: normal;
-  overflow-wrap: anywhere;
-}
-
-/*
- * 侧栏里计划区自己滚（上限 35%）：列表不必再压成 126px 的小窗，
- * 否则计划一长就缩成几行，下面空着也看不见后面的条目。
- */
-.chat-process-plan .chat-task-children {
-  max-height: none;
-}
-
-.chat-turn-log.is-sidebar .chat-turn-log-scroll {
-  flex: 1 1 0%;
-  max-height: none;
-  padding: 12px;
-}
-
-.chat-turn-log.is-sidebar .chat-turn-log-rounds {
-  max-height: min(28%, 180px);
-  flex: 0 1 auto;
-  padding: 8px 12px 0;
-}
-
-.chat-turn-log.is-sidebar.is-reading-history .chat-turn-log-rounds {
-  max-height: none;
-  flex: 1 1 0%;
-  padding-bottom: 8px;
-}
-
-.chat-turn-log.is-sidebar.is-reading-history .chat-turn-log-scroll {
-  flex: 0 0 auto;
-}
-
-.chat-turn-log.is-sidebar.has-rounds .chat-turn-log-scroll {
-  margin: 8px 12px 12px;
-  padding: 8px;
 }
 
 .chat-turn-log-thinking {

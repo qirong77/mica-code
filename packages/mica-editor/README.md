@@ -5,7 +5,7 @@
 | 模式 | 入口 | 文档格式 | 谁在用 |
 | --- | --- | --- | --- |
 | 富文本 | `/editor/index.html` | Lexical JSON | `plugins/notebook`（笔记正文） |
-| Markdown | `/editor/index.html?mode=markdown` | Markdown 字符串 | 配置页 Role / Skill 编辑 |
+| Markdown | `/editor/index.html?mode=markdown` | Markdown 字符串 | 文件视图 `.md`、配置页 Role / Skill 编辑 |
 
 ## 目录
 
@@ -36,6 +36,9 @@ await ref.current?.flush(); // 切换条目/离开页面前把最后一批输入
 - **主题**：`web/theme.ts` 读宿主 `data-theme` / `data-appearance` 与 CSS 变量，经 `theme` 消息下发；
   亮暗和六套主题跟随 Mica，runtime 不维护第二套皮肤。
 - **降级**：CDN 或构建产物不可用时组件退回朴素 textarea，仍能继续编辑源码，`status` 为 `fallback`。
+- **保存**：文件宿主可传 `onSave`；runtime 捕获 ⌘/Ctrl+S 并先交出最新 Markdown，再调用该回调。
+  自动保存的设置页不必提供回调。切换或关闭文档前仍需等待 `flush()`，完成后才能换 `documentId`。
+- **尺寸**：宿主提供确定高度和 `min-height: 0` 的容器，组件与 runtime 填满剩余区域；源码和排版只滚正文，工具栏与字数栏固定。
 
 ## Markdown 模式的取舍
 
@@ -48,6 +51,20 @@ await ref.current?.flush(); // 切换条目/离开页面前把最后一批输入
   转换不保留 Markdown 空行（否则空行会变成空段落、排版撑成双倍行距），导出时由块分隔补回，
   并沿用文件原本的收尾换行；只有连续多行空行会收敛成一个空行。
 - 源码模式是权威：在源码里改的内容原样回传，不经过富文本往返。
+- 查看源码后直接返回排版，不重新导入文档，也不清除撤销、选区和手动表格列宽；源码有修改才重新解析。
+  源码区的 Tab / Shift+Tab 支持缩进及取消缩进，使用浏览器文本事务以保留撤销。
+- GFM 表格按内容和可用区域分配初始列宽，行距紧凑；支持拖动行高、列宽，宽表格在表格内部横向滚动。
+  手动列宽只属于本次编辑状态，不写入标准 Markdown；重新打开后会按内容重新计算。
+- Markdown 链接编辑保留 `./README.md`、`../docs/guide.md`、`README.md` 和 `#锚点`，不自动改成网址。
+
+## Mermaid 与代码块
+
+两种模式共用 `MermaidPreviewPlugin`：语言为 `mermaid` 的 Lexical CodeNode 默认显示图表，
+点「编辑源码」展开实际代码，下方显示实时预览；也可收起源码只看图表。语法错误或 CDN 失败时显示原始代码及就地提示，正文不丢失。
+预览的 SVG 位于 contenteditable 之外；原 CodeNode 始终是文档数据，Markdown 导出仍为 `mermaid` 围栏，富文本仍为代码节点。
+
+Mermaid 与 DOMPurify 用固定版本 jsDelivr ESM 按需加载（版本见插件 `mermaid.ts`），不进入宿主或编辑器产物。
+图表使用宿主主题，严格渲染并清洗 SVG，不执行图表中的点击回调或加载外部图像。复制操作复制 Mermaid 源码。
 
 ## 构建与静态资源
 

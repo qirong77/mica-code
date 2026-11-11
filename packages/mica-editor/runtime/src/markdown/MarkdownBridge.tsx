@@ -21,6 +21,12 @@ export class MarkdownSession {
     post({type: 'change', documentId: this.documentId, value});
   };
   snapshot() { return this.reader?.() ?? this.value; }
+  save() {
+    if (this.readOnly) return;
+    const value = this.snapshot();
+    this.change(value);
+    post({type: 'save', documentId: this.documentId, value});
+  }
   ready() { post({type: 'loaded', documentId: this.documentId, requestId: this.requestId}); }
 }
 
@@ -54,9 +60,17 @@ export function MarkdownFrame({children}: {children: ReactNode}) {
         post({type: 'error', requestId, documentId: current.current?.documentId, message: cause instanceof Error ? cause.message : String(cause)});
       }
     };
+    const saveShortcut = (event: KeyboardEvent) => {
+      if (!(event.metaKey || event.ctrlKey) || event.shiftKey || event.altKey || event.key.toLowerCase() !== 's' || event.isComposing || !current.current) return;
+      // Keyboard events do not cross the iframe boundary. Send the snapshot
+      // through the same authenticated bridge before asking the host to save.
+      event.preventDefault();
+      current.current.save();
+    };
     window.addEventListener('message', receive);
+    document.addEventListener('keydown', saveShortcut, true);
     post({type: 'ready'});
-    return () => window.removeEventListener('message', receive);
+    return () => {window.removeEventListener('message', receive); document.removeEventListener('keydown', saveShortcut, true);};
   }, []);
   return session ? <Context.Provider key={session.mountKey} value={session}>{children}</Context.Provider> : <div className="notebook-loading" role="status">正在载入 Markdown…</div>;
 }

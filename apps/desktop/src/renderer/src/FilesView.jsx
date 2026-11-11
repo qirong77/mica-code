@@ -1,6 +1,7 @@
 import { ArcoAction } from '@mica-config-ui/web'
 // Markdown 文件默认用共享 Lexical 编辑器打开（内部是沙箱 iframe，只收发 Markdown 字符串）。
 import { MarkdownEditor } from '@packages/mica-editor/index.js'
+import { flushSync } from 'react-dom'
 import { confirmAction } from './desktop-dialog'
 import { lazyView } from './lazy-view'
 import {
@@ -48,11 +49,13 @@ import { buildGitDecorations, stagedCode, worktreeCode } from './git-decorations
 import { useIsMobile, usePaneWidth } from './hooks'
 import { editorOptions, fileName, languageFor, loadMonaco } from './monaco'
 import {
+  createDocumentTaskQueue,
   editorOptionsForTab,
   editorSurface,
   isDocumentKey,
   isMarkdownFile,
   planDocumentOpen,
+  saveDocumentTab,
   uniqueDocumentTitle,
   writeModelText
 } from './files-document'
@@ -309,6 +312,7 @@ export const FilesView = forwardRef(function FilesView(
   const openRequestRef = useRef(0)
   const messageTimer = useRef(null)
   const saveActionRef = useRef(null)
+  const [documentTasks] = useState(createDocumentTaskQueue)
   const [tree, setTreeState] = useState({
     root: null,
     parent: null,
@@ -397,7 +401,6 @@ export const FilesView = forwardRef(function FilesView(
     setTabsState(next)
   }, [])
   const setActivePath = useCallback((path) => {
-    openRequestRef.current += 1
     activeRef.current = path
     setActivePathState(path)
   }, [])
@@ -408,6 +411,49 @@ export const FilesView = forwardRef(function FilesView(
       messageTimer.current = window.setTimeout(() => setMessage(null), error ? 4000 : 1800)
     }
   }, [])
+
+  // 切换、关闭、保存共享同一队列：flush 未完成前不能换 documentId 或卸载 iframe。
+  const runDocumentTask = useCallback(
+    (operation, failure = '无法切换文件') => {
+      const generation = lifecycleRef.current
+      return documentTasks(async () => {
+        if (generation !== lifecycleRef.current) return false
+        try {
+          return await operation()
+        } catch (error) {
+          if (generation === lifecycleRef.current)
+            showMessage(`${failure}：${error?.message || error}`, true, true)
+          return false
+        }
+      })
+    },
+    [documentTasks, showMessage]
+  )
+  const findDocumentTab = useCallback(
+    (tab) => tabsRef.current.find((item) => item.path === tab.path && item.model === tab.model),
+    []
+  )
+  const updateDocumentTab = useCallback(
+    (tab, patch) =>
+      setTabs((items) =>
+        items.map((item) =>
+          item.path === tab.path && item.model === tab.model ? { ...item, ...patch } : item
+        )
+      ),
+    [setTabs]
+  )
+  const synchronizeDocument = useCallback(
+    async (tab = tabsRef.current.find((item) => item.path === activeRef.current)) => {
+      if (!tab?.model || editorSurface(tab) !== 'markdown' || tab.path !== activeRef.current)
+        return
+      const markdown = markdownRef.current
+      if (!markdown) throw new Error('Markdown 编辑器尚未就绪，请稍后再试')
+      const text = await markdown.flush()
+      if (!findDocumentTab(tab)) throw new Error('文档已关闭')
+      writeModelText(tab.model, text)
+    },
+    [findDocumentTab]
+  )
 
   const selectGitFile = useCallback(
     (file, section = 'changes') => {
@@ -547,13 +593,13 @@ export const FilesView = forwardRef(function FilesView(
     else editorRef.current?.focus()
   }, [])
 
-  const activateFile = useCallback(
+  // 只在文档任务内调用；调用前已经收集了旧 Markdown 的最新输入。
+  const displayFile = useCallback(
     (path, focus = true) => {
       const tab = tabsRef.current.find((item) => item.path === path)
       if (!tab) return
       const surface = editorSurface(tab)
       if (activeRef.current === path && editorRef.current?.getModel() === tab.model) {
-        openRequestRef.current += 1
         if (tab.model) {
           editorRef.current?.updateOptions(editorOptionsForTab(tab))
           showMessage('')
@@ -564,12 +610,12 @@ export const FilesView = forwardRef(function FilesView(
       const previous = tabsRef.current.find((item) => item.path === activeRef.current)
       if (previous?.model && previous.path !== path) {
         previous.viewState = editorRef.current?.saveViewState()
-        // 换文档前先把 Markdown 编辑器手上的正文同步回旧 model。必须同步取值：
-        // 换文档会让 bridge 作废在途请求，等 flush() 只会拿到「文档已切换」的拒绝。
-        if (editorSurface(previous) === 'markdown' && markdownRef.current)
-          writeModelText(previous.model, markdownRef.current.getValue())
       }
-      setActivePath(path)
+      // 队列的下一项可能立即 flush；先提交 React 更新，确保 ref/documentId 已切到新页签。
+      flushSync(() => {
+        setActivePath(path)
+        if (surface === 'markdown') setMarkdownValue(tab.model?.getValue() ?? '')
+      })
       if (!tab.model) {
         editorRef.current?.setModel(null)
         showMessage(`正在打开 ${tab.name}…`)
@@ -577,7 +623,6 @@ export const FilesView = forwardRef(function FilesView(
       }
       editorRef.current?.setModel(tab.model)
       // Markdown 页签的正文由 model 供一次；之后归编辑器自己持有，逐字回灌会让整页重渲染。
-      if (surface === 'markdown') setMarkdownValue(tab.model.getValue())
       // editor 是唯一实例，只读状态跟着页签走：虚拟文档（工具输出预览）不可编辑。
       editorRef.current?.updateOptions(editorOptionsForTab(tab))
       if (tab.viewState) editorRef.current?.restoreViewState(tab.viewState)
@@ -596,6 +641,20 @@ export const FilesView = forwardRef(function FilesView(
     [focusSurface, revealPosition, setActivePath, showMessage]
   )
 
+  const activateFile = useCallback(
+    (path, focus = true) => {
+      const request = ++openRequestRef.current
+      return runDocumentTask(async () => {
+        if (request !== openRequestRef.current) return false
+        await synchronizeDocument()
+        if (request !== openRequestRef.current) return false
+        displayFile(path, focus)
+        return true
+      })
+    },
+    [displayFile, runDocumentTask, synchronizeDocument]
+  )
+
   /**
    * 打开一段内存文本（工具调用详情里的参数/输出）。
    *
@@ -606,167 +665,167 @@ export const FilesView = forwardRef(function FilesView(
    * `id` 是记忆点：同一个工具调用再点一次会复用原页签并刷新内容（模型 URI 不能重复）。
    */
   const openDocument = useCallback(
-    async ({ id, title, content, language = 'plaintext' }) => {
-      const { key, reuse } = planDocumentOpen(tabsRef.current, id || title)
-      setGitPreview(false)
-      // eslint-disable-next-line no-use-before-define -- 回调打开时 setter 早已定义
-      setMobileTreeVisible(false)
-      if (reuse) {
-        if (reuse.model.getValue() !== content) reuse.model.setValue(content ?? '')
-        activateFile(key)
-        return
-      }
-      const previous = tabsRef.current.find((tab) => tab.path === activeRef.current)
-      if (previous?.model) previous.viewState = editorRef.current?.saveViewState()
-      setActivePath(key)
-      const request = openRequestRef.current
+    ({ id, title, content, language = 'plaintext' }) => {
+      const request = ++openRequestRef.current
       const generation = lifecycleRef.current
-      editorRef.current?.setModel(null)
-      editorRef.current?.updateOptions({ readOnly: true })
-      // 首屏这一步才真正装载 monaco（与打开文件同一个装载器）
-      const monaco = await ensureEditor()
-      if (generation !== lifecycleRef.current) return
-      // 装载是异步的：等它的时候同一个文档可能已经被另一次点击建好了
-      const { reuse: stale } = planDocumentOpen(tabsRef.current, id || title)
-      if (stale) {
-        if (stale.model.getValue() !== content) stale.model.setValue(content ?? '')
-        if (request === openRequestRef.current && activeRef.current === key) activateFile(key)
-        return
-      }
-      const model = monaco.editor.createModel(content ?? '', language, monaco.Uri.parse(key))
-      const tab = {
-        path: key,
-        name: uniqueDocumentTitle(tabsRef.current, title, key),
-        model,
-        subscription: null,
-        viewState: null,
-        savedVersion: model.getAlternativeVersionId(),
-        diskVersion: null,
-        dirty: false,
-        loading: false,
-        saving: false,
-        readOnly: true,
-        virtual: true
-      }
-      setTabs((items) => [...items, tab])
-      if (request === openRequestRef.current && activeRef.current === key) activateFile(key)
+      return runDocumentTask(async () => {
+        if (request !== openRequestRef.current) return false
+        await synchronizeDocument()
+        if (request !== openRequestRef.current) return false
+        const monaco = await ensureEditor()
+        if (generation !== lifecycleRef.current || request !== openRequestRef.current) return false
+        const { key, reuse } = planDocumentOpen(tabsRef.current, id || title)
+        setGitPreview(false)
+        // eslint-disable-next-line no-use-before-define -- 回调执行时 setter 早已定义
+        setMobileTreeVisible(false)
+        if (reuse) {
+          if (reuse.model.getValue() !== content) reuse.model.setValue(content ?? '')
+        } else {
+          const model = monaco.editor.createModel(content ?? '', language, monaco.Uri.parse(key))
+          setTabs((items) => [
+            ...items,
+            {
+              path: key,
+              name: uniqueDocumentTitle(items, title, key),
+              model,
+              subscription: null,
+              viewState: null,
+              savedVersion: model.getAlternativeVersionId(),
+              diskVersion: null,
+              dirty: false,
+              loading: false,
+              saving: false,
+              readOnly: true,
+              virtual: true
+            }
+          ])
+        }
+        displayFile(key)
+        return true
+      })
     },
-    [activateFile, ensureEditor, setActivePath, setTabs]
+    [displayFile, ensureEditor, runDocumentTask, setTabs, synchronizeDocument]
   )
 
   const openFile = useCallback(
     async (path, position = null) => {
       if (!path) return
-      openRequestRef.current += 1
-      setGitPreview(false)
-      // eslint-disable-next-line no-use-before-define -- 回调打开文件时才执行，setter 早已定义
-      setMobileTreeVisible(false)
-      const existing = tabsRef.current.find((tab) => tab.path === path)
-      if (existing) {
-        existing.pendingPosition = position
-        activateFile(path)
-        requestAnimationFrame(() => {
-          const current = tabsRef.current.find((tab) => tab.path === path)
-          if (
-            current?.model &&
-            activeRef.current === path &&
-            editorRef.current?.getModel() === current.model
-          ) {
-            revealPosition(current.pendingPosition)
-            current.pendingPosition = null
-          }
-        })
-        return
-      }
-      const previous = tabsRef.current.find((tab) => tab.path === activeRef.current)
-      if (previous?.model) previous.viewState = editorRef.current?.saveViewState()
-      const tab = {
-        path,
-        name: fileName(path),
-        model: null,
-        subscription: null,
-        viewState: null,
-        savedVersion: null,
-        diskVersion: null,
-        dirty: false,
-        // .md 默认用 Markdown 编辑器；正文仍然是这份 monaco model，保存 / 未保存 / 冲突逻辑不变。
-        markdown: isMarkdownFile(path),
-        pendingPosition: position,
-        loading: true,
-        saving: false
-      }
-      setTabs((items) => [...items, tab])
-      setActivePath(path)
-      editorRef.current?.setModel(null)
-      showMessage(`正在打开 ${tab.name}…`)
-      const generation = lifecycleRef.current
-      try {
-        const result = await window.mica.files.read(path)
-        if (generation !== lifecycleRef.current || !tabsRef.current.includes(tab)) return
-        // 首次打开文件时这里才真正装载 monaco；装载期间用户可能切走/关掉页签。
-        const monaco = await ensureEditor()
-        if (generation !== lifecycleRef.current || !tabsRef.current.includes(tab)) return
-        const model = monaco.editor.createModel(
-          result.content,
-          languageFor(path),
-          monaco.Uri.file(path)
-        )
-        tab.model = model
-        tab.diskVersion = result.version
-        tab.loading = false
-        tab.savedVersion = model.getAlternativeVersionId()
-        tab.subscription = model.onDidChangeContent(() => {
-          const current = tabsRef.current.find((item) => item.path === path)
-          if (!current?.model) return
-          const dirty = current.model.getAlternativeVersionId() !== current.savedVersion
-          if (dirty !== current.dirty)
-            setTabs((items) => items.map((item) => (item === current ? { ...item, dirty } : item)))
-        })
-        setTabs((items) => items.map((item) => (item === tab ? { ...tab } : item)))
-        if (activeRef.current === path) {
-          editorRef.current?.setModel(model)
-          // Markdown 页签：磁盘正文喂给共享编辑器一次，之后它自己持有。
-          if (editorSurface(tab) === 'markdown') setMarkdownValue(result.content)
-          editorRef.current?.updateOptions(editorOptionsForTab(tab))
-          showMessage('')
+      const request = ++openRequestRef.current
+      return runDocumentTask(async () => {
+        if (request !== openRequestRef.current) return false
+        await synchronizeDocument()
+        if (request !== openRequestRef.current) return false
+        setGitPreview(false)
+        // eslint-disable-next-line no-use-before-define -- 回调打开文件时才执行，setter 早已定义
+        setMobileTreeVisible(false)
+        const existing = tabsRef.current.find((tab) => tab.path === path)
+        if (existing) {
+          existing.pendingPosition = position
+          displayFile(path)
           requestAnimationFrame(() => {
-            if (activeRef.current !== path || editorRef.current?.getModel() !== model) return
-            editorRef.current?.layout()
-            focusSurface(editorSurface(tab))
-            const current = tabsRef.current.find((item) => item.path === path)
-            revealPosition(current?.pendingPosition)
-            if (current) current.pendingPosition = null
+            const current = tabsRef.current.find((tab) => tab.path === path)
+            if (
+              current?.model &&
+              activeRef.current === path &&
+              editorRef.current?.getModel() === current.model
+            ) {
+              revealPosition(current.pendingPosition)
+              current.pendingPosition = null
+            }
           })
+          return
         }
-      } catch (error) {
-        if (!tabsRef.current.includes(tab)) return
-        const text = `无法打开文件：${error?.message || error}`
-        setTabs((items) => items.filter((item) => item !== tab))
-        if (activeRef.current === path) {
-          const fallback = tabsRef.current.at(-1)
-          if (fallback) {
-            activateFile(fallback.path, false)
-            showMessage(text, true, true)
-          } else {
-            setActivePath(null)
-            editorRef.current?.setModel(null)
-            showMessage(text)
+        const tab = {
+          path,
+          name: fileName(path),
+          model: null,
+          subscription: null,
+          viewState: null,
+          savedVersion: null,
+          diskVersion: null,
+          dirty: false,
+          // .md 默认用 Markdown 编辑器；正文仍然是这份 monaco model，保存 / 未保存 / 冲突逻辑不变。
+          markdown: isMarkdownFile(path),
+          pendingPosition: position,
+          loading: true,
+          saving: false
+        }
+        setTabs((items) => [...items, tab])
+        displayFile(path)
+        const generation = lifecycleRef.current
+        try {
+          const result = await window.mica.files.read(path)
+          if (generation !== lifecycleRef.current || !tabsRef.current.includes(tab)) return
+          // 首次打开文件时这里才真正装载 monaco。
+          const monaco = await ensureEditor()
+          if (generation !== lifecycleRef.current || !tabsRef.current.includes(tab)) return
+          const model = monaco.editor.createModel(
+            result.content,
+            languageFor(path),
+            monaco.Uri.file(path)
+          )
+          tab.model = model
+          tab.diskVersion = result.version
+          tab.loading = false
+          tab.savedVersion = model.getAlternativeVersionId()
+          tab.subscription = model.onDidChangeContent(() => {
+            const current = tabsRef.current.find((item) => item.path === path)
+            if (!current?.model) return
+            const dirty = current.model.getAlternativeVersionId() !== current.savedVersion
+            if (dirty !== current.dirty)
+              setTabs((items) => items.map((item) => (item === current ? { ...item, dirty } : item)))
+          })
+          flushSync(() => {
+            setTabs((items) => items.map((item) => (item === tab ? { ...tab } : item)))
+            // 磁盘正文与 model 就绪状态一起提交，再允许下一项任务采集输入。
+            if (activeRef.current === path && editorSurface(tab) === 'markdown')
+              setMarkdownValue(result.content)
+          })
+          if (activeRef.current === path) {
+            editorRef.current?.setModel(model)
+            editorRef.current?.updateOptions(editorOptionsForTab(tab))
+            showMessage('')
+            requestAnimationFrame(() => {
+              if (activeRef.current !== path || editorRef.current?.getModel() !== model) return
+              editorRef.current?.layout()
+              focusSurface(editorSurface(tab))
+              const current = tabsRef.current.find((item) => item.path === path)
+              revealPosition(current?.pendingPosition)
+              if (current) current.pendingPosition = null
+            })
           }
-        } else {
-          const activeTab = tabsRef.current.find((item) => item.path === activeRef.current)
-          if (activeTab?.model) showMessage(text, true, true)
-          else if (activeTab?.loading) showMessage(`正在打开 ${activeTab.name}…`)
+        } catch (error) {
+          if (!tabsRef.current.includes(tab)) return
+          const text = `无法打开文件：${error?.message || error}`
+          setTabs((items) => items.filter((item) => item !== tab))
+          if (activeRef.current === path) {
+            const fallback = tabsRef.current.at(-1)
+            if (fallback) {
+              displayFile(fallback.path, false)
+              showMessage(text, true, true)
+            } else {
+              flushSync(() => setActivePath(null))
+              editorRef.current?.setModel(null)
+              showMessage(text)
+            }
+          } else {
+            const activeTab = tabsRef.current.find((item) => item.path === activeRef.current)
+            if (activeTab?.model) showMessage(text, true, true)
+            else if (activeTab?.loading) showMessage(`正在打开 ${activeTab.name}…`)
+          }
         }
-      }
+      })
     },
     [
-      activateFile,
+      displayFile,
       ensureEditor,
       focusSurface,
       revealPosition,
+      runDocumentTask,
       setActivePath,
       setTabs,
-      showMessage
+      showMessage,
+      synchronizeDocument
     ]
   )
 
@@ -805,70 +864,92 @@ export const FilesView = forwardRef(function FilesView(
     [openFile, root]
   )
 
-  const saveActive = useCallback(async () => {
-    const tab = tabsRef.current.find((item) => item.path === activeRef.current)
-    if (!tab?.model || tab.readOnly || !tab.dirty || tab.loading || tab.saving) return
-    // Markdown 页签：先让编辑器把手上那一份（含尚未提交的输入法组合）交出来，再落盘。
-    if (editorSurface(tab) === 'markdown' && markdownRef.current) {
-      try {
-        writeModelText(tab.model, await markdownRef.current.flush())
-      } catch {
-        // 拿不到就按 model 里的内容保存，不因为一次同步失败把保存也挡掉
-      }
-    }
-    const content = tab.model.getValue()
-    const savedVersion = tab.model.getAlternativeVersionId()
-    tab.saving = true
-    setTabs((items) => items.map((item) => (item === tab ? { ...tab } : item)))
-    try {
-      const result = await window.mica.files.write(tab.path, content, tab.diskVersion)
-      if (!tabsRef.current.some((item) => item.path === tab.path)) return
-      tab.savedVersion = savedVersion
-      tab.diskVersion = result.version
-      tab.dirty = tab.model.getAlternativeVersionId() !== savedVersion
-      setTabs((items) => items.map((item) => (item.path === tab.path ? { ...tab } : item)))
-      showMessage(tab.dirty ? '已保存，文件仍有新的更改' : '已保存', true)
-      void onRefreshGit?.()
-    } catch (error) {
-      showMessage(`保存失败：${error?.message || error}`, true, true)
-      throw error
-    } finally {
-      tab.saving = false
-      setTabs((items) => items.map((item) => (item.path === tab.path ? { ...tab } : item)))
-    }
-  }, [onRefreshGit, setTabs, showMessage])
-  saveActionRef.current = () =>
-    saveActive().catch((error) => console.error('save file failed', error))
+  const saveActive = useCallback(
+    (path = activeRef.current) => {
+      // 保存绑定到按键发起时的文档；等待队列时用户可能已经请求切换。
+      const tab = tabsRef.current.find((item) => item.path === path)
+      if (!tab?.model || tab.readOnly || tab.loading || tab.saving) return
+      return runDocumentTask(
+        async () => {
+          const result = await saveDocumentTab({
+            tab,
+            findTab: findDocumentTab,
+            updateTab: updateDocumentTab,
+            synchronize: synchronizeDocument,
+            write: (target, content, version) => window.mica.files.write(target, content, version)
+          })
+          if (result) {
+            showMessage(result.dirty ? '已保存，文件仍有新的更改' : '已保存', true)
+            void onRefreshGit?.()
+          }
+        },
+        '保存失败'
+      )
+    },
+    [
+      findDocumentTab,
+      onRefreshGit,
+      runDocumentTask,
+      showMessage,
+      synchronizeDocument,
+      updateDocumentTab
+    ]
+  )
+  saveActionRef.current = saveActive
 
   const closeFile = useCallback(
-    async (path) => {
-      const tab = tabsRef.current.find((item) => item.path === path)
-      if (!tab) return false
-      if (tab.saving) {
-        showMessage('文件正在保存，请稍后再关闭', true, true)
-        return false
-      }
-      if (tab.dirty && !(await confirmAction(`“${tab.name}” 的更改尚未保存。是否放弃更改并关闭？`)))
-        return false
-      const paths = tabsRef.current.map((item) => item.path)
-      const index = paths.indexOf(path)
-      const wasActive = activeRef.current === path
-      tab.subscription?.dispose()
-      if (editorRef.current?.getModel() === tab.model) editorRef.current.setModel(null)
-      tab.model?.dispose()
-      const remaining = tabsRef.current.filter((item) => item !== tab)
-      setTabs(remaining)
-      if (wasActive) {
-        const next = remaining[Math.min(index, remaining.length - 1)]
-        if (next) activateFile(next.path, false)
-        else {
-          setActivePath(null)
-          showMessage('')
-        }
-      }
-      return true
+    (path) => {
+      const target = tabsRef.current.find((item) => item.path === path)
+      if (activeRef.current === path) openRequestRef.current += 1
+      return runDocumentTask(
+        async () => {
+          let tab = target && findDocumentTab(target)
+          if (!tab) return false
+          if (tab.saving) {
+            showMessage('文件正在保存，请稍后再关闭', true, true)
+            return false
+          }
+          // dirty 可能还没收到 iframe 的输入；先采集再决定是否需要确认。
+          await synchronizeDocument(tab)
+          tab = findDocumentTab(tab)
+          if (!tab) return false
+          if (
+            tab.dirty &&
+            !(await confirmAction(`“${tab.name}” 的更改尚未保存。是否放弃更改并关闭？`))
+          )
+            return false
+          tab = findDocumentTab(tab)
+          if (!tab) return false
+          const paths = tabsRef.current.map((item) => item.path)
+          const index = paths.indexOf(path)
+          const wasActive = activeRef.current === path
+          tab.subscription?.dispose()
+          if (editorRef.current?.getModel() === tab.model) editorRef.current.setModel(null)
+          tab.model?.dispose()
+          const remaining = tabsRef.current.filter((item) => item !== tab)
+          setTabs(remaining)
+          if (wasActive) {
+            const next = remaining[Math.min(index, remaining.length - 1)]
+            if (next) displayFile(next.path, false)
+            else {
+              flushSync(() => setActivePath(null))
+              showMessage('')
+            }
+          }
+          return true
+        },
+        '无法关闭文件'
+      )
     },
-    [activateFile, setActivePath, setTabs, showMessage]
+    [
+      displayFile,
+      findDocumentTab,
+      runDocumentTask,
+      setActivePath,
+      setTabs,
+      showMessage,
+      synchronizeDocument
+    ]
   )
 
   useEffect(() => {
@@ -1480,7 +1561,8 @@ export const FilesView = forwardRef(function FilesView(
   )
 
   const reloadAfterGitChange = useCallback(
-    async (nextRoot) => {
+    (nextRoot) => runDocumentTask(async () => {
+      await synchronizeDocument()
       if (tabsRef.current.some((tab) => tab.dirty || tab.saving || tab.loading)) return false
       const generation = lifecycleRef.current
       const request = ++reloadRef.current
@@ -1502,6 +1584,9 @@ export const FilesView = forwardRef(function FilesView(
         })
       )
       if (generation !== lifecycleRef.current || request !== reloadRef.current) return false
+      // 磁盘读取期间也可能有新输入；不能用磁盘版本盖掉尚未回传的 Markdown。
+      await synchronizeDocument()
+      if (tabsRef.current.some((tab) => tab.dirty || tab.saving || tab.loading)) return false
 
       const responses = new Map(results.map((result) => [result.path, result]))
       const removed = []
@@ -1529,21 +1614,23 @@ export const FilesView = forwardRef(function FilesView(
           loading: false
         })
       }
-      setTabs(nextTabs)
-
-      const nextActive = nextTabs.find((tab) => tab.path === activeRef.current) || nextTabs.at(-1)
-      if (nextActive) {
-        setActivePath(nextActive.path)
-        editorRef.current?.setModel(nextActive.model)
-        editorRef.current?.updateOptions(editorOptionsForTab(nextActive))
-        if (nextActive.viewState) editorRef.current?.restoreViewState(nextActive.viewState)
-        // 正文被磁盘内容覆盖了：Markdown 那一侧也要跟着换，否则它还在显示旧文字。
-        if (editorSurface(nextActive) === 'markdown' && nextActive.model)
-          setMarkdownValue(nextActive.model.getValue())
-      } else {
-        setActivePath(null)
-        editorRef.current?.setModel(null)
-      }
+      // 提交 documentId 与正文后，下一项文档任务才能安全地使用 Markdown ref。
+      flushSync(() => {
+        setTabs(nextTabs)
+        const nextActive = nextTabs.find((tab) => tab.path === activeRef.current) || nextTabs.at(-1)
+        if (nextActive) {
+          setActivePath(nextActive.path)
+          editorRef.current?.setModel(nextActive.model)
+          editorRef.current?.updateOptions(editorOptionsForTab(nextActive))
+          if (nextActive.viewState) editorRef.current?.restoreViewState(nextActive.viewState)
+          // 正文被磁盘内容覆盖了：Markdown 那一侧也要跟着换，否则它还在显示旧文字。
+          if (editorSurface(nextActive) === 'markdown' && nextActive.model)
+            setMarkdownValue(nextActive.model.getValue())
+        } else {
+          setActivePath(null)
+          editorRef.current?.setModel(null)
+        }
+      })
       await treeTask
       if (generation !== lifecycleRef.current || request !== reloadRef.current) return false
       showMessage(
@@ -1554,8 +1641,8 @@ export const FilesView = forwardRef(function FilesView(
         removed.length > 0
       )
       return true
-    },
-    [loadRoot, setActivePath, setTabs, showMessage]
+    }, '无法重新加载文件'),
+    [loadRoot, runDocumentTask, setActivePath, setTabs, showMessage, synchronizeDocument]
   )
 
   const toggleDirectory = useCallback(
@@ -1627,10 +1714,10 @@ export const FilesView = forwardRef(function FilesView(
 
   const activeTab = tabs.find((tab) => tab.path === activePath)
   // Markdown 页签：正文交给共享 Lexical 编辑器，monaco 只作为 model 的宿主（隐藏）。
-  const markdownTab = activeTab && editorSurface(activeTab) === 'markdown' ? activeTab : null
+  const markdownTab = activeTab?.model && editorSurface(activeTab) === 'markdown' ? activeTab : null
   /** Markdown 编辑器交回整篇正文：只替换 model 里变化的那一段，撤销栈与 dirty 判定都保持不变。 */
-  const changeMarkdown = useCallback((text) => {
-    const tab = tabsRef.current.find((item) => item.path === activeRef.current)
+  const changeMarkdown = useCallback((path, text) => {
+    const tab = tabsRef.current.find((item) => item.path === path)
     if (!tab?.model || tab.readOnly) return
     writeModelText(tab.model, text)
   }, [])
@@ -2242,7 +2329,8 @@ export const FilesView = forwardRef(function FilesView(
                   ref={markdownRef}
                   documentId={markdownTab.path}
                   value={markdownValue}
-                  onChange={changeMarkdown}
+                  onChange={(text) => changeMarkdown(markdownTab.path, text)}
+                  onSave={() => saveActionRef.current?.(markdownTab.path)}
                   readOnly={Boolean(markdownTab.readOnly)}
                   ariaLabel={`${markdownTab.name} Markdown 编辑器`}
                 />

@@ -12,6 +12,7 @@ import {
   registerLink,
   TOGGLE_LINK_COMMAND,
 } from '@lexical/link';
+import {$convertFromMarkdownString, $convertToMarkdownString, LINK} from '@lexical/markdown';
 import {
   $applyNodeReplacement,
   $createNodeSelection,
@@ -38,6 +39,7 @@ import {
   $removeLink,
   $restoreLinkSelection,
   type LinkEditSession,
+  type LinkUrlStrategy,
   normalizeLinkUrl,
   registerLinkDraftRequests,
 } from '../src/playground/plugins/FloatingLinkEditorPlugin/linkEditing';
@@ -80,8 +82,8 @@ function update(editor: LexicalEditor, operation: () => void) {
   editor.update(operation, {discrete: true});
 }
 
-function capture(editor: LexicalEditor) {
-  const session = editor.read('latest', () => $createLinkEditSession(editor));
+function capture(editor: LexicalEditor, strategy?: LinkUrlStrategy) {
+  const session = editor.read('latest', () => $createLinkEditSession(editor, strategy));
   if (!session) throw new Error('Expected an editable link selection');
   return session;
 }
@@ -121,10 +123,10 @@ function linkedText() {
   return {editor, linkKey, textKey, beforeKey};
 }
 
-function apply(session: LinkEditSession, value: string) {
+function apply(session: LinkEditSession, value: string, strategy?: LinkUrlStrategy) {
   let result: ReturnType<typeof $applyLinkEdit> | undefined;
   update(session.editor, () => {
-    result = $applyLinkEdit(session, value);
+    result = $applyLinkEdit(session, value, strategy);
   });
   return result!;
 }
@@ -163,8 +165,7 @@ const invalidAddresses = [
   'tel:no-number',
 ];
 
-describe('link dialog URL validation', () => {
-  it.each([
+const webAddresses = [
     ['example.com', 'https://example.com/'],
     ['  example.com/docs?q=1#intro  ', 'https://example.com/docs?q=1#intro'],
     ['www.example.com', 'https://www.example.com/'],
@@ -175,7 +176,15 @@ describe('link dialog URL validation', () => {
     ['mailto:name@example.com?subject=hello', 'mailto:name@example.com?subject=hello'],
     ['tel:+8613800138000', 'tel:+8613800138000'],
     ['tel:+1-555-0100;ext=42', 'tel:+1-555-0100;ext=42'],
-  ])('normalizes %s to a usable address', (input, url) => {
+    ['https://example.com/a%20b', 'https://example.com/a%20b'],
+    ['https://Example.COM/README.md', 'https://example.com/README.md'],
+    ['example.com/guide.md', 'https://example.com/guide.md'],
+    ['localhost:3000/guide.md', 'https://localhost:3000/guide.md'],
+    ['127.0.0.1:8080/guide.md', 'https://127.0.0.1:8080/guide.md'],
+];
+
+describe('link dialog URL validation', () => {
+  it.each(webAddresses)('normalizes %s to a usable address', (input, url) => {
     expect(normalizeLinkUrl(input)).toEqual({ok: true, url});
   });
 
@@ -188,6 +197,138 @@ describe('link dialog URL validation', () => {
     if (!result.ok) expect(result.error.length).toBeGreaterThan(0);
     expect(editor.getEditorState().toJSON()).toEqual(document);
     assertSelection(editor, session);
+  });
+});
+
+describe('Markdown link URL strategy', () => {
+  const markdownAddresses = [
+    'README.md',
+    './README.md',
+    '../README.md',
+    '../../docs/guide.md',
+    'docs/guide.md',
+    'docs/guide.MD?raw=true#intro',
+    '/docs/guide.md',
+    '/docs/no-extension?view=raw#intro',
+    '#anchor',
+    '#中文标题',
+    '#',
+    '/',
+    './docs/no-extension',
+    '../docs/',
+    './docs.v1/guide.md',
+    'docs/Quick%20start.md',
+    './My%20Notes/README.md',
+    'README.md?download=1&view=raw#intro',
+    '文档/指南.md',
+    'docs/guide(v2).md',
+  ];
+
+  it.each(markdownAddresses)('preserves %s through editing and Markdown serialization', (url) => {
+    const editor = makeEditor();
+    const source = `[文档](${url.replace(/([()])/g, '\\$1')} "说明")`;
+    update(editor, () => {
+      $convertFromMarkdownString(source, [LINK]);
+      $getRoot().getAllTextNodes()[0].select(0, 2);
+    });
+    const session = capture(editor, 'markdown');
+    expect(session.url).toBe(url);
+    update(editor, () => $setSelection(null));
+    expect(apply(session, url)).toEqual({ok: true, url});
+    assertSelection(editor, session);
+    const markdown = editor.read('latest', () => {
+      expect($link(session.linkKey!).getURL()).toBe(url);
+      expect($link(session.linkKey!).getTitle()).toBe('说明');
+      expect($getRoot().getTextContent()).toBe('文档');
+      return $convertToMarkdownString([LINK]);
+    });
+    expect(markdown).toBe(source);
+    update(editor, () => $convertFromMarkdownString(markdown, [LINK]));
+    editor.read('latest', () => {
+      const link = $getRoot().getAllTextNodes()[0].getParent();
+      expect($isLinkNode(link) && link.getURL()).toBe(url);
+      expect($convertToMarkdownString([LINK])).toBe(source);
+    });
+  });
+
+  it.each(webAddresses)('keeps web, email and phone validation for %s', (input, url) => {
+    expect(normalizeLinkUrl(input, 'markdown')).toEqual({ok: true, url});
+    expect(normalizeLinkUrl(input, 'markdown')).toEqual(normalizeLinkUrl(input));
+  });
+
+  it.each([
+    ...invalidAddresses,
+    'vbscript:msgbox(1)',
+    'blob:https://example.com/id',
+    'vscode://file/readme.md',
+    'javascript:readme.md',
+    'javascript%3Areadme.md',
+    'java%73cript:readme.md',
+    '//example.com/README.md',
+    '\\example.com\\README.md',
+    './docs\\guide.md',
+    '/%2Fexample.com/README.md',
+    './docs%5Cguide.md',
+    './bad name.md',
+    '#anchor heading',
+    './bad%.md',
+    './bad%ZZ.md',
+    './bad%FF.md',
+    '\nREADME.md',
+    'README.md\r\n',
+    './bad\u0085name.md',
+    './bad%00name.md',
+    './bad%0Dname.md',
+    './bad%0aname.md',
+    './bad%1Fname.md',
+    '#anchor%7f',
+    './bad%C2%80name.md',
+    'https://example.com/%0d%0aother',
+  ])('rejects unsafe or invalid Markdown address %j without mutating content', (value) => {
+    const {editor} = linkedText();
+    const session = capture(editor, 'markdown');
+    const before = editor.getEditorState().toJSON();
+    expect(apply(session, value).ok).toBe(false);
+    expect(editor.getEditorState().toJSON()).toEqual(before);
+    assertSelection(editor, session);
+  });
+
+  it('retains hostname completion for ambiguous destinations and rich-text defaults', () => {
+    expect(normalizeLinkUrl('example.com/docs', 'markdown')).toEqual({ok: true, url: 'https://example.com/docs'});
+    expect(normalizeLinkUrl('docs/guide', 'markdown').ok).toBe(false);
+    expect(normalizeLinkUrl('  ./README.md  ', 'markdown')).toEqual({ok: true, url: './README.md'});
+    expect(normalizeLinkUrl('README.md')).toEqual({ok: true, url: 'https://readme.md/'});
+    for (const input of ['./README.md', '../README.md', 'docs/guide.md', '/docs/guide.md', '#anchor']) {
+      expect(normalizeLinkUrl(input).ok).toBe(false);
+    }
+  });
+
+  it('can explicitly apply Markdown strategy to a default rich-text draft', () => {
+    const {editor, linkKey} = linkedText();
+    const session = capture(editor);
+    expect(session.urlStrategy).toBe('rich-text');
+    expect(apply(session, 'README.md', 'markdown')).toEqual({ok: true, url: 'README.md'});
+    editor.read('latest', () => expect($link(linkKey).getURL()).toBe('README.md'));
+  });
+
+  it('carries the Markdown strategy from a toolbar draft through insertion without a placeholder mutation', () => {
+    const editor = makeEditor();
+    update(editor, () => {
+      const text = $createTextNode('阅读文档');
+      $getRoot().append($createParagraphNode().append(text));
+      text.select(2, 4);
+    });
+    const before = editor.getEditorState().toJSON();
+    let draft: LinkEditSession | undefined;
+    const unregister = registerLinkDraftRequests(editor, (session) => {
+      draft = session;
+    }, 'markdown');
+    update(editor, () => editor.dispatchCommand(TOGGLE_LINK_COMMAND, 'https://'));
+    expect(draft?.urlStrategy).toBe('markdown');
+    expect(editor.getEditorState().toJSON()).toEqual(before);
+    expect(apply(draft!, './README.md')).toEqual({ok: true, url: './README.md'});
+    editor.read('latest', () => expect($convertToMarkdownString([LINK])).toBe('阅读[文档](./README.md)'));
+    unregister();
   });
 });
 

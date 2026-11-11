@@ -8,8 +8,14 @@
  */
 
 .TableCellResizer__resizer {
-  position: absolute;
+  position: fixed;
+  z-index: 60;
   touch-action: none;
+  user-select: none;
+}
+
+@media print {
+  .TableCellResizer__resizer { display: none; }
 }
 
 @media (pointer: coarse) {

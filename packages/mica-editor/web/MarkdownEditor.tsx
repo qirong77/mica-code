@@ -1,11 +1,13 @@
 import { forwardRef, useImperativeHandle, useLayoutEffect, useRef, useState } from 'react';
 import { createMarkdownBridge, type MarkdownEditorStatus } from './bridge.js';
 import { readEditorTheme } from './theme.js';
+import { applyMarkdownSourceEdit, planMarkdownSourceIndent } from '../sourceEditing.js';
 import './MarkdownEditor.css';
 
 export type MarkdownEditorProps = {
   value: string;
   onChange(value: string): void;
+  onSave?(value: string): void;
   documentId: string;
   readOnly?: boolean;
   ariaLabel?: string;
@@ -15,10 +17,8 @@ export type MarkdownEditorHandle = {
   /** Wait for hydration, collect pending input, and synchronously notify onChange before resolving. */
   flush(): Promise<string>;
   /**
-   * 最近一次交给宿主的 Markdown 文本，同步返回。
-   *
-   * 切换文档时不能等 flush()：换文档会让 bridge 作废在途请求，那个 promise 会以
-   * 「文档已切换」拒绝，最后一段输入反而丢了。宿主切换前用它同步取一次。
+   * 最近一次交给宿主的 Markdown 文本，同步返回。保存、切换和关闭前应先 await flush()，
+   * 再改变 documentId 或卸载；缓存可能还不包含编辑器尚未提交的输入。
    */
   getValue(): string;
 };
@@ -48,6 +48,10 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
         if (documentId !== latest.current.documentId || latest.current.readOnly) return;
         setSource(value);
         latest.current.onChange(value);
+      },
+      onSave(documentId, value) {
+        if (documentId !== latest.current.documentId || latest.current.readOnly) return;
+        latest.current.onSave?.(value);
       },
       onStatus(next, text) {
         setStatus(next);
@@ -99,6 +103,23 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
             readOnly={props.readOnly}
             spellCheck={false}
             onChange={(event) => bridge.current?.editSource(event.currentTarget.value)}
+            onKeyDown={(event) => {
+              if (event.nativeEvent.isComposing) return;
+              if (event.key === 'Tab' && !event.altKey && !event.ctrlKey && !event.metaKey && !props.readOnly) {
+                event.preventDefault();
+                const element = event.currentTarget;
+                const edit = planMarkdownSourceIndent(element.value, element.selectionStart, element.selectionEnd, event.shiftKey);
+                if (edit) applyMarkdownSourceEdit(element, edit, (value) => bridge.current?.editSource(value));
+                return;
+              }
+              if (!(event.metaKey || event.ctrlKey) || event.shiftKey || event.altKey || event.key.toLowerCase() !== 's') return;
+              event.preventDefault();
+              event.stopPropagation();
+              if (!props.readOnly) {
+                bridge.current?.editSource(event.currentTarget.value);
+                latest.current.onSave?.(bridge.current?.getValue() ?? event.currentTarget.value);
+              }
+            }}
           />
         </>
       ) : (

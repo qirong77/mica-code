@@ -11,4 +11,8 @@ import {createRoot} from 'react-dom/client';
 import MarkdownApp from './MarkdownApp';
 import {MarkdownFrame} from './MarkdownBridge';
 
+// The runtime is embedded in a fixed-height pane. Do not inherit the standalone
+// notebook's content-sized viewport: both source and visual views fill the pane.
+document.documentElement.classList.add('mica-markdown-page');
+
 createRoot(document.getElementById('root')!).render(<StrictMode><ConfigProvider locale={zhCN} size="small" autoInsertSpaceInButton={false}><MarkdownFrame><MarkdownApp /></MarkdownFrame></ConfigProvider></StrictMode>);

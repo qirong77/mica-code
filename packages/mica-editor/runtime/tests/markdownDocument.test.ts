@@ -1,13 +1,10 @@
-import {CodeNode} from '@lexical/code';
 import {createHeadlessEditor} from '@lexical/headless';
-import {LinkNode} from '@lexical/link';
-import {ListItemNode, ListNode} from '@lexical/list';
-import {HeadingNode, QuoteNode} from '@lexical/rich-text';
 import {$getRoot} from 'lexical';
 import {describe, expect, it} from 'vitest';
 
 import {$exportMarkdown, $importMarkdown} from '../src/markdown/markdownDocument';
 import {markdownEditableReason} from '../src/markdown/markdownPolicy';
+import {MARKDOWN_NODES} from '../src/markdown/transformers';
 
 /**
  * Markdown 模式只在「导入 → 编辑 → 导出」这条链路上改写文本，所以这里盯住往返结果：
@@ -16,7 +13,7 @@ import {markdownEditableReason} from '../src/markdown/markdownPolicy';
 function roundTrip(source: string) {
   const editor = createHeadlessEditor({
     namespace: 'markdown-document-test',
-    nodes: [CodeNode, HeadingNode, QuoteNode, ListNode, ListItemNode, LinkNode],
+    nodes: MARKDOWN_NODES,
     onError(error) { throw error; },
   });
   editor.update(() => {
@@ -44,6 +41,10 @@ describe('Markdown document round trip', () => {
     ['引用内列表', '> 只依据两份 PRD：\n> - 《资金相关》`2210258582940`（下称 **资金PRD**）\n> - 《C 端产品方案》`2210222573447`（下称 **C端PRD**）\n>\n> 文中 `「资金PRD §五」` 是原文位置。\n'],
     ['引用内代码块', '> 说明\n>\n> ```js\n> const a = 1\n> ```\n'],
     ['嵌套引用', '> 外层\n> > 内层\n'],
+    ['GFM 表格', '| 名称 | 状态 |\n| --- | --- |\n| A | 完成 |\n'],
+    ['表格对齐', '| 左 | 中 | 右 |\n| :--- | :---: | ---: |\n| a | b | c |\n'],
+    ['表格单元格行内格式', '| 格式 | 转义 |\n| --- | --- |\n| **加粗** 与 `a\\|b` | 左\\|右 |\n'],
+    ['引用内表格', '> | 名称 | 状态 |\n> | --- | --- |\n> | A | 完成 |\n'],
     ['行内格式与链接', '**粗** 与 *斜* 与 `代码` 与 [链接](https://example.com)\n'],
     ['任务列表', '- [ ] 待办\n- [x] 完成\n'],
     ['没有收尾换行', '# 标题\n\n正文'],

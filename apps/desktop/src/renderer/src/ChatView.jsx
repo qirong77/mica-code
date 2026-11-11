@@ -29,8 +29,6 @@ import {
   IconGitCommit,
   IconGitFork,
   IconInfoCircle,
-  IconLayoutBottombar,
-  IconLayoutSidebarRight,
   IconLoader2,
   IconClock,
   IconMessageChatbot,
@@ -184,7 +182,7 @@ import {
 import { longPressHandlers, useLatest } from './hooks'
 import { canGoToPreviousConversation, conversationNavTarget } from './chat-conversation-nav'
 import { readScrollEntry, resolveScrollRestore, writeScrollEntry } from './chat-scroll'
-import { turnLogVisible, useProcessLayout } from './chat-process-layout'
+import { turnLogVisible } from './chat-process-layout'
 import { mergeRecalledDraft, resolveQueueRecall } from './chat-recall'
 import { uid } from './workspace'
 import { setUiState, setUiStateEntries, subscribeUiState, uiStateKeys, useSharedState, useUiStateValue } from './ui-state'
@@ -2214,10 +2212,6 @@ function TurnLogDock({
   now = Date.now(),
   running = false,
   onOpenActivity,
-  sidebar = false,
-  canSidebar = false,
-  onTogglePlacement,
-  todoPanel,
   interrupted = false
 }) {
   const scrollRef = useRef(null)
@@ -2233,10 +2227,9 @@ function TurnLogDock({
       : null
   // 拖出来的高度跟着「正在看的那一块」走：看历史轮次时落在目录上，回到最新一轮时落回
   // 正文，切换时停靠区整体高度不会跳一下。
-  const paneStyle = !sidebar && height != null ? { height, maxHeight: 'none' } : undefined
-  // 侧栏用满可用高度，不继承底部日志的收起状态与手动高度。
-  const contentCollapsed = (!sidebar || interrupted) && collapsed
-  const dockVisible = turnLogVisible({ roundCount: rounds.length, running, hasPlan: todoPanel?.visible, canSidebar, interrupted })
+  const paneStyle = height != null ? { height, maxHeight: 'none' } : undefined
+  const contentCollapsed = collapsed
+  const dockVisible = turnLogVisible({ roundCount: rounds.length, running, interrupted })
   const stickToBottomRef = useRef(true)
   // 展开的历史轮次：同一时刻只摊开一轮（`null` = 看正在跑的这一轮）。两块长正文接连
   // 摊开时分不清哪一段属于哪一轮，所以点开历史轮次时最新一轮先让位。
@@ -2288,7 +2281,7 @@ function TurnLogDock({
   useLayoutEffect(() => {
     const scroll = scrollRef.current
     if (scroll && stickToBottomRef.current) scroll.scrollTop = scroll.scrollHeight
-  }, [rounds, height, contentCollapsed, roundsVisible, liveExpanded, sidebar])
+  }, [rounds, height, contentCollapsed, roundsVisible, liveExpanded])
   useLayoutEffect(() => {
     const scroll = scrollRef.current
     if (!scroll || typeof ResizeObserver === 'undefined') return
@@ -2336,7 +2329,7 @@ function TurnLogDock({
   const resetHeight = useCallback(() => setStoredHeight(null), [setStoredHeight])
   const toggleCollapsed = useCallback(() => setCollapsed((value) => !value), [setCollapsed])
 
-  // 窄屏沿用运行时停靠；宽屏结束后仍可回看过程。尚无活动时也能显示当前计划。
+  // 所有宽度都停靠在输入区上方；正常结束后隐藏，中断日志保留供回看。
   if (!dockVisible) return null
 
   const meta = [`${head?.steps ?? 0} 步`, head?.elapsedMs == null ? '' : formatLogElapsed(head.elapsedMs)]
@@ -2345,44 +2338,39 @@ function TurnLogDock({
 
   return (
     <section
-      className={`chat-turn-log${contentCollapsed ? ' is-collapsed' : ''}${sidebar ? ' is-sidebar' : ''}${
+      className={`chat-turn-log${contentCollapsed ? ' is-collapsed' : ''}${
         roundsVisible ? ' has-rounds' : ''
       }${viewingRound ? ' is-reading-history' : ''}`}
-      aria-label={sidebar ? '本轮过程' : '当前回合的思考与工具日志'}
+      aria-label="当前回合的思考与工具日志"
     >
       <header
         className="chat-turn-log-head"
-        onPointerDown={sidebar || contentCollapsed ? undefined : startResize}
-        onDoubleClick={sidebar || contentCollapsed ? undefined : resetHeight}
+        onPointerDown={contentCollapsed ? undefined : startResize}
+        onDoubleClick={contentCollapsed ? undefined : resetHeight}
         onClick={contentCollapsed ? toggleCollapsed : undefined}
         title={
-          sidebar ? undefined : contentCollapsed
+          contentCollapsed
             ? '点击展开这一轮的思考与工具日志'
             : '拖动调整日志高度，双击复位'
         }
       >
-        {(!sidebar || interrupted) && (
-          <ArcoAction iconOnly
-            type="button"
-            className="chat-turn-log-toggle"
-            aria-expanded={!contentCollapsed}
-            aria-label={contentCollapsed ? '展开回合日志' : '收起回合日志'}
-            onPointerDown={(event) => event.stopPropagation()}
-            onClick={(event) => {
-              event.stopPropagation()
-              toggleCollapsed()
-            }}
-            onDoubleClick={(event) => event.stopPropagation()}
-          >
-            {contentCollapsed ? <IconChevronRight size={12} /> : <IconChevronDown size={12} />}
-          </ArcoAction>
-        )}
+        <ArcoAction iconOnly
+          type="button"
+          className="chat-turn-log-toggle"
+          aria-expanded={!contentCollapsed}
+          aria-label={contentCollapsed ? '展开回合日志' : '收起回合日志'}
+          onPointerDown={(event) => event.stopPropagation()}
+          onClick={(event) => {
+            event.stopPropagation()
+            toggleCollapsed()
+          }}
+          onDoubleClick={(event) => event.stopPropagation()}
+        >
+          {contentCollapsed ? <IconChevronRight size={12} /> : <IconChevronDown size={12} />}
+        </ArcoAction>
         <span className="chat-turn-log-head-label">
-          {sidebar || !running ? '本轮过程' : '模型思考中'}
+          {running ? '模型思考中' : '本轮'}
         </span>
-        {sidebar && (
-          <span className="chat-process-state">{running ? '进行中' : interrupted ? '已中断' : '已结束'}</span>
-        )}
         {contentCollapsed ? (
           // 摘要是收起时的替代品：展开后下面每一行都在，标题行只留把手与标签。
           // 收起时也没有列表可切，所以这个位置不放假开关。
@@ -2406,26 +2394,7 @@ function TurnLogDock({
             <span>{roundSwitchLabel(rounds.length, running)}</span>
           </button>
         ) : null}
-        {canSidebar && (
-          <span
-            className="chat-process-placement"
-            onPointerDown={(event) => event.stopPropagation()}
-            onDoubleClick={(event) => event.stopPropagation()}
-            onClick={(event) => event.stopPropagation()}
-          >
-            <Button
-              variant="ghost"
-              size="compact"
-              icon={sidebar ? <IconLayoutBottombar size={13} /> : <IconLayoutSidebarRight size={13} />}
-              title={sidebar ? '将过程移到底部' : '将过程移到右上角'}
-              onClick={onTogglePlacement}
-            />
-          </span>
-        )}
       </header>
-      {sidebar && !contentCollapsed && !viewingRound && todoPanel && (
-        <div className="chat-process-plan"><TodoDock panel={todoPanel} /></div>
-      )}
       {!contentCollapsed && roundsVisible && (
         // 历史轮次是**固定的目录**：它不跟正文一起滚。正文一长就把它顶出视野，
         // 看上去就只剩正在跑的这一轮，等于没留下历史。
@@ -7497,12 +7466,6 @@ export function ChatView({
     list.scrollTo({ top: target.top, behavior: 'smooth' })
   }, [])
 
-  const { layoutRef, processRoom, processSidebar, toggleProcessPlacement } = useProcessLayout({
-    running,
-    hasActivity: turnLogRounds.length > 0,
-    hasPlan: todoPanel.visible
-  })
-
   // Composer input and task clocks don't change the transcript. Keep the element list as well
   // as MessageRow's memo stable, so those updates don't walk/reconcile the whole history.
   const transcriptRows = useMemo(
@@ -7558,7 +7521,7 @@ export function ChatView({
         onContextMenu={openChatContextMenu}
         {...longPressHandlers(openChatContextMenu)}
       >
-        <div ref={layoutRef} className={`chat-conversation-layout${processSidebar ? ' has-process-sidebar' : ''}`}>
+        <div className="chat-conversation-layout">
         <div
           ref={listRef}
           className="chat-scroll"
@@ -7596,10 +7559,6 @@ export function ChatView({
           now={Date.now()}
           running={running}
           onOpenActivity={openActivityDetail}
-          sidebar={processSidebar}
-          canSidebar={processRoom}
-          onTogglePlacement={toggleProcessPlacement}
-          todoPanel={todoPanel}
           interrupted={todoInterrupted}
         />
 
@@ -7634,7 +7593,7 @@ export function ChatView({
               </ArcoAction>
             </div>
           )}
-          {!processSidebar && <TodoDock panel={todoPanel} />}
+          <TodoDock panel={todoPanel} />
           <SubagentStatusDock
             tasks={subagentTasks.filter((task) => keepsSubagentTaskRow(task))}
             now={taskNow}
