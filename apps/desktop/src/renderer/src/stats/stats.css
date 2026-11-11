@@ -241,6 +241,7 @@
 
 .stats-ring {
   position: relative;
+  isolation: isolate;
   width: 100%;
   max-width: 260px;
   height: 216px;
@@ -249,10 +250,13 @@
 
 .stats-ring .stats-chart {
   height: 100%;
+  /* SVG tooltips must paint above the separate HTML center label. */
+  z-index: 1;
 }
 
 .stats-ring-center {
   position: absolute;
+  z-index: 0;
   inset: 0;
   display: flex;
   align-items: center;
