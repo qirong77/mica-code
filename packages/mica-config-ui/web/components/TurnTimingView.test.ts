@@ -20,6 +20,16 @@ function fixture(): TurnTimingState {
   };
 }
 
+/** 分段选择是 Arco `Radio.Group`，选中态落在 label 的 `arco-radio-checked` 上而不是 `aria-pressed`。 */
+function segmentedOptions(html: string): { label: string; checked: boolean }[] {
+  const pattern =
+    /<label class="arco-radio-button([^"]*)">[\s\S]*?<span class="arco-radio-button-inner">([^<]*)<\/span>/g;
+  return [...html.matchAll(pattern)].map((match) => ({
+    label: match[2]!,
+    checked: match[1]!.split(' ').includes('arco-radio-checked'),
+  }));
+}
+
 describe('TurnTimingView sorting', () => {
   it('defaults to chronological order and offers both sorting modes', () => {
     const html = renderToStaticMarkup(
@@ -28,8 +38,10 @@ describe('TurnTimingView sorting', () => {
       }),
     );
     expect(html).toContain('aria-label="执行过程排序"');
-    expect(html).toMatch(/aria-pressed="true"[^>]*>按时间/);
-    expect(html).toMatch(/aria-pressed="false"[^>]*>按耗时/);
+    expect(segmentedOptions(html)).toEqual([
+      { label: '按时间', checked: true },
+      { label: '按耗时', checked: false },
+    ]);
     expect(html).toContain('aria-label="按时间顺序的执行过程"');
     const list = html.slice(html.indexOf('<ol'));
     expect(list.indexOf('等待首字')).toBeLessThan(list.indexOf('输出 20 字符'));

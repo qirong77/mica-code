@@ -1,23 +1,35 @@
 import { readFileSync } from 'node:fs';
-import { createElement } from 'react';
+import { createElement, type ReactNode } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 import { ConversationDetailModal, RecordRow, RunRow, TurnHead } from './ConversationPane.js';
 import type { ConfigWebConversationItem, ConfigWebConversationItemType } from '../../src/shared/types.js';
 
-vi.mock('react-dom', () => ({ createPortal: (content: unknown) => content }));
+// 只替换 createPortal：Arco 的 `_util/is.js` 在模块加载时读 `ReactDOM.version`，
+// 整个模块被替成 `{ createPortal }` 会让它拿到没有 `default` 导出的模块而崩在 collect 阶段。
+vi.mock('react-dom', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('react-dom')>();
+  return { ...actual, createPortal: (content: unknown) => content };
+});
 
 function item(sequence: number, type: ConfigWebConversationItemType, content = 'short'): ConfigWebConversationItem {
   return { sequence, type, content };
 }
 
-function renderModal(records: ConfigWebConversationItem[]): string {
-  vi.stubGlobal('document', { body: {} });
-  try {
-    return renderToStaticMarkup(createElement(ConversationDetailModal, { records, onClose: () => {} }));
-  } finally {
-    vi.unstubAllGlobals();
-  }
+/**
+ * 弹窗本体是 Arco `Modal`：它只在浏览器里挂载，`renderToStaticMarkup` 拿到的是一个空壳。
+ * 所以先读组件交给 `Modal` 的 props（portal / 标题），再单独渲染正文验证内容。
+ */
+function renderDetail(records: ConfigWebConversationItem[]) {
+  const element = ConversationDetailModal({ records, onClose: () => {} }) as {
+    props: { portal?: boolean; wide?: boolean; title: string; children: ReactNode };
+  };
+  return {
+    portal: element.props.portal,
+    wide: element.props.wide,
+    title: element.props.title,
+    body: renderToStaticMarkup(createElement('div', null, element.props.children)),
+  };
 }
 
 describe('conversation record rows', () => {
@@ -77,19 +89,20 @@ describe('conversation detail dialog', () => {
       toolName: 'run_shell',
       callId: 'call-7',
     };
-    const html = renderModal([record]);
-    expect(html).toContain('mica-config-ui is-embed modal-portal');
-    expect(html).toContain('role="dialog"');
-    expect(html).toContain('工具结果 · #7');
-    expect(html).toContain('run_shell');
-    expect(html).toContain('call-7');
-    expect(html).toContain(record.content);
+    const { portal, wide, title, body } = renderDetail([record]);
+    // 详情必须开在 document.body 上的独立弹窗里，不挤进对话列表（portal + 宽版）。
+    expect(portal).toBe(true);
+    expect(wide).toBe(true);
+    expect(title).toBe('工具结果 · #7');
+    expect(body).toContain('run_shell');
+    expect(body).toContain('call-7');
+    expect(body).toContain(record.content);
   });
 
   it('shows every grouped record in order and handles empty content', () => {
-    const html = renderModal([item(2, 'reasoning', 'thinking body'), item(3, 'tool_result', '')]);
-    expect(html).toContain('2 条记录');
-    expect(html.indexOf('thinking body')).toBeLessThan(html.indexOf('(空)'));
-    expect(html.match(/class="conversation-content"/g)).toHaveLength(2);
+    const { body } = renderDetail([item(2, 'reasoning', 'thinking body'), item(3, 'tool_result', '')]);
+    expect(body).toContain('2 条记录');
+    expect(body.indexOf('thinking body')).toBeLessThan(body.indexOf('(空)'));
+    expect(body.match(/class="conversation-content"/g)).toHaveLength(2);
   });
 });
