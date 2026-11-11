@@ -44,8 +44,8 @@ const worktreeState = new Map()
 /**
  * 每个仓库「我们改过工作区」的次数。
  *
- * `worktreeState` 被显式打点时会整条删掉，但徽标那份更长的缓存（`git.js` 的
- * change-counts）要独立知道自己是不是过期了：stage / discard / 保存文件之后，
+ * 全树读取与徽标那份更长的缓存（`git.js` 的 change-counts）都要知道自己是不是过期了：
+ * stage / discard / 保存文件之后，
  * 数字必须立刻变化，而不是等 TTL。
  */
 const worktreeEpoch = new Map()
@@ -55,7 +55,7 @@ const worktreeEpoch = new Map()
  * - `summary:<base>` 是一次全树 `status` + `diff --numstat`，内容随工作区任何一次保存变化，
  *   所以只有 5 秒；
  * - `workspace-status` 只有仓库根和分支名，只随 HEAD 变化，而 `headSignature` 已经把
- *   「切分支 / 提交 / rebase」算进失效判据，`noteWorktreeChange` 还会整条删掉缓存。
+ *   「切分支 / 提交 / rebase」算进失效判据；普通文件保存不影响这一份仓库身份。
  *   给它 5 秒的唯一后果是：轮询间隔 10 秒永远比 TTL 长，于是**每次轮询都必然 miss**、
  *   每次都 spawn 一个 git 进程（实测一天 3000 次、274 秒，占 host 通道总耗时的 32%）。
  *   拉到 60 秒，切分支仍然立刻可见（签名变了），只是少掉那些必然落空的 spawn。
@@ -92,7 +92,6 @@ export function summaryScanCostOf(root) {
 export function noteWorktreeChange(root) {
   if (typeof root !== 'string' || !root) return
   root = worktreeRoot(root)
-  worktreeState.delete(root)
   worktreeEpoch.set(root, worktreeEpochOf(root) + 1)
 }
 
@@ -117,20 +116,44 @@ export function worktreeSignature(root) {
  * 从一个目录往上找仓库根（只看 `.git` 是否存在，不跑 git 命令）：保存文件时用来
  * 精确失效那一份缓存。找不到就返回 null，调用方当作「没有可失效的」。
  */
-export function repositoryRootOf(directory) {
+export function repositoryRootOf(directory, { strict = false } = {}) {
   let current = typeof directory === 'string' ? directory : ''
   if (!current) return null
   current = path.resolve(current)
+  if (strict && !statSync(current).isDirectory()) {
+    throw Object.assign(new Error(`ENOTDIR: not a directory, '${current}'`), { code: 'ENOTDIR' })
+  }
   for (;;) {
     try {
       statSync(path.join(current, '.git'))
       return current
-    } catch {
+    } catch (error) {
+      // 保存文件的失效提示可以尽力而为；读取请求不能把权限/IO 错误伪装成「没有仓库」。
+      if (strict && error.code !== 'ENOENT') throw error
       const parent = path.dirname(current)
       if (!parent || parent === current) return null
       current = parent
     }
   }
+}
+
+/** 每次重新查祖先标记，无负缓存：刚 init、删除或移入 .git 时下一次读取立即生效。 */
+function requireRepositoryDirectory(cwd) {
+  const root = repositoryRootOf(cwd, { strict: true })
+  if (root || GIT_ENV.GIT_DIR || GIT_ENV.GIT_WORK_TREE) return root
+  // 裸仓库没有 .git；让 Git 给出「需要工作区」的原始错误。
+  for (let current = cwd; ; current = path.dirname(current)) {
+    try {
+      if (
+        statSync(path.join(current, 'HEAD')).isFile() &&
+        statSync(path.join(current, 'objects')).isDirectory()
+      ) return null
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw error
+    }
+    if (path.dirname(current) === current) break
+  }
+  throw new Error('fatal: not a git repository (or any of the parent directories): .git')
 }
 
 /**
@@ -209,8 +232,9 @@ function optionalFile(file) {
 export async function cachedWorktreeRead(root, key, run, { refresh = false, invalidate = false, diagnostics } = {}) {
   root = worktreeRoot(root)
   const signature = headSignature(root)
-  const epoch = worktreeEpochOf(root)
-  const cached = worktreeState.get(root)
+  // 根目录/分支名由 HEAD 决定，文件保存和 index 变化不应让它每次都重新 spawn。
+  const epoch = key === 'workspace-status' ? 0 : worktreeEpochOf(root)
+  const cached = worktreeState.get(root)?.get(key)
   if (
     !refresh &&
     !invalidate &&
@@ -218,12 +242,10 @@ export async function cachedWorktreeRead(root, key, run, { refresh = false, inva
     cached &&
     cached.signature === signature &&
     cached.epoch === epoch &&
-    Date.now() - (cached.values.get(key)?.at ?? 0) < ttlOf(key)
+    Date.now() - cached.at < ttlOf(key)
   ) {
-    if (cached.values.has(key)) {
-      if (diagnostics) diagnostics.cache = 'hit'
-      return cached.values.get(key).value
-    }
+    if (diagnostics) diagnostics.cache = 'hit'
+    return cached.value
   }
   // `refresh: true` 是用户主动点刷新：既不读缓存，也不搭别人那次还没跑完的顺风车。
   const inFlightKey = `${root}\u0000${key}`
@@ -245,23 +267,15 @@ export async function cachedWorktreeRead(root, key, run, { refresh = false, inva
     if (
       !signature ||
       worktreeInFlight.get(inFlightKey) !== pending ||
-      worktreeEpochOf(root) !== epoch ||
+      (key !== 'workspace-status' && worktreeEpochOf(root) !== epoch) ||
       headSignature(root) !== signature
     ) {
       return value
     }
-    // 并发读取共用一份缓存；`probe` 取这次的 HEAD 签名，切换分支后自然失配。
-    // 这里必须重新取一次：等 `run()` 的这段时间里，另一个不同 key 的读取可能刚写过 entries，
-    // 沿用上面捕获的 `cached` 会把它的结果覆盖掉。
-    const current = worktreeState.get(root)
-    // 每个 key 各记各的时间：两个 key 的有效期不同（见 `ttlOf`），共用一个 `at` 时
-    // 频繁刷新的 `summary` 会把 `workspace-status` 一起「续期」，长 TTL 就没意义了。
-    const entry =
-      current && current.signature === signature && current.epoch === epoch
-        ? current
-        : { signature, epoch, values: new Map() }
-    entry.values.set(key, { at: Date.now(), value })
-    worktreeState.set(root, entry)
+    // 每个 key 独立记身份、epoch 和时间，避免 summary 与 status 互相覆盖/续期。
+    const values = worktreeState.get(root) || new Map()
+    values.set(key, { signature, epoch, at: Date.now(), value })
+    worktreeState.set(root, values)
     return value
   })()
   // 手动刷新也登记为最新读取，防止它完成后被更早开始的慢请求覆盖。
@@ -336,7 +350,7 @@ export async function getRepository(cwd) {
  */
 export async function cachedRepository(cwd) {
   cwd = worktreeRoot(cwd)
-  const root = repositoryRootOf(cwd)
+  const root = requireRepositoryDirectory(cwd)
   const signature = root ? headSignature(root) : null
   if (!signature) return getRepository(cwd)
   const cached = repositoryState.get(root)
@@ -365,6 +379,8 @@ export async function cachedRepository(cwd) {
  * `rev-parse`（原来的 show-toplevel + verify HEAD + symbolic-ref 是三个进程）。
  */
 export async function getWorkspaceStatus(cwd) {
+  cwd = worktreeRoot(cwd)
+  requireRepositoryDirectory(cwd)
   let root
   let branch
   try {

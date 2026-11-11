@@ -15,9 +15,10 @@ import {$readCodeSnapshot} from '../../codeActions';
 interface Props {
   editor: LexicalEditor;
   codeKey: NodeKey;
+  label?: string;
 }
 
-export function CopyButton({editor, codeKey}: Props) {
+export function CopyButton({editor, codeKey, label = '复制代码'}: Props) {
   const [status, setStatus] = useState<'idle' | 'success' | 'error'>('idle');
   const requestRef = useRef(0);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -53,8 +54,8 @@ export function CopyButton({editor, codeKey}: Props) {
         className={`code-action-button code-copy-button ${status}`}
         onMouseDown={event => event.preventDefault()}
         onClick={handleClick}
-        aria-label="复制代码"
-        title={status === 'error' ? '复制失败，请检查剪贴板权限后重试' : feedback || '复制代码'}
+        aria-label={label}
+        title={status === 'error' ? '复制失败，请检查剪贴板权限后重试' : feedback || label}
         icon={status === 'success' ? <IconCheck /> : status === 'error' ? <IconClose /> : <IconCopy />}>
         {feedback || undefined}
       </Button>

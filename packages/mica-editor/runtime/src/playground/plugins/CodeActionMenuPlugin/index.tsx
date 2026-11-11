@@ -39,6 +39,7 @@ import {
 import {CopyButton} from './components/CopyButton';
 import {PrettierButton} from './components/PrettierButton';
 import {canBePrettier} from './formatCodeWithPrettier';
+import {isMermaidLanguage} from '../MermaidPreviewPlugin/mermaid';
 
 const LANGUAGE_OPTIONS = [
   {value: '', label: '未指定语言'},
@@ -74,7 +75,9 @@ function CodeActionMenuContainer({anchorElem}: {anchorElem: HTMLElement}): JSX.E
       const hovered = hoveredKeyRef.current ? $getCodeBlock(hoveredKeyRef.current) : null;
       const selected = root?.contains(doc.activeElement) ? $getSelectedCodeBlock() : null;
       const code = locked || hovered || selected;
-      return code ? {key: code.getKey(), language: code.getLanguage() || ''} : null;
+      // Mermaid has its own source/preview controls; do not cover those with
+      // a second language/copy/exit menu when its CodeNode receives focus.
+      return code && !isMermaidLanguage(code.getLanguage()) ? {key: code.getKey(), language: code.getLanguage() || ''} : null;
     });
     const codeDOM = next ? editor.getElementByKey(next.key) : null;
     if (!root || !next || !codeDOM?.isConnected || !root.contains(codeDOM)) {
@@ -170,6 +173,15 @@ function CodeActionMenuContainer({anchorElem}: {anchorElem: HTMLElement}): JSX.E
         scheduleRefresh();
       }),
       registerCodeWritingCommands(editor, key => {
+        const codeDOM = editor.getElementByKey(key);
+        if (codeDOM?.hasAttribute('data-mermaid-view')) {
+          // The Mermaid source toolbar replaces this menu, including its
+          // keyboard entry point. It lives outside the editable root.
+          const toolbar = [...anchorElem.querySelectorAll<HTMLElement>('.mermaid-source-toolbar')]
+            .find(element => element.dataset.mermaidKey === key);
+          toolbar?.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus();
+          return;
+        }
         hoveredKeyRef.current = key;
         scheduleRefresh();
         cancelAnimationFrame(focusFrameRef.current);

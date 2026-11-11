@@ -1,5 +1,6 @@
 import {Button, Radio, Select} from '@arco-design/web-react';
 import {IconBold, IconItalic, IconLink, IconRedo, IconUndo} from '@arco-design/web-react/icon';
+import {FocusTrapExtension} from '@lexical/a11y';
 import {$createCodeNode, $isCodeNode} from '@lexical/code';
 import {HorizontalRuleExtension, TabIndentationExtension} from '@lexical/extension';
 import {HistoryExtension} from '@lexical/history';
@@ -243,7 +244,7 @@ export default function MarkdownApp() {
     namespace: 'MicaMarkdown',
     nodes: MARKDOWN_NODES,
     theme: PlaygroundEditorTheme,
-    dependencies: [RichTextExtension, HistoryExtension, LinkExtension, ListExtension, CheckListExtension, HorizontalRuleExtension,
+    dependencies: [RichTextExtension, HistoryExtension, LinkExtension, ListExtension, CheckListExtension, HorizontalRuleExtension, FocusTrapExtension,
       configExtension(CodeHighlightExtension, {mode: 'prism'}),
       configExtension(TableExtension, {hasCellMerge: false, hasCellBackgroundColor: false, hasHorizontalScroll: true}),
       configExtension(TabIndentationExtension, {maxIndent: 7}),

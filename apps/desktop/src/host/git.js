@@ -185,7 +185,7 @@ async function getStatus(cwd) {
   const diagnostics = { cache: 'uncached' }
   let rootMs = 0
   try {
-    const root = repositoryRootOf(cwd)
+    const root = repositoryRootOf(cwd, { strict: true })
     rootMs = Date.now() - started
     if (!root) return await getWorkspaceStatus(cwd)
     return await cachedWorktreeRead(root, 'workspace-status', () => getWorkspaceStatus(root), {

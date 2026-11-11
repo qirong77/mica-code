@@ -18,6 +18,7 @@ import {
   mergeHistory
 } from './git-graph'
 import { GitDiffEditor } from './GitDiffEditor'
+import { createGitGraphRequest } from './git-graph-state'
 
 const ROW_HEIGHT = 26
 const LANE_WIDTH = 14
@@ -99,7 +100,12 @@ function GraphCell({ row }) {
   )
 }
 
-export function GitGraphView({ cwd, onOpenFile, onClose, mobile = false }) {
+export function GitGraphView(props) {
+  // 分支筛选、选择、分页、引用与打开的 diff 都属于这个目录；切换时一起重建。
+  return <GitGraphWorkspace key={props.cwd || ''} {...props} />
+}
+
+function GitGraphWorkspace({ cwd, onOpenFile, onClose, mobile = false }) {
   const [branch, setBranch] = useState('')
   const [page, setPage] = useState({ key: '', skip: 0 })
   const [query, setQuery] = useState('')
@@ -122,35 +128,33 @@ export function GitGraphView({ cwd, onOpenFile, onClose, mobile = false }) {
 
   useEffect(() => {
     if (!cwd) return undefined
-    let cancelled = false
     setLoading(true)
     setError('')
-    Promise.resolve()
-      .then(() => window.mica.git.log(cwd, { ref: branch || undefined, max: 200, skip }))
+    const request = createGitGraphRequest(() =>
+      window.mica.git.log(cwd, { ref: branch || undefined, max: 200, skip })
+    )
+    request.promise
       .then((response) => {
-        if (cancelled) return
+        if (!request.current || !response) return
         if (response?.error) throw new Error(response.error)
         const history = response?.history || {}
         setHistory((previous) => mergeHistory(previous, history, skip))
       })
       .catch((failure) => {
-        if (!cancelled) setError(failure?.message || String(failure))
+        if (request.current) setError(failure?.message || String(failure))
       })
       .finally(() => {
-        if (!cancelled) setLoading(false)
+        if (request.current) setLoading(false)
       })
-    return () => {
-      cancelled = true
-    }
+    return () => request.cancel()
   }, [branch, cwd, retry, skip])
 
   useEffect(() => {
     if (!cwd) return undefined
-    let cancelled = false
-    Promise.resolve()
-      .then(() => window.mica.git.refs(cwd))
+    const request = createGitGraphRequest(() => window.mica.git.refs(cwd))
+    request.promise
       .then((response) => {
-        if (cancelled || response?.error) return
+        if (!request.current || !response || response.error) return
         const list = response?.refs || {}
         setRefs({
           branches: list.branches || [],
@@ -158,9 +162,7 @@ export function GitGraphView({ cwd, onOpenFile, onClose, mobile = false }) {
         })
       })
       .catch(() => {})
-    return () => {
-      cancelled = true
-    }
+    return () => request.cancel()
   }, [cwd, retry])
 
   const visible = useMemo(() => filterCommits(history.commits, query), [history.commits, query])
@@ -181,22 +183,19 @@ export function GitGraphView({ cwd, onOpenFile, onClose, mobile = false }) {
       setDetailError('')
       return undefined
     }
-    let cancelled = false
     setDetail(null)
     setDetailError('')
-    Promise.resolve()
-      .then(() => window.mica.git.commit(cwd, selected))
+    const request = createGitGraphRequest(() => window.mica.git.commit(cwd, selected))
+    request.promise
       .then((response) => {
-        if (cancelled) return
+        if (!request.current || !response) return
         if (response?.error) throw new Error(response.error)
         setDetail(response?.detail || null)
       })
       .catch((failure) => {
-        if (!cancelled) setDetailError(failure?.message || String(failure))
+        if (request.current) setDetailError(failure?.message || String(failure))
       })
-    return () => {
-      cancelled = true
-    }
+    return () => request.cancel()
   }, [cwd, selected])
 
   const selectCommit = useCallback((hash) => {

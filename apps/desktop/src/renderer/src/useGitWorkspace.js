@@ -27,6 +27,48 @@ const EMPTY_GIT = {
   loading: false
 }
 
+/** 一次编辑器读取；summary 已确认非仓库时不再发分支/状态请求。 */
+export async function readGitWorkspace(
+  api,
+  target,
+  { bases = EMPTY_COMPARE_BASES, heads = EMPTY_COMPARE_BASES, compare = null, refresh = false, isCurrent = () => true } = {}
+) {
+  // 页面明确指定的提交评审不需要扫描工作区。
+  const summary = compare?.head ? null : await api.summary(target, { refresh })
+  if (!isCurrent()) return null
+  if (!compare?.head && !summary?.repository) {
+    return { ...EMPTY_GIT, cwd: target, compareError: summary?.error || null }
+  }
+  const root = summary?.repository?.root || target
+  const chosen = bases[root] || bases[target]
+  const chosenHead = heads[root] || heads[target]
+  const review = compare?.head
+    ? { base: compare.base || null, head: compare.head }
+    : chosenHead?.ref
+      ? { base: chosen?.ref || null, head: chosenHead.ref }
+      : null
+  // 两条请求都结束后才释放轮询门控；一条失败不能让另一条与下一轮重叠。
+  const results = await Promise.allSettled([
+    review
+      ? api.refSummary(target, { ...(review.base ? { base: review.base } : {}), head: review.head })
+      : api.branchSummary(target, chosen ? { base: chosen.ref || null } : undefined),
+    compare?.head ? Promise.resolve({ status: null }) : api.status(target)
+  ])
+  if (!isCurrent()) return null
+  const failed = results.find((result) => result.status === 'rejected')
+  if (failed) throw failed.reason
+  const [branch, status] = results.map((result) => result.value)
+  return {
+    cwd: target,
+    repository: summary?.repository || null,
+    branch: branch?.repository || null,
+    compareError: branch?.error || status?.error || null,
+    status: status?.status || null,
+    review: !!review,
+    loading: false
+  }
+}
+
 export function useGitWorkspace(cwd, { enabled = true, compare = null } = {}) {
   const compareBases = useUiStateValue('gitCompareBase', EMPTY_COMPARE_BASES)
   const compareHeads = useUiStateValue('gitCompareHead', EMPTY_COMPARE_BASES)
@@ -46,10 +88,13 @@ export function useGitWorkspace(cwd, { enabled = true, compare = null } = {}) {
       const request = ++requestRef.current
       const bases = readCompareBases()
       const heads = readCompareHeads()
+      const comparison = compareRef.current
       const isCurrent = () =>
         enabledRef.current &&
         request === requestRef.current &&
         target === (cwdRef.current || null) &&
+        comparison?.head === compareRef.current?.head &&
+        comparison?.base === compareRef.current?.base &&
         bases === readCompareBases() &&
         heads === readCompareHeads()
       if (!target) {
@@ -65,52 +110,15 @@ export function useGitWorkspace(cwd, { enabled = true, compare = null } = {}) {
       )
       inFlightRef.current += 1
       try {
-        const summary = await window.mica.git.summary(target, { refresh: force })
-        if (!isCurrent()) return
-        const root = summary?.repository?.root || target
-        const chosen = bases[root] || bases[target]
-        const chosenHead = heads[root] || heads[target]
-        // 页面地址带来的那份对比优先：这一页打开时就是它（插件的评审入口）。
-        const review = compareRef.current?.head
-          ? { base: compareRef.current.base || null, head: compareRef.current.head }
-          : chosenHead?.ref
-            ? { base: chosen?.ref || null, head: chosenHead.ref }
-            : null
-        // Keep the polling guard until both reads finish, even if either one rejects.
-        // 评审模式不抓 status：两边都在提交里，未提交改动与「当前检出哪条分支」都不相关。
-        // 只有页面地址带来的评审窗口才省掉它——那一页的目录可能是别处的副本，甚至已经不在了；
-        // 本页自己选的当前分支仍要读 status，否则底部那条「当前分支」会凭空消失。
-        const results = await Promise.allSettled([
-          review
-            ? window.mica.git.refSummary(target, {
-                ...(review.base ? { base: review.base } : {}),
-                head: review.head
-              })
-            : window.mica.git.branchSummary(
-                target,
-                chosen ? { base: chosen.ref || null } : undefined
-              ),
-          compareRef.current?.head
-            ? Promise.resolve({ status: null })
-            : window.mica.git.status(target)
-        ])
-        if (!isCurrent()) return
-        const failed = results.find((result) => result.status === 'rejected')
-        if (failed) throw failed.reason
-        const [branch, status] = results.map((result) => result.value)
-        setGit({
-          cwd: target,
-          repository: summary?.repository || null,
-          branch: branch?.repository || null,
-          compareError: branch?.error || null,
-          status: status?.status || null,
-          review: !!review,
-          loading: false
+        const next = await readGitWorkspace(window.mica.git, target, {
+          bases, heads, compare: comparison, refresh: force, isCurrent
         })
+        if (!isCurrent()) return
+        if (next) setGit(next)
       } catch (error) {
         if (!isCurrent()) return
         console.error('refresh git failed', error)
-        setGit({ ...EMPTY_GIT, cwd: target })
+        setGit({ ...EMPTY_GIT, cwd: target, compareError: error?.message || String(error) })
       } finally {
         inFlightRef.current -= 1
       }

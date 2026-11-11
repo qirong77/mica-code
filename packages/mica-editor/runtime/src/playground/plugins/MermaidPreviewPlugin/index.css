@@ -1,9 +1,9 @@
-/* CodeNode stays the only source of document data. Reserve the diagram's
-   measured height in its box while the actual preview lives outside the root. */
+/* Source stays in its CodeNode. The card and controls live in a portal, outside
+   contenteditable, and its measured height reserves the same space in flow. */
 [data-mermaid-view='preview'] {
-  height: var(--mermaid-preview-height, 88px) !important;
-  min-height: var(--mermaid-preview-height, 88px) !important;
-  max-height: var(--mermaid-preview-height, 88px) !important;
+  height: var(--mermaid-preview-height, 120px) !important;
+  min-height: var(--mermaid-preview-height, 120px) !important;
+  max-height: var(--mermaid-preview-height, 120px) !important;
   box-sizing: border-box;
   padding-block: 0 !important;
   overflow: hidden !important;
@@ -11,89 +11,143 @@
   pointer-events: none;
 }
 
-[data-mermaid-view='source'] {
-  padding-bottom: calc(var(--mermaid-preview-height, 88px) + 12px) !important;
+.notebook-editor [data-mermaid-view='source'] {
+  padding-top: 44px !important;
+  padding-bottom: calc(var(--mermaid-preview-height, 120px) + 12px) !important;
+  border: 1px solid var(--color-line-soft);
+  border-radius: 8px;
 }
 
-.mermaid-preview {
+.mermaid-preview,
+.mermaid-source-toolbar {
   position: absolute;
   z-index: 2;
-  width: 100%;
   min-width: 0;
-  min-height: 64px;
   max-width: 100%;
   box-sizing: border-box;
-  padding: 36px 12px 10px;
-  border: 1px solid var(--color-line-soft, #dce0e7);
-  border-radius: 5px;
-  color: var(--color-fg-soft, #5c6472);
-  background: var(--color-panel, #f5f6f8);
+  border: 1px solid var(--color-line-soft, #e6e8ee);
+  border-radius: 8px;
+  background: var(--color-canvas, #fff);
+  color: var(--color-fg-soft, #5e687b);
   font: 12px/1.5 var(--notebook-font-family, var(--chat-font-family, system-ui, sans-serif));
   white-space: normal;
   text-align: start;
-  overflow: hidden;
   pointer-events: auto;
 }
 
+.mermaid-preview {
+  overflow: hidden;
+  container-type: inline-size;
+}
+
 .mermaid-preview-live {
-  border-top-style: dashed;
+  border-radius: 0 0 8px 8px;
+}
+
+.mermaid-source-toolbar {
+  z-index: 3;
+  border-radius: 8px 8px 0 0;
+  background: var(--color-panel, #f7f8fa);
 }
 
 .mermaid-preview-actions {
-  position: absolute;
-  inset: 4px 5px auto;
   display: flex;
   align-items: center;
-  justify-content: flex-end;
   gap: 3px;
   min-width: 0;
-  height: 25px;
+  height: 36px;
+  padding: 0 7px 0 11px;
+  box-sizing: border-box;
   user-select: none;
 }
 
 .mermaid-preview-label {
+  display: flex;
   flex: 1;
+  align-items: center;
+  gap: 6px;
   min-width: 0;
   overflow: hidden;
-  text-overflow: ellipsis;
+  color: var(--color-fg-soft, #5e687b);
+  font-size: 12px;
   white-space: nowrap;
-  padding-inline-start: 5px;
-  color: var(--color-fg-faint, #78818e);
+}
+
+.mermaid-preview-label > span:first-of-type {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mermaid-preview-label > svg {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  color: var(--color-fg-faint, #818b9d);
+}
+
+.mermaid-preview-kind {
+  color: var(--color-fg-faint, #818b9d);
   font-size: 11px;
 }
 
-.mermaid-preview-actions .arco-btn {
+.mermaid-preview-actions .arco-btn,
+.mermaid-viewer-toolbar .arco-btn {
+  display: inline-flex;
   flex: none;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
   height: 24px;
   min-width: 24px;
   padding: 0 5px;
   border: 1px solid transparent;
   border-radius: 4px;
-  background: var(--color-panel, #f5f6f8);
-  color: var(--color-fg-soft, #5c6472);
+  background: transparent;
+  color: var(--color-fg-soft, #5e687b);
   font: inherit;
+  line-height: 1;
 }
 
-.mermaid-preview-actions .arco-btn:hover,
-.mermaid-preview-actions .arco-btn:focus-visible {
-  background: var(--color-active, #e6eaf0);
+.mermaid-preview-actions .arco-btn svg,
+.mermaid-viewer-toolbar .arco-btn svg {
+  width: 14px;
+  height: 14px;
 }
 
-.mermaid-preview-actions .arco-btn:focus-visible {
-  outline: 2px solid var(--color-accent, #4269c2);
+.mermaid-preview-actions .arco-btn:hover:not(:disabled),
+.mermaid-viewer-toolbar .arco-btn:hover:not(:disabled) {
+  background: var(--color-active, #e9edf5);
+}
+
+.mermaid-preview-actions .arco-btn:focus-visible,
+.mermaid-viewer-toolbar .arco-btn:focus-visible {
+  outline: 2px solid var(--color-accent, #4d6bfe);
   outline-offset: -2px;
+}
+
+.mermaid-preview-actions .arco-btn:disabled,
+.mermaid-viewer-toolbar .arco-btn:disabled {
+  color: var(--color-fg-faint, #818b9d);
+  opacity: 0.5;
+}
+
+.mermaid-toolbar-divider {
+  flex: none;
+  width: 1px;
+  height: 12px;
+  margin-inline: 3px;
+  background: var(--color-line-soft, #e6e8ee);
 }
 
 .mermaid-preview-actions .code-copy-button.success {
   color: var(--color-success, #238253);
 }
-
-.mermaid-preview-actions .code-copy-button.error,
-.mermaid-preview-error {
+.mermaid-preview-actions .code-copy-button.error {
   color: var(--color-danger, #c04545);
 }
 
-.mermaid-preview .code-action-sr-only {
+.mermaid-preview .code-action-sr-only,
+.mermaid-source-toolbar .code-action-sr-only {
   position: absolute;
   width: 1px;
   height: 1px;
@@ -104,70 +158,232 @@
 }
 
 .mermaid-preview-diagram {
-  max-height: min(600px, 70vh);
-  overflow: auto;
-  overscroll-behavior: contain;
-  scrollbar-width: thin;
-  text-align: center;
+  position: relative;
+  width: calc(100% - 32px);
+  min-height: 88px;
+  max-height: min(420px, 55vh);
+  margin: 8px auto 16px;
+  overflow: hidden;
+  cursor: zoom-in;
 }
 
-.mermaid-preview-diagram > svg {
+.mermaid-preview-svg {
+  position: absolute;
+  inset: 0;
+}
+
+.mermaid-preview-svg > svg,
+.mermaid-viewer-graphic > svg {
   display: block;
-  height: auto;
-  max-width: 100%;
-  margin: 0 auto;
+  width: 100% !important;
+  height: 100% !important;
+  max-width: none !important;
+  margin: 0;
+}
+
+.mermaid-preview-diagram:focus-visible {
+  outline: 2px solid var(--color-accent, #4d6bfe);
+  outline-offset: 3px;
+  border-radius: 4px;
+}
+
+.mermaid-preview-expand-hint {
+  position: absolute;
+  right: 4px;
+  bottom: 4px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 6px;
+  border: 1px solid var(--color-line-soft, #e6e8ee);
+  border-radius: 4px;
+  background: var(--color-canvas, #fff);
+  color: var(--color-fg-soft, #5e687b);
+  font-size: 11px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.mermaid-preview-diagram:hover .mermaid-preview-expand-hint,
+.mermaid-preview-diagram:focus-visible .mermaid-preview-expand-hint {
+  opacity: 1;
+}
+
+.mermaid-preview-expand-hint svg {
+  width: 12px;
+  height: 12px;
+}
+.mermaid-preview-live-label {
+  margin: 8px 12px 0;
+  color: var(--color-fg-faint, #818b9d);
+  font-size: 11px;
+}
+.mermaid-viewer-placeholder {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-content: center;
+  color: var(--color-fg-faint, #818b9d);
+}
+.mermaid-preview-updating {
+  display: flex;
+  color: var(--color-fg-faint, #818b9d);
 }
 
 .mermaid-preview-status {
   display: flex;
   align-items: center;
   justify-content: center;
-  flex-wrap: wrap;
-  gap: 3px 6px;
-  min-height: 24px;
+  gap: 6px;
+  min-height: 88px;
+  padding: 12px;
+  box-sizing: border-box;
   text-align: center;
   overflow-wrap: anywhere;
 }
 
-.mermaid-preview-status-quiet {
-  min-height: 0;
-  color: var(--color-fg-faint, #78818e);
-  font-size: 11px;
+.mermaid-preview-status > svg {
+  flex: none;
+  width: 16px;
+  height: 16px;
 }
-
 .mermaid-preview-status-quiet:empty {
   display: none;
 }
-
+.mermaid-preview-error {
+  min-height: 0;
+  margin: 0 12px 12px;
+  padding: 8px;
+  justify-content: flex-start;
+  border-radius: 4px;
+  color: var(--color-danger, #c04545);
+  background: var(--color-panel, #f7f8fa);
+  font-size: 11px;
+  text-align: start;
+}
 .mermaid-preview-error .arco-btn {
+  flex: none;
   height: 22px;
   padding: 0 4px;
   color: inherit;
   font: inherit;
 }
 
-@media (max-width: 480px) {
-  .mermaid-preview {
-    padding-inline: 6px;
-  }
+.editor-modal.mermaid-viewer .arco-modal-content {
+  padding: 0;
+}
+.mermaid-viewer .editor-modal-body {
+  display: flex;
+  flex-direction: column;
+  /* Short, wide flows should not open a mostly empty full-height window. */
+  height: clamp(
+    min(300px, 60dvh),
+    calc((min(1180px, 100vw - 32px) - 32px) / var(--mermaid-viewer-aspect, 1) + 76px),
+    min(76dvh, 800px)
+  );
+}
+.mermaid-viewer-toolbar {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 3px;
+  min-width: 0;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--color-line-soft);
+  color: var(--color-fg-soft);
+  font: 12px/1.5 var(--notebook-font-family, system-ui, sans-serif);
+}
+.mermaid-viewer-hint {
+  flex: 1;
+  min-width: 0;
+  padding-inline-end: 8px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-fg-faint);
+  font-size: 11px;
+}
+.mermaid-viewer-toolbar .mermaid-viewer-scale {
+  min-width: 48px;
+  font-variant-numeric: tabular-nums;
+}
+.mermaid-viewer-viewport {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--color-canvas);
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+.mermaid-viewer-viewport.is-dragging {
+  cursor: grabbing;
+}
+.mermaid-viewer-viewport:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: -2px;
+}
+.mermaid-viewer-graphic {
+  position: absolute;
+  inset: 0 auto auto 0;
+  transform-origin: 0 0;
+  pointer-events: none;
+}
+.mermaid-viewer-footer {
+  display: flex;
+  align-items: center;
+  flex: none;
+  gap: 5px;
+  padding: 7px 12px;
+  border-top: 1px solid var(--color-line-soft);
+  color: var(--color-fg-faint);
+  font-size: 11px;
+}
+.mermaid-viewer-footer > svg {
+  width: 12px;
+  height: 12px;
+}
+.mermaid-viewer-footer > span {
+  margin-inline-start: auto;
+}
 
-  .mermaid-preview-label {
-    font-size: 10px;
+@container (max-width: 340px) {
+  .mermaid-preview-kind {
+    display: none;
+  }
+  .mermaid-preview-actions {
+    padding-inline: 7px;
+    gap: 1px;
+  }
+}
+
+@media (max-width: 480px) {
+  .mermaid-preview-kind {
+    display: none;
+  }
+  .mermaid-source-toolbar .mermaid-preview-label {
+    font-size: 11px;
+  }
+  .mermaid-viewer-hint {
+    display: none;
+  }
+  .mermaid-viewer-toolbar {
+    justify-content: center;
+  }
+  .mermaid-preview-diagram {
+    width: calc(100% - 20px);
   }
 }
 
 @media print {
   .mermaid-preview-actions,
-  .mermaid-preview-status-quiet {
+  .mermaid-source-toolbar,
+  .mermaid-preview-expand-hint,
+  .mermaid-preview-live-label {
     display: none;
   }
-
-  .mermaid-preview {
-    padding-top: 10px;
-  }
-
   .mermaid-preview-diagram {
     max-height: none;
-    overflow: visible;
   }
 }

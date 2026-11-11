@@ -2,6 +2,7 @@ import type {Config, DOMPurify} from 'dompurify';
 import type {Mermaid, MermaidConfig} from 'mermaid';
 
 import {sanitizeMermaidSVG} from './sanitizeSVG';
+import type {DiagramSize} from './diagramViewport';
 
 // Native browser ESM, just like Excalidraw. These packages never enter Vite's
 // bundle. Keep the versions aligned with the existing transitive dependencies.
@@ -53,6 +54,19 @@ export function isMermaidLanguage(language: string | null | undefined): boolean 
   return language?.trim().toLowerCase() === 'mermaid';
 }
 
+/** Use intrinsic coordinates rather than Mermaid's width="100%". A small
+ * diagram stays small, and a tall/wide one can fit either viewing surface. */
+export function readMermaidSVGSize(markup: string, doc: Document): DiagramSize {
+  if (markup) {
+    const svg = new doc.defaultView!.DOMParser().parseFromString(markup, 'image/svg+xml').documentElement;
+    const values = svg.getAttribute('viewBox')?.trim().split(/[\s,]+/).map(Number);
+    if (values?.length === 4 && values.every(Number.isFinite) && values[2] > 0 && values[3] > 0) {
+      return {width: values[2], height: values[3]};
+    }
+  }
+  return {width: 640, height: 320};
+}
+
 /** Read resolved host tokens: Mermaid's color math cannot consume CSS var(). */
 export function readMermaidTheme(element: HTMLElement): MermaidTheme {
   const doc = element.ownerDocument;
@@ -97,7 +111,8 @@ export function createMermaidConfig(theme: MermaidTheme, defaultConfig: MermaidC
     theme: 'base',
     themeCSS: '',
     fontFamily: theme.fontFamily,
-    flowchart: {htmlLabels: false, useMaxWidth: true},
+    flowchart: {htmlLabels: false, useMaxWidth: true, curve: 'basis', padding: 14, nodeSpacing: 32, rankSpacing: 44},
+    sequence: {useMaxWidth: true, actorMargin: 40, diagramMarginX: 16, diagramMarginY: 16},
     themeVariables: {
       darkMode: theme.dark,
       background: theme.background,
