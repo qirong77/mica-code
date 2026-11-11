@@ -48,8 +48,6 @@ import {
 } from 'lexical';
 import {type JSX, useMemo} from 'react';
 
-import {isDevPlayground} from './appSettings';
-import {FlashMessageContext} from './context/FlashMessageContext';
 import {SettingsContext, useSettings} from './context/SettingsContext';
 import {ToolbarContext} from './context/ToolbarContext';
 import Editor from './Editor';
@@ -64,7 +62,6 @@ import {CardExtension} from './plugins/CardExtension';
 import {CodeHighlightExtension} from './plugins/CodeHighlightExtension';
 import {CollapsibleExtension} from './plugins/CollapsibleExtension';
 import {DateTimeExtension} from './plugins/DateTimeExtension';
-import DocsPlugin from './plugins/DocsPlugin';
 import {DragDropPasteExtension} from './plugins/DragDropPasteExtension';
 import {EmojisExtension} from './plugins/EmojisExtension';
 import {EquationsExtension} from './plugins/EquationsExtension';
@@ -78,7 +75,6 @@ import {MaxLengthExtension} from './plugins/MaxLengthPlugin';
 import {MentionsExtension} from './plugins/MentionsExtension';
 import {PageBreakExtension} from './plugins/PageBreakExtension';
 import {PagesReactExtension} from './plugins/PagesReactExtension';
-import PasteLogPlugin from './plugins/PasteLogPlugin';
 import {PollExtension} from './plugins/PollExtension';
 import {PullQuoteExtension} from './plugins/PullQuoteExtension';
 import {ReactReviewExtension} from './plugins/ReviewExtension';
@@ -87,9 +83,7 @@ import {ShortcutsExtension} from './plugins/ShortcutsExtension';
 import {SpecialTextExtension} from './plugins/SpecialTextExtension';
 import {TabFocusExtension} from './plugins/TabFocusExtension';
 import {TerseExportExtension} from './plugins/TerseExportExtension';
-import TestRecorderPlugin from './plugins/TestRecorderPlugin';
 import {TwitterExtension} from './plugins/TwitterExtension';
-import TypingPerfPlugin from './plugins/TypingPerfPlugin';
 import {VisibleNonPrintingExtension} from './plugins/VisibleNonPrintingExtension';
 import {YouTubeExtension} from './plugins/YouTubeExtension';
 import PlaygroundEditorTheme from './themes/PlaygroundEditorTheme';
@@ -130,7 +124,6 @@ const PlaygroundRichTextExtension = defineExtension({
     }),
     CheckListExtension,
     PlaygroundMarkdownShortcutsExtension,
-    PageBreakExtension,
     PagesReactExtension,
     PollExtension,
     EquationsExtension,
@@ -210,13 +203,7 @@ function buildNotebookExtension(editorState: string | null) {
 }
 
 function App(): JSX.Element {
-  const {
-    settings: {
-      isShadowDOM,
-      measureTypingPerf,
-      showTreeView: settingsShowDebug,
-    },
-  } = useSettings();
+  const {settings: {isShadowDOM}} = useSettings();
 
   const session = useNotebookSession();
   const app = useMemo(
@@ -241,14 +228,7 @@ function App(): JSX.Element {
               <Editor />
             </div>
           )}
-          {settingsShowDebug && <div className="workspace-devtools">
-            {isDevPlayground ? <DocsPlugin /> : null}
-            {isDevPlayground ? <PasteLogPlugin /> : null}
-            {isDevPlayground ? <TestRecorderPlugin /> : null}
-          </div>}
           </WorkspaceShell>
-
-          {measureTypingPerf ? <TypingPerfPlugin /> : null}
         </ToolbarContext>
       </LexicalExtensionComposer>
     </LexicalCollaboration>
@@ -258,9 +238,7 @@ function App(): JSX.Element {
 export default function PlaygroundApp(): JSX.Element {
   return (
     <SettingsContext>
-      <FlashMessageContext>
-        <NotebookFrame><App /></NotebookFrame>
-      </FlashMessageContext>
+      <NotebookFrame><App /></NotebookFrame>
     </SettingsContext>
   );
 }

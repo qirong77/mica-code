@@ -63,13 +63,10 @@ export type StoredSubagentTask = {
 export function isValidSubagentSessionId(id: string): boolean {
   return ID_PATTERN.test(id);
 }
-function legacyPath(id: string): string {
-  return resolveMicaHomePath('subagent-tasks', `${id}.json`);
-}
 function taskDir(id: string): string {
   return resolveMicaHomePath('subagent-tasks', id);
 }
-function validTask(item: unknown): item is StoredSubagentTask {
+export function isStoredSubagentTask(item: unknown): item is StoredSubagentTask {
   if (!item || typeof item !== 'object') return false;
   const task = item as Partial<StoredSubagentTask>;
   return (
@@ -227,7 +224,7 @@ export function commitSubagentRestart(claim: SubagentRestartClaim, task: StoredS
   if (
     claim.owner.version !== 2 ||
     claim.owner.pid !== process.pid ||
-    !validTask(task) ||
+    !isStoredSubagentTask(task) ||
     task.id === claim.id ||
     task.status !== 'running' ||
     task.execution_pid !== process.pid ||
@@ -280,7 +277,7 @@ function readRestartHandoff(parent: string, id: string, token: string): StoredSu
     handoff.version !== 2 ||
     handoff.original_id !== id ||
     handoff.token !== token ||
-    !validTask(task) ||
+    !isStoredSubagentTask(task) ||
     task.id === id ||
     task.status !== 'running' ||
     task.execution_pending !== true ||
@@ -335,7 +332,7 @@ function reportStorageError(action: string, error: unknown): void {
 }
 
 /**
- * 磁盘上任务记录的轻量指纹：目录 + 迁移前那份单文件的 mtime/size。
+ * 磁盘上任务记录的轻量指纹。旧单文件由 evolution 一次性迁移，运行时只读任务目录。
  *
  * 常驻宿主每秒推一次任务快照，而 `readStoredSubagentTasks()` 要把每份记录（单条
  * result 上限 200k 字符）读出来并 JSON.parse。调用方先比这个指纹，没变就不重读。
@@ -343,33 +340,23 @@ function reportStorageError(action: string, error: unknown): void {
  */
 export function storedSubagentTasksStamp(id: string): string {
   if (!isValidSubagentSessionId(id)) return '';
-  const parts: string[] = [];
-  for (const target of [taskDir(id), legacyPath(id)]) {
-    try {
-      const info = statSync(target);
-      parts.push(`${info.mtimeMs}:${info.size}`);
-    } catch {
-      parts.push('-');
-    }
+  try {
+    const info = statSync(taskDir(id));
+    return `${info.mtimeMs}:${info.size}`;
+  } catch {
+    return '-';
   }
-  return parts.join('|');
 }
 
 export function readStoredSubagentTasks<T extends StoredSubagentTask = StoredSubagentTask>(id: string): T[] {
   if (!isValidSubagentSessionId(id)) return [];
   const records = new Map<string, StoredSubagentTask>();
   try {
-    const legacy: unknown = JSON.parse(readFileSync(legacyPath(id), 'utf8'));
-    if (Array.isArray(legacy)) for (const task of legacy) if (validTask(task)) records.set(task.id, task);
-  } catch (error) {
-    reportStorageError('reading legacy records', error);
-  }
-  try {
     for (const name of readdirSync(taskDir(id))) {
       if (!name.endsWith('.json') || !ID_PATTERN.test(name.slice(0, -5))) continue;
       try {
         const task: unknown = JSON.parse(readFileSync(resolveMicaHomePath('subagent-tasks', id, name), 'utf8'));
-        if (validTask(task) && `${task.id}.json` === name) records.set(task.id, task);
+        if (isStoredSubagentTask(task) && `${task.id}.json` === name) records.set(task.id, task);
       } catch (error) {
         reportStorageError(`reading task ${name}`, error);
       }

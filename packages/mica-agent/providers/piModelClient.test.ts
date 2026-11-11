@@ -134,6 +134,21 @@ describe('pi tool iterations', () => {
     expect(execute).not.toHaveBeenCalled();
     expect(client.messages).toEqual([]);
   });
+  it('never executes unsolicited tool calls when tools are disabled', async () => {
+    const execute = vi.fn(async () => 'written');
+    tool('write_probe', false, execute);
+    scripts.push(
+      () => completed([call('unsolicited', 'write_probe')], { usage: usage({ input: 5, output: 3, totalTokens: 8 }) }),
+      () => text('done'),
+    );
+    const client = new PiModelClient({ ...options(), tools: false });
+    await expect(client.query('generate a title')).rejects.toThrow('tools are disabled');
+    expect(execute).not.toHaveBeenCalled();
+    expect(requests).toHaveLength(1);
+    expect(requests[0]!.context.tools).toBeUndefined();
+    expect(client.messages).toEqual([]);
+    expect(client.lastUsage).toMatchObject({ inputTokens: 5, outputTokens: 3, totalTokens: 8 });
+  });
   it('keeps multimodal tool results in pi history and images out of text callbacks', async () => {
     tool('read_image_probe', true, async () => [
       { type: 'text', text: 'screenshot' },

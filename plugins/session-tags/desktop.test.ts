@@ -120,7 +120,7 @@ it('lists the tags with their usage counts', async () => {
 it('adds a tag with the picked color and clears the input', async () => {
   const { api, tree } = await mount(makeApi());
   const input = inputByLabel(tree(), '新标签名字')!;
-  (input.props!.onChange as (event: unknown) => void)({ target: { value: '进行中' } });
+  (input.props!.onChange as (value: string) => void)('进行中');
 
   // 换一个颜色再提交：默认色是橙色，这里选黄色（色板自己的圆点由 Palette 渲染，
   // 测试直接调它的 onChange，与点中某个圆点等价）
@@ -139,7 +139,7 @@ it('adds a tag with the picked color and clears the input', async () => {
 it('refuses a duplicate name without writing anything', async () => {
   const { api, tree } = await mount(makeApi());
   const input = inputByLabel(tree(), '新标签名字')!;
-  (input.props!.onChange as (event: unknown) => void)({ target: { value: '待办' } });
+  (input.props!.onChange as (value: string) => void)('待办');
   (buttonByText(tree(), '添加')!.props!.onClick as () => void)();
   await flush();
 
@@ -153,7 +153,7 @@ it('renames a tag in place and keeps the list order', async () => {
 
   const input = inputByLabel(tree(), '标签名')!;
   expect(input.props!.value).toBe('待 review');
-  (input.props!.onChange as (event: unknown) => void)({ target: { value: '等人看' } });
+  (input.props!.onChange as (value: string) => void)('等人看');
   (buttonByText(tree(), '保存')!.props!.onClick as () => void)();
   await flush();
 
@@ -183,7 +183,7 @@ it('surfaces a failed write and keeps the current list', async () => {
   });
   const { tree } = await mount(api);
   const input = inputByLabel(tree(), '新标签名字')!;
-  (input.props!.onChange as (event: unknown) => void)({ target: { value: '进行中' } });
+  (input.props!.onChange as (value: string) => void)('进行中');
   (buttonByText(tree(), '添加')!.props!.onClick as () => void)();
   await flush();
 

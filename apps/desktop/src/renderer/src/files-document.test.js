@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'bun:test'
+import { Range } from 'monaco-editor/esm/vs/editor/common/core/range.js'
+import { PieceTreeTextBufferBuilder } from 'monaco-editor/esm/vs/editor/common/model/pieceTreeTextBuffer/pieceTreeTextBufferBuilder.js'
 import {
   createDocumentTaskQueue,
   documentKey,
@@ -166,6 +168,7 @@ describe('writeModelText', () => {
     return {
       edits: [],
       getValue: () => value,
+      getEOL: () => '\n',
       getPositionAt: positionOf,
       applyEdits(edits) {
         for (const edit of edits) {
@@ -198,6 +201,36 @@ describe('writeModelText', () => {
     const model = fakeModel('same')
     expect(writeModelText(model, 'same')).toBe(false)
     expect(model.edits).toHaveLength(0)
+  })
+
+  it('Markdown 的 LF 输出保存到 CRLF model 后不再制造空修改', () => {
+    // Use Monaco's actual buffer: it normalizes inserted text to the model's EOL.
+    const builder = new PieceTreeTextBufferBuilder()
+    builder.acceptChunk('a\r\nb\r\n')
+    const { textBuffer, disposable } = builder.finish().create(2)
+    let edits = 0
+    const model = {
+      getValue: () => textBuffer.getValueInRange(textBuffer.getRangeAt(0, textBuffer.getLength())),
+      getEOL: () => textBuffer.getEOL(),
+      getPositionAt: (offset) => textBuffer.getPositionAt(offset),
+      applyEdits(operations) {
+        edits += 1
+        textBuffer.applyEdits(
+          operations.map((op) => ({ ...op, range: Range.lift(op.range) })),
+          false,
+          false
+        )
+      }
+    }
+    try {
+      expect(writeModelText(model, 'a\nb\n')).toBe(false)
+      expect(writeModelText(model, 'a\nb!\n')).toBe(true)
+      expect(model.getValue()).toBe('a\r\nb!\r\n')
+      expect(writeModelText(model, 'a\nb!\n')).toBe(false)
+      expect(edits).toBe(1)
+    } finally {
+      disposable.dispose()
+    }
   })
 })
 

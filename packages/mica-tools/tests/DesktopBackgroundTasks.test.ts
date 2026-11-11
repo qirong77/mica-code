@@ -17,28 +17,25 @@ function task(
 }
 
 describe('desktop background task projection', () => {
-  it('retains active tasks and the 20 most recently finished tasks', () => {
+  it('retains active tasks without resurfacing finished failures in the dock', () => {
     const finished = Array.from({ length: 21 }, (_, i) =>
-      // 只有「需要看一眼」的结束才留在状态栏：退出码非零的失败任务。
       task(`done-${i}`, 'finished', {
         finishedAt: new Date(Date.UTC(2026, 0, 1, 0, i)).toISOString(),
         exitCode: 2,
       }),
     );
-    const result = projectBackgroundTasks([task('active', 'running'), ...finished]);
-    expect(result).toHaveLength(21);
-    expect(result.map((item) => item.id)).toContain('active');
-    expect(result.map((item) => item.id)).toContain('done-20');
-    expect(result.map((item) => item.id)).not.toContain('done-0');
+    const result = projectBackgroundTasks([task('starting', 'starting'), task('active', 'running'), ...finished]);
+    expect(result.map((item) => item.id).sort()).toEqual(['active', 'starting']);
   });
 
-  it('drops endings that were already explained in the conversation', () => {
+  it('drops all terminal states while their records remain available for detail requests', () => {
     const result = projectBackgroundTasks([
       task('ok', 'finished', { finishedAt: '2026-01-01T00:00:00.000Z', exitCode: 0 }),
       task('killed', 'killed', { finishedAt: '2026-01-01T00:00:01.000Z' }),
       task('failed', 'failed', { finishedAt: '2026-01-01T00:00:02.000Z' }),
+      task('unknown', 'unknown_exited', { finishedAt: '2026-01-01T00:00:03.000Z' }),
     ]);
-    expect(result.map((item) => item.id)).toEqual(['failed']);
+    expect(result).toEqual([]);
   });
 
   it('only accepts the matching agent owner, including for detail and kill requests', () => {

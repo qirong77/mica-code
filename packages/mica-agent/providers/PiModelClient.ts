@@ -385,6 +385,9 @@ export class PiModelClient extends BaseAgent<ModelClientOptions, Message, AgentU
       if (response.stopReason === 'length' && calls.length) {
         throw new Error('Model output limit reached with incomplete tool calls; tools were not executed.');
       }
+      if (settings.tools === false && calls.length) {
+        throw new Error('Model returned tool calls while tools are disabled; tools were not executed.');
+      }
       if (response.content.length) messages.push(response);
       if (!calls.length) {
         await commit(false);

@@ -42,7 +42,7 @@ export const SettingsContext = ({
   const [settings, setSettings] = useState(INITIAL_SETTINGS);
 
   const setOption = useCallback((setting: SettingName, value: boolean) => {
-    if (['isCollab', 'useCollabV2', 'emptyEditor', 'isRichText', 'isShadowDOM'].includes(setting)) return;
+    if (['isCollab', 'useCollabV2', 'isRichText', 'isShadowDOM'].includes(setting)) return;
     setSettings(options => ({
       ...options,
       [setting]: value,

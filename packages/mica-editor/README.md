@@ -32,12 +32,14 @@ await ref.current?.flush(); // 切换条目/离开页面前把最后一批输入
 宿主侧不 import Lexical，避免把编辑器依赖拖进主 React 图。
 
 - **隔离**：runtime 跑在 `sandbox="allow-scripts allow-popups"` 的 iframe 里，宿主通过 `window.postMessage`
-  的随机 token 校验通信，不授予 same-origin，也不开放宿主 API。
+  的来源窗口和随机 token 校验通信，不授予 same-origin，也不开放宿主 API。每次加载有独立请求身份，
+  同一文档重载前的旧正文与保存快捷键消息不会写入新编辑器；切换时未完成的 flush 会明确失败。
 - **主题**：`web/theme.ts` 读宿主 `data-theme` / `data-appearance` 与 CSS 变量，经 `theme` 消息下发；
   亮暗和六套主题跟随 Mica，runtime 不维护第二套皮肤。
 - **降级**：CDN 或构建产物不可用时组件退回朴素 textarea，仍能继续编辑源码，`status` 为 `fallback`。
 - **保存**：文件宿主可传 `onSave`；runtime 捕获 ⌘/Ctrl+S 并先交出最新 Markdown，再调用该回调。
   自动保存的设置页不必提供回调。切换或关闭文档前仍需等待 `flush()`，完成后才能换 `documentId`。
+  若 `onChange` 在收集最后输入时同步切换文档，旧 `flush()` 会拒绝，避免调用方把新文档内容保存到旧文件。
 - **尺寸**：宿主提供确定高度和 `min-height: 0` 的容器，组件与 runtime 填满剩余区域；源码和排版只滚正文，工具栏与字数栏固定。
 
 ## Markdown 模式的取舍
@@ -60,6 +62,8 @@ await ref.current?.flush(); // 切换条目/离开页面前把最后一批输入
 ## Mermaid 与代码块
 
 Notebook 富文本画布使用分区工作台排版（`runtime/src/workspace/notebook-workbench.css`）：紧凑工具栏、限宽正文、表格与图注排版及底部字数栏。样式限定富文本画布，不改变文件或配置页 Markdown 模式的布局。宿主大纲通过现有身份校验消息桥接收标题、当前位置和内容块元数据，并按节点 key 请求跳转；这些信息不写入正文，也不改变编辑器选区或撤销历史。
+
+富文本入口只装配实际使用的编辑器：旧 Playground 分享与版本演示、实验设置、测试录制和重复表格菜单已移除；现存节点的解析与当前编辑能力继续由相应节点和扩展负责，大纲统一由宿主工作台呈现。旧源码预览的 DOM 状态检查与切换时的重复快照不再保留；正文快照采集失败会向宿主明确报告。
 
 两种模式共用 `MermaidPreviewPlugin`：语言为 `mermaid` 的 Lexical CodeNode 默认显示紧凑图表卡片，
 标出流程图、时序图等类型，沿用宿主画布、文字和边框颜色；小图不拉伸，长图限制概览高度。

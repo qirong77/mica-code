@@ -65,9 +65,11 @@ export function createMarkdownBridge(options: {
   let fallback = false;
   let disposed = false;
   let loading: Promise<string> | null = null;
+  let loadId: string | null = null;
   const bootTimer = setTimeout(() => fail('编辑器加载超时，已保留 Markdown 源码。'), timeoutMs);
 
   function post(message: MarkdownHostMessage) {
+    if (disposed) return;
     options.target()?.postMessage({ channel: MARKDOWN_CHANNEL, token: options.token, ...message }, '*');
   }
 
@@ -92,6 +94,7 @@ export function createMarkdownBridge(options: {
     if (!current) return Promise.reject(new Error('尚未选择 Markdown 文档。'));
     const documentId = current.documentId;
     const requestId = `${++sequence}`;
+    if (type === 'load') loadId = requestId;
     return new Promise((resolve, reject) => {
       requests.set(requestId, {
         documentId, generation, type, resolve, reject,
@@ -165,7 +168,7 @@ export function createMarkdownBridge(options: {
     }
     if (!current || data.documentId !== current.documentId) return;
     if (data.type === 'change' || data.type === 'save') {
-      if (!loaded || current.readOnly || typeof data.value !== 'string') return;
+      if (!loaded || data.loadId !== loadId || current.readOnly || typeof data.value !== 'string') return;
       const document = current;
       const expectedGeneration = generation;
       accept(data.value);
@@ -181,13 +184,16 @@ export function createMarkdownBridge(options: {
     if (data.type === 'result' && typeof data.value !== 'string') return;
     clearTimeout(pending.timer);
     requests.delete(data.requestId);
+    const document = current;
     if (data.type === 'loaded') {
       loaded = true;
       options.onStatus('ready');
     } else {
       accept(data.value);
     }
-    pending.resolve(current.value);
+    // onChange/onStatus may synchronously navigate. Never resolve the old flush with the new file's text.
+    if (current !== document || pending.generation !== generation) pending.reject(new Error('Markdown 文档已切换，请重试。'));
+    else pending.resolve(document.value);
   }
 
   async function flush(): Promise<string> {

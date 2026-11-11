@@ -43,6 +43,8 @@ import {
   trashNode,
 } from './model';
 import { createEditorBridge } from './bridge';
+import { createNotebookDraft, createNotebookWriter, updateNotebookDraft } from './writer';
+import { createNotebookLifecycle } from './lifecycle';
 import './notebook.css';
 
 const message = (error) =>
@@ -105,17 +107,25 @@ export default function NotebookPage({ api }) {
   layoutRef.current = layout;
   const bridge = useRef(null);
   const ready = useRef(false);
+  const uncollected = useRef(false);
   const current = useRef(null);
   const drafts = useRef(new Map());
   const saveTimer = useRef(null);
-  const writer = useRef(null);
   const mounted = useRef(true);
-  const switching = useRef(false);
   const loadedNote = useRef(null);
   const tree = useRef(null);
   const actions = useRef({});
   const token = useMemo(() => createNodeId(), [frameKey]);
   const controller = useMemo(() => createNotebookController({ host: api, onIndex: setIndex }), [api]);
+  const writer = useMemo(() => createNotebookWriter(controller), [controller]);
+  const lifecycle = useMemo(
+    () =>
+      createNotebookLifecycle({
+        freeze: (frozen) => bridge.current?.freeze(frozen),
+        canEdit: () => ready.current && loadedNote.current === current.current?.id,
+      }),
+    [],
+  );
   const active = index.nodes.find((node) => node.id === activeId && !node.trashedAt);
   const selected = index.nodes.find((node) => node.id === selectedId);
   const visible = useMemo(
@@ -141,48 +151,29 @@ export default function NotebookPage({ api }) {
         clearTimeout(saveTimer.current);
         saveTimer.current = null;
       }
-      if (writer.current) {
-        await writer.current;
-        if (!target?.dirty) return true;
-      }
-      const work = async () => {
-        const draft = target;
-        if (!draft) return true;
-        while (draft.dirty) {
-          const snapshot = draft.document;
-          const serialized = JSON.stringify(snapshot);
-          setSaveState('saving');
-          try {
-            draft.version = await controller.saveDocument(draft.id, snapshot, { expectedVersion: draft.version });
-            draft.saved = serialized;
-            draft.dirty = JSON.stringify(draft.document) !== serialized;
-          } catch (cause) {
-            draft.dirty = true;
-            setSaveState('error');
-            if (mounted.current) setError(message(cause));
-            return false;
-          }
-        }
-        if (mounted.current) setSaveState('saved');
-        return true;
-      };
-      const task = work();
-      writer.current = task;
       try {
-        return await task;
-      } finally {
-        if (writer.current === task) writer.current = null;
+        await writer.save(target, () => {
+          if (mounted.current && current.current === target) setSaveState('saving');
+        });
+        if (mounted.current && current.current === target) setSaveState(uncollected.current ? 'error' : 'saved');
+        return true;
+      } catch (cause) {
+        if (mounted.current && current.current === target) {
+          setSaveState('error');
+          setError(message(cause));
+        }
+        return false;
       }
     },
-    [controller],
+    [writer],
   );
 
   const acceptChange = useCallback(
     (id, document) => {
       const draft = drafts.current.get(id);
       if (!draft || current.current !== draft) return;
-      draft.document = document;
-      draft.dirty = JSON.stringify(document) !== draft.saved;
+      uncollected.current = false;
+      updateNotebookDraft(draft, document);
       if (!draft.dirty) return;
       setSaveState('pending');
       if (saveTimer.current) clearTimeout(saveTimer.current);
@@ -196,7 +187,7 @@ export default function NotebookPage({ api }) {
   const flush = useCallback(
     async (includeIndex = true) => {
       try {
-        if (switching.current && includeIndex) throw new Error('正在切换笔记，请稍后再返回');
+        if (lifecycle.switching && includeIndex) throw new Error('正在切换笔记，请稍后再返回');
         if (current.current && ready.current && loadedNote.current === current.current.id) {
           const result = await bridge.current.flush();
           if (result.noteId !== current.current.id) throw new Error('笔记切换尚未完成，请稍后再试');
@@ -210,55 +201,72 @@ export default function NotebookPage({ api }) {
         return false;
       }
     },
-    [controller, save, acceptChange],
+    [controller, save, acceptChange, lifecycle],
+  );
+
+  const loadEditor = useCallback(
+    async (draft) => {
+      const instance = bridge.current;
+      if (lifecycle.closing || !ready.current || !instance) return;
+      loadedNote.current = null;
+      setFrameState('loading');
+      instance.freeze(true);
+      try {
+        await instance.load(draft.id, draft.document);
+        if (bridge.current !== instance || current.current !== draft) return;
+        loadedNote.current = draft.id;
+        uncollected.current = false;
+        setFrameState('ready');
+      } catch (cause) {
+        if (bridge.current === instance && current.current === draft) setFrameState('error');
+        throw cause;
+      } finally {
+        if (bridge.current === instance) lifecycle.resume();
+      }
+    },
+    [lifecycle],
   );
 
   const openNote = useCallback(
     async (id) => {
-      if (switching.current) return;
-      if (current.current?.id === id) {
+      if (lifecycle.closing || lifecycle.switching) return;
+      if (current.current?.id === id && ready.current && loadedNote.current === id) {
         if (layoutRef.current.mobile) setRailOpen(false);
         return;
       }
-      switching.current = true;
-      bridge.current?.freeze(true);
       setBusy(true);
       try {
-        if (!(await flush(false))) return;
-        let draft = drafts.current.get(id);
-        if (!draft || !draft.dirty) {
-          const snapshot = await controller.readDocument(id);
-          draft = {
-            id,
-            document: snapshot.value,
-            version: snapshot.version,
-            saved: JSON.stringify(snapshot.value),
-            dirty: false,
-          };
-          drafts.current.set(id, draft);
-        }
-        current.current = draft;
-        setActiveId(id);
-        setSelectedId(id);
-        setSaveState(draft.dirty ? 'pending' : 'saved');
-        setError('');
-        setOutline(emptyOutline());
-        loadedNote.current = null;
-        if (ready.current) await bridge.current.load(id, draft.document);
-        setRecentIds((previous) => [id, ...previous.filter((value) => value !== id)].slice(0, 6));
-        if (layoutRef.current.mobile) setRailOpen(false);
+        await lifecycle.replace(
+          async () => {
+            if (!(await flush(false)) || lifecycle.closing) return null;
+            const draft = drafts.current.get(id);
+            return draft?.dirty ? draft : createNotebookDraft(id, await controller.readDocument(id));
+          },
+          async (draft) => {
+            if (!draft) return;
+            drafts.current.set(id, draft);
+            current.current = draft;
+            setActiveId(id);
+            setSelectedId(id);
+            setSaveState(draft.dirty ? 'pending' : 'saved');
+            setError('');
+            setOutline(emptyOutline());
+            loadedNote.current = null;
+            await loadEditor(draft);
+            setRecentIds((previous) => [id, ...previous.filter((value) => value !== id)].slice(0, 6));
+            if (layoutRef.current.mobile) setRailOpen(false);
+          },
+        );
       } catch (cause) {
         setError(message(cause));
       } finally {
-        switching.current = false;
-        bridge.current?.freeze(false);
         setBusy(false);
       }
     },
-    [controller, flush],
+    [controller, flush, loadEditor, lifecycle],
   );
 
-  actions.current = { flush, openNote, save };
+  actions.current = { flush, openNote, save, loadEditor };
 
   useEffect(() => {
     let alive = true;
@@ -288,19 +296,24 @@ export default function NotebookPage({ api }) {
 
   useEffect(() => {
     ready.current = false;
+    loadedNote.current = null;
     setFrameState('loading');
     const instance = createEditorBridge({
       token,
       target: () => iframe.current?.contentWindow ?? null,
       onReady() {
         ready.current = true;
-        setFrameState('ready');
         syncTheme();
-        if (current.current)
-          void instance.load(current.current.id, current.current.document).catch((cause) => setError(message(cause)));
-      },
-      onLoaded(id) {
-        loadedNote.current = id;
+        if (lifecycle.closing) {
+          instance.freeze(true);
+          return;
+        }
+        const draft = current.current;
+        if (draft)
+          void actions.current.loadEditor(draft).catch((cause) => {
+            if (current.current === draft) setError(message(cause));
+          });
+        else setFrameState('ready');
       },
       onOutline(id, next) {
         if (current.current?.id === id) setOutline(next);
@@ -308,7 +321,11 @@ export default function NotebookPage({ api }) {
       onChange: acceptChange,
       onError(text) {
         setError(text);
-        setFrameState(ready.current ? 'ready' : 'error');
+        if (current.current && loadedNote.current === current.current.id) {
+          uncollected.current = true;
+          setSaveState('error');
+        }
+        if (!ready.current) setFrameState('error');
       },
     });
     bridge.current = instance;
@@ -349,11 +366,11 @@ export default function NotebookPage({ api }) {
       window.removeEventListener('message', instance.receive);
       instance.dispose();
     };
-  }, [token, acceptChange]);
+  }, [token, acceptChange, lifecycle]);
 
   useEffect(() => {
     const beforeUnload = (event) => {
-      if (!current.current?.dirty && !controller.getPendingIndexCount()) return;
+      if (!uncollected.current && !current.current?.dirty && !controller.getPendingIndexCount()) return;
       event.preventDefault();
       event.returnValue = '';
       void save();
@@ -363,18 +380,13 @@ export default function NotebookPage({ api }) {
     };
     window.addEventListener('beforeunload', beforeUnload);
     window.addEventListener('pagehide', pagehide);
-    const stop = api.page?.beforeClose(async () => {
-      bridge.current?.freeze(true);
-      const ok = await actions.current.flush();
-      if (!ok) bridge.current?.freeze(false);
-      return ok;
-    });
+    const stop = api.page?.beforeClose(() => lifecycle.beforeClose(() => actions.current.flush()));
     return () => {
       stop?.();
       window.removeEventListener('beforeunload', beforeUnload);
       window.removeEventListener('pagehide', pagehide);
     };
-  }, [api, controller, save]);
+  }, [api, controller, save, lifecycle]);
 
   useEffect(() => {
     const observer = new ResizeObserver(([entry]) => {
@@ -430,6 +442,7 @@ export default function NotebookPage({ api }) {
   const parentForNew =
     selected && !selected.trashedAt ? (selected.kind === 'folder' ? selected.id : selected.parentId) : null;
   const mutate = async (operation) => {
+    if (lifecycle.closing) return null;
     setBusy(true);
     try {
       operation(index);
@@ -445,29 +458,38 @@ export default function NotebookPage({ api }) {
   };
   const loadLatest = async () => {
     const draft = current.current;
-    if (!draft) return;
+    if (!draft || lifecycle.closing || lifecycle.switching) return;
     setBusy(true);
-    bridge.current?.freeze(true);
     try {
-      download(draft.document, `${active?.title || '笔记'}-冲突草稿`);
-      const snapshot = await controller.readDocument(draft.id);
-      const latest = {
-        id: draft.id,
-        document: snapshot.value,
-        version: snapshot.version,
-        saved: JSON.stringify(snapshot.value),
-        dirty: false,
-      };
-      drafts.current.set(draft.id, latest);
-      current.current = latest;
-      if (ready.current) await bridge.current.load(draft.id, latest.document);
-      setSaveState('saved');
-      setError('');
-      setDialog(null);
+      await lifecycle.replace(
+        async () => {
+          if (ready.current && loadedNote.current === draft.id) {
+            const result = await bridge.current.flush();
+            acceptChange(result.noteId, result.document);
+          }
+          if (saveTimer.current) {
+            clearTimeout(saveTimer.current);
+            saveTimer.current = null;
+          }
+          // Let acknowledged writes advance this draft before replacing it with a disk snapshot.
+          await writer.idle();
+          if (lifecycle.closing) return null;
+          download(draft.document, `${active?.title || '笔记'}-冲突草稿`);
+          return createNotebookDraft(draft.id, await controller.readDocument(draft.id));
+        },
+        async (latest) => {
+          if (!latest) return;
+          drafts.current.set(draft.id, latest);
+          current.current = latest;
+          await loadEditor(latest);
+          setSaveState('saved');
+          setError('');
+          setDialog(null);
+        },
+      );
     } catch (cause) {
       setError(message(cause));
     } finally {
-      bridge.current?.freeze(false);
       setBusy(false);
     }
   };
@@ -484,7 +506,7 @@ export default function NotebookPage({ api }) {
   const edit = (node) => setDialog({ type: 'rename', node, title: '重命名', name: node.title });
   const submitDialog = async () => {
     const value = dialog;
-    if (!value || busy) return;
+    if (!value || busy || lifecycle.closing) return;
     if (value.type === 'reload') {
       await loadLatest();
       return;
@@ -493,10 +515,11 @@ export default function NotebookPage({ api }) {
       if (!(await flush())) return;
       const now = new Date().toISOString();
       const result = await mutate((latest) => trashNode(latest, value.node.id, now));
-      if (!result) return;
+      if (!result || lifecycle.closing) return;
       const removed = result.nodes.find((node) => node.id === current.current?.id)?.trashedAt;
       if (removed) {
         current.current = null;
+        bridge.current?.freeze(true);
         setActiveId(null);
         loadedNote.current = null;
         setOutline(emptyOutline());
@@ -515,7 +538,7 @@ export default function NotebookPage({ api }) {
           ? latest
           : createNode(latest, { id, now, kind: value.kind, title: value.name, parentId: value.parentId }),
       );
-      if (!result) return;
+      if (!result || lifecycle.closing) return;
       if (value.parentId) setExpanded((previous) => new Set([...previous, value.parentId]));
       if (value.kind === 'folder') {
         setSelectedId(id);
@@ -529,6 +552,7 @@ export default function NotebookPage({ api }) {
   };
 
   const selectRow = (node) => {
+    if (lifecycle.closing) return;
     setSelectedId(node.id);
     if (trash) return;
     if (node.kind === 'folder') toggleFolder(node.id);
@@ -982,7 +1006,7 @@ export default function NotebookPage({ api }) {
                   <Button
                     icon={<RefreshCw size={14} />}
                     onClick={() => {
-                      if (!current.current?.dirty) {
+                      if (!lifecycle.closing && !lifecycle.switching && !current.current?.dirty) {
                         setError('');
                         setFrameKey((key) => key + 1);
                       }

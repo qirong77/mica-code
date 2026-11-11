@@ -432,6 +432,27 @@ describe('real SDK request policy', () => {
     expect(end).toHaveBeenCalledTimes(1);
   });
 
+  it('retries a top-level gateway body-read error after SDK error normalization', async () => {
+    const wire = await server((response, index) => {
+      if (index === 0) {
+        response.writeHead(400, { 'content-type': 'application/json' });
+        response.end(JSON.stringify({ message: '读取失败', code: 'request_read_error', type: 'codexgo_error' }));
+      } else chat(response, false);
+    });
+    const client = new PiModelClient({
+      model: 'wire-top-level-error',
+      provider: { id: 'wire-top-level-error', protocol: 'openai_chat_completions', api_base: wire.url },
+      apiKey: 'test-key',
+      systemPrompt: 'test',
+      tools: false,
+    });
+    const retry = vi.fn();
+    await expect(client.query('question', { onRetry: retry })).resolves.toBe('after');
+    expect(retry).toHaveBeenCalledTimes(1);
+    expect(wire.requests).toHaveLength(2);
+    expect(wire.requests[1]).toEqual(wire.requests[0]);
+  });
+
   it('omits user images for a text-only model while preserving the original history', async () => {
     const wire = await server((response) => chat(response, false));
     const client = new PiModelClient({

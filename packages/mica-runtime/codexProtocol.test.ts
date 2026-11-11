@@ -48,6 +48,7 @@ describe('codex protocol framing', () => {
       pluginPanelView: 'mica/pluginPanel/view',
       pluginPanelAction: 'mica/pluginPanel/action',
       pluginSessionMenuRun: 'mica/sessionMenu/run',
+      askAnswer: 'mica/ask/answer',
     });
   });
 

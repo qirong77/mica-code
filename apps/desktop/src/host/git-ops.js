@@ -454,7 +454,7 @@ export function safeFilePath(root, relativePath) {
   const realRoot = realish(root)
   const realTarget = realish(path.resolve(root, relativePath))
   const relative = path.relative(realRoot, realTarget)
-  if (relative.startsWith('..') || path.isAbsolute(relative))
+  if (relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative))
     throw new Error('Invalid repository path')
   return realTarget
 }
@@ -462,7 +462,7 @@ export function safeFilePath(root, relativePath) {
 /** 路径是否已经在索引里（未跟踪文件不在）。 */
 async function isTracked(root, filePath) {
   try {
-    await git(root, ['ls-files', '--error-unmatch', '--', filePath])
+    await git(root, ['ls-files', '--error-unmatch', '--', `:(literal)${filePath}`])
     return true
   } catch {
     return false
@@ -473,7 +473,7 @@ async function isTracked(root, filePath) {
 export async function stageFile(cwd, filePath) {
   const { root } = await getRepository(cwd)
   safeFilePath(root, filePath)
-  await git(root, ['add', '--', filePath])
+  await git(root, ['add', '--', `:(literal)${filePath}`])
   noteWorktreeChange(root)
 }
 
@@ -484,8 +484,9 @@ export async function stageFile(cwd, filePath) {
 export async function unstageFile(cwd, filePath) {
   const { root, base } = await getRepository(cwd)
   safeFilePath(root, filePath)
-  if (base === EMPTY_TREE) await git(root, ['rm', '--cached', '-q', '--', filePath])
-  else await git(root, ['restore', '--staged', '--', filePath])
+  const pathspec = `:(literal)${filePath}`
+  if (base === EMPTY_TREE) await git(root, ['rm', '--cached', '-q', '--', pathspec])
+  else await git(root, ['restore', '--staged', '--', pathspec])
   noteWorktreeChange(root)
 }
 
@@ -512,7 +513,7 @@ export async function discardFile(cwd, filePath) {
     safeFilePath(root, path.dirname(filePath))
   }
   if (await isTracked(root, filePath)) {
-    await git(root, ['restore', '--worktree', '--', filePath])
+    await git(root, ['restore', '--worktree', '--', `:(literal)${filePath}`])
     noteWorktreeChange(root)
     return
   }

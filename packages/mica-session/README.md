@@ -11,6 +11,8 @@
 - 读取最近会话列表：`store.list(limit)`。
 - 加载指定会话：`store.load(id)`。
 - 保存会话快照：`store.save(session)`。
+- 获取写入租约：`micaSession.acquireTurnLease(id)`；拿不到返回 `null`。句柄的 `isHeld()` 核对未释放且磁盘 token 仍匹配，`release()` 幂等且只释放自身 token。
+- 删除会话：`store.delete(id)`；先取得同一把写入租约，已有 writer 持锁时返回 `false`，不会清除其锁或会话数据。
 - 列出正在运行的会话：`listSessionTurnLocks()`（读 `sessions/.turn-locks`，按持有进程是否存活判定）。
 - 列出最近结束的会话：`listRecentSessionFiles({ since, limit })`（按 session 文件写入时间与头部 `updatedAt` 判定窗口，不持锁即代表那一轮已结束）。
 

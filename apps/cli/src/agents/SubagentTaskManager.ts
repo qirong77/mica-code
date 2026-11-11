@@ -229,6 +229,7 @@ export class SubagentTaskManager {
   clearOwner(owner: AgentRuntime): void {
     if (!this.canSwitchSession(owner)) throw new Error('Cannot switch sessions while subagent execution is active.');
     for (const [id, task] of this.tasks) if (task.owner === owner) this.tasks.delete(id);
+    this.restoredStamps.delete(owner);
   }
 
   /** Restore records for display and restart; execution handles are never restored. */
@@ -384,7 +385,9 @@ export class SubagentTaskManager {
   }
 
   private refreshRestored(owner: AgentRuntime): void {
-    if (!this.readRestoredTasks || ![...this.tasks.values()].some((task) => task.owner === owner && task.restored)) return;
+    // Evolution may publish the first task files after an empty startup restore.
+    // The directory stamp still gates I/O; existing local executions win in restore().
+    if (!this.readRestoredTasks) return;
     if (this.readRestoredStamp) {
       const stamp = this.readRestoredStamp(owner);
       if (stamp && this.restoredStamps.get(owner) === stamp) return;

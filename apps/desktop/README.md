@@ -1,811 +1,116 @@
-# Mica Code desktop
+# Mica Code Desktop 与 Web 运行时
 
-The app is a **web page**: `src/server` runs it as a dependency-free Node HTTP + SSE runtime, so any
-browser (including phones on the same LAN) gets the full workspace — session management, file
-editing, workspace search, Git diff views and the chat view. Electron is an optional container
-around that same page: it starts the runtime, points a window at it, and adds native touches
-(dock badge, taskbar attention, external links) that the browser simply does without.
+Desktop 和独立浏览器工作区共用一份 React 页面与 Node HTTP/SSE 运行时。Electron 提供原生窗口、受控浏览器、终端控制与系统权限检查；浏览器入口提供对话、文件、Git、设置和工作区终端。会话与 CLI 共用 `$MICA_HOME/sessions/`，默认位于 `~/.mica`。
 
-The Chat tab keeps one resident `mica app-server` child process per chat node (Codex v2 App Server protocol over stdio) and renders reasoning / text / tool calls / finish states as a terminal-style web conversation. Sessions are shared with the Mica CLI (`~/.mica/sessions`), so conversations started in the terminal or the app can be resumed in either place. The Git status bar opens a VS Code-style branch picker for searching and switching local branches and creating branches from the current or a selected ref.
+使用指南见 [桌面与浏览器](https://qirong77.github.io/mica-code/docs/desktop/)；开发前阅读 [维护者手册](../../AGENT.md)。本页保留启动、验证与源码导航，运行时细节以对应模块文档为准。
 
-## Theme
+## 安装与开发
 
-The renderer ships two palettes and lets the user pick one in **Settings → Appearance** (follow system / light / dark, labelled 跟随系统 / 浅色 / 深色). The preference lives in the runtime UI state (`ui-state` key `theme`, values `auto|light|dark`, default `auto`), so every window of the same runtime — and the phone/LAN page — shows the same palette and a reload keeps it. `src/renderer/src/theme.js` is the only renderer-side entry: it resolves `auto` through `prefers-color-scheme`, writes `<html data-theme="light|dark">` plus `color-scheme`/`theme-color`, and broadcasts the resolved theme to consumers that cannot read CSS variables. `public/theme-boot.js` is the synchronous, CSP-safe classic script in every page entry that applies the cached preference before first paint; the durable value from `ui-state` wins once the page boots.
-
-The dark palette is the Darcula (VSCode JetBrains) theme that `assets/app.css` has always used. The light palette follows the DeepSeek harness web design system: its `--dsw-static-*` palette and `--dsw-alias-*` semantics (neutral-bluish surface/label ramps, deepseek-500 `#4176e6` for accent/link/focus, amber/red/green state steps) mapped onto this app's `--color-*` tokens. All colours live in `@theme` (dark) and the unlayered `html[data-theme='light']` block of `assets/app.css`; components must not hardcode colours — translucent hover/selection layers are `--color-overlay*`, and xterm/Monaco subscribe to `theme.js` instead of reading CSS. The settings shell has its own token block in `packages/mica-config-ui/web/styles.css`, overridden the same way under `html[data-theme='light'] .mica-config-ui`.
-
-Switching is instant (one attribute change, no reload), which is also the quickest way to review both palettes.
-
-## Tech stack
-
-- Dependency-free Node HTTP + SSE runtime (`src/server`) hosting the renderer
-- Electron + electron-vite for the optional desktop container
-- React 19 + React DOM
-- Vite + `@vitejs/plugin-react`
-- Tailwind CSS v4 + `@tailwindcss/vite`
-- xterm.js for the terminal panel
-- Monaco Editor for file editing and Git comparisons
-- lucide-react for product icons
-
-## Chat protocol
-
-The Chat tab talks to the Mica CLI via `mica app-server`, a per-chat-node resident process speaking the Codex v2 App Server protocol subset over stdio (JSON-RPC style, one JSON object per line): the app sends `initialize`/`thread/start`/`turn/start`/`turn/steer`/`turn/interrupt` and consumes v2 notifications (`turn/started`, `turn/completed`, `item/agentMessage/delta` for text, `item/reasoning/textDelta` for thinking, `item/commandExecution/outputDelta` plus `item/started`/`item/completed` for tool calls — pending then completed with the same item id, `thread/tokenUsage/updated` for usage). Mica extension notifications surface long-lived host state: `mica/queue/*` for the after_iteration queue and `mica/backgroundTasks/updated`/`mica/subagentTasks/updated` snapshots for background shell tasks and running subagents (including background subagents still active after the parent turn), which the renderer keeps as resident rows above the composer — the same task status area the CLI shows above its input. Those rows are actionable: clicking one opens a live detail modal (a background task's output tail, or a subagent's transcript — prompt, thinking, streamed text, tool calls with their arguments and results, final result and usage) that polls every second while the task runs and stops once it finishes; a background task's trailing ✕ stops it after a second confirmation. Both go through Mica extension requests (`mica/backgroundTasks/kill|output`, `mica/subagentTasks/detail|kill`) rather than the snapshot, because the snapshot deliberately carries only running tasks and the task records live in the host process: a background task's `output` response therefore carries its own task projection (final status and exit code included), and a subagent's transcript is fetched on demand so it never bloats the per-second push. The runtime (`src/host/chat.js`) maps these notifications back to the renderer's internal event shape (forwarding each `thread/tokenUsage/updated` as it arrives, so the composer status line's tokens/cached/ctx keep refreshing during long turns instead of only at `turn/completed`; those figures come from `tokenUsage.last`, the current context occupancy), paces adjacent text/reasoning deltas, and keeps the host alive across turns (skipping process startup, session reload and MCP re-init; every busy Enter/Tab/Shift+Tab steers into the active turn for after_iteration injection, so a queued message lands at the next tool-call iteration instead of waiting for the whole turn to finish). A waiting message can be pulled back into the composer exactly like the CLI's shift + ← (the queue dock row also carries a recall button): `chat:recall-queued` empties whichever slot holds it — the local after_turn queue, or the host's after_iteration slot through `mica/queue/recall` — and the recalled text is restored into the input, so the composer never becomes read-only just because a message was queued. Aborts send `turn/interrupt` instead of killing the process (SIGTERM fallback). Conversation history plus model/context metadata is read from `~/.mica/sessions/*.json` when a session is reopened, and turn lifecycle notifications are posted to the local notify server so sidebar dots and unread badges behave exactly like PTY-hosted Mica sessions.
-
-The sidebar intentionally has four activity indicators sharing one fixed row-leading slot (`RowLeading`, always `w-4` so every row keeps the same title indent): a green dot breathing while a Mica turn is running (`chat-dot-running`), the terminal icon while that session has a long-running terminal foreground process, a blue dot marking a result the user has not read yet, and a steady red dot for a turn that never finished normally. The terminal icon owns the slot when both apply, with the unread/red dot stacked on its top-right corner; running takes precedence, and merely opening an idle session never creates a status dot. The red dot is a session _state_, not an unread badge: it clears only when a later turn completes (reading the session does not clear it), it covers a turn that ended in error as well as the `running` residue of a process that died mid-turn, and it deliberately excludes user-requested aborts (`turn.aborted`) and sessions another process is actively running. That last distinction is decided host-side in `session-lease.js` — a persisted `turnState: "running"` only reads as interrupted once nobody holds the session's `sessions/.turn-locks/<id>.lock`, so a TUI running the same session in another terminal is not mislabelled, and the same probe read the other way sets `remoteRunning` for a session whose lease is alive right now — another window, the other runtime instance on the same machine, or a terminal — which breathes green instead of looking idle (the host attaches both flags to the session meta rows). A live turn lease also blocks writes: `chat:start`/`chat:edit-message` refuse a session another process is running (the app rolls the optimistic message back). Within one runtime that is rarely the case, because the workspace is shared — every window has the same chat nodes, so a second window is attached to the same run and streams the same turn live (there is no per-window "another window is running this" state any more). Only another _process_ (a TUI, `mica exec`, or a second runtime instance) leaves a page without any event stream: `chat:is-running` then reports `remoteRunning`, the composer shows 正在另一个进程里运行 and disables send until the lease is released. Every row ends with when it last moved — the relative time at the _end_ of the row, but only where that time still tells you something: Pinned and Projects are long-term shelves, so their rows and their folded group rows show the relative time only for something that moved within the last 24 hours (`activeTimeLabel` in `relative-time.js`; older entries keep the count and the time in the tooltip only, otherwise the whole column is a wall of `15d`), while Recent — whose whole point is recency — always shows it. Recent rows additionally keep the working directory base name as muted text in front of it, so sessions from different projects stay distinguishable without pushing the titles out of their column; a pinned or grouped session needs no such label because its section already says where it lives. Only a folded group row carries that fact for its whole subtree, and only as the time itself (`collectGroupDigests` in `session-projects.js` sums the latest update across it, so the folded row still says when it last moved, and a nested group counts for every ancestor) — an expanded group row stays empty on the right, because every child below it already shows its own time. Section headers draw neither count nor time on the right; both live in the label's tooltip. Folding a group away collapses it completely: a collapsed group is that one row, with no child rows and no preview of its contents. The hover actions of a group or a section header float on top of that tail instead of reserving a column, so the time always lines up with the session rows below it. Closing a conversation is no longer a hover affordance on the left, and the row's context menu (right-click, or long-press on touch) now owns **deleting** it instead: 删除对话 is always offered (independent of whether the tab is open, since it removes the session from disk rather than closing a tab — the tab keeps its own close button), asks for confirmation, and goes through the host's `stats:delete-session` (`src/host/session-delete.js`): the session file and its `sessions/.turn-locks/<id>.lock` go away along with the dangling pin / project-assignment / sort entries. A turn that is still running is refused — this process's chat turns via `isChatSessionRunning`, and a TUI running the same session in another terminal via the turn-lease liveness probe — because that turn would write the file back.
-Folding a row away never hides its activity. When a session ends up invisible — inside a collapsed group, a collapsed section, or the Recent overflow behind Show more — the first visible ancestor speaks for it by stacking the very same dot on the top-right corner of its own icon (the leading column is the chevron, the icon column holds the folder/section icon, so the badge is an overlay and never costs a column). `RowBadge` reuses the `chat-dot-running`/`chat-dot-unread` styling and the merge rule in `session-state.js` (`mergeRowStates`, running > unread), and `collectGroupStates` walks a group's whole subtree so a nested session or draft counts for every ancestor above it. The red dot deliberately does not float up: an interrupted turn is a property of one session the user has to open to act on, so it stays on its own row and a collapsed container never turns red. Exactly one visible row carries it: a collapsed section's header, a collapsed group's folder icon, or the Show-more row for the Recent overflow — an expanded section never speaks for what Show more trims, and an expanded group leaves the badge to its own rows.
-
-The sidebar has four sections in a fixed order — **Pinned**, **Projects**, **定时任务** (scheduled tasks), **Recent** — and a session lives in exactly one of them. 定时任务 is filled automatically rather than by hand: `sessionSectionOf(sessionId, { pins, projects, loopSessionIds })` resolves Pinned → Projects → _a session running a scheduled loop_ → Recent, so an unclassified conversation that starts a scheduled loop moves there on its own while anything pinned or grouped stays put, and the drag rules still do not know the section.
-
-**Projects** holds arbitrarily nested groups (`session-projects.json`: a flat `groups` array with `parentId` plus an `assignments` map, normalized on every read — dangling parents and cycles collapse to the root). A group row leads with the collapse chevron and a folder icon (open while expanded, closed while collapsed), like the section headers above it. Every sidebar row — section header, group, session — is the same `[action column][icon column][name]` grid (both leading columns are `w-4`) (`SessionTree.jsx`'s `ROW_PAD`/`COLUMN`/`GAP`/`TREE_STEP`/`NAME_OFFSET`/`Slot`), so a session's title, its group's name and the section label all land in the same column; a session keeps the leading column empty and puts its status indicator (`RowLeading`) in the icon column, Nesting costs exactly one step, and only for containers: a _nested group_ moves right by `TREE_STEP` (one `w-4` column plus `gap-2`, `24px`, so the child group's chevron sits on its parent's icon column), while the sessions and drafts inside a group stay in that group's own name column - a session in a first-level group therefore lands on exactly the same column as a Recent session, and the tree never uses more than that one indent distance. Re-using that grid is mandatory for any new row type — and for the empty-state hints and the Show-more row. A group row reveals a `+` (new session inside it) and a more-actions button on hover — always visible below `md`, where there is no hover — and its context menu owns 在此新建会话 / 新建子分组 / 重命名分组 / 删除分组; the section header's `+` creates a root group. Deleting a group drops its whole subtree and releases its sessions back to Recent. A session created inside a group starts in that group's working directory: `resolveGroupCwd` walks the group's subtree for the most recently updated session that has a `cwd`, then its ancestors, and only then falls back to the usual default. The freshly created draft is filed under its group immediately (`draftGroups` in `App.jsx` is page-local bookkeeping — the draft's _text_ lives in the shared UI state, but which group a tab was started from is only needed until it has a session id), and the assignment is written for real the moment the draft gets a session id.
-
-Group ordering is stored in `session-sort.json` under a per-group key (`project:<groupId>`, alongside the existing `pinned`/`recent` lists), so each group keeps its own manual order and a stale key left behind by a deleted group is harmless.
-
-**定时任务** runs the CLI's `/loop` inside the runtime, not in a page: `src/host/loop-state.js` holds the pure model (normalize / start / stop / due selection / count a round, unit-tested) and `src/host/loops.js` the host (one re-armed timer, `userData/loops.json`, the `loops:*` IPC, plus `catchUpLoops` so a loop that expired while the process was down fires once instead of replaying every missed round). A loop is keyed by the workspace **node id**, not by session id: a loop may be started on a draft that has no session yet, it fires the first round immediately, and the session id is bound on `turn/started`. Starting, pausing, resuming, editing and stopping are the same call the composer panel makes, and every change is broadcast as `loops:changed`. Each round goes through `chat.js`'s `runLoopTurn` — i.e. the chat host's own `startRun` — so a session that is already busy (or already held by another process) is _skipped_ instead of queued: the run counter stays put, the next attempt moves one interval out, and the reason lands in the row's tooltip. A round is a host-initiated turn, so the page has no optimistic bubble for it: the host pushes `chat:run-started` alongside `turn/started` (`{ id, sessionId, prompt, clientMessageId, startedAt }`) and the renderer appends the task's user message through `appendRunStartedMessage`, deduped by `clientMessageId` and by the trailing unanswered user row — without it a scheduled conversation shows the answers with no sign of what was asked until it is reopened, and it must not dedupe by text alone because every round sends the same task. The composer's clock is the **only** control surface: the section header has no `+`, a row's context menu (long-press on touch) is the ordinary session menu (pin / rename / delete / details), and nothing ever prefills a `/loop xx` command into the input — creating, re-intervalling, pausing, resuming, firing once and stopping all happen in the clock panel above the composer. Every row with a loop shows the clock icon next to its title **in every section** (a pinned or grouped conversation is never moved into 定时任务, so it must not lose the fact that it carries one) and the icon stays highlighted (`text-warn`) whether the loop is running or waiting; the tail keeps `每 30 分钟 · 3 次` and the state reads 运行中 (a round is executing right now) / 等待运行中 / 已暂停 via `loopStatusLabel(loop, running)`. The countdown still lives in the tooltip only — the tree never ticks per second. Deleting a conversation drops its loop (`stats:delete-session` → `dropLoopsForSession`).
-**Session search** (the sidebar search box) is the way back to a conversation you only half-remember, and it deliberately does not keep the four sections: as soon as there is a query the sidebar renders one flat list ranked by relevance (each row carries the section or group it came from at its tail, and a second line showing _why_ it matched). `packages/mica-web-shared/session-search.ts` holds the whole matching model — case/full-width folding that is length-preserving so a match offset can be mapped back onto the original text for the snippet, multi-word AND, the score tiers (title prefix > title contains > working-directory basename > full path > id/group/scheduled-task text > body-only), match ranges, snippet extraction and the time-range arithmetic — while `src/renderer/src/session-search.js` (pure, unit-tested) merges sessions and drafts into that list. Hits are marked up with `<mark>`, so a body-only match shows the `…` context line and a path-only match highlights the path instead; nothing ever matches silently. The box itself is sticky inside the scrolling list (an opaque background keeps it above the rows) and its second line holds the range pills plus the result count — the count lives there rather than under the list because the bottom of a long list is off-screen anyway. `⌘/Ctrl+K` focuses it (not while a terminal or a text area has focus, where Cmd+K means something else), `↑↓` moves the highlight, `Enter` opens, `Esc` clears. **Body search runs host-side**: `stats:search-sessions` (`src/host/stats.js`) matches the scanner's `text` projection (`parseSessionText` in `stats-core.js`) over user/assistant text only — notices and tool payloads are ignored, a plugin-injected message contributes its `displayContent`, compact's `[Mica compact boundary]` metadata is skipped entirely (it is internal state JSON that would otherwise eat the whole budget and win every query) and a `[Mica compact checkpoint]` summary only loses its marker line. Each session is capped at `SESSION_SEARCH_TEXT_LIMIT` (20k chars), keeping the head 60% and the tail 40% (marked in the middle, reported as `textTruncated`) since a long conversation is remembered by how it started and what it was doing at the end. The default range is **the last three days** (`SESSION_SEARCH_RANGES`'s `3d`, counted back in calendar days) and sessions outside it are never parsed — which is what makes it answer in 10–30ms over a directory of a thousand sessions; choosing 全部 takes the 600 most recently updated candidates and reports `truncated: true` (roughly 0.5–0.8s on a cold cache, cached afterwards). Content hits are fetched on a 220ms debounce with a `cancelled` guard, so a slow response never overwrites a newer query; local title/path hits appear immediately and the body hits join them when they arrive.
-
-The Files view's activity bar mirrors VS Code with four entries: Explorer, Search, Source Control (`CHANGES`) and `GIT TREE`. `CHANGES` is the VS Code view of the working tree — uncommitted changes against `HEAD` (`git:summary`, host `git.js`), the same set the activity-bar badge counts and the explorer decorates — while `GIT TREE` roots the branch's own changes (`git:branch-summary`: `merge-base..worktree`, so committed and uncommitted changes plus untracked files) under the current branch, i.e. what this branch adds on top of its base branch, which stays visible after the agent commits. The base branch is `origin/HEAD` when it exists, then `origin/master`, `origin/main`, `master`, `main` (`resolveBaseRef`); when the current branch _is_ the base — or the repository has no such branch, or is in detached HEAD — the dataset degrades to the working tree so the panel never claims "no changes" just because you are sitting on `master`. Picking a file in `GIT TREE` diffs it against the merge base instead of `HEAD` (`git:file`'s `base: 'branch'`, carried by the selection), which is what makes an already-committed branch change visible at all. While the workspace is dirty the source-control icon carries an orange badge with the changed-file count, and the explorer decorates changes the way VS Code does — a changed file takes its status colour (gold modified, green added, red deleted) plus a trailing `M`/`A`/`D` letter, and every folder above it inherits the most significant status of its subtree and shows a dot. Status letters, colours, the folder roll-up and the repository-relative path helper live in `src/renderer/src/git-decorations.js`. The explorer header follows the VS Code layout too: the folder's base name in bold (the absolute path only survives as the tooltip) plus four buttons — new file, new folder, collapse all — the latter dropping loaded subtrees so expanding re-reads them — and a more-actions menu holding refresh, collapse all, go to the parent directory, reveal in file manager and copy path. Menus share one floating layer (`FloatingMenu`) whose anchor buttons opt out of the press-to-close rule, which is what lets the more-actions button toggle its own menu. Entries matched by `.gitignore` — files and folders alike — render greyed out (dimmed label, desaturated icon) while staying fully interactive: the flag rides on the host's `files:list`, which asks `git check-ignore --stdin` once per directory listing (`src/host/git-ignore.js`; paths outside a repository, or a machine without `git`, simply mark nothing) because the rules deciding it live in `.gitignore` files, `.git/info/exclude` and the user's global excludes rather than in the path. Picking a file in `CHANGES`/`GIT TREE` opens the lazily-loaded `GitDiffEditor`, which lands on the first change (`revealFirstDiff`) instead of the top of the file, and leaves the layout to Monaco: side-by-side while the editor pane is wider than the inline breakpoint, inline diff once the pane is narrower, so a narrow pane never squeezes two unreadable columns. `CHANGES` splits itself the way VS Code does: staged work gets its own `Staged Changes` group above `Changes` (the group vanishes when empty, mirroring the `hideWhenEmpty` index group, while `Changes` stays put), and every file is filed by its porcelain `XY` code — one staged _and_ edited again (`MM`) shows up in both. Hovering a row reveals the VS Code inline actions — open file, discard changes, stage/unstage — right-aligned in front of the status letter. Those three are the app's only Git writes: `git:stage` / `git:unstage` / `git:discard` live in `src/host/git-ops.js`, which deliberately imports no Electron so `git-ops.test.js` can drive real Git against a temporary repository; `discard` is irreversible — untracked files are deleted, tracked ones restored from the index — so the renderer confirms first, naming the file. List rows hover with `--color-list-hover` (`#2a2d2e`, _darker_ than the panel, not lighter: that is VS Code's fallback `list.hoverBackground`) and a 4px radius, and the Explorer/`CHANGES` decorations use the VS Code `gitDecoration.*` palette (gold `#e2c08d` modified, green `#73c991` added or untracked, red `#f14c4c` deleted).
-
-The tab strip follows the theme's own layering rather than the chrome colour: the empty strip is _darker_ than the editor (`--color-tabstrip`, the `editorGroupHeader.tabsBackground` VS Code falls back to because Darcula leaves it undefined), so the active tab — painted `canvas` — reads as the lighter one and merges into the editor below it. The 1px separator under the strip is therefore drawn as an inset shadow on the _inactive_ tabs (plus a `flex-1` filler for the empty area) instead of a border on the container: a container border sits outside the tab boxes and would show up under the active tab too, which is exactly the hairline VS Code does not draw. Darcula defines no `tab.activeBorderTop`, so there is no accent line across the active tab.
-
-The `SEARCH` panel drives `files:search` (host `files.js` over the pure matcher in `src/host/search-core.js`) with the VS Code query toggles — `Aa` case, `ab` whole word, `.*` regex — and the include/exclude boxes, both using VS Code glob semantics (a pattern with no `/` matches the basename at any depth, `**` crosses directories). The host reports each hit's line, column and highlight range, because the renderer cannot recompute the match once a long line has been truncated or a regex is in play; results group by file with a per-file count, and clicking a hit opens the file at that line. An in-progress regex (`([`) comes back as a message, not an error page. Both git panels also carry a refresh button in their header (`onRefreshGit`) on top of the 10s poll.
-
-Chat Markdown uses `react-markdown` with GFM support. Raw HTML is not rendered; tables, task lists, fenced code, nested lists and streaming incomplete blocks are handled by the parser, while code blocks, messages and tool details expose copy actions. `todo_write` drives a plan dock above the composer, and Agent/background-shell calls receive dedicated activity summaries. A user turn and a model answer are told apart by three things, and none of them is a new column: a user message sits on a raised band (`--chat-user`, the `--color-panel-hi` rung — `--color-panel` is what the compact notice already claims, so the two bands stay distinguishable), its text takes the brightest foreground rung (`--color-fg-max`) while the answer keeps the reading color (`--color-fg`), and the turn rhythm is tight inside a turn (11px before an answer) but airy between turns (20px before a prompt). Both markers and the body inset stay shared with the notices, so the `▌` column never shifts.
-
-Quick open (`Ctrl+P`) and the full-text overlay (`Ctrl+Shift+F`) render in the same VS Code quick-pick shell as the footer's branch and directory pickers (`quick-pick-*` in `assets/app.css`): a 640px panel anchored near the top, 22px rows with the name bright and its directory dimmed, a separator between the action rows and the list, and a 520px cap so a long list scrolls instead of covering the window. Quick open goes through the host's `files:find`, which reuses the `mica-file-mentions` workspace scan and its 45s cache (100 candidates, directories filtered out because the action is opening a file) — the same names and latency the `@` completion sees — while `Ctrl+Shift+F` still drives `files:search`. An empty query shows a hint instead of enumerating the workspace. The branch picker in the footer opens the same shell and keeps each ref's git date as a Chinese relative time (`git-refs.js`), with the author/hash/subject on the row's second line.
-
-The Chat view keeps the same minimal status line as the Mica terminal: the left side shows the running indicator, and the right side shows `model_effort` and context usage as plain text. A single-line bar above the transcript always shows the newest sent user message (`lastUserPromptText`, ellipsised; queued messages stay in the queue dock instead), so the current task stays visible while scrolling. Double-clicking a user message swaps its text for an inline editor whose bottom-right corner carries Cancel / Confirm; Confirm is enabled only while Mica is idle (`canSubmitMessageEdit`, unit-tested) and calls the host's `chat:edit-message`, which asks the app-server for `mica/turn/editMessage` (`MICA_METHODS`): the session history is truncated at that message — located by whitespace-folded text plus an occurrence counter, because persisted messages carry no ids — saved, and rerun with the edited text. The `mica/sessionHistory/replaced` notification then swaps the transcript, so everything that followed the edited message leaves the context instead of staying in it. Clicking the model text opens a selection panel (catalog from `mica models`), clicking the `ctx` text opens a context-usage modal with a token bar and the same breakdown as `/context`; model and effort apply on the next message via `--model`/`--variant` overrides; the arrow left of the composer shows and switches the role, which rides on the next `turn/start` (`buildTurnStartParams`, Mica's `role` extension) so the resident host switches without respawning. Every choice made here lands in the session snapshot, which is why reopening a session restores the model, effort and role it was last used with. The app footer pairs the Git branch (left) with the working directory (right), and both always describe the same directory: the active chat node's working directory, never the `cd` of a shell running in the terminal panel. Clicking the directory opens a picker (recent directories aggregated from session history, a system folder chooser, and manual input); switching re-points the current chat and becomes the default directory, so New Session starts in the most recently used directory. Typing `@` opens a file completion and `/` a skill completion above the composer, and picking a candidate only inserts text into the input (`@src/a.ts ` for a file, `/ask ` for a skill) — nothing runs and Enter still just sends the message. `/` lists the skills of the session's working directory plus `$MICA_HOME/skills` (host `skills:list`, `src/host/skills.js`). `@` is the same completion the terminal uses: the host's `files:mention` (debounced 100ms, immediate for an empty query) returns candidates from `packages/mica-file-mentions`, the package that also backs the CLI plugin and its input box, so both sides share one trigger rule, one workspace scan (`git ls-files` plus `fd` when present, cached per workspace and prewarmed when a run starts) and one scoring pass (basename before path, directories first, 20 candidates max, `labelHighlights` for the matched characters); nothing is re-ranked in the renderer. `↑↓`/Enter/Tab pick a candidate and Esc dismisses the list. Each row reads `name | description` (skill: `/<name>` then its description; file: file name then its workspace-relative path), the name always keeping its natural width while the description truncates, and a composer too narrow for both drops the descriptions instead of squeezing the names. The composer runs **no** input command: `send()` does no slash dispatch, so `/xxx` (including `/loop`) reaches the model as ordinary text exactly like any other prompt, and `/` only drives the skill completion. Do not reintroduce a "runnable in the composer" whitelist over `CHAT_COMMANDS` — `/` is also the skill completion (`/ask`, `/commit`…) and `/Users/qi` is just a path; capabilities that need UI (scheduled tasks and friends) belong on a panel entry instead. Chat commands (compact local/model, clear, commit, fork) keep living on the transcript's context menu (`ChatContextMenu`, also reachable by long-press on touch). Selecting text inside the transcript adds 引用 as the menu's **first** item (`readTranscriptSelection`): it quotes the selection into the composer through the same `quoteIntoDraft` path as the hover quote button, labelled 我 / 模型 when the whole selection sits in one message and 对话 when it spans messages, while selections inside the composer never produce it. Auto-scroll follows output only while the reader remains near the bottom, with resize anchoring for streaming Markdown and reasoning. The transcript also keeps its own scroll position per conversation. What actually wipes it is React _moving_ the `.chat-view` node inside its parent (which rebuilds its layout box), and that happens whenever the panes are rendered in most-recently-used order — hence workspace-node order. Hiding a pane with `display:none` alone does not reset the scroller (measured: 4511 stays 4511, while moving the same node gives 3011 → 0). `chat-scroll.js` (unit-tested) covers the two things the browser cannot: a pane rebuilt after LRU eviction, and staying pinned to the bottom when the content grew while the pane was hidden.
-The composer's action strip ends with a clock that opens the loop panel (`LoopPopover.jsx`) directly above the input — the same spot and layer as the `@` completion and the model picker. It is the visual counterpart of the CLI's `/loop <interval> <task>`: the same `loops.start` call, the first round firing immediately. On a conversation that already has a loop the panel becomes its editor (interval, task, 立即执行一次 / 暂停 / 继续 / 停止), and the interval and progress strings all come from the pure `loop-command.js` so the page and the host cannot disagree. A composer whose node carries a loop also _looks_ different, mirroring the CLI's loop prompt: the container gets `.chat-composer-loop` (warning-tinted border and background), the leading marker turns into ⏰ (`.chat-prompt-mark.is-loop`) and `LoopBadge.jsx` prints the CLI-shaped badge on the top-right edge (`⏰ 每 30 分钟 · 下次 3 分 12 秒 · 第 3 次`, with 运行中 replacing the countdown while a round is in flight); that badge owns its own per-second ticker — keeping the timer in `ChatView` would re-render the whole transcript every second — and it wins the top-right slot over the queue hint. On a computer the strip deliberately has **no send button** any more: Enter (or Tab) is the gesture, leaving only the upload and clock buttons, while phones keep 发送/加入队列 because a soft keyboard has no Enter. 「停止生成」 stays on both, since it is unrelated to how a message is submitted.
-The action strip also carries the CLI's **`/btw`** as a right-side **drawer**, labelled **By The Way** in the UI (the same wording the CLI's btw prompt uses) — `BtwDrawer.jsx` (`.chat-btw`), between the character-count hint and the clock, with `aria-expanded` on the trigger. The drawer is a sibling of the transcript inside `.chat-view`, not a popover: `.chat-view.chat-btw-open` reserves its strip with `padding-right: var(--chat-btw-width)` and the drawer takes the same variable as its width (`min(400px, 45%)` — both percentages resolve against the same width, so the two never overlap or leave a seam), which keeps the transcript _and_ the composer fully usable while it is open; below 768px it covers the view instead (`padding-right: 0`, `width: 100%`). It does not reuse the shared `Popover` shell and therefore does not dismiss on an outside click either — reading the main transcript while the drawer is open is the normal case, and a stray click must not throw away the half-typed question — so the ways out are the header's ✕, Esc (document-level, so it works from any focus), Cmd/Ctrl+Shift+B (bound in `ChatView` only while this node is visible and has a session, and ignored when focus lives outside `.chat-view`) and the trigger itself. Questions and answers reuse the transcript's own row grammar (`.chat-message` / `-user` / `-assistant` with the `▌`/`●` markers, `.chat-markdown`, one `--chat-text-size` rung) on the content surface (`.chat-btw-body` is `--color-canvas`) while the header and input row stay on the frame color (`--color-panel`) — the user band (`--chat-user`) is only 27 levels above canvas and would be invisible on panel. It exists to be usable _while the main turn runs_ — that is the whole point — so it never queues a message, never touches the run lifecycle, and is only disabled on a draft without a session id or on `remoteRunning`, where there is no host to hold the main transcript. The panel is a _thread_, not a chat bubble: `mica/btw/ask` (`MICA_METHODS.btwAsk`) hands the question to the resident host and returns immediately, because the request loop awaits one line at a time and a synchronous model answer would block `turn/interrupt`, `turn/steer` and `mica/queue/recall` for as long as it takes. Because btw _is_ a Mica run — the same agent loop, with read-only tools — that snapshot is a **live** one: the host wires the subagent's text/thinking/tool-call/tool-result callbacks into the in-flight entry and pushes a merged whole-thread snapshot every 80ms, so the drawer renders thinking, tool rows (the transcript's own `chat-tool-views.jsx` components — wrapped reasoning text plus one-line tool rows and the shared tool detail dialog in `chat-tool-detail.jsx`, one implementation for both surfaces) and the answer as it streams, with a blinking caret on the last line. Phase labels, the header timer and the "still running" judgement are pure functions in `btw-thread.js` (unit-tested); the header's 250ms ticker lives in the drawer, never in `ChatView`. Only the entry that is running carries thinking/tool rows — the host clears them when the next question starts, exactly like the transcript's turn log describes the current turn — and every field is capped, because the whole thread is re-sent on every flush. The CLI's `/btw` folds the same callbacks into one progress line above the input, a terminal has no room for a live transcript, and an aborted answer keeps the text it already streamed. Failures raised while the drawer is open land in its own notice strip (`chat-btw-notice`) instead of the transcript's notice — that one would sit **behind** the drawer, so the click would look like it did nothing; with the drawer closed they still go to the transcript (info notes such as a copy or a compaction clear themselves after a couple of seconds; errors stay until dismissed or the next question). An answer that lands while the drawer is closed leaves a dot on the trigger (`chat-composer-btw-dot`) until it is opened, and each tab carries its own state mark (breathing dot while running, red for a failed last answer, amber for one the user stopped) with the full first question, the Q&A count and the failure reason in its tooltip. Leaving the bottom of the thread shows a 最新 pill that jumps back and restores auto-follow, switching tabs scrolls to the newest entry instead of keeping the previous thread's offset, and the `+` button is disabled at `BTW_MAX_THREADS` — the host's own limit, shared through `mica-common/btwLimits.ts` — rather than failing after the click. The right-click menu also copies the whole thread as Markdown (`btwThreadMarkdown`, questions and answers only), and selecting text in the main transcript offers 问 btw: it opens the drawer with the selection already quoted into its draft.
-
-The answer comes back as a whole-thread snapshot on `mica/btw/updated` (host state, delivered like the task snapshots, never through the turn event buffer), and follow-ups continue the same isolated subagent — exactly the CLI's `/btw -continue` — while 新话题 sends `{ newThread: true }` with an empty question to reset it so the next question re-reads the main transcript. Answers are rendered with the chat's own Markdown (passed down as `renderAnswer`, so the panel never imports `ChatView` and creates a cycle), a half-typed question is kept per node like the composer draft, and if an answer lands while the drawer is closed `newlyAnsweredBtwEntries` (pure, unit-tested) adds a notice — its baseline is "that entry was still running in the previous snapshot", which is why restoring a session does not re-announce old answers. Nothing here ever enters the transcript or the provider context: btw is by definition out-of-band, and hiding it in the conversation would blur which content the model actually saw. Two small affordances keep a long thread workable: an `error`/`aborted` entry carries a 重试 button that re-asks the same question (`btwEntryRetryable`, pure and unit-tested — a completed answer never offers it), and Alt+↑/↓ walks the questions of _this_ tab only (`btwHistoryStep`), stashing the half-typed draft until you come back to the bottom. A tab with no questions is never persisted: `BtwThreads.exportState` / `restore` and `readBtwState` all drop threads whose `entries` are empty, so opening the drawer after a restart never shows a row of empty 新线程 tabs.
-
-**会话压缩** is an official plugin (`plugins/session-compact/`) and nothing happens unless you ask for it: the only entries are the two right-click items in the conversation area (manifest `surface: "chat"`: they act on the history you are reading, so the sidebar session row does not offer them) **快速压缩** (replace only the tool results with placeholders — local, no model call, nothing else in the history changes) and **模型压缩** (send the user/assistant dialogue to the model and fold old history into a checkpoint summary). Both go through `ctx.agent.compactIdleHistory`, so they rewrite the **persisted** history: reopen the session and it is still compacted. There are no thresholds, run counters or idle reminders — `settings` is gone, and all the plugin keeps is the `llm` panel for choosing the summarization model (it reuses the session model by default). A model compaction opens a maintenance window while it runs, so a message you send in those seconds waits in the queue instead of slipping into the history being rewritten; a running turn makes the host answer `busy` and the plugin just says so. Only the history sent to the model is rewritten — the transcript you are reading keeps the full conversation.
-
-Pasting an image into the composer saves it into `~/.mica/images/` (mirroring the terminal input) and inserts an `[Image](...)` ref; the headless run resolves the ref into a multimodal content block before calling the model, so vision-capable models see the pasted image directly. Models whose API rejects image input (e.g. DeepSeek chat completions) surface the provider error in the conversation instead. The photo button next to send covers the same path for devices without a clipboard paste (phones): it opens a file picker limited to the formats the CLI can read (`accept="image/png,image/jpeg,image/webp,image/gif"`, which is also what makes iOS transcode HEIC to JPEG), uploads every selected file through `POST /api/paste-image`, and inserts the refs at the caret. `saveImageDataUrl` (`src/host/chat-images.js`) names the stored file after the data URL's media type — falling back to magic-byte sniffing — instead of always writing `.png`, which is what previously mislabelled a pasted JPEG.
-
-The Files view and the terminal panel both belong to the session shown in the main area, and switching conversations switches them with it. Files shares the main column with the transcript: a path link in the transcript opens the file in place, while the file icon at the top-right of the chat switches the main column to Files instead (clicking it again, or the 「返回对话」 button, goes back to the chat; there is no shortcut). That icon also carries the working-tree badge — `+1.2k` in green and `−840` in red to its right (`src/renderer/src/git-badge.js`). Line counts are the one number that runs away, so anything past four digits is compacted to about five characters per side (`+999`, `+1.2k`, `+12k`, `+999k`, `+1.2M`, always rounded *down* so the badge never overstates), a side that is zero is not drawn at all, a change with no line delta (permissions, binary, a pure rename) falls back to the file count, and a clean tree draws nothing; the exact numbers plus the changed-file count live in the tooltip, so nothing is lost. The numbers come from `git:change-counts`, which reuses the `CHANGES` panel's own summary (`sumLineChanges` over the same file list, untracked files included) so the two surfaces can never disagree; outside the Files view it is fetched on a 20-second TTL rather than on every Git poll, the Files view reuses the `git:summary` it already runs, and a finished turn forces one refresh so the agent's edits show up right away. Files is a view of the main window, not a page of its own: the transcript, the editor and the stats page share `App.jsx`, and a plugin's review switches to the same editor view (`reviewTarget`) instead of opening a second window — nothing to keep in sync, nothing to bring forward. It reads Git through `src/renderer/src/useGitWorkspace.js` — the same `git:summary` / `git:branch-summary` / `git:status` calls and the same shared `gitCompareBase` / `gitCompareHead` tables, and a review's own baseline takes precedence over the per-repository one while that comparison is open. The source-control panel keeps the two seats in one bordered block: 原分支 (the older side, compared against the working tree by default) and 目标分支, which starts as 工作区 and can be any branch, tag or commit — choosing one switches that page to a commit-to-commit `git:ref-summary` read (no `status`, no polling). Both seats live in UI state per repository, so switching them changes this page only and never the session; during a review the two seats edit that comparison itself, and putting 工作区 back into 目标分支 ends the review and returns the tree to the session's own directory. A 「返回对话」 button appears on every non-chat view of the main window, and the tree roots itself at that session's working directory (the same directory the footer shows). The terminal is a VSCode-style panel docked to the bottom of the main column: the terminal icon next to the file icon — or `Ctrl+Backquote` — toggles it, and it listens for Ctrl only because macOS claims `Cmd+Backquote` for cycling windows, its top edge is a drag handle (the drag writes the panel's height straight to the DOM and only commits to `layout` on release, capped at ¾ of the viewport), and because it is docked rather than floating the composer stays usable while a command runs. Terminals belong to the session that opened them (`rightTermsByChat` in `App.jsx`, keyed by chat node id, with `allRightTerms` handed to `TerminalHost` so other sessions' panes stay mounted and only get hidden) — switching back therefore restores the shells you left running instead of dropping you into the previous project's directory. Opening the panel in a session that has no terminal creates one on the spot; a session you merely click through never spawns a PTY. That list is seeded from the runtime's UI state (`resolveStoredRightTerms` in `src/renderer/src/right-terms.js`) instead of starting empty: the panel's open flag is restored at the same moment, so a first frame that looks like "this session has no terminal" makes the ensure-one effect add another, leaving one more 「终端 N」 behind on every reload or extra window. Both surfaces mount on first use and are never unmounted afterwards (`filesMounted` / `terminalMounted`), so their chunks stay out of the startup path while reopening one keeps its open (and unsaved) files and terminal scrollback — which is also why `filesRef` may be null when a path link asks for a file: `openFileInView` falls back to `pendingFileOpenRef` and the effect flushes it once the callback ref reports the view is mounted. When the session's path changes (the footer picker, or a resumed session) the terminals left behind in the old directory are disposed and respawned at the new one, while a terminal running a foreground process is left alone — restarting it would kill whatever the user started (`staleRightTermIds` in `src/renderer/src/right-terms.js`). Because every terminal is a real PTY, the panel sweeps itself every 10 minutes: a session untouched for 8 hours releases its whole group, and within a session still in use only terminals with no activity for 8 hours are released, so a long-lived app does not accumulate shells for conversations the user has moved on from. A terminal running a foreground process and the session currently on screen are always kept, and a released terminal simply comes back in its session's directory the next time it is opened. Closing a session reclaims its terminals too.
-
-## Recommended IDE Setup
-
-- [VSCode](https://code.visualstudio.com/) + [ESLint](https://marketplace.visualstudio.com/items?itemName=dbaeumer.vscode-eslint) + [Prettier](https://marketplace.visualstudio.com/items?itemName=esbenp.prettier-vscode)
-
-## Project Setup
-
-### Install
+准备 Bun、Node.js 22.19+ 和 npm。在仓库根安装依赖后，进入本目录：
 
 ```bash
-$ npm install
+# 仓库根目录
+bun install
+
+cd apps/desktop
+npm install
+npm run dev
 ```
 
-### Development
+`npm run dev` 先构建 Web 运行时，再启动 Electron 与 Vite。页面通过同源 `/api` 与 SSE 调用运行时。桌面端通过 `resolveMicaExecutable()` 调用已安装的 CLI；修改 CLI 源码后需自行重新构建 CLI，并在需要时用 `MICA_CLI_PATH` 指向独立安装入口。包含隔离安装目录的完整示例见 [项目 README](../../README.md#桌面与浏览器)。
+
+## 验证
 
 ```bash
-$ npm run dev            # builds the runtime, then electron-vite dev (renderer HMR)
+# 本目录：全部 host / renderer / main 测试
+npm test
+
+# 只验证相关文件或目录
+npm test -- src/host/git-watch.test.js
+npm test -- src/renderer/src
+
+# 仓库根目录：CLI 与共享包
+bun run typecheck
+bun run test -- packages/mica-agent/providers/piModelClient.test.ts
 ```
 
-In dev the page is served by the Vite dev server and `electron.vite.config.mjs` proxies `/api` to
-the runtime, so the page always talks to `/api` on its own origin.
+桌面测试由 `scripts/run-tests.mjs` 启动 Bun，默认 4 个并行 worker、每项 20 秒超时。父进程先隔离全局 Git 配置与本机 Git 包装程序，避免临时仓库里的提交执行开发机 hooks；测试结束清理临时 PATH 入口。单靠 worker 中的 preload 修改环境，无法隔离 Bun 并行测试的默认子进程环境。
 
-### Mobile keyboard diagnostics
+测试与调试使用独立 `MICA_HOME`。启动隔离桌面实例还需独立 `MICA_DESKTOP_USER_DATA`、`MICA_DESKTOP_PORT` 与 `--user-data-dir`，详见 [构建与验证约定](../../agent/build.md)。可重复使用的界面探针集中在 [.probe/](./.probe/README.md)。
 
-When the native phone keyboard fails but the simulated viewport check passes, build the renderer
-and serve it against the already running desktop runtime:
+## 构建与运行
+
+以下命令在本目录执行。构建会产出新文件；运行中的应用何时重启由开发者决定。
+
+| 命令 | 结果 |
+| --- | --- |
+| `npm run build` | 并行构建并安装 CLI、构建 Electron 外壳/renderer、构建 Web 运行时 |
+| `npm run build:server` | 只构建 `out/server/index.mjs` |
+| `npm run build:app` | 完整构建、打包本机 `.app` 并执行本机快速签名 |
+| `npm run pack:app` | 将现有产物打包为应用目录，跳过 electron-builder 签名 |
+| `npm run sign:app` | 对现有 `.app` 执行本机签名；无证书时跳过 |
+| `npm run build:mac` | 完整构建并生成 macOS 发布包 |
+| `npm run build:win` / `build:linux` | 构建对应平台发布包 |
+| `npm run start:web` | 启动已有的 Web 运行时 |
+
+`build` 会调用根目录的 `bun run build`，默认更新 `~/.local/lib/mica` 与 `~/.local/bin/mica`。保留发布版时使用根 README 中的独立安装目录。构建锁、macOS 签名与跨平台条件只在 [agent/build.md](../../agent/build.md) 维护。
+
+独立 Web 工作区需要已有的 renderer 和 server 产物：
 
 ```bash
-npm run build:app
+npm run start:web -- --host 127.0.0.1 --port 8787 --no-share
+```
+
+默认监听地址为 `0.0.0.0:8787`。运行参数包括 `--host`、`--port`、`--renderer`、`--no-share` 与 `--allow-missing-renderer`；对应环境变量为 `MICA_DESKTOP_HOST`、`MICA_DESKTOP_PORT`、`MICA_DESKTOP_RENDERER`、`MICA_DESKTOP_SHARING`。端口占用时以启动日志中的实际地址为准；`GET /api/health` 返回运行时指纹。
+
+远程访问没有账号体系。完整运行时 API 可以在宿主读写文件、运行命令；仅本机使用时绑定 `127.0.0.1`。LAN、口令与分享链接的访问范围见 [远程与手机访问](https://qirong77.github.io/mica-code/docs/remote-access/) 和 [agent/desktop.md](../../agent/desktop.md#共享状态与路由)。
+
+## 源码边界
+
+| 路径 | 职责 |
+| --- | --- |
+| `src/host/` | 对话宿主、文件、Git、统计、工作区终端与持久化等业务 |
+| `src/server/index.js` | 托管页面，提供 `/api/invoke` 与 SSE，实施访问守卫 |
+| `src/main/` | Electron 容器、导航、窗口生命周期、浏览器/终端控制、系统检查 |
+| `src/preload/index.js` | 固定的 `window.micaClient` 客户端能力桥 |
+| `src/renderer/` | 页面、HTTP/SSE transport 与视图状态 |
+| `../../packages/mica-web-shared/` | 跨宿主的地址、主题、状态、展示和用量纯逻辑 |
+| `../../packages/mica-config-ui/` | 配置页及 Arco 共享控件 |
+| `../../packages/mica-editor/` | Notebook 与 Markdown 共用的隔离 Lexical 编辑器 |
+| `../../plugins/` | 清单驱动的产品能力及其桌面模块 |
+
+对话宿主使用 CLI 的 `mica app-server`，通过 stdio 交换 Codex v2 风格协议子集；浏览器页面使用 HTTP/SSE 访问 Web 运行时。两个接口的用途与支持范围见 [Headless 设计](../../docs/headless-design.md) 与 [客户端接入](../../docs/multica-runtime.md)。
+
+客户端能力桥只向登记过的运行时窗口开放固定方法，校验发送窗口、主 frame 和认可的 origin。本机插件数据还需随包清单声明 `desktop.clientData: true`。旧 `mica-client:` fetch 协议不再支持；普通浏览器没有 `window.micaClient`。完整边界见 [桌面架构](../../agent/desktop.md#三层边界与装配)。
+
+运行时构建使用 `ssr.noExternal: true`，仅保留 Node 内置模块与 `node-pty` 为 external。`package.json.dependencies` 只放主进程/运行时实际 require 的包，renderer 依赖归 `devDependencies`。`electron.vite.config.mjs` 的 React/React DOM dedupe 保证共享配置页与 desktop 使用同一份 React；Vite 8 与 electron-vite 6 配套维护。
+
+## 界面与插件
+
+主题注册表只有一份：`mica-web-shared/theme.ts`。当前支持 Darcula、浅色、Catppuccin Mocha/Latte、Tokyo Night/Light，以及跟随系统。`theme.js` 设置具体 `data-theme` 和明暗档 `data-appearance`；主窗口、配置页、编辑器、终端与 Portal 使用同一套语义 token。控件与动画规范见 [agent/ui.md](../../agent/ui.md)。
+
+桌面插件通过清单声明入口、整页、输入控件、面板或会话菜单。随包插件的页面来自各自 `desktop.jsx`，宿主不按具体插件 id 分派产品逻辑。插件 API、版本化文档保存、关闭前保存钩子与原生启动器见 [插件开发文档](../../plugins/README.md)。
+
+Notebook 的树与正文存储归插件，共享编辑器运行在 sandbox iframe 中；第三方编辑器依赖首次从 CDN 加载。文件视图的 Markdown、配置页 Role/Skill 与 Notebook 共享编辑能力，说明见 [mica-editor](../../packages/mica-editor/README.md) 和 [Notebook](../../plugins/notebook/README.md)。
+
+会话压缩由 [Session Compact](../../plugins/session-compact/README.md) 提供。快速压缩聚合较早工具过程并移除思考/媒体载荷，保留用户和助手正文；模型压缩保存摘要加最近几轮，界面同步显示当前持久化记录。切换服务商/模型后，插件在下一次发送前快速压缩；没有按占用阈值或空闲时间自动生成摘要的设置。
+
+## 手机键盘诊断
+
+手机原生键盘问题需要在真实浏览器模式复现，包括添加到主屏后的模式。已有 renderer 产物时，可对接正在运行的运行时：
+
+```bash
 node scripts/serve-mobile-diagnostics.mjs
 ```
 
-The script prints the LAN URL (port 18787 by default) with `?viewport-debug=1` and a temporary
-NDJSON log path. `MICA_DESKTOP_PORT` selects the existing runtime port (default 8787). It proxies
-requests to that runtime so the same sessions remain available without restarting the desktop app.
-Reproduce in the same browser mode as the failure, including home-screen mode when applicable.
-The capture records viewport and element geometry, ancestor scroll offsets, browser/mode and build
-filenames. It does not read chat text, draft values, HTML, session identifiers or page query parameters,
-and adds no overlay or focus/scroll changes. Recording is opt-in and requires this dedicated server;
-the production runtime does not accept reports. Logs are bounded and stored only in the system temp
-directory. Stop the diagnostic server with Ctrl+C after collecting the reproduction.
+脚本默认使用运行时端口加 10000（通常为 18787），打印带 `?viewport-debug=1` 的 LAN 地址与临时 NDJSON 日志路径。`MICA_DESKTOP_PORT` 指向已有运行时，`MICA_DIAGNOSTICS_PORT` 可覆盖诊断端口。它记录视口、元素几何、滚动偏移、浏览器模式和构建文件名，不记录对话正文、草稿、HTML、会话 id 或查询参数。
 
-If the problem disappears while recording, compare with `/?viewport-debug=0` on the same server
-in the same browser mode before treating it as fixed. Geometry and computed-style reads can flush
-pending browser layout even though the recorder does not write styles or scroll positions. A passing
-Safari tab run also does not establish that an installed home-screen app works. The diagnostic
-server's manifest deliberately starts home-screen launches with recording enabled.
+采集仅在专用诊断服务开启，生产运行时不接收这些报告；结束后 Ctrl+C 停止服务。如果问题在采集时消失，应在同一浏览器模式对比 `?viewport-debug=0`：读取几何或计算样式本身可能触发布局，不能将录制时通过当作修复证明。视口算法及布局约定见 [agent/desktop.md](../../agent/desktop.md)。
 
-### Production build
+## 图标与第三方资源
 
-```bash
-$ npm run build          # = build:app (shell + renderer) + build:server (runtime)
-```
+品牌 SVG 唯一源为 `resources/icon.svg`。macOS 上修改后用 `npm run icons:generate` 生成窗口、安装包、网页与 PWA 图标，需要 `sips`、`iconutil` 和 Pillow。
 
-`build:app` runs `build:cli` (`cd ../.. && bun run build`) alongside the shell build, so the
-repo-root CLI binary and the `~/.local/bin/mica` launcher are rebuilt before packaging. The app
-resolves the CLI through `resolveMicaExecutable()`, so skipping this step leaves the window talking
-to a stale binary.
-Run `npm run build:server` alone when only the runtime changed and the CLI is already current.
+原生位图使用 Apple 的 824/1024 内容区；网页图标保持满幅。SVG 圆角需不大于图标尺寸的 `19/64`，否则 macOS 26 会加灰色底板。几何处理集中在 `scripts/generate-icons.py`，不要单独手改派生位图。
 
-`npm run build:app` is the local path: it runs the same build but packages with
-`electron-builder --dir`, skipping the DMG/ZIP compression that dominates a release build. The
-result is a runnable `dist/mac-*/mica-code-app.app` in roughly 6s. `npm run build:mac` adds the
-DMG + ZIP artifacts and takes ~27s.
-
-Build cost is split roughly as: CLI + shell + runtime in parallel (~4s), electron-builder `--dir`
-packaging (~2s), then zip + dmg compression (~20s). The last part compresses a 277 MB Electron
-Framework and does not shrink (`hdiutil` alone needs ~9s); that is why `--dir` is the local path.
-
-Build speed comes from these steps, all of which are load-bearing:
-
-- Vite 8 (Rolldown) via `electron-vite` 6. The renderer segment went from 26–29s to 4–5s.
-  `electron-vite` 5 peers on vite ≤7, so the two versions must move together.
-- `scripts/run-parallel.mjs` runs the CLI build, `electron-vite build` and the runtime build
-  concurrently. They write to disjoint directories, so serializing them only wastes wall time.
-- `tablerIconDeepImports()` in `electron.vite.config.mjs` rewrites `@tabler/icons-react` named
-  imports to per-icon deep imports at build time. The upstream barrel re-exports 6197 icon
-  modules, which the renderer used to parse in full; the rewrite drops 10870 modules to 4744.
-- `scripts/file-icon-assets.mjs` emits only file and folder icons reachable from the manifest,
-  without transforming every SVG as a module. Icons remain separate assets loaded on demand.
-- The macOS builder reuses the installed Electron distribution when its version and architecture
-  match, falling back to the usual download otherwise. DMGs use LZFSE compression (ULFO), which is
-  compatible with Electron 39's macOS 12 minimum; pass `--config.dmg.format=UDZO` to electron-builder
-  if a consumer requires the older format.
-
-Package size is decided by dependency classification, not by a file-exclusion list. electron-builder
-packs every entry of `dependencies` into `app.asar`, so renderer packages live in `devDependencies`
-(they are already bundled into `out/renderer` by Vite) and only `@electron-toolkit/utils`,
-`@xterm/headless` and `node-pty` stay in `dependencies`. Shipping the renderer set as well used to
-push `app.asar` past 200 MB (`@tabler/icons-react` alone is 91 MB of icon modules) and slowed both
-asar writing and archive compression; it is now ~15 MB. Add a new package to `dependencies` only if
-`src/main` requires it directly.
-
-`renderer.resolve.dedupe` pins `react` / `react-dom` to a single copy for the same structural reason:
-the config UI sources in `packages/mica-config-ui` resolve React from the repo root while the page
-resolves it from `apps/desktop`, and a second instance makes hooks in the settings page read from a
-null namespace (`Cannot read properties of null (reading 'useState')`).
-
-The renderer bundle is minified and split into on-demand chunks:
-
-- `electron.vite.config.mjs` sets `build.minify: true` explicitly — electron-vite leaves `minify`
-  off for all three (main / preload / renderer) segments, so without the override the page ships a
-  ~11.5 MB unminified bundle. With it plus `React.lazy`, the entry chunk is ~0.5 MB.
-- Monaco (the file editor and Git diff) is never in the startup path. `monaco.js` exports only the
-  pure helpers plus `loadMonaco()`; the editor itself lives in `monaco-runtime.js`, which is reached
-  by a dynamic import and by the lazily-loaded `GitDiffEditor`. `FilesView` creates its editor through
-  `ensureEditor()` on the first file open, so ~3.7 MB of Monaco is fetched only when you actually open
-  a file.
-- Everything heavy is a separate chunk: `FilesView`, `TerminalHost` (xterm), `StatsView`,
-  `SettingsView`, `QuickSearch`, `GitDiffEditor`. `FilesView` and `TerminalHost` are additionally
-  mounted on demand (`filesMounted` / `terminalMounted`), so their chunks are not even fetched
-  until the file view or the terminal panel is opened for the first time.
-- The 1500+ file-type icons are emitted as individual assets (`?url&no-inline`); inlining them put
-  ~2.2 MB of data URIs into the entry chunk.
-- The runtime's static handler gzips text assets on the fly and marks content-hashed assets
-  `immutable`, so the Monaco chunk crosses a LAN at ~0.9 MB instead of ~3.7 MB, and repeat loads come
-  from cache. This is deliberately local rather than a CDN: the page's CSP is `script-src 'self'`, and
-  both the Electron window and the LAN mode must work offline.
-
-### Package
-
-```bash
-# Windows
-$ npm run build:win
-
-# macOS
-$ npm run build:mac
-
-# Linux
-$ npm run build:linux
-```
-
-## Architecture: web runtime + Electron container
-
-- `src/host/` — the business core (terminals, chat, files, Git, stats, workspace, configWeb, notify
-  server). It runs inside the runtime process only.
-- `src/server/` — the runtime. A dependency-free Node HTTP + SSE server that hosts the renderer
-  bundle and exposes `src/host` over `/api`. `vite.server.config.mjs` aliases `electron` to
-  `src/server/electron-shim.js`, which implements the exact surface those modules use
-  (`ipcMain.handle`, a shared `event.sender`, `app.getPath`, `shell`, `clipboard`, `dialog`).
-  _Dependency-free is load-bearing_: the bundle ships inside `app.asar`, which has no
-  `node_modules`, so any dependency left external is a `Cannot find package …` at launch. Vite's SSR
-  build externalises `package.json` dependencies by default, so the config pins
-  `ssr.noExternal: true` and keeps only Node builtins plus `node-pty` external;
-  `src/host/server-bundle.test.js` asserts it (skipping when the bundle has not been built). A slip
-  here stays green in dev — which resolves packages from the repo's `node_modules` — and only breaks
-  the packaged app.
-- `src/main/index.js` — the Electron container. It spawns the runtime
-  (`ELECTRON_RUN_AS_NODE`), loads the window at the runtime URL, mirrors unread notifications onto
-  the dock badge (and flashes the taskbar on Windows), and stops the runtime on quit. It registers
-  no general business IPC: the page always builds `window.mica` from HTTP + SSE, so
-  the window and a phone browser run byte-identical UI code. A restricted preload supplies only client-local
-  data, probes and window actions through `window.micaClient`. It also owns the navigation policy and
-  one window per server — title suffix, badge subscription and ⇧⌘M are tracked per window — see
-  _Switching Mica servers_ below.
-- `ELECTRON_RUN_AS_NODE` is a bootstrap marker for the runtime process only. The runtime calls
-  `stripContainerEnv()` before it derives any child environment, so PTY terminals, `mica` children
-  and the shell-env capture never inherit it — otherwise running `electron` from a terminal inside
-  the app (e.g. `electron-vite dev`) starts as plain Node and crashes on `electron.app`.
-- `src/renderer/` — the page itself.
-
-### Running the runtime on its own (browser / LAN)
-
-```bash
-$ npm run build          # build everything (or npm run build:server alone)
-$ npm run start:web      # node out/server/index.mjs
-$ npm run serve:web      # = build && start:web
-
-# options
-$ node out/server/index.mjs --host 0.0.0.0 --port 8787 --renderer out/renderer \
-    [--no-share] [--allow-missing-renderer]
-```
-
-Environment variables with the same meaning: `MICA_DESKTOP_HOST`, `MICA_DESKTOP_PORT`,
-`MICA_DESKTOP_SHARING` (on/off only, see below), `MICA_DESKTOP_RENDERER`. The runtime prints both the loopback and LAN URLs
-on startup, plus a machine-readable `[mica-desktop] ready {"url":…,"port":…}` line the Electron
-container parses. `GET /api/health` answers whether a port is already serving Mica Code.
-`MICA_DESKTOP_TRUSTED_CLIENTS` (comma-separated addresses) is how another machine gets the *full* app
-without a password; the everyday way is the remote access password in the `Connections` card. Both are
-explained in "Who can see which path".
-
-It listens on **one** port and distinguishes its services by path (the conventions live in
-`packages/mica-web-shared/app-paths.ts`, shared with the renderer). That port's number — `8787`
-unless `MICA_DESKTOP_PORT` / `--port` says otherwise — exists in exactly one place,
-`packages/mica-web-shared/runtime-port.js`: the runtime, the Electron shell, the renderer's `本机`
-shortcut, the Vite dev proxy and the mobile-diagnostics script all import it from there instead of
-each carrying a literal. Nothing else in the app opens a TCP port:
-
-- the controlled browser and the terminal service listen on **Unix sockets** in the app's
-  `userData` (`MICA_BROWSER_SOCKET` / `MICA_TERMINAL_SOCKET`), forwarded as `/remote/*` below;
-- `src/host/notifyServer.js` binds an **ephemeral** loopback port (`listen(0)`) for the duration of
-  one turn — nothing ever needs to know its number;
-- `scripts/serve-mobile-diagnostics.mjs` (a manual dev helper, not the app) picks the runtime port
-  plus 10000 — `18787` by default — overridable with `MICA_DIAGNOSTICS_PORT`.
-
-The paths:
-
-- `/` and `/mica-web` — the whole app (session list, files, terminals, settings);
-- `/share` — the surface a share link points at: `/share?session=<id>` opens that one conversation
-  **without the left session list**, and `/share` itself is the list of links that have been shared
-  (`分享链接`). It is also the only page a client that is not on this machine can reach — see "Who can
-  see which path" below;
-- `/terminal-control` — the terminal window page (`?session=<id>`), a separate Vite entry;
-- `/remote/control/*` — the controlled browser, forwarded to the main process (below). `/remote/control`
-  itself answers with the entry points (`/browser/docs`, `/browser/health`), so opening it in a browser
-  tells you whether the service is up instead of a bare 404;
-- `/remote/terminal/*` — the agent-facing terminal API, forwarded to the main process (below);
-- `/mcp/browser` and `/mcp/terminal` — the two MCP endpoints the agent actually calls (one tool
-  each, `control`; see "Controlled browser windows" below);
-- `/api/*` — the runtime capabilities.
-
-A share link is `<reachable host>:<the runtime's own port>/share?session=<id>`. The port falls back to
-a random one when 8787 is taken (another runtime, or a dev server), so the share _base URL_ must always
-be read from `access:info` and never hard-coded. Sharing is switched with `--no-share` /
-`MICA_DESKTOP_SHARING=0`, which only disables the `/share` route.
-
-Everything on the port is the same runtime with the same state. Drawing one less panel in the share
-view is **presentation, not access control** — a client there can still invoke every channel (see "There
-is no authorization boundary"). The renderer decides it is in share view from `location.pathname`
-(`isSharePath`) using the same pure helpers the router uses, not from an `/api/env` flag.
-
-Static assets are referenced relatively (`./assets/x.js`) in the built `index.html`, so under
-`/mica-web/` and `/share/` they resolve to prefixed URLs — the runtime strips the service prefix with
-`toAssetPath()` before serving, which is why all three entry paths render the same bundle.
-
-### How it is wired
-
-- `POST /api/invoke` `{ channel, payload }` is the `ipcRenderer.invoke` equivalent; handlers run in
-  the same process as the Electron main process would, so PTY terminals, resident `mica app-server`
-  hosts, file/Git/stats/config access all behave identically.
-- `GET /api/events` is a Server-Sent Events stream carrying every push channel
-  (`terminal:data|exit`, `chat:event|exit|queue-state|queue-error|run-started|commit-exit`,
-  `notify:changed`,
-  `ui-state:changed`, `loops:changed`).
-  Events are broadcast to every connected client, so a phone and a desktop tab share one state.
-  The controlled-browser host adds `browser:changed` to the same stream (see _Controlled browser
-  windows_ below).
-- `GET /api/env` returns `platform` / `homeDir`; the renderer fetches it before mounting and
-  installs `window.mica` (see `src/renderer/src/transport.js`).
-- `GET /api/image?path=...` serves pasted and attached images, replacing the `file://` URLs that
-  only resolve inside Electron.
-- `MICA_DESKTOP_USER_DATA` (the container passes `app.getPath('userData')`) and the shim default
-  resolve to the same `mica-code-app` directory, so `ui-state.json`, `file-order.json` and
-  `session-pins.json`, `session-projects.json`, `session-sort.json` and `loops.json` are
-  shared between the desktop app and a standalone runtime.
-
-### Controlled browser windows
-
-The container can hand the agent a real browser. It is the one capability that cannot live in
-`src/host/`: only the Electron main process can create windows, so `src/main/browser/` owns a
-tabbed, AI-driven browser and a small localhost HTTP API; the runtime only bridges it for the page.
-
-- `src/main/browser/browser-host.js` is what `src/main/index.js` starts (`startBrowserHost()`): it
-  builds the manager and brings up the API server on a **Unix socket** (`MICA_BROWSER_SOCKET`, under
-  the app's `userData`), handed to the runtime through that variable — no TCP port of its own. The
-  runtime forwards the socket as `/remote/control/*` on its single port and every `mica` child gets
-  `MICA_BROWSER_URL` = that prefix.
-- `browser-manager.js` holds the windows. Each browser is a `BrowserWindow` whose own webContents
-  renders a display-only chrome bar (`browser-chrome.js`: tab strip, read-only URL, owner) with the
-  page in a `WebContentsView` below it — tabs, navigation and input are the API's job, there is no
-  address bar to type into. Closing the window hides it (`close` is intercepted) so the agent keeps
-  its session; `POST /browser/browsers/:id/close` is the only way to really destroy it. Pages live
-  in the isolated `persist:mica-browser` partition, `window.open` is redirected into a new tab
-  instead of a popup, and permissions are denied outright.
-- `browser-service.js` is the API (`/browser/capabilities`, `/browser/browsers`, `/browser/tabs`,
-  `navigate|evaluate|content|click|type|keys|scroll|screenshot|wait|cookies|console|network`,
-  `/browser/events`). Requests are JSON in/out, `x-mica-owner` (or `owner` in the body/query) says
-  which mica session a window belongs to, and the server refuses anything that is not a local
-  request (`Origin`/`Host` guard) so a random web page cannot drive it. `browser-docs.js` is the one
-  place the endpoint catalog lives: the routes, `/browser/docs` and the MCP `control` tool's doc list
-  all read it, and `browser-service.js` refuses to start if a documented endpoint has no handler.
-  Owner-scoped calls list and operate only on their own windows and tabs. Each session can create one
-  window; further pages use tabs, and duplicate window creation returns 409 rather than destroying
-  an existing page. Windows do not expire on idle. The cookie partition remains shared across sessions;
-  owner is a routing guard, not an authentication boundary.
-- Everything runs with the window **hidden** — it never pops up while the agent works. Screenshots go
-  through CDP (`Page.captureScreenshot`): on a hidden window `capturePage()` hands back a stale frame
-  while CDP returns the current one (measured). Native CDP input works on hidden windows too
-  (`Input.dispatchMouseEvent` press/release, `Input.dispatchKeyEvent`, `Input.insertText`), so
-  `click`/`type`/`keys` need no fallback; `scroll` scrolls in-page (the `mouseWheel` CDP event never
-  resolves on a hidden window) and prefers the inner scroll container under the viewport centre.
-  `showBrowser` is the only method that shows the window — for demoing to the user — and the user
-  summons/hides it from the top-bar browser icon.
-- Hidden windows are _occluded_ windows as far as Chromium is concerned, so its renderer freezes
-  them: `requestAnimationFrame` never fires and `document.visibilityState` stays `hidden` (measured:
-  0 rAF ticks in 4s). Anything that renders on rAF (charts, canvas, virtualized lists) and any SPA
-  that pauses itself when hidden therefore stops advancing, and screenshots return the frame it froze
-  on. `src/main/index.js` applies `--disable-backgrounding-occluded-windows` before `app.whenReady()`
-  to turn that off — it is the only lever that works (a view-level `backgroundThrottling: false` only
-  un-throttles timers, `Page.startScreencast` / `Emulation.setVirtualTimePolicy` /
-  `disable-renderer-backgrounding` / `CalculateNativeWinOcclusion` all do nothing). It restores both
-  rAF and `visibilityState: visible`, which is what makes the hidden-only model above work at all.
-  The cost is that hidden windows keep rendering, so it is on by default and can be turned off with
-  `MICA_BROWSER_UNTHROTTLE=0` (it is a process-wide switch, not per-window) — with it off, rAF pages
-  freeze and screenshots stop advancing.
-- `src/host/browser-control.js` is the runtime side: it reads `MICA_BROWSER_URL`, keeps the window
-  list fresh from `/browser/events`, broadcasts `browser:changed` and exposes the `browser-control:*`
-  IPC channels (used by the top bar and by the settings page). The agent never calls the HTTP API
-  directly: `src/host/control-mcp.js` serves a single-tool MCP endpoint at `/mcp/browser` (calling it
-  without `action` returns the operation docs), and `src/host/control-mcp-config.js` writes a
-  per-session `--mcp-config` file carrying `x-mica-owner`. A `mica-browser` / `mica-terminal` entry in
-  `config.json` reaches the same endpoints from the TUI and `mica exec`; its url uses
-  `http://127.0.0.1:${MICA_DESKTOP_PORT:-8787}/mcp/<kind>` so it follows the runtime port (the
-  per-session file wins on name conflict). Without the socket — a standalone
-  `npm run start:web` — everything degrades to "no browser service" and the icons never appear.
-- The page (`App.jsx`) renders one icon per window of the active chat, immediately left of the
-  terminal toggle: click toggles the native window, right-click (or a touch long press) destroys it
-  after a confirmation, and the count badge distinguishes several windows of the same session.
-  A window must belong to a session: creating one without `x-mica-owner` is rejected, and listing
-  windows prunes any ownerless leftovers, so there is no "unknown owner" state left to render. The
-  settings page has a _Browser Control_ section (its sidebar
-  entry is always there; the data only exists inside the desktop runtime) that shows the service
-  status, the MCP endpoint and tool name, and the whole endpoint catalog. The
-  skill body itself is not shown — it is a single line (the service address), and copying the
-  endpoint list into it would just drift; the agent fetches `/browser/docs` from the address. It
-  deliberately does **not** manage windows — opening, showing, hiding and destroying a window is the
-  agent's job (or the globe icon in the chat header); windows are created hidden so they never steal
-  focus from what you are doing.
-
-### Terminal control
-
-The second main-process capability (`src/main/terminal/`) is a real terminal the agent can drive.
-It is not a simulated shell: `node-pty` opens a real pty and the login shell (the same mechanism as
-Terminal.app and VS Code), while `@xterm/headless` only mirrors that output into a screen buffer so
-the agent can read what the terminal currently shows. `terminal-docs.js` is the single endpoint
-catalog, and the runtime exposes it on its existing port as `/remote/terminal/*` (proxied to the
-main process' Unix socket) so the agent only needs `MICA_TERMINAL_URL`.
-
-- `terminal-sessions.js` owns the PTYs (max 12 live shells; exited ones do not take a slot). Output
-  is buffered (256k chars, with a `seq` for reconnect/replay) and parsed by a headless xterm; reading
-  the screen waits for queued writes to finish, otherwise a command that just ran looks like it
-  printed nothing. A periodic `sweep()` cleans up after agents: an exited session goes 10 minutes
-  after its last look, a live one only once it has been hidden and completely idle (no output, input
-  or resize) for 6 hours, so a shell that is still doing something is never killed. Sessions with a
-  visible window are always kept. Closing a session, from the endpoint or from `sweep()`, destroys
-  its window through the same `closed` event.
-- `terminal-window.js` creates a `BrowserWindow` on demand: a session created without `show` has no
-  renderer at all, which keeps agent-only terminals cheap. Closing the window only hides — the PTY
-  keeps running — and the explicit `close` endpoint kills the process. The window loads the
-  runtime-served page `/terminal-control?session=<id>`, so page and agent share the same PTY through
-  HTTP + SSE; there is no preload and no extra IPC surface in the shell.
-- The page (`src/renderer/src/terminal-page.jsx`, a second Vite entry) renders with xterm's DOM
-  renderer, not canvas. PTY size is the source of truth: an agent resize is applied to the page,
-  while resizing the native window fits and reports the new size back. A hidden window only records
-  that it fell behind and rebuilds from a snapshot when shown, instead of parsing every frame in the
-  background.
-- The agent flow is create → `input` (text + submit) → `wait` → read the session's
-  `screen`/`inputLine`. `wait` matches text/regex against logical lines (only xterm soft wraps are
-  joined) after masking recent input echoes; `skipEcho: false` disables masking. Returned screens
-  always retain their visual rows, echoes and cursor coordinates. `expectExitCode` waits for the
-  PTY/shell process to exit, not a command inside a persistent shell; capture that command's `$?`
-  in a unique completion marker instead. `idleMs` means silence, not completion or success. Writes carry
-  `x-mica-owner`: an agent cannot type into or close another chat's terminal, while the human page
-  (no owner header) can still take over any of them. The top-bar shows one icon **per live terminal
-  of the current chat** (numbered when there are several) and nothing at all when the chat has none;
-  icons toggle the window, right-click closes it after a confirmation. Creating a session is the
-  agent's job (`POST /sessions`), the same split as the browser icons.
-- `src/host/terminal-control.js` mirrors the browser bridge: it subscribes to `/terminal/events`,
-  forwards `terminal:changed` only to pages watching that session (plus list subscribers), exposes
-  `terminal-control:*` IPC. The agent uses it through the `/mcp/terminal` MCP endpoint (same
-  single-tool bridge as the browser). A standalone `npm run start:web` has no main process, so
-  `/remote/terminal/*` answers 503 instead of falling back to the SPA.
-- The settings page has a _Terminal Control_ section next to _Browser Control_ (the sidebar entry is
-  always there; only the desktop runtime can read the data). It shows the service address and
-  version, the MCP endpoint, every live session (title, cwd, size, running/exited, window in
-  the foreground or not) and the full endpoint catalog with copyable `curl` examples. Like the
-  browser section it does **not** create or close sessions: that is the agent's job, and buttons
-  would suggest you have to build them by hand.
-
-### Single-instance state
-
-The workspace is one thing, not one per tab: the runtime owns the UI state and every page renders
-that same state, so a second window (or a phone on the LAN) is another view of the same workspace
-rather than a separate session. `src/host/ui-state.js` keeps a flat key/value table, persists it to
-`userData/ui-state.json` (atomically, debounced) and broadcasts changed keys over SSE; the page side
-(`src/renderer/src/ui-state.js`, pure semantics shared through `packages/mica-web-shared`) reads it
-through `ui-state:get` before mounting and writes through `ui-state:patch`.
-
-That covers everything the user would otherwise lose: the unsent text in a composer per chat node
-(`drafts`, so leaving a tab, reloading, opening a second window or restarting the app all keep it),
-the open chat tabs and folder tree (`workspace`), the panel widths / collapse and current tab and
-main view (`layout`), the last working directory, and the turn-log height. Two consequences worth
-knowing when changing this code: an echo of your own write can arrive after you have already
-written something newer (drags and typing write several times a second), so echo suppression is
-keyed by _key + value_ and claims every broadcast (`claimUiStateEcho`) — comparing against "the
-last value I wrote" is not enough; and the draft table must not be read through React rendering in
-`App.jsx` (that would re-render the whole sidebar on every keystroke), which is why the sidebar
-markers go through `subscribeUiState` and the reference-stable `draftMarkers`.
-
-Scheduled loops are host-owned state that is deliberately _not_ UI state: they outlive the page, so they are persisted to `userData/loops.json` and scheduled by the runtime (`loops.js`) instead of being rebuilt from a page-side `setInterval` — see the 定时任务 paragraph above. The composer panel writes and reads intervals through the same `packages/mica-common/loopArgs.ts` helpers the CLI's `/loop` uses (`formatLoopInterval`, `MIN_LOOP_INTERVAL_MS`/`MAX_LOOP_INTERVAL_MS`), so both ends accept the same wording and nobody re-implements the parsing.
-
-Right-side panel terminals are the one piece still owned per page: the PTYs live in the runtime and
-their output is broadcast to everyone, but creating, respawning (`staleRightTermIds`) and reclaiming
-them are single-writer operations that would fight each other from two pages, so sharing that list
-needs an owner rule first.
-
-### URL state and share links
-
-The open session is mirrored into the address bar (`src/renderer/src/app-url.js`, pure logic with
-unit tests): every switch `replaceState`s `?session=<id>` (replace, not push, so the back button
-still leaves the app; unrelated params such as `?layout=` are preserved), and on boot the page opens
-the session named by `?session=` — once the session list has loaded, so the tab gets its title and
-working directory. An id that no longer exists still opens, letting the chat side report the failure
-instead of doing nothing at all.
-
-The write-back waits until a session is actually open (`urlSessionRef.current`), so the first frame cannot
-clobber the param with an empty session and leave the page showing nothing.
-
-#### Access is a door, not an account system
-
-The runtime has no accounts and no access control beyond two things that do not restrict normal use:
-
-- A request carrying `Origin` must be same-site, and `Host` must be a name this machine actually answers
-  on — which is what stops an arbitrary web page from quietly talking to `http://127.0.0.1:8787` on the
-  visitor's behalf. Same-site ignores the port, because the dev server serves the page on
-  `localhost:5173` and proxies `/api` to the runtime.
-- The host allowlist is the loopback names, this machine's hostname and its interface addresses, plus
-  whatever `MICA_DESKTOP_ALLOWED_HOSTS` (comma-separated, names or IPs) adds. That variable is the
-  escape hatch for reaching the runtime under a name it does not own — a reverse tunnel or a proxy,
-  where the browser keeps sending the _public_ address as `Host` while the runtime only sees the
-  loopback connection. Without it such a request answers `403 Host 不被允许`: the static shell and
-  `/api/health` still load (health is deliberately credential-free), so the page renders its "无法连接
-  Mica Code 运行时" screen even though the tunnel is fine. It is read once per process — restart the app
-  after changing it.
-
-`src/host/access-core.js` holds these judgements as pure logic with unit tests;
-`src/host/access.js` wires them up and computes the reachable base URL; `src/server/index.js` runs them
-on every request. There are no accounts and no per-client scope: a remote client either gets through
-the door or does not, and **every client that is in is a full client.** Getting in is equivalent to
-having a shell on the host — the terminal is a real shell, files are read/write, and the config page
-holds your API keys. The default `0.0.0.0` bind is a product decision (a phone on the LAN can drive the
-agent), so keep the warning in this file honest.
-
-#### Who can see which path
-
-`classifyRemotePath` in `src/host/access-core.js` is the one place that sorts a path into
-`share` / `api` / `asset` / `other`, and `remoteAccessDecision` in
-`src/host/remote-access-core.js` decides what a given remote request gets. Both judge by **who is
-connecting and what they hold**, never by origin:
-
-- a loopback connection — or one listed in `MICA_DESKTOP_TRUSTED_CLIENTS` (comma-separated addresses,
-  last-octet wildcard allowed: `172.22.240.*`) — is a full client and sees every path;
-- **a valid share link is the only thing that is public**: `/share?session=<id>` where that session
-  file exists. Opening it is what hands out the `mica_share_scope` cookie, and that cookie is what
-  unlocks `/api/*`. Bare `/share` (the share index) and invented ids are *not* links.
-
-| remote request | no password configured | password enabled |
-| --- | --- | --- |
-| `/share?session=<existing id>` | allowed, issues the share cookie | allowed, issues the share cookie |
-| built assets (whitelisted extensions) | allowed | allowed |
-| `/api/*` **with** the share cookie | allowed | allowed |
-| `/api/*` **without** it | `404` | `401` / login page |
-| `/share` (index), `/`, `/mica-web`, `/files`, `/terminal*`, `/remote/*`, `/mcp/*` | `404` | redirect to the login page |
-
-So: someone who has only the address gets **nothing at all** — not even `/api/*`, which is the whole
-machine (a real shell, read/write files, the API keys in the config page). Someone you handed a link
-to gets what the link implies, exactly as before: that session *and* the API behind it. An expired or
-deleted session turns the link into a 404. `/api/*` answers `404` rather than `401` while no password
-is configured, because "there is nothing here" is the truth a stranger should see.
-
-This is deliberately **not** a permission model — a link holder is an API client — but the bad
-default is gone: typing `http://<lan-ip>:8787` into a browser no longer even renders the app.
-
-#### The remote access password
-
-`Connections` (the sidebar entry) has a section called `局域网/公网可访问`: a switch plus a
-password, **default `0000`**. With it on, another machine that opens this runtime gets a one-field
-login page (`/__access`) instead of the app; posting the right password sets `mica_remote_access`
-(HttpOnly, SameSite=Lax, 7 days) and everything is as if the request came from this machine.
-
-- Storage is `$MICA_HOME/remote-access.json` (`{ version, enabled, password, secret }`, written
-  `0600`). `secret` is generated once by the runtime; the cookie value is
-  `HMAC(secret, "access|share:" + password)`, so changing the password invalidates every issued
-  cookie without keeping a revocation list. Deleting the file resets everything to off / `0000`.
-- Share links stay password-free on purpose. Enabling the password protects the *full* app, not the
-  link you already handed out — a share link must keep working. The `mica_share_scope` cookie (same
-  HMAC, different scope) is issued **only** when an existing session's link is opened, and it only
-  unlocks `/api/*`; it cannot open the app. That distinction is the whole door: before it, any
-  request to `/share` was enough to mint that cookie, so the password protected nothing.
-- Login is throttled per peer address: five wrong attempts lock that address for 60 s (`429`). A
-  four-digit default is guessable in 10 000 tries, so the throttle is what makes it a door rather
-  than a speed bump — change the password if the port is reachable by people you don't know.
-- It is a door, not an account system: one password, no users, no per-client scope, and after it
-  you are a full client exactly like a loopback connection. `MICA_DESKTOP_TRUSTED_CLIENTS` still
-  exists as a password-free list of addresses (useful on a trusted LAN).
-
-Two consequences worth knowing. The judgement reads only the socket's peer address, never `Host` or
-`X-Forwarded-For` — the requester writes those, so trusting them hands the decision to the requester;
-under a tunnel or reverse proxy every connection looks loopback, and such a deployment has to carry its
-own auth at the tunnel. And `connections` (the sidebar entry that opens another machine's runtime) needs
-the *full* app on the other side: the target machine either lists this one in
-`MICA_DESKTOP_TRUSTED_CLIENTS` or has a remote access password set (you then log in once per machine —
-the cookie is per browser profile), otherwise that window lands on the 404 page.
-
-Unmatched `/api/*` paths answer that same `404` instead of falling through to the SPA fallback. Without
-that, `GET /api/invoke` in a browser came back as `index.html` — the full app — and `/api/*` is the
-prefix a share-link holder is allowed to touch.
-
-The login page lives at `/__access` and is served by the runtime itself (`renderLoginPage` in
-`src/server/index.js`), not by the renderer bundle: it has to work *before* the app is allowed to load.
-
-#### A share link
-
-`分享链接` builds the address of one session: the session row's context menu (`session-menu.js`; drafts
-have no session id yet, so they do not offer it) and the chat area's context menu both copy it
-straight to the clipboard and report the result in a one-line toast at the bottom of the window — no
-dialog to click through. Copying goes through `copyText`, which says so honestly when the clipboard
-API is unavailable (plain http on the LAN is not a secure context) instead of claiming success.
-
-The link is `<reachable base>/share?session=<id>` (`app-url.js`'s `sessionShareUrl`) — no token, no
-fragment; opening it is the same as clicking that session in the list. The base URL comes from the
-_runtime_, never from the page's own `location.origin`: a window on the machine is served from
-`127.0.0.1`, and handing that to someone else points at their own machine. `pickShareBaseUrl` prefers
-`MICA_DESKTOP_PUBLIC_URL` (a bare domain gets `/share` appended), then the address the sharer is
-already using, then the machine's interface addresses (private LAN first) — and always pins the
-**runtime's own port** plus the `/share` path (read from `access:info`; the port falls back to a random
-one when 8787 is taken), because the share surface is a path on the one listener, not a second one.
-When sharing is off (`--no-share`) the dialog reports that sharing is unavailable.
-
-Copying a link also records the session in the share list (`src/host/shared-sessions.js` +
-`shared-sessions-core.js`, persisted to `userData/shared-sessions.json`), so `/share` itself (the
-`ShareIndex` component, rendered by `main.jsx` when `/api/env` says `share: true` and no
-`?session=` is present) can list what has been handed out: title, working directory, when it was
-shared, a copy button, an open button and a remove button. That page is the only way to navigate there,
-since the share surface has no session list; a session that no longer exists stays in the list marked
-`会话已不存在` until it is removed.
-
-What the link hides is only the session list: **treat it as lending someone this machine** — the holder
-can chat, interrupt, queue, compact, change the working directory, browse files, open a shell in the
-terminal panel and read the config page (and can reach the same channels by hand regardless of what the
-page draws). It never expires and there is no revocation list — taking it back means stopping the
-runtime or moving to another port.
-
-#### One session, one tab, one set of terminals
-
-The workspace lives in the runtime and is shared by every page, so the second window is another viewport
-of the same UI rather than a separate place: events are broadcast to all clients, both render the same
-live turn, and both can queue, recall or interrupt it. Two tabs for one session would fight each other,
-so `workspace.js`'s `dedupeSessionNodes` (pure function with unit tests) merges duplicates by
-`sessionId` when the workspace is read, and `App.jsx` converges once more against the notify state
-(`prefer: isRunning`, keeping the tab whose turn is actually running — turn events are dispatched by
-node id, so only that one receives them). Without it the later tab gets `isChatSessionRunning` and is
-told "正在另一个进程里运行"; `chat:is-running`'s `remoteRunning` therefore only ever means a **turn
-lease** held by another process (a TUI in a terminal, `mica exec`, a second runtime instance).
-
-Terminals are shared the same way. The PTY lives in the runtime and its output is broadcast over SSE,
-and the panel inventory (which terminals exist per session, which one is active) is part of the shared
-UI state (`rightTerms`). PTY ids are derived from the tab id (`TerminalHost.ptyIdFor`), so both pages
-compute the same id; a page attaching to an existing terminal gets `{ reused: true }` plus a `replay`
-of the host-side output tail, which it writes into its xterm so the panel is not blank.
-
-### Plugin entries（插件在侧栏 / 顶栏的入口）
-
-The sidebar does not hard-code capabilities. A plugin declares `desktop.entry` in its manifest and ships `desktop.jsx` in its own directory; the host draws **one row plus a card container** and knows nothing about what is inside. `renderer/src/PluginEntries.jsx` owns the row (icon from the manifest `icon`, label from `desktop.entry.label`, an optional `summary(api)` line on the right), the hover/tap behaviour, the popover placement and the Esc / outside-click dismissal; `renderer/src/plugin-entries.js` resolves the module by id through `import.meta.glob('@plugins/*/desktop.jsx')`, so adding a desktop plugin needs no host edit — only a directory and a manifest. `desktop.entry.placement` picks the side: `sidebar` (default) draws one row, `header` draws an icon button at the left end of the top bar's right cluster — same module, so a page entry or a card behaves the same in both places. Only bundled plugins are picked up: the page is built at build time and `$MICA_HOME/plugins` does not exist yet.
-
-插件前端模块拿到的 api（`renderer/src/plugin-host.js` 的 `createPluginHostApi`）包含 `currentHost()`（页面所在运行时的 origin）、`probe(address)`、`readData()` / `writeData(value, options?)`、`open(url)`、`access` 与 `action(key)`。探活、数据读写、访问策略和动作在运行时侧（`src/host/plugin-host.js`），因为页面既读不了跨源响应，也没有文件系统；`open` 是纯页面行为。`host/plugin-data-store.js` 负责原子文件读写：读取返回 `{ value, version }`，缺文件时两者为 null，IO 失败显式报错；写入可带 `{ expectedVersion }`，比较版本与替换使用同一跨进程锁，冲突返回 `{ ok: false, conflict: true }`，插件重读后重放本次修改。省略版本继续支持整份写入。
-
-`open` 分支按 user agent（`shell-env.js` 的 `isElectronShell`）：外壳里把导航交给主进程（`location.assign`，被 `will-navigate` 拦成新窗口），浏览器里 `window.open(url, '_blank')` 再掐掉 `window.opener`——刻意不用 `noopener` 特性串，它会让 `window.open` 恒返回 `null`，把「被拦截」和「外壳里没有窗口」混成一种情况；被拦截时退回本标签页。
-
-Connections 的桌面窗口共用启动客户端的本机清单（`$MICA_HOME/plugin-data/connections/data.json`）：
-本机有 A、B、C，打开 A 后，当前标识是 A，切换项仍为 B、C、Local；A 保存的 E、D 不参与这份清单。
-清单声明 `desktop.clientData: true`，通过 `api.client.readData/writeData` 读写本机同一文件；
-`client.probe/open/local` 从客户端探活、复用或打开目标窗口、直接聚焦原本机窗口。
-`client.context()` 给出真实本机页面地址（包含开发端口或回退端口）；`currentTarget()` 保留中转链接的令牌身份。
-普通浏览器的 `client` 为 null，继续使用当前运行时的清单。访问策略 `api.access` 始终控制当前连接的运行时。
-
-客户端能力由 `src/preload/index.js` 的隔离桥 `window.micaClient` 提供，只暴露固定方法，
-不暴露 `ipcRenderer`、任意 channel 或通用文件访问。`main/client-context.js` 每次核对 sender 必须是
-已登记运行时窗口的 webContents、senderFrame 必须精确等于 mainFrame，并要求外壳认可的入口、frame 和
-窗口当前 URL 的 HTTP(S) origin 一致。iframe、未登记窗口、跨源重定向页不能继承授权；
-本机插件数据只开放给本机随包清单显式授权且未停用的插件。
-页面按真实桥是否存在检测能力，不根据 Electron UA 猜测。旧 `mica-client:` fetch 协议不再支持，
-Local 与本机清单读取不依赖页面 fetch、CSP、CORS 或 referrer。
-本机和远端页面都需使用新版产物；旧远端页面仍可用 **⇧⌘M** 返回本机。
-回归探针见 `.probe/client-context/README.md`。
-
-The container owns navigation and one window per runtime (`src/main/index.js`), using origin plus relay token
-for relay entries. Switching to an existing target restores and focuses its window without reloading it.
-Closing a runtime window hides it. Remote windows retain their page state for **two hours continuously hidden**,
-then `main/window-retention.js` destroys them to release resources. Showing one cancels its expiry; hiding it
-again starts a new two-hour period. The local primary window stays resident, and quitting the app closes all
-windows normally. Each window keeps its own runtime title and unread subscription.
-
-### What the page does differently from a native app
-
-- **Folder pickers become in-app unless the shell can open a real one.** The working-directory
-  picker (`CwdModal`) opens `DirectoryPicker` and browses the _server's_ filesystem through
-  `files:list`, because a LAN page has no `dialog:select-directory`. Settings fields declared as
-  `type: "directories"` (Global Search's 搜索目录) instead call the desktop-only `pickDirectory`
-  config action, which the runtime forwards over `MICA_SYSTEM_SOCKET` to `dialog.showOpenDialog` in
-  the Electron main process (`/pick-directory` in `system-docs.js`); the browser host does not
-  implement it, so those fields fall back to plain path inputs.
-- **Clipboard writes happen in the browser.** `files.copyPath` / `copyRelativePath` copy locally via
-  `navigator.clipboard` with an `execCommand` fallback (a plain-HTTP LAN page is not a secure
-  context). `files.reveal` still opens the containing folder on the server machine.
-- **External links open in the browser tab**, not on the server.
-- **Terminal file links open the in-app editor** instead of VS Code: the transport dispatches a
-  `mica:open-file` event that `App.jsx` routes to the Files view.
-- **Settings is inlined, not framed.** The view renders the config page components from
-  `packages/mica-config-ui` directly and gets its data through `config-web:invoke`
-  (`src/host/configWebData.js`, which reads this machine's `$MICA_HOME`). Nothing is spawned and no
-  iframe is used, so the page always configures the runtime that serves it — switching to another
-  server configures _that_ machine. The Roles section shows the built-in `default` role read-only
-  with its actual prompt: the host reads `packages/mica-agent/prompt/system.md` (brand placeholders
-  expanded, `?raw` import) instead of keeping a second copy of the prompt, and a `default.md` in
-  `~/.mica/role` cannot shadow or duplicate it.
-- **Window focus/visibility comes from the page**: `document.visibilityState` plus `focus`/`blur`.
-- **Row drag & drop is plain HTML5 DnD.** Section changes go through one `stats:move-session`
-  call rather than a client-side list juggling act, which is also why the sidebar in two browser
-  tabs (or on a phone) converges instead of each client keeping its own copy of the sections.
-
-### Mobile layout
-
-Below 768px the two-column shell collapses to a single column: the session list becomes an overlay
-drawer (scrim + close button), the Files view swaps between the tree and the editor behind a back
-button, and right-click-only actions gain long-press equivalents on touch
-(`longPressHandlers` ignores mouse pointers, so desktop behaviour is unchanged). `?layout=mobile`
-and `?layout=desktop` force a layout for previewing on a large screen.
-
-The mobile block in `assets/app.css` also floors every form control at `16px`. iOS Safari zooms the
-whole page when a control with a smaller computed font size takes focus, and it does not zoom back
-out on blur — the page stays magnified after leaving the composer. The rule is scoped as
-`#root input, #root select, #root textarea:not(.inputarea)` so it outranks Tailwind's per-component
-`text-[13px]` utilities, and it exempts monaco's hidden `inputarea` textarea (the editor measures
-and positions IME candidates off that element). The composer action buttons grow to 32px at the same
-breakpoint because 25px is below a comfortable touch target.
-
-The terminal panel gets a `TerminalKeyBar` below 768px, under the terminal: a soft keyboard has no
-Esc, Tab, Ctrl or arrow keys, which leaves shell completion, interrupt and history unreachable —
-the desktop modifier mapping in `TerminalHost.jsx` only sees physical keyboards. The bar sends the
-same raw sequences through `TerminalHost`'s `input()` → `term.input()`, so they take xterm's own
-input path (`term.input` → `onData`) rather than writing to the PTY directly (`terminal-keys.js`
-holds the table and the clipboard read). Its buttons cancel `pointerdown` so tapping a key never
-pulls focus out of xterm's hidden textarea: losing focus dismisses the keyboard, which would take
-the bar down with it.
-The paste button reads `navigator.clipboard`, which is unavailable over plain http in a LAN (not a
-secure context), so an unreadable clipboard shows a hint pointing at the system keyboard's own
-paste instead of failing silently.
-
-Plain typing needed a fix too, and not one of ours: xterm 6's `_inputEvent` only accepts an `input`
-event satisfying `!e.composed || !_keyDownSeen`. Browsers dispatch `input` with `composed === true`
-and `_keyDownSeen` is true between `keydown` and `keyup`, so **any `input` that follows a `keydown`
-is dropped**. Space and A–Z only ever travel that path — xterm sends nothing for them from `keydown`
-(it defers to the `keypress` that desktop browsers fire and mobile ones do not) — so they vanished,
-leaving stray characters in the hidden textarea. `attachCustomKeyEventHandler` now re-sends those
-two classes of key on `(pointer: coarse)` via `softKeyboardFallbackKey` (`terminal-keys.js`),
-calling `preventDefault()` itself (otherwise the browser still writes the character into the
-textarea and a desktop `keypress` would send it a second time) and letting `keyCode` 229/0 through
-to xterm's own Android composition handling. Upstream fixed this in PR #5614 (`!isComposing &&
-!isSendingComposition`), which is not in 6.0.0 — drop the re-send and re-verify when xterm is
-upgraded. Input with no `keydown` at all (CJK IME punctuation, dictation) still drops.
-
-The terminal is already rendered as HTML: xterm 6's core renderer is the DOM one, so rows are
-`<span>`s inside `.xterm-rows` and the only real `<canvas>` on screen is the overview ruler. That is
-also why its font size cannot come from CSS — the DOM renderer writes an inline `font-size` on
-`.xterm-rows` derived from the `fontSize` option, so any rule on `.terminal-pane .xterm` is dead.
-Change the option instead. None of this makes the terminal behave like an `<input>`: it is a
-character grid painted from whatever the PTY emitted, so there is no native caret to tap into and no
-text selection to drag — the arrow keys on the key bar are how the cursor moves.
-
-Keyboard avoidance is shared by every bottom-anchored element: when the keyboard opens, iOS Safari
-and Android Chrome shrink only the visual viewport, not the layout viewport, and `dvh` follows the
-URL bar rather than the keyboard. `useVisualViewportHeight` (`hooks.js`) writes the visible height
-into `--vvh`, and the narrow-screen root height is `var(--vvh, 100dvh)`, so the composer and the
-terminal key bar rise above the keyboard instead of being covered by it (Android additionally gets
-`interactive-widget=resizes-content` in `index.html`, which resizes the layout viewport too —
-Safari ignores that key).
-
-Height alone is not enough on iOS: to reveal the focused input Safari also shifts the whole layout
-viewport, reported as `visualViewport.offsetTop`. By then the app has already shrunk to the visible
-height, so without compensation it hangs off the top of the screen and leaves a blank strip below —
-the composer ends up under the status bar. The same hook therefore writes that shift into
-`--vvh-top` and the narrow-screen `#root` is `position: fixed` plus `translateY(var(--vvh-top,
-0px))`. The fixed positioning is load-bearing: `html`/`body` are `overflow: hidden` at that same
-visible height, so an in-flow root would be clipped the moment it is translated.
-
-Neither number is taken at face value, and both decisions live in the pure
-`viewport-metrics.js` (unit conversion, rounding, thresholds — the renderer only writes the CSS
-variables):
-
-- **Height**: iOS 26 can leave `visualViewport.height` untouched when the keyboard opens while the
-  layout viewport (`window.innerHeight` / `documentElement.clientHeight`) does shrink, so the
-  height is the smallest signal that is at least `KEYBOARD_MIN_INSET` (80px) shorter than the
-  layout viewport. Anything smaller is treated as viewport jitter rather than a keyboard, which
-  would otherwise shave a blank strip off the app.
-- **Shift**: `--vvh-top` is only written once the height actually accounts for the keyboard (the
-  app is already shorter than the layout viewport). Without that check the compensation is applied
-  to a full-height app as well, and it then cancels the very shift that brings the composer above
-  the keyboard — the composer stays hidden behind it.
-- The shift only applies while unzoomed, since the same value during pinch-zoom comes from
-  panning, not the keyboard. The hook re-measures on `visualViewport` resize/scroll plus
-  `window.resize`, `orientationchange` and `document` focusin/focusout, and re-reads the values a
-  few more times after each (`SETTLE_DELAYS`): the numbers settle after the event, and some OS
-  versions never fire one.
-- **That height must not be injected away.** The narrow-screen rule is `html body #root { height:
-var(--vvh, 100dvh) }` rather than `html, body, #root`, because a later stylesheet from the
-  embedded config page used to ship a plain `html, body, #root { height: 100% }` of the same
-  specificity (the SettingsView chunk loads right after boot, since the view stays mounted in a
-  `Suspense` boundary), which silently won and left the app full height forever — the composer
-  stayed behind the keyboard while `--vvh` was computed perfectly. Page-level height chains belong
-  to whichever host owns the whole page, never to the shared config stylesheet.
-
-> There are no accounts: a client either gets through the door or does not, and everyone who is in
-> gets a shell on the host. The runtime binds `0.0.0.0` by default (so phones can join); pass
-> `--host 127.0.0.1` when you don't want that. Remote clients are served only the share surface
-> (`/share` + assets) until the remote access password is enabled in the `Connections` card, so a
-> browser on the LAN no longer lands on the full app — see "Who can see which path".
-
-### App icon
-
-`resources/icon.svg` is the app mark (soft rounded square with a hand-drawn `M` built from four uneven strokes, slightly tilted) — and the repo's **only** brand mark: the website (`apps/website`), the config web UI (`apps/config-web`) and the README all reference this same file, so editing it here updates every surface. It is drawn full-bleed (the tile fills the viewBox) because web icons have to fill their box; the macOS content margin described below is applied when rasterizing, not baked into the SVG.
-
-`src/main/index.js` imports `resources/icon.png` for the window/taskbar icon, and `electron-builder.yml` packages `build/icon.icns` (macOS), `build/icon.ico` (Windows) and `build/icon.png` (Linux). `npm run icons:generate` (macOS + Pillow) rasterizes those plus the desktop web/PWA icons in `src/renderer/public`, widening the viewBox for the native sizes and rendering the web sizes full-bleed.
-
-Two geometry rules keep the icon out of the macOS 26 Tahoe gray "icon jail" (a gray squircle plate the system draws behind legacy icons):
-
-- **Corner radius must stay at or below `19/64` of the icon size.** This is the actual trigger — not the margin. Verified on macOS 26.0 through `NSWorkspace.icon(forFile:)`: `rx=19/64` renders normally, `rx=20/64` and above get jailed, at any margin. The SVG uses Apple's 22.375% (`rx=14.32/64`) for headroom.
-- **The native rasterizations keep the mark inside Apple's 824/1024 content area** — `scripts/generate-icons.py` widens the viewBox by `1/0.8046875` (the same 6.25/64 transparent margin per side) so the icon keeps the classic Big Sur–Sequoia grid on macOS ≤ 15. Tahoe scales the artwork up to fill the tile either way, so the margin costs nothing there. Web/PWA icons are deliberately rendered without it (an inset favicon looks shrunken next to every other tab, and iOS applies its own 22.375% mask on "Add to Home Screen").
-
-Editing the SVG must keep both properties, otherwise the Dock icon regresses to the jailed look.
-
-Regenerate every raster asset after editing the SVG (macOS only; needs `sips`/`iconutil` and Pillow):
-
-```bash
-$ npm run icons:generate
-```
-
-The script renders the SVG at 4x and downscales with LANCZOS, so the gradient stays clean at 1024px without dithering noise.
-
-The same run writes the **web icons** into `src/renderer/public/`, which Vite copies verbatim into
-the renderer output (so the runtime serves them at `/`):
-
-| file                            | consumer                                                  |
-| ------------------------------- | --------------------------------------------------------- |
-| `favicon-32.png`                | browser tab (declared in `src/renderer/index.html`)       |
-| `apple-touch-icon.png` (180px)  | iOS "Add to Home Screen"                                  |
-| `icon-192.png` / `icon-512.png` | `manifest.webmanifest` (PWA install, Android home screen) |
-
-These are **full-bleed**: the script renders `resources/icon.svg` as-is (the artwork is already
-full-bleed; only the native sizes get the widened viewBox described above). iOS applies its own
-22.375% corner mask to `apple-touch-icon` (the SVG's `rx` is exactly that value), so handing it the
-artwork with a transparent margin would shrink the
-icon on the home screen and leave a ring of wallpaper around it. `manifest.webmanifest` declares
-`display: standalone` — inert for a plain-HTTP LAN page (browsers only apply it to installed apps),
-but it makes the served page installable as a real web app once it is reached over HTTPS.
+文件图标来自固定版本的 vscode-icons，`npm run icons:sync` 更新图标与映射。授权及复现信息见 [THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md)。

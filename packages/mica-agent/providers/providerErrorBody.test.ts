@@ -50,6 +50,15 @@ describe('fetchWithReadableErrors', () => {
     expect(await response.json()).toEqual({ error: { message: 'System messages are not allowed' } });
   });
 
+  it('preserves top-level error codes and types when rewriting a gateway body', async () => {
+    const response = await fetchWithReadableErrors(
+      fetchStub(responseWith('{"message":"body read failed","code":"request_read_error","type":"codexgo_error"}')),
+    )('http://gateway.test/v1');
+    expect(await response.json()).toEqual({
+      error: { message: 'body read failed', code: 'request_read_error', type: 'codexgo_error' },
+    });
+  });
+
   it('surfaces the gateway detail instead of "400 status code (no body)"', async () => {
     const stub = vi.spyOn(globalThis, 'fetch').mockImplementation(fetchStub(responseWith('{"detail":"System messages are not allowed"}')));
     const client = new PiModelClient({

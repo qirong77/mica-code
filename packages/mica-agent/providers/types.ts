@@ -9,6 +9,7 @@ export type ModelClientOptions = {
   /** Whether the model accepts image input. Missing defaults to true (vision-capable). */
   supportsVision?: boolean;
   provider: ProviderDefinition;
+  /** False omits tool definitions and rejects any unsolicited tool calls before execution. */
   tools?: boolean;
   toolFilter?: ToolFilter;
   toolContext?: unknown;

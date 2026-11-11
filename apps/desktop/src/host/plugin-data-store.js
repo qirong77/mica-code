@@ -77,9 +77,12 @@ export function writePluginData(home, pluginId, value, options = {}) {
     ) {
       return { ok: false, conflict: true, error: '插件数据已更新，请重新读取后保存' }
     }
-    writeFileSync(temp, `${encoded.json}\n`, { encoding: 'utf8', mode: 0o600 })
+    const raw = `${encoded.json}\n`
+    writeFileSync(temp, raw, { encoding: 'utf8', mode: 0o600 })
     renameSync(temp, file)
-    return { ok: true }
+    // Return this write's version while still holding the lock. A verification read
+    // would transfer the whole document again and might observe a different writer.
+    return { ok: true, version: createHash('sha256').update(raw).digest('hex') }
   } catch (error) {
     throw new Error(`写入插件数据失败：${error?.message ?? error}`)
   } finally {

@@ -37,7 +37,8 @@ export type PluginModelUsageEntry = {
   finishedAt: string;
 };
 
-export type PluginModelRecorder = (entry: PluginModelUsageEntry) => void;
+/** A returned promise delays completion until local accounting finishes; other return values are ignored. */
+export type PluginModelRecorder = (entry: PluginModelUsageEntry) => unknown;
 
 /**
  * 一次插件模型请求在**运行轨迹**里的落点。
@@ -139,7 +140,7 @@ export function createPluginModels(options: CreatePluginModelsOptions = {}): Plu
           : {}),
       });
       finishTrace(trace, 'completed', undefined, result.usageHistory);
-      safelyRecord(record, {
+      await safelyRecord(record, {
         pluginId,
         purpose: request.purpose,
         model,
@@ -155,7 +156,7 @@ export function createPluginModels(options: CreatePluginModelsOptions = {}): Plu
       const requests = usageHistoryOf(error);
       finishTrace(trace, isPluginAbort(error, request.signal) ? 'aborted' : 'error', error, requests);
       if (requests.length > 0) {
-        safelyRecord(record, {
+        await safelyRecord(record, {
           pluginId,
           purpose: request.purpose,
           model,
@@ -250,9 +251,9 @@ function applyMainProvider(
   };
 }
 
-function safelyRecord(record: PluginModelRecorder | undefined, entry: PluginModelUsageEntry): void {
+async function safelyRecord(record: PluginModelRecorder | undefined, entry: PluginModelUsageEntry): Promise<void> {
   try {
-    record?.(entry);
+    await record?.(entry);
   } catch (error) {
     // Recording is local. A recording failure must not resend an already paid
     // request through the provider fallback or replace its original error.
@@ -287,9 +288,9 @@ export function capturePluginModelUsageRecorder(
   controller: Pick<SessionController, 'getCurrentSessionId' | 'recordSubagentUsageForSession'>,
 ): PluginModelRecorder {
   const sessionId = controller.getCurrentSessionId();
-  return (entry) => {
+  return async (entry) => {
     if (entry.requests.length > 0) {
-      controller.recordSubagentUsageForSession(sessionId, pluginUsageRecord(entry));
+      await controller.recordSubagentUsageForSession(sessionId, pluginUsageRecord(entry));
     }
   };
 }

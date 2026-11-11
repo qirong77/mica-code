@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { execFileSync } from 'child_process'
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'fs'
+import { mkdtempSync, mkdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'fs'
 import os from 'os'
 import path from 'path'
 import {
@@ -27,7 +27,7 @@ import {
 const dirs = []
 
 function repo() {
-  const dir = mkdtempSync(path.join(os.tmpdir(), 'mica-git-watch-'))
+  const dir = realpathSync.native(mkdtempSync(path.join(os.tmpdir(), 'mica-git-watch-')))
   dirs.push(dir)
   execFileSync('git', ['init', '-q'], { cwd: dir })
   execFileSync('git', ['config', 'user.email', 'a@b.c'], { cwd: dir })
@@ -43,7 +43,7 @@ function repo() {
  * 提交会跑仓库里的钩子（本机上每条几秒），一个用例建两个会撞上 bun 的单测超时。
  */
 function bareRepo() {
-  const dir = mkdtempSync(path.join(os.tmpdir(), 'mica-git-empty-'))
+  const dir = realpathSync.native(mkdtempSync(path.join(os.tmpdir(), 'mica-git-empty-')))
   dirs.push(dir)
   execFileSync('git', ['init', '-q'], { cwd: dir })
   return dir
@@ -153,6 +153,23 @@ describe('isWorktreePath', () => {
 })
 
 describe('watchRepository', () => {
+  it('uses one canonical root for a symlinked checkout and its change events', async () => {
+    const dir = repo()
+    const aliases = mkdtempSync(path.join(os.tmpdir(), 'mica-git-alias-'))
+    dirs.push(aliases)
+    const alias = path.join(aliases, 'checkout')
+    symlinkSync(dir, alias, 'dir')
+    const events = []
+    setGitWatchBroadcaster((channel, payload) => events.push({ channel, payload }))
+    const subscription = watchRepository(alias, 'page')
+    expect(subscription.root).toBe(dir)
+    expect(watchRepository(dir, 'page').root).toBe(dir)
+    expect(handleGitWatchEvent(subscription.root, 'HEAD')).toBe(true)
+    await waitForCount(events, 1)
+    expect(events).toEqual([{ channel: 'git:changed', payload: { root: dir } }])
+    expect(unwatchRepository(alias, 'page').root).toBe(dir)
+  })
+
   it('reports the repository root and skips directories without one', () => {
     const dir = repo()
     const plain = mkdtempSync(path.join(os.tmpdir(), 'mica-git-norepo-'))

@@ -18,6 +18,7 @@
 - 构建运行时系统提示词：`buildSystemPrompt`。固定使用内置默认正文，非默认 Role 通过 `rolePrompt` 追加；`BuildSystemPromptOptions.baseSystemPrompt` 覆盖入口已移除，这个形态不再支持。
 - 单独取 skills 索引正文：`formatSkillsIndex`（By The Way 的隔离子代理替换了系统提示词，索引必须与主流程同源）。
 - 同一条消息内的工具调用按并行安全分组执行：只读工具与 `Agent` 调用并发，写/执行类工具串行，结果按原始顺序回填。
+- `tools: false` 同时关闭工具声明与执行；模型意外返回工具调用时拒绝该响应，并保留已经报告的用量。
 - 从 `~/.mica/role`（或 `$MICA_HOME/role`）加载 `.md` 用户 role，以文件名（不含扩展名）作为 role 名，并与插件角色统一追加到默认正文后。内置 `default` 正文只读、不可覆盖，Role 页面展示其正文。
 
 ## 使用入口
@@ -45,6 +46,7 @@ const agent = micaAgent.createModelClient({
 - 本包不依赖 UI、session、commands 等应用层模块。
 - provider adapter 只负责模型协议适配，不感知多 agent 协作或命令系统。
 - Pi 提供协议、签名和工具结果的转换；Mica 的共享循环保留权限过滤、只读并发、写入屏障、等待重叠、队列输入、压缩、展示回滚与用量归属。Pi SDK 的自动重试关闭，可见重试由 Mica 统一管理。
+- 图片预算只处理 pi user / toolResult 的图片内容块，工具参数与签名按正文计入预算并原样保留。内部预算入口不再支持旧 Chat / Responses wire 消息形态。
 - 不引用 pi 的完整 agent 应用；`pi-agent-core` 的执行模式不能表达 Mica 按工具输入判断的等待重叠与写入屏障，因此不额外叠加第二个执行循环。
 - pi-ai 固定版本为 `1.5.2`，Node 运行时要求 `>=22.19.0`。真实 API 冒烟用显式开关 `MICA_PI_LIVE=1 MICA_PI_SOURCE_HOME=/path/to/.mica MICA_PI_PROVIDER=<id> bunx vitest run --project unit packages/mica-agent/providers/piLive.test.ts`；默认跳过，不读取真实凭据。每种选中协议最多三次模型请求，验证工具循环与序列化后重放。
 - prompt 构建集中放在 `prompt/`，避免散落在运行时流程中。

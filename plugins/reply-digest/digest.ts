@@ -15,6 +15,8 @@ export type DigestLimits = {
 export function lastAssistantText(messages: readonly MicaUiConversationMessage[]): string {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index];
+    // A completed turn can contain only tool activity; never summarize the previous reply again.
+    if (message?.role === 'user') return '';
     if (message?.role !== 'assistant') continue;
     return messageText(message.content);
   }
@@ -23,8 +25,9 @@ export function lastAssistantText(messages: readonly MicaUiConversationMessage[]
 
 export function shouldDigest(text: string, limits: Pick<DigestLimits, 'charThreshold' | 'lineThreshold'>): boolean {
   if (!text) return false;
+  if (text.length >= limits.charThreshold) return true;
   const lines = text.split('\n').filter((line) => line.trim()).length;
-  return text.length >= limits.charThreshold || lines >= limits.lineThreshold;
+  return lines >= limits.lineThreshold;
 }
 
 export function digestInput(text: string, limit: number): string {

@@ -44,6 +44,18 @@ export function fetchWithReadableErrors(fetchImpl: FetchLike = fetch): FetchLike
     if (response.ok) return response;
     const text = await response.text().catch(() => '');
     const message = errorMessageFromBody(text);
-    return rebuild(message ? JSON.stringify({ error: { message } }) : text, response);
+    if (!message) return rebuild(text, response);
+    // Preserve structured retry hints when moving a gateway's reason into the SDK's error shape.
+    const body = JSON.parse(text) as Record<string, unknown>;
+    return rebuild(
+      JSON.stringify({
+        error: {
+          message,
+          ...(typeof body.code === 'string' ? { code: body.code } : {}),
+          ...(typeof body.type === 'string' ? { type: body.type } : {}),
+        },
+      }),
+      response,
+    );
   };
 }

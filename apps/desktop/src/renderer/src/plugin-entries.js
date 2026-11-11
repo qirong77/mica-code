@@ -18,15 +18,21 @@ import { readPluginsDetails, usePluginsDetails } from './plugins-details'
 
 // glob 的 key 是匹配到的文件路径，形态跟着构建配置走（alias 解析后可能不是写下的样子），
 // 所以按「结尾是 `<插件 id>/desktop.jsx`」取 id，而不是自己拼字符串去查表。
-const entryLoaders = new Map()
-for (const [key, load] of Object.entries(import.meta.glob('@plugins/*/desktop.jsx'))) {
-  const match = /(?:^|\/)([^/]+)\/desktop\.jsx$/.exec(key)
-  if (match) entryLoaders.set(match[1], load)
+let entryLoaders
+function bundledEntryLoaders() {
+  if (entryLoaders) return entryLoaders
+  const loaders = new Map()
+  for (const [key, load] of Object.entries(import.meta.glob('@plugins/*/desktop.jsx'))) {
+    const match = /(?:^|\/)([^/]+)\/desktop\.jsx$/.exec(key)
+    if (match) loaders.set(match[1], load)
+  }
+  entryLoaders = loaders
+  return loaders
 }
 
 /** 某个插件的桌面入口模块加载器；没有 `desktop.jsx` 时返回 null。 */
 export function pluginEntryLoader(pluginId) {
-  return entryLoaders.get(pluginId) ?? null
+  return bundledEntryLoaders().get(pluginId) ?? null
 }
 
 /**

@@ -198,12 +198,13 @@ describe('createPluginModels', () => {
     });
   });
 
-  it('does not resend or reject a successful model response when local usage persistence fails', async () => {
+  it.each([false, true])('does not resend a successful model response when usage saving fails (async: %s)', async (asynchronous) => {
     const createClient = vi.fn((options: ModelClientOptions) =>
       fakeClient(options, { text: 'already paid result', usage }),
     );
     const models = createPluginModels({
       record: () => {
+        if (asynchronous) return Promise.reject(new Error('local disk full'));
         throw new Error('local disk full');
       },
       createClient,
@@ -213,14 +214,32 @@ describe('createPluginModels', () => {
     expect(createClient).toHaveBeenCalledTimes(1);
   });
 
-  it('keeps the provider failure when recording partial usage also fails', async () => {
+  it.each([false, true])('keeps the provider failure when partial usage saving fails (async: %s)', async (asynchronous) => {
+    const failure = new Error('provider failure');
     const models = createPluginModels({
       record: () => {
+        if (asynchronous) return Promise.reject(new Error('local disk full'));
         throw new Error('local disk full');
       },
-      createClient: (options) => fakeClient(options, { error: new Error('provider failure'), usage }),
+      createClient: (options) => fakeClient(options, { error: failure, usage }),
     });
-    await expect(models('memory', baseRequest)).rejects.toThrow('provider failure');
+    await expect(models('memory', baseRequest)).rejects.toBe(failure);
+  });
+
+  it('waits for an asynchronous usage recorder without running the paid request again', async () => {
+    let finishRecording!: () => void;
+    const accounting = new Promise<void>((resolve) => { finishRecording = resolve; });
+    const record = vi.fn(() => accounting);
+    const createClient = vi.fn((options: ModelClientOptions) => fakeClient(options, { text: 'paid', usage }));
+    const models = createPluginModels({ record, createClient });
+    let settled = false;
+    const result = models('memory', baseRequest).then((value) => { settled = true; return value; });
+    await vi.waitFor(() => expect(record).toHaveBeenCalledOnce());
+    expect(settled).toBe(false);
+    expect(createClient).toHaveBeenCalledOnce();
+    finishRecording();
+    await expect(result).resolves.toMatchObject({ text: 'paid' });
+    expect(createClient).toHaveBeenCalledOnce();
   });
 
   it('does not write an empty record when the failed request produced no usage', async () => {
@@ -295,7 +314,7 @@ describe('createPluginModels', () => {
 });
 
 describe('capturePluginModelUsageRecorder', () => {
-  it('captures the session id even when a controller later resumes another session', () => {
+  it('captures the session id even when a controller later resumes another session', async () => {
     let sessionId = 'original';
     const recordSubagentUsageForSession = vi.fn();
     const record = capturePluginModelUsageRecorder({
@@ -304,7 +323,7 @@ describe('capturePluginModelUsageRecorder', () => {
     });
     sessionId = 'switched';
 
-    record(entry);
+    await record(entry);
 
     expect(recordSubagentUsageForSession).toHaveBeenCalledWith(
       'original',
@@ -314,6 +333,14 @@ describe('capturePluginModelUsageRecorder', () => {
         requests: [usage],
       }),
     );
+  });
+
+  it('passes the controller asynchronous save failure back to the host recorder guard', async () => {
+    const record = capturePluginModelUsageRecorder({
+      getCurrentSessionId: () => 'original',
+      recordSubagentUsageForSession: vi.fn().mockRejectedValue(new Error('usage disk full')),
+    });
+    await expect(record(entry)).rejects.toThrow('usage disk full');
   });
 });
 
@@ -396,6 +423,22 @@ describe('createPluginModels follow-main', () => {
 });
 
 describe('ctx.llm fallback through the host', () => {
+  it('does not send a fallback request after an async accounting failure', async () => {
+    const createClient = vi.fn((options: ModelClientOptions) => fakeClient(options, { text: 'paid result', usage }));
+    const models = createPluginModels({
+      record: async () => { throw new Error('local accounting failed'); },
+      resolveMainProvider: () => ({ baseUrl: 'https://main.test/v1', apiKey: 'main-key', model: 'main' }),
+      createClient,
+    });
+    const llm = createPluginLlmApi({
+      spec: {},
+      readValues: () => ({ useMainProvider: 'false', baseUrl: 'https://own.test/v1', apiKey: 'k', model: 'mini' }),
+      models: (request) => models('test', request),
+    });
+    await expect(llm.request({ purpose: 'p', system: 's', user: 'u' })).resolves.toMatchObject({ text: 'paid result' });
+    expect(createClient).toHaveBeenCalledOnce();
+  });
+
   it('retries on the main endpoint and model after the plugin endpoint fails', async () => {
     const built: Array<{ baseURL?: string; apiKey?: string; model?: string }> = [];
     const models = createPluginModels({

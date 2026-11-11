@@ -16,9 +16,9 @@ export type MarkdownHostMessage =
 export type MarkdownRuntimeMessage =
   | { type: 'ready' }
   | { type: 'loaded'; requestId: string; documentId: string }
-  | { type: 'change'; documentId: string; value: string }
-  | { type: 'save'; documentId: string; value: string }
+  | { type: 'change'; documentId: string; loadId: string; value: string }
+  | { type: 'save'; documentId: string; loadId: string; value: string }
   | { type: 'result'; requestId: string; documentId: string; value: string }
-  | { type: 'error'; requestId?: string; message: string };
+  | { type: 'error'; requestId?: string; documentId?: string; message: string };
 
 export type MarkdownEnvelope = { channel: typeof MARKDOWN_CHANNEL; token: string };

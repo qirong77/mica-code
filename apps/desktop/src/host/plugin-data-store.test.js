@@ -50,13 +50,26 @@ describe('plugin data versioned persistence', () => {
     expect(readPluginData(home, 'connections').value).toEqual({ peers: ['a', 'b'] })
   })
 
+  test('returns the exact committed version so callers can save again without a verification read', () => {
+    const options = { key: 'note-a', expectedVersion: null }
+    const first = writePluginData(home, 'sample', { text: 'local draft' }, options)
+    expect(first).toEqual({ ok: true, version: readPluginData(home, 'sample', options).version })
+    expect(first.version).toBeTypeOf('string')
+    const second = writePluginData(home, 'sample', { text: 'other window' }, { ...options, expectedVersion: first.version })
+    expect(second).toEqual({ ok: true, version: readPluginData(home, 'sample', options).version })
+    expect(first.version).not.toBe(second.version)
+    expect(writePluginData(home, 'sample', { text: 'stale local edit' }, { ...options, expectedVersion: first.version }))
+      .toMatchObject({ ok: false, conflict: true })
+    expect(readPluginData(home, 'sample', options).value).toEqual({ text: 'other window' })
+  })
+
   test('keeps unversioned writes compatible and refuses oversized replacements', () => {
-    expect(writePluginData(home, 'sample', { value: 'original' })).toEqual({ ok: true })
+    expect(writePluginData(home, 'sample', { value: 'original' })).toMatchObject({ ok: true })
     expect(() =>
       writePluginData(home, 'sample', { value: 'x'.repeat(PLUGIN_DATA_MAX_BYTES) })
     ).toThrow('上限')
     expect(readPluginData(home, 'sample').value).toEqual({ value: 'original' })
-    expect(writePluginData(home, 'sample', { value: 'updated' })).toEqual({ ok: true })
+    expect(writePluginData(home, 'sample', { value: 'updated' })).toMatchObject({ ok: true })
   })
 
   test('returns a conflict while another process holds the write guard', () => {
@@ -93,7 +106,7 @@ describe('plugin data versioned persistence', () => {
     expect(typeof broken.version).toBe('string')
     expect(
       writePluginData(home, 'sample', { restored: true }, { expectedVersion: broken.version })
-    ).toEqual({ ok: true })
+    ).toMatchObject({ ok: true })
   })
 })
 
@@ -103,21 +116,21 @@ describe('plugin documents versioned persistence', () => {
 
   test('keeps each document and config independent, with per-document CAS versions', () => {
     expect(readPluginData(home, pluginId, { key })).toEqual({ value: null, version: null })
-    expect(writePluginData(home, pluginId, { tree: [key] }, { expectedVersion: null })).toEqual({
+    expect(writePluginData(home, pluginId, { tree: [key] }, { expectedVersion: null })).toMatchObject({
       ok: true
     })
     expect(
       writePluginData(home, pluginId, { text: 'first' }, { key, expectedVersion: null })
-    ).toEqual({ ok: true })
+    ).toMatchObject({ ok: true })
     const original = readPluginData(home, pluginId, { key })
     expect(typeof original.version).toBe('string')
     expect(original.value).toEqual({ text: 'first' })
     expect(
       writePluginData(home, pluginId, { text: 'second' }, { key: 'other', expectedVersion: null })
-    ).toEqual({ ok: true })
+    ).toMatchObject({ ok: true })
     expect(
       writePluginData(home, pluginId, { text: 'updated' }, { key, expectedVersion: original.version })
-    ).toEqual({ ok: true })
+    ).toMatchObject({ ok: true })
     expect(
       writePluginData(home, pluginId, { text: 'stale' }, { key, expectedVersion: original.version })
     ).toMatchObject({ ok: false, conflict: true })
@@ -136,7 +149,7 @@ describe('plugin documents versioned persistence', () => {
 
   test('persists a large document privately while config stays limited to 256 KiB', () => {
     const value = { text: 'x'.repeat(PLUGIN_DATA_MAX_BYTES + 1) }
-    expect(writePluginData(home, pluginId, value, { key, expectedVersion: null })).toEqual({
+    expect(writePluginData(home, pluginId, value, { key, expectedVersion: null })).toMatchObject({
       ok: true
     })
     expect(readPluginData(home, pluginId, { key }).value).toEqual(value)
@@ -146,7 +159,7 @@ describe('plugin documents versioned persistence', () => {
     expect(readPluginData(home, pluginId)).toEqual({ value: null, version: null })
 
     const fullSize = 'x'.repeat(PLUGIN_DOCUMENT_MAX_BYTES - 2)
-    expect(writePluginData(home, pluginId, fullSize, { key })).toEqual({ ok: true })
+    expect(writePluginData(home, pluginId, fullSize, { key })).toMatchObject({ ok: true })
     expect(statSync(file).size).toBe(PLUGIN_DOCUMENT_MAX_BYTES + 1)
     const version = readPluginData(home, pluginId, { key }).version
     expect(() => writePluginData(home, pluginId, `${fullSize}x`, { key })).toThrow('上限')
@@ -161,8 +174,8 @@ describe('plugin documents versioned persistence', () => {
         writePluginData(home, pluginId, { text: 'blocked' }, { key, expectedVersion: null })
       ).toMatchObject({ ok: false, conflict: true })
       expect(readPluginData(home, pluginId, { key })).toEqual({ value: null, version: null })
-      expect(writePluginData(home, pluginId, { tree: [] })).toEqual({ ok: true })
-      expect(writePluginData(home, pluginId, { text: 'other' }, { key: 'other' })).toEqual({
+      expect(writePluginData(home, pluginId, { tree: [] })).toMatchObject({ ok: true })
+      expect(writePluginData(home, pluginId, { text: 'other' }, { key: 'other' })).toMatchObject({
         ok: true
       })
     } finally {
@@ -170,7 +183,7 @@ describe('plugin documents versioned persistence', () => {
     }
     expect(
       writePluginData(home, pluginId, { text: 'saved' }, { key, expectedVersion: null })
-    ).toEqual({ ok: true })
+    ).toMatchObject({ ok: true })
   })
 
   test('rejects invalid keys for reads and writes before creating any files', () => {
@@ -211,7 +224,7 @@ describe('plugin documents versioned persistence', () => {
     expect(typeof empty.version).toBe('string')
     expect(
       writePluginData(home, pluginId, { text: 'restored' }, { key, expectedVersion: empty.version })
-    ).toEqual({ ok: true })
+    ).toMatchObject({ ok: true })
   })
 
   test('rejects symlinks in the plugin root, document directory, document file and lock', () => {

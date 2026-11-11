@@ -73,6 +73,18 @@ describe('session reader', () => {
       ]
       expect(await write(messages)).toEqual(plan)
       expect(await write([...messages, { role: 'user', content: 'new turn' }])).toBeNull()
+      expect(
+        await write([
+          ...messages,
+          {
+            role: 'user',
+            content: [
+              { type: 'text', text: 'new turn with attachment' },
+              { type: 'image', data: 'image', mimeType: 'image/png' }
+            ]
+          }
+        ])
+      ).toBeNull()
       expect(await write(messages.slice(0, 2))).toBeNull()
       expect(await write([
         ...messages.slice(0, 2),
@@ -124,6 +136,40 @@ describe('session reader', () => {
       })
       writeFileSync(file, '{bad')
       expect(await read(file)).toEqual({ history: [], meta: null })
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('does not join a read of an older file revision or let it replace the current cache', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'session-reader-revision-'))
+    const file = join(dir, 'session.json')
+    const workers = []
+    const read = createSessionReader({
+      startWorker: () => {
+        const worker = new EventEmitter()
+        workers.push(worker)
+        return worker
+      }
+    })
+    try {
+      writeFileSync(file, '{"revision":1}')
+      const old = read(file)
+      expect(read(file)).toBe(old)
+      writeFileSync(file, '{"revision":"newer revision"}')
+      const current = read(file)
+      expect(current).not.toBe(old)
+      expect(workers).toHaveLength(2)
+      const latest = { history: [{ role: 'notice', text: 'summary finished' }], meta: null }
+      workers[1].emit('message', latest)
+      expect(await current).toBe(latest)
+      workers[0].emit('message', {
+        history: [{ role: 'notice', text: 'still running' }],
+        meta: null
+      })
+      await old
+      expect(await read(file)).toBe(latest)
+      expect(workers).toHaveLength(2)
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }

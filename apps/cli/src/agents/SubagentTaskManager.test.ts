@@ -511,6 +511,34 @@ function createDeferred<T>() {
 
 
 describe('cross-process recovery', () => {
+  it('discovers tasks published after an empty restore and resets the stamp when switching sessions', () => {
+    const owner = {} as AgentRuntime;
+    const record = {
+      id: 'migrated-task', description: 'recovered', subagent_type: 'test', model: 'm',
+      effort: 'low' as const, status: 'completed' as const,
+      started_at: '2026-01-01T00:00:00Z', execution_pending: false,
+    };
+    let records: (typeof record)[] = [];
+    let stamp = 'missing';
+    const read = vi.fn(() => records);
+    const manager = new SubagentTaskManager({ readRestoredTasks: read, readRestoredStamp: () => stamp });
+    manager.restore([], owner);
+    expect(manager.list(owner)).toEqual([]);
+    manager.list(owner);
+    expect(read).toHaveBeenCalledTimes(1);
+
+    records = [record];
+    stamp = 'migrated';
+    expect(manager.get(record.id, owner)).toMatchObject(record);
+    expect(manager.list(owner)).toEqual([expect.objectContaining(record)]);
+    expect(read).toHaveBeenCalledTimes(2);
+
+    manager.clearOwner(owner);
+    records = [];
+    expect(manager.list(owner)).toEqual([]);
+    expect(read).toHaveBeenCalledTimes(3);
+  });
+
   it('refreshes restored records while waiting and refuses to kill another process task', async () => {
     const owner = {} as AgentRuntime;
     let record = { id: 'remote-task', description: 'work', subagent_type: 'test', model: 'm', effort: 'low', status: 'running' as 'running' | 'completed', started_at: new Date().toISOString(), execution_pid: process.pid, execution_pending: true };

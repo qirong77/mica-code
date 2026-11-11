@@ -103,10 +103,15 @@ export function planTextReplacement(previous, next) {
 /**
  * 把整段文本写回 monaco 模型，只动变化的那一段。
  *
- * `model` 只用到 `getValue` / `getPositionAt` / `applyEdits`，所以纯逻辑测试里能给假对象。
+ * 先按 model 的换行符归一化：Monaco 写入时也会这样做，提前对齐才能识别没有变化的 flush，
+ * 避免 CRLF 文件保存后又被同一份 LF Markdown 标成 dirty。
  */
 export function writeModelText(model, next) {
-  const change = planTextReplacement(model.getValue(), next)
+  const previous = model.getValue()
+  if (previous === next) return false
+  const eol = model.getEOL()
+  const normalized = eol === '\n' ? next.replace(/\r\n|\r/g, eol) : next.replace(/\r\n|\r|\n/g, eol)
+  const change = planTextReplacement(previous, normalized)
   if (!change) return false
   const from = model.getPositionAt(change.start)
   const to = model.getPositionAt(change.end)

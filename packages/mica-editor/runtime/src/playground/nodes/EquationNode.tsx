@@ -44,8 +44,8 @@ export type SerializedEquationNode = Spread<
 >;
 
 /**
- * btoa/atob only handle Latin-1, so go through the UTF-8 bytes -- the same way
- * docSerialization does. An equation is free-form LaTeX and routinely holds
+ * btoa/atob only handle Latin-1, so go through the UTF-8 bytes.
+ * An equation is free-form LaTeX and routinely holds
  * code points above U+00FF (`\text{α}`, CJK, an emoji), which btoa throws on.
  * Pure ASCII encodes byte for byte, so previously exported HTML still decodes.
  */

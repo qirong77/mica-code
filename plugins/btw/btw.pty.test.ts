@@ -1,7 +1,7 @@
 import { describe, it } from 'vitest';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PtyDriver } from '@packages/mica-pty/index.js';
@@ -240,14 +240,35 @@ suite('/btw PTY end-to-end (mock provider)', () => {
     };
 
     try {
-      const booted = await driver.waitFor(/Type something|start a conversation/, { timeoutMs: 90_000 });
+      // The first Ink frame precedes plugin setup, and incremental redraws do not
+      // repeat complete placeholder text in the byte stream. Wait for this isolated
+      // host's assembly record instead, then let the final input render settle.
+      const startupDeadline = Date.now() + 90_000;
+      let booted = false;
+      while (!booted && Date.now() < startupDeadline) {
+        try {
+          const status = JSON.parse(readFileSync(join(home, 'plugin-status.json'), 'utf8')) as {
+            host?: string;
+            plugins?: { id: string; status: string }[];
+          };
+          booted =
+            status.host === 'tui' &&
+            Boolean(status.plugins?.some((entry) => entry.id === 'btw' && entry.status === 'loaded'));
+        } catch {
+          /* The startup record has not been published yet. */
+        }
+        if (!booted) await new Promise((resolve) => setTimeout(resolve, 50));
+      }
       if (!booted) fail('TUI 未启动');
+      await driver.waitIdle(250, 5_000);
 
       // turn 1: 一个正常回合
+      const sendPos = driver.text().length;
       await driver.typeText('开始', 15);
+      await driver.waitIdle(250, 5_000);
       driver.enter();
-      const t1 = await driver.waitTurnCompleted(0, { timeoutMs: 90_000 });
-      if (t1 !== 'completed') fail(`turn1 未完成: ${String(t1)}`);
+      const t1 = await driver.waitTurnCompleted(sendPos, { timeoutMs: 90_000 });
+      if (t1 !== 'completed') fail(`turn1 未完成: ${String(t1)}，模型请求数 ${mock.state.requests.length}`);
 
       // /btw -h：用法与子命令能直接查（-continue / -stop 都写在这一段里）
       if (!(await runCommand(['/btw', ' -h'], /\/btw -stop/))) fail('未看到 /btw 帮助');

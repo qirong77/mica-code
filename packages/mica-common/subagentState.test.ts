@@ -114,13 +114,13 @@ describe('subagent state', () => {
     expect(child.status).toBe(0);
     expect(() => claimSubagentRestart('claimed')).toThrow('claimed');
   });
-  it('reads legacy records and prefers their per-task updates', () => {
+  it('only reads the current per-task layout; legacy arrays require evolution', () => {
     const dir = home();
     mkdirSync(join(dir, 'subagent-tasks'));
     writeFileSync(join(dir, 'subagent-tasks', 'session.json'), JSON.stringify([task('one'), task('two')]));
     writeStoredSubagentTasks('session', [{ ...task('one'), status: 'completed' }]);
     const restored = readStoredSubagentTasks('session');
-    expect(restored).toHaveLength(2);
+    expect(restored).toHaveLength(1);
     expect(restored.find((record) => record.id === 'one')?.status).toBe('completed');
   });
 });

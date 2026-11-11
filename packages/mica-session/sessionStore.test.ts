@@ -10,6 +10,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { execFileSync } from 'node:child_process';
 import { join, resolve } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { PersistedSession } from './sessionStore.js';
@@ -201,16 +202,53 @@ describe('session turn lease', () => {
 
       const first = acquireSessionTurnLease('shared-session');
       expect(first).not.toBeNull();
+      expect(first?.isHeld()).toBe(true);
       expect(acquireSessionTurnLease('shared-session')).toBeNull();
       const other = acquireSessionTurnLease('other-session');
       expect(other).not.toBeNull();
 
       first?.release();
       first?.release();
+      expect(first?.isHeld()).toBe(false);
       const next = acquireSessionTurnLease('shared-session');
       expect(next).not.toBeNull();
+      expect(next?.isHeld()).toBe(true);
       next?.release();
       other?.release();
+    } finally {
+      rmSync(micaHome, { recursive: true, force: true });
+    }
+  });
+
+  it('checks disk tokens even when a replacement writer has the same PID', async () => {
+    const micaHome = mkdtempSync(join(tmpdir(), 'mica-session-token-'));
+    try {
+      process.env.MICA_HOME = micaHome;
+      vi.resetModules();
+      const { acquireSessionTurnLease, SESSION_DIR } = await import('./sessionStore.js');
+      const first = acquireSessionTurnLease('replaced')!;
+      const lockPath = join(SESSION_DIR, '.turn-locks', 'replaced.lock');
+      const originalLock = readFileSync(lockPath, 'utf8');
+
+      writeFileSync(lockPath, '{invalid');
+      expect(first.isHeld()).toBe(false);
+      rmSync(lockPath);
+      expect(first.isHeld()).toBe(false);
+      const replacement = acquireSessionTurnLease('replaced')!;
+      expect(JSON.parse(readFileSync(lockPath, 'utf8')).pid).toBe(process.pid);
+      expect(first.isHeld()).toBe(false);
+      expect(replacement.isHeld()).toBe(true);
+      first.release();
+      first.release();
+      expect(replacement.isHeld()).toBe(true);
+      expect(acquireSessionTurnLease('replaced')).toBeNull();
+      replacement.release();
+
+      // Even restoring the former token cannot revive a released handle.
+      writeFileSync(lockPath, originalLock);
+      expect(first.isHeld()).toBe(false);
+      first.release();
+      expect(readFileSync(lockPath, 'utf8')).toBe(originalLock);
     } finally {
       rmSync(micaHome, { recursive: true, force: true });
     }
@@ -242,7 +280,7 @@ describe('session turn lease', () => {
     }
   });
 
-  it('deletes a session together with any leftover turn-lock', async () => {
+  it('deletes a session after reclaiming a dead writer lock and releases its own lease', async () => {
     const micaHome = mkdtempSync(join(tmpdir(), 'mica-session-delete-lock-'));
     try {
       process.env.MICA_HOME = micaHome;
@@ -253,7 +291,7 @@ describe('session turn lease', () => {
 
       const lockPath = resolve(SESSION_DIR, '.turn-locks', 'to-delete.lock');
       mkdirSync(resolve(SESSION_DIR, '.turn-locks'), { recursive: true });
-      writeFileSync(lockPath, JSON.stringify({ pid: process.pid, token: 'x' }), 'utf-8');
+      writeFileSync(lockPath, JSON.stringify({ pid: 999_999_999, token: 'stale' }), 'utf-8');
       const btwPath = resolve(micaHome, 'btw', 'to-delete.json');
       mkdirSync(resolve(micaHome, 'btw'), { recursive: true });
       writeFileSync(btwPath, JSON.stringify({ version: 1, threads: [] }), 'utf-8');
@@ -281,10 +319,76 @@ describe('session turn lease', () => {
       // exists anymore, otherwise a later continue/resume of the id stays stuck.
       const lockPath = resolve(SESSION_DIR, '.turn-locks', 'gone-session.lock');
       mkdirSync(resolve(SESSION_DIR, '.turn-locks'), { recursive: true });
-      writeFileSync(lockPath, JSON.stringify({ pid: process.pid, token: 'x' }), 'utf-8');
+      writeFileSync(lockPath, JSON.stringify({ pid: 999_999_999, token: 'stale' }), 'utf-8');
 
       expect(store.delete('gone-session')).toBe(false);
       expect(existsSync(lockPath)).toBe(false);
+    } finally {
+      rmSync(micaHome, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('SessionStore deletion lease', () => {
+  it.each([false, true])('blocks another process from deleting a live writer (persisted: %s)', async (persisted) => {
+    const micaHome = mkdtempSync(join(tmpdir(), 'mica-session-delete-race-'));
+    try {
+      process.env.MICA_HOME = micaHome;
+      vi.resetModules();
+      const { SessionStore, acquireSessionTurnLease, SESSION_DIR } = await import('./sessionStore.js');
+      const store = new SessionStore();
+      const session = makeSession('live-writer', '/tmp/live-writer', '2026-01-01T00:00:00.000Z');
+      const writer = acquireSessionTurnLease(session.id)!;
+      if (persisted) store.save(session);
+      const lockPath = join(SESSION_DIR, '.turn-locks', `${session.id}.lock`);
+      const lock = readFileSync(lockPath, 'utf8');
+      const btwPath = join(micaHome, 'btw', `${session.id}.json`);
+      mkdirSync(join(micaHome, 'btw'), { recursive: true });
+      writeFileSync(btwPath, JSON.stringify({ version: 1, threads: [] }));
+      const deleteInAnotherProcess = () =>
+        execFileSync(
+          'bun',
+          [
+            '--eval',
+            `
+        import { SessionStore } from ${JSON.stringify(new URL('./sessionStore.ts', import.meta.url).href)};
+        console.log(new SessionStore().delete('live-writer'));
+      `,
+          ],
+          { env: { ...process.env, MICA_HOME: micaHome }, encoding: 'utf8' },
+        ).trim();
+
+      expect(deleteInAnotherProcess()).toBe('false');
+      expect(store.delete(session.id)).toBe(false);
+      expect(store.load(session.id)).toEqual(persisted ? session : null);
+      expect(readFileSync(lockPath, 'utf8')).toBe(lock);
+      expect(writer.isHeld()).toBe(true);
+      expect(existsSync(btwPath)).toBe(true);
+
+      writer.release();
+      expect(deleteInAnotherProcess()).toBe(String(persisted));
+      expect(store.load(session.id)).toBeNull();
+      expect(existsSync(lockPath)).toBe(false);
+      expect(existsSync(btwPath)).toBe(false);
+    } finally {
+      rmSync(micaHome, { recursive: true, force: true });
+    }
+  });
+
+  it('releases the deletion lease when removing the session fails', async () => {
+    const micaHome = mkdtempSync(join(tmpdir(), 'mica-session-delete-failure-'));
+    try {
+      process.env.MICA_HOME = micaHome;
+      vi.resetModules();
+      const { SessionStore, acquireSessionTurnLease, SESSION_DIR } = await import('./sessionStore.js');
+      const store = new SessionStore();
+      // rmSync without recursive removal rejects a directory, even with force.
+      mkdirSync(join(SESSION_DIR, 'cannot-delete.json'), { recursive: true });
+      expect(() => store.delete('cannot-delete')).toThrow();
+      expect(existsSync(join(SESSION_DIR, '.turn-locks', 'cannot-delete.lock'))).toBe(false);
+      const next = acquireSessionTurnLease('cannot-delete');
+      expect(next?.isHeld()).toBe(true);
+      next?.release();
     } finally {
       rmSync(micaHome, { recursive: true, force: true });
     }

@@ -23,6 +23,20 @@ describe('reply digest helpers', () => {
     expect(lastAssistantText(messages)).toBe('最后\n一条');
   });
 
+  it('does not reuse a reply from before the latest user input', () => {
+    expect(lastAssistantText([
+      assistant('上一轮的长回复'),
+      { role: 'user', content: '继续执行工具' },
+      { role: 'notice', content: '工具已完成' },
+    ])).toBe('');
+    expect(lastAssistantText([
+      assistant('上一轮的长回复'),
+      { role: 'user', content: '新请求' },
+      assistant('本轮回复'),
+      { role: 'notice', content: '插件提示' },
+    ])).toBe('本轮回复');
+  });
+
   it('triggers on character count or many non-empty lines', () => {
     expect(shouldDigest('a'.repeat(1800), { charThreshold: 1800, lineThreshold: 36 })).toBe(true);
     expect(

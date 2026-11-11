@@ -6,13 +6,7 @@
  *
  */
 
-const hostName = window.location.hostname;
-export const isDevPlayground: boolean =
-  hostName !== 'playground.lexical.dev' &&
-  hostName !== 'lexical-playground.vercel.app';
-
 export const DEFAULT_SETTINGS = {
-  emptyEditor: false,
   hasFitNestedTables: false,
   hasLinkAttributes: false,
   hasNestedTables: false,
@@ -27,7 +21,6 @@ export const DEFAULT_SETTINGS = {
   isShadowDOM: false,
   isVisibleNonPrinting: false,
   listStrictIndent: false,
-  measureTypingPerf: false,
   selectBlock: true,
   selectionAlwaysOnDisplay: false,
   shouldAllowHighlightingWithBrackets: false,
@@ -35,15 +28,13 @@ export const DEFAULT_SETTINGS = {
   shouldPreserveNewLinesInMarkdown: false,
   shouldUseLexicalContextMenu: false,
   showNestedEditorTreeView: false,
-  showTableOfContents: false,
-  showTreeView: false,
   tableCellBackgroundColor: true,
   tableCellMerge: true,
   tableHorizontalScroll: true,
   useCollabV2: false,
 } as const;
 
-// These are mutated in setupEnv
+// Notebook defaults are not read from the URL: its hash authenticates the host bridge.
 export const INITIAL_SETTINGS: Record<SettingName, boolean> = {
   ...DEFAULT_SETTINGS,
 };

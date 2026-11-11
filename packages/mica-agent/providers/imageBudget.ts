@@ -1,3 +1,5 @@
+import type { Message } from '@earendil-works/pi-ai';
+
 /**
  * 请求级的内联图片字节预算。
  *
@@ -19,8 +21,6 @@
 export const MAX_REQUEST_BODY_BYTES = 20 * 1024 * 1024;
 /** 单张图的上限：超过就换占位符（PNG 已在准备阶段压过，走到这里多半是别的格式）。 */
 export const MAX_SINGLE_IMAGE_BYTES = 6 * 1024 * 1024;
-
-const IMAGE_PART_TYPES = new Set(['input_image', 'image_url', 'image']);
 
 export type ImageBudgetReport = {
   /** 裁剪前的请求正文字节数（文本 + 内联图片载荷）。 */
@@ -51,10 +51,10 @@ const IMAGE_OMITTED_TOO_LARGE =
   '[图片已省略] 这张图片（{size}）超过单张上限 {limit}，本机压不下来（只有 PNG 会被重编码）。请先裁剪或缩小图片再读，并如实告知用户这张图已被省略。';
 
 /**
- * 就地替换超限的图片块。返回的是新对象（原数组不被改动），没有超限时原样返回
+ * 在发送副本中替换超限的图片块。返回的是新对象（原数组不被改动），没有超限时原样返回
  * 入参，避免为几十 MB 的历史白复制一遍。
  */
-export function applyImageBudget<T>(messages: T, options: ImageBudgetOptions = {}): ImageBudgetResult<T> {
+export function applyImageBudget(messages: Message[], options: ImageBudgetOptions = {}): ImageBudgetResult<Message[]> {
   const maxBodyBytes = options.maxBodyBytes ?? MAX_REQUEST_BODY_BYTES;
   const maxSingleImageBytes = options.maxSingleImageBytes ?? MAX_SINGLE_IMAGE_BYTES;
   const scan = scanImages(messages);
@@ -96,7 +96,7 @@ export function applyImageBudget<T>(messages: T, options: ImageBudgetOptions = {
   }
   report.keptImages = scan.images.length - report.droppedImages;
 
-  const value = rewriteImages(messages, omissions, { index: 0 }, '');
+  const value = rewriteImages(messages, omissions);
   // 占位文本本身也有体积（每条约 300 字节），报出来的结果得是真正要发的那份。
   const after = scanImages(value);
   report.resultBytes = after.textBytes + after.images.reduce((total, image) => total + image.bytes, 0);
@@ -113,73 +113,45 @@ export function describeImageBudget(report: ImageBudgetReport): string | null {
   );
 }
 
-function scanImages(node: unknown, scan: Scan = { images: [], textBytes: 0 }): Scan {
-  if (typeof node === 'string') {
-    scan.textBytes += Buffer.byteLength(node, 'utf8');
-    return scan;
+function scanImages(messages: Message[]): Scan {
+  const scan: Scan = { images: [], textBytes: 0 };
+  for (const message of messages) {
+    const { content, ...metadata } = message;
+    scan.textBytes += stringBytes(metadata);
+    if (typeof content === 'string') {
+      scan.textBytes += stringBytes(content);
+      continue;
+    }
+    for (const part of content) {
+      if (message.role !== 'assistant' && part.type === 'image') {
+        scan.images.push({ index: scan.images.length, bytes: Buffer.byteLength(part.data, 'utf8') });
+      } else scan.textBytes += stringBytes(part);
+    }
   }
-  if (!node || typeof node !== 'object') return scan;
-  if (Array.isArray(node)) {
-    for (const item of node) scanImages(item, scan);
-    return scan;
-  }
-  const record = node as Record<string, unknown>;
-  const payload = imagePayload(record);
-  if (payload !== null) {
-    scan.images.push({ index: scan.images.length, bytes: Buffer.byteLength(payload, 'utf8') });
-    return scan;
-  }
-  for (const value of Object.values(record)) scanImages(value, scan);
   return scan;
 }
 
-function rewriteImages<T>(node: T, omissions: Map<number, string>, counter: { index: number }, role: string): T {
-  if (!node || typeof node !== 'object') return node;
-  if (Array.isArray(node)) {
+function stringBytes(node: unknown): number {
+  if (typeof node === 'string') return Buffer.byteLength(node, 'utf8');
+  if (!node || typeof node !== 'object') return 0;
+  return Object.values(node).reduce<number>((total, value) => total + stringBytes(value), 0);
+}
+
+function rewriteImages(messages: Message[], omissions: Map<number, string>): Message[] {
+  let imageIndex = 0;
+  return messages.map((message) => {
+    if ((message.role !== 'user' && message.role !== 'toolResult') || typeof message.content === 'string')
+      return message;
     let changed = false;
-    const next = node.map((item) => {
-      const rewritten = rewriteImages(item, omissions, counter, role);
-      if (rewritten !== item) changed = true;
-      return rewritten;
+    const content = message.content.map((part) => {
+      if (part.type !== 'image') return part;
+      const omission = omissions.get(imageIndex++);
+      if (!omission) return part;
+      changed = true;
+      return { type: 'text' as const, text: omission };
     });
-    return (changed ? next : node) as T;
-  }
-  const record = node as Record<string, unknown>;
-  if (imagePayload(record) !== null) {
-    const index = counter.index++;
-    const omission = omissions.get(index);
-    if (!omission) return node;
-    return (record.type === 'image' ? { type: 'text', text: omission } : omissionPart(record.type === 'image_url', role, omission)) as T;
-  }
-  const nextRole = record.type === 'message' && typeof record.role === 'string' ? record.role : role;
-  let changed = false;
-  const next: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(record)) {
-    const rewritten = rewriteImages(value, omissions, counter, nextRole);
-    if (rewritten !== value) changed = true;
-    next[key] = rewritten;
-  }
-  return (changed ? next : node) as T;
-}
-
-/** 图片块的载荷字符串：Responses 的 `image_url` 是字符串或 `{ url }`，Chat 的一律是 `{ url }`。 */
-function imagePayload(record: Record<string, unknown>): string | null {
-  const type = record.type;
-  if (typeof type !== 'string' || !IMAGE_PART_TYPES.has(type)) return null;
-  if (type === 'image') return typeof record.data === 'string' ? record.data : '';
-  const source = record.image_url ?? record.url;
-  if (typeof source === 'string') return source;
-  if (source && typeof source === 'object') {
-    const url = (source as { url?: unknown }).url;
-    if (typeof url === 'string') return url;
-  }
-  return '';
-}
-
-function omissionPart(chatShape: boolean, role: string, text: string): Record<string, unknown> {
-  if (chatShape) return { type: 'text', text };
-  // Responses 的 assistant 消息只认 output_text，user/system 认 input_text。
-  return role === 'assistant' ? { type: 'output_text', text, annotations: [] } : { type: 'input_text', text };
+    return changed ? { ...message, content } : message;
+  });
 }
 
 function formatForBudget(bytes: number): string {

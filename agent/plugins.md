@@ -185,6 +185,7 @@ macOS 浮窗只取键盘焦点、不连带唤起主应用；原生窗口策略�
 插件前端模块的能力就这几件，来自 `renderer/src/plugin-host.js` 的 `createPluginHostApi(pluginId, session)`：`currentHost()`（页面所在运行时的 origin）、`probe(address)`、`readData()` / `writeData(value, options?)`、`open(url)`、`access`（读改写这台机器的远程访问策略）、`action(key)`（执行清单 `actions` 里声明过的动作，宿主转给一次性插件进程 `mica plugin-action`；卡片要「真的干一件事」时用它，不要用 `writeData` 伪造一个请求位再等后端轮询，没声明的 key 会被拒绝，卡片能做的动作与配置页的按钮是同一份声明）、`session`（页面正在看的那条会话：`id()` / `sessionId()` / `cwd()`、`state.read()|write(value)|subscribe()` 读写插件自己的会话级状态（`pluginState[pluginId]`，与 `ctx.sessionState` 同一份，走 `mica/sessionState/get|set`）、`onIdle()` 在这一轮跑完时回调——模型在轮次里写下的状态只能在这一刻重读）。`session` 为 null 表示当前没有打开的会话，卡片要如实画空态。探活、数据读写、访问策略与动作必须由运行时代劳（页面读不到跨源响应、碰不到请求分派、也没有文件系统），落在 `host/plugin-host.js` 的 `plugin-host:probe` / `plugin-host:read-data|write-data` / `plugin-host:access-get|set` / `plugin-host:run-action`；数据文件统一在 `$MICA_HOME/plugin-data/<id>/data.json`，宿主不解析结构。读取返回 `{ value, version }`，缺文件两者为 null、IO 失败显式报错；读改写可带 `{ expectedVersion }`，宿主在跨进程锁内比较版本并原子替换，冲突返回 `{ ok: false, conflict: true }`，插件重读并只重放本次修改。`open` 是纯页面行为，分支在 `shell-env.js` 的 `isElectronShell`。
 
 - 卡片宽度默认 320px，插件模块可以 `export const card = { width }` 声明更宽的（夹在 240–960）；长文编辑这类在 320 里放不下的界面用它，宿主只负责尺寸与浮层定位。
+- 数据与独立文档成功写入都返回 `{ ok: true, version }`，版本在写入锁内根据实际写出的内容计算；下一次 CAS 使用这个值，不为确认版本重读整篇文档。
 - 插件前端模块用到的 Tailwind 工具类必须被扫描到：`plugins/` 不在 `apps/desktop` 下，`app.css` 里用 `@source '../../.../plugins'` 显式纳入，否则插件里的间距、`group-hover/*`、`max-md:*` 一个都不会生成（表现为间距全塌、悬停不出现）。
 
 ## 界面控件只有一份

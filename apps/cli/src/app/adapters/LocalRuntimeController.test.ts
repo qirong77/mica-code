@@ -9,11 +9,6 @@ import { setActiveContext } from '../activeContext.js';
 import { LocalRuntimeController } from './LocalRuntimeController.js';
 import { MicaUiRuntimeBridge } from './MicaUiRuntimeBridge.js';
 
-vi.mock('@packages/mica-session/index.js', async (importOriginal) => {
-  const original = await importOriginal<typeof import('@packages/mica-session/index.js')>();
-  return { ...original, micaSession: { ...original.micaSession, acquireTurnLease: () => ({ release: () => {} }) } };
-});
-
 vi.mock('../../runtime/RewindCheckpointManager.js', () => ({
   RewindCheckpointManager: class {
     capture() { return 'checkpoint'; }
@@ -60,6 +55,7 @@ describe('LocalRuntimeController retry display', () => {
     const saves: Array<{ turnState?: string; thinking: string; ids: string[] }> = [];
     const sessionController = {
       getCurrentSessionId: () => 'local-retry-test',
+      acquireTurnLease: vi.fn(() => ({ sessionId: 'local-retry-test', isHeld: () => true, release: vi.fn() })),
       refreshFromStore: () => null,
       saveCurrent: (options: { turnState?: string }) => {
         saves.push({

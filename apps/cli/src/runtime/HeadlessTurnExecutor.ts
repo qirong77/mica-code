@@ -3,7 +3,7 @@ import { micaAgent } from '@packages/mica-agent/index.js';
 import type { MicaUiConversationMessage } from '@packages/mica-ui/index.js';
 import type { HookRegistry } from '@packages/mica-plugin/index.js';
 import { micaRuntime, type MessageQueueService, type RuntimeInput } from '@packages/mica-runtime/index.js';
-import { micaSession, type SessionTurnLease } from '@packages/mica-session/index.js';
+import type { SessionTurnLease } from '@packages/mica-session/index.js';
 import { micaTools } from '@packages/mica-tools/index.js';
 import { parseImageRefs } from '@packages/mica-ui/utils/imagePaste.js';
 import type { SessionController } from '../session/SessionController.js';
@@ -372,7 +372,7 @@ export class HeadlessTurnExecutor {
    */
   private acquireTurnLease(): SessionTurnLease | null {
     if (!this.persistsSession) return null;
-    return micaSession.acquireTurnLease(this.options.sessionController.getCurrentSessionId());
+    return this.options.sessionController.acquireTurnLease();
   }
 
   private releaseTurnLease(): void {

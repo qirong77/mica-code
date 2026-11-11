@@ -9,6 +9,7 @@ import { attachCodexProjector } from './CodexProjector.js';
 import type { MicaUiConversationMessage } from '@packages/mica-ui/index.js';
 import { micaPlugin } from '@packages/mica-plugin/index.js';
 import type { RuntimeInput } from '@packages/mica-runtime/index.js';
+import { micaSession } from '@packages/mica-session/index.js';
 
 class MockAgent {
   readonly events = mitt();
@@ -120,6 +121,7 @@ function createHarness(
   const sessionId = `session-${++harnessSeq}`;
   const sessionController = {
     getCurrentSessionId: () => sessionId,
+    acquireTurnLease: vi.fn(() => micaSession.acquireTurnLease(sessionId)),
     saveCurrent: (options: { turnState?: string; conversationMessages?: Array<{ role: string }> } = {}) => {
       savedStates.push(options.turnState ?? 'completed');
       savedConversations.push(options.conversationMessages);
@@ -184,6 +186,61 @@ function input(text: string, queueMode?: 'after_iteration' | 'after_turn') {
 }
 
 describe('HeadlessTurnExecutor', () => {
+  it('registers turn preparation and idle maintenance leases with the usage recorder', async () => {
+    const { SessionController } = await import('../session/SessionController.js');
+    const { buildSubagentUsageRecord } = await import('@packages/mica-agent/index.js');
+    const snapshot: import('../agent/AgentRuntime.js').AgentRuntimeSnapshot = {
+      providerId: 'test', protocol: 'openai_responses', model: 'test-model', effort: 'none', role: 'default',
+      messageFormat: 'pi-ai-v1', messages: [{ role: 'user', content: 'work', timestamp: 1 }],
+      usageHistory: [], lastUsage: undefined, subagentUsageHistory: [],
+    };
+    const makeRecord = (taskId: string) => buildSubagentUsageRecord({
+      taskId, origin: 'plugin', pluginId: 'test', subagentType: 'plugin:test', description: taskId,
+      status: 'completed', startedAt: new Date().toISOString(), requests: [],
+    });
+    const agent = Object.assign(new MockAgent(), {
+      getSnapshot: () => snapshot,
+      recordSubagentUsage: (value: ReturnType<typeof makeRecord>) => { snapshot.subagentUsageHistory!.push(value); },
+      loadSnapshot: vi.fn(), reloadConfig: vi.fn(),
+    });
+    const controller = new SessionController({
+      agent: agent as unknown as import('../session/SessionController.js').SessionAgentAdapter,
+      config: { apply: () => undefined }, ui: { restore: vi.fn() },
+    });
+    controller.saveCurrent();
+    const sessionId = controller.getCurrentSessionId();
+    const prepare = makeRecord('prepare');
+    const maintenance = makeRecord('maintenance');
+    const hooks = new micaPlugin.HookRegistry();
+    hooks.on('turn:prepare', async () => {
+      expect(await controller.recordSubagentUsageForSession(sessionId, prepare)).toBe(true);
+    });
+    let releasedBeforeAfter = false;
+    hooks.on('turn:after', () => {
+      const available = micaSession.acquireTurnLease(sessionId);
+      releasedBeforeAfter = available !== null;
+      available?.release();
+    });
+    let idleCount = 0;
+    const executor = new HeadlessTurnExecutor({
+      agent: agent as never, sessionController: controller, hooks,
+      host: { getCurrentSessionId: () => sessionId }, onEvent: () => {}, onIdle: () => { idleCount++; },
+      parseImageRefs: async (text) => text,
+    });
+    await expect(executor.start(input('work'))).resolves.toBe('started');
+    await vi.waitFor(() => expect(idleCount).toBe(1));
+    expect(releasedBeforeAfter).toBe(true);
+    expect(controller.load(sessionId)!.snapshot.subagentUsageHistory).toEqual([prepare]);
+    await expect(executor.runIdleMaintenance(async () => {
+      expect(await controller.recordSubagentUsageForSession(sessionId, maintenance)).toBe(true);
+      return 'saved';
+    }, 'busy')).resolves.toBe('saved');
+    expect(controller.load(sessionId)!.snapshot.subagentUsageHistory).toEqual([prepare, maintenance]);
+    const available = micaSession.acquireTurnLease(sessionId);
+    expect(available).not.toBeNull();
+    available?.release();
+  });
+
   it('rolls back completed responses before a turn retry and aborts the wait without saving their text', async () => {
     const { agent, executor, events } = createHarness({ retryDelayMs: 5000 });
     const notifications: Array<{ method: string; params: Record<string, unknown> }> = [];

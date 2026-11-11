@@ -50,6 +50,7 @@ import { prepareImageForApi } from '@packages/mica-common/index.js';
 - `toolNames.ts`：工具名规范（snake_case 全小写）与历史大驼峰名的 `normalizeToolName` 映射。
 - `loopArgs.ts`：`/loop` 参数解析与间隔上下限，CLI 与桌面端斜杠命令共用同一套写法。
 - `todoState.ts`：待办解析归一化与展示投影的唯一实现，TUI 面板与 desktop 计划 dock 共用；宿主只渲染，不改写模型给的状态。
+- `subagentState.ts`：子代理任务按 `subagent-tasks/<sessionId>/<taskId>.json` 独立原子写入，目录指纹供轮询跳过未变记录；`isStoredSubagentTask` 与 Evolution 共用记录校验。旧单文件数组不再支持，由 Evolution 拆分并归档。
 - `btwState.ts`：By The Way 线程的落盘路径与读写（`$MICA_HOME/btw/<sessionId>.json`），常驻 host 写入与会话删除时的清理共用。
 - `image.ts`：图片格式和尺寸识别 + 发送前的压缩策略：长边超过 `IMAGE_MAX_LONG_EDGE`（1568）的 PNG 按面积平均缩小再无损重编码，够小的图原样透传（字节一个不改），解不开就退回原图。16bit PNG（macOS 剪贴板截图）降到 8bit，不透明图丢掉 alpha 通道。最后还有一道尺寸闸：处理完长边仍超过 `IMAGE_MAX_API_LONG_EDGE`（8192）就抛错让模型换手段（缩小 / 裁剪 / 分段），因为接口按尺寸拒收却报「不支持的图片格式」，那条 400 不可重试、整个 turn 会失败。
 - `imagePng.ts`：PNG 解码/编码（非隔行，灰度 / RGB / 灰度+alpha / RGBA 的 8bit 与 16bit，以及任意位深调色板），逐行挑 filter、zlib deflate；`imageResample.ts`：沿两个轴的面积平均降采样，半透明按预乘 alpha 平均。两者都不依赖任何原生图像库。

@@ -568,7 +568,7 @@ export function summary(api) { return api.currentHost() } // 可选：入口行�
   （宿主夹在 240–960）。定宽以外的排版仍由卡片自己负责。
 - 数据读取返回 `{ value, version }`（缺文件时两者为 null）；IO 失败应显式报错。读改写时将版本作为
   `writeData(value, { expectedVersion })` 传回；宿主在跨进程互斥下比较版本并原子替换，冲突返回
-  `{ ok: false, conflict: true }`，插件重读后只重放本次修改。未传版本仍可整份写入。
+  `{ ok: false, conflict: true }`，插件重读后只重放本次修改。成功写入返回 `{ ok: true, version }`，可直接用于下一次 CAS；未传版本仍可整份写入。
 - `action` 是「卡片要真的干一件事」：页面里没有插件自己的代码，所以按 key 请宿主去跑
   `mica plugin-action`——与配置页点按钮同一条路，不需要会话。没在清单里声明的 key 会被拒绝，
   所以卡片能用哪些动作和配置页看到哪些按钮是同一份声明。动作可能真的在干活（同步一批数据），
@@ -1018,7 +1018,7 @@ const child = spawn(micaExecutable, ['app-server', '--dir', cwd, '--parent', thi
 `$MICA_HOME/plugin-data/<id>/documents/<key>.json`，6 MiB UTF-8 JSON 上限；`key` 只接受
 安全标识符，不接受目录、`..` 或符号链接。现有 `readData/writeData` 仍是 256 KiB 的
 `data.json`，不改变其语义。读取缺失文档返回 `{ value: null, version: null }`，正文损坏显式报错。
-写入使用同一份跨进程锁、CAS 与原子替换，冲突后插件保留草稿；宿主不解析文档业务结构。
+写入使用同一份跨进程锁、CAS 与原子替换，成功返回 `{ ok: true, version }`（该次实际写入内容的版本），无需重读整篇文档确认版本。冲突后插件保留草稿；宿主不解析文档业务结构。
 
 整页可以注册 `api.page.beforeClose(async () => boolean)`，返回 `false` 阻止宿主返回按钮关闭，
 返回的取消函数用于卸载。保存失败不应通过关闭页面静默丢弃内容。

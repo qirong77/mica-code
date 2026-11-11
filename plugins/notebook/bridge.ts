@@ -20,31 +20,62 @@ export function createEditorBridge(options: {
   onOutline?: (noteId: string, outline: NotebookOutline) => void;
 }) {
   let disposed = false;
+  let ready = false;
   let sequence = 0;
+  let active: { noteId: string; loadId: string; loaded: boolean } | null = null;
   const pending = new Map<
     string,
     {
+      type: 'load' | 'flush';
+      noteId: string;
+      loadId: string;
+      document?: NotebookDocument;
       resolve: (value: { noteId: string; document: NotebookDocument }) => void;
       reject: (error: Error) => void;
       timer: ReturnType<typeof setTimeout>;
     }
-  >();
-  const loads = new Map<
-    string,
-    { resolve: () => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> }
   >();
 
   function send(type: string, payload: Record<string, unknown> = {}) {
     if (disposed) return;
     options.target()?.postMessage({ channel: NOTEBOOK_CHANNEL, token: options.token, type, ...payload }, '*');
   }
+  function rejectRequests(message: string) {
+    for (const request of pending.values()) {
+      clearTimeout(request.timer);
+      request.reject(new Error(message));
+    }
+    pending.clear();
+  }
+  function request(type: 'load' | 'flush', document?: NotebookDocument) {
+    if (disposed) return Promise.reject(new Error('编辑器已关闭'));
+    if (!options.target()) return Promise.reject(new Error('编辑器尚未就绪'));
+    if (!active || (type === 'flush' && !active.loaded)) return Promise.reject(new Error('笔记尚未完成加载，请重试'));
+    const { noteId, loadId } = active;
+    const requestId = type === 'load' ? loadId : `flush-${++sequence}`;
+    return new Promise<{ noteId: string; document: NotebookDocument }>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        pending.delete(requestId);
+        reject(new Error(type === 'load' ? '笔记未能完成加载，请重试' : '编辑器没有响应，当前草稿已保留。请先导出备份再重试。'));
+      }, type === 'load' ? 10000 : 5000);
+      pending.set(requestId, { type, noteId, loadId, document, resolve, reject, timer });
+      try {
+        send(type, { requestId, noteId, loadId, ...(type === 'load' ? { document } : {}) });
+      } catch (cause) {
+        clearTimeout(timer);
+        pending.delete(requestId);
+        reject(cause instanceof Error ? cause : new Error(String(cause)));
+      }
+    });
+  }
   function receive(event: MessageEvent) {
-    if (disposed || event.source !== options.target()) return;
+    const target = options.target();
+    if (disposed || !target || event.source !== target) return;
     const data = event.data;
     if (!data || data.channel !== NOTEBOOK_CHANNEL || data.token !== options.token) return;
     if (data.type === 'outline') {
       if (
-        typeof data.noteId !== 'string' ||
+        !active?.loaded || data.noteId !== active.noteId || data.loadId !== active.loadId ||
         !Array.isArray(data.items) ||
         !data.items.every(
           (item: NotebookOutline['items'][number]) =>
@@ -66,6 +97,8 @@ export function createEditorBridge(options: {
       return;
     }
     if (data.type === 'ready') {
+      if (ready) return;
+      ready = true;
       options.onReady();
       return;
     }
@@ -73,30 +106,32 @@ export function createEditorBridge(options: {
       const message = typeof data.message === 'string' ? data.message : '编辑器操作失败';
       const request = pending.get(data.requestId);
       if (request) {
+        if (data.loadId !== request.loadId) return;
         clearTimeout(request.timer);
         request.reject(new Error(message));
         pending.delete(data.requestId);
-      }
-      const load = loads.get(data.noteId);
-      if (load) {
-        clearTimeout(load.timer);
-        load.reject(new Error(message));
-        loads.delete(data.noteId);
+      } else if ((data.requestId !== undefined && data.requestId !== active?.loadId) ||
+        (data.loadId !== undefined && data.loadId !== active?.loadId)) {
+        return;
       }
       options.onError(message);
       return;
     }
     if (data.type === 'loaded') {
-      const load = loads.get(data.noteId);
-      if (load) {
-        clearTimeout(load.timer);
-        load.resolve();
-        loads.delete(data.noteId);
-      }
+      const load = pending.get(data.requestId);
+      if (!load || load.type !== 'load' || !active ||
+        data.noteId !== load.noteId || data.loadId !== load.loadId || active.loadId !== load.loadId) return;
+      clearTimeout(load.timer);
+      pending.delete(data.requestId);
+      active.loaded = true;
+      load.resolve({ noteId: load.noteId, document: load.document! });
       options.onLoaded?.(data.noteId);
       return;
     }
     if (data.type !== 'change' && data.type !== 'result') return;
+    if (!active?.loaded || data.noteId !== active.noteId || data.loadId !== active.loadId) return;
+    const result = data.type === 'result' ? pending.get(data.requestId) : undefined;
+    if (data.type === 'result' && (!result || result.type !== 'flush' || result.loadId !== active.loadId)) return;
     try {
       if (typeof data.noteId !== 'string') throw new Error('编辑器未返回笔记身份');
       // 超限草稿仍保留在宿主内存供导出；保存层负责硬限制，不能丢弃最后一次输入。
@@ -117,27 +152,26 @@ export function createEditorBridge(options: {
       }
       if (data.type === 'change') options.onChange(data.noteId, document);
       else {
-        const request = pending.get(data.requestId);
-        if (!request) return;
-        clearTimeout(request.timer);
+        clearTimeout(result!.timer);
         pending.delete(data.requestId);
-        request.resolve({ noteId: data.noteId, document });
+        result!.resolve({ noteId: data.noteId, document });
       }
     } catch (cause) {
-      options.onError(cause instanceof Error ? cause.message : String(cause));
+      const error = cause instanceof Error ? cause : new Error(String(cause));
+      if (result) {
+        clearTimeout(result.timer);
+        pending.delete(data.requestId);
+        result.reject(error);
+      }
+      options.onError(error.message);
     }
   }
   return {
     receive,
     load(noteId: string, document: NotebookDocument): Promise<void> {
-      return new Promise((resolve, reject) => {
-        const timer = setTimeout(() => {
-          loads.delete(noteId);
-          reject(new Error('笔记未能完成加载，请重试'));
-        }, 10000);
-        loads.set(noteId, { resolve, reject, timer });
-        send('load', { noteId, document });
-      });
+      rejectRequests('笔记已切换，请重试');
+      active = { noteId, loadId: `load-${++sequence}`, loaded: false };
+      return request('load', document).then(() => undefined);
     },
     freeze(frozen: boolean) {
       send('freeze', { frozen });
@@ -146,31 +180,15 @@ export function createEditorBridge(options: {
       send('theme', { appearance, tokens });
     },
     navigate(noteId: string, target: { heading?: string; block?: 'top' | keyof NotebookOutline['blocks'] }) {
-      send('navigate', { noteId, ...target });
+      if (active?.loaded && active.noteId === noteId) send('navigate', { noteId, loadId: active.loadId, ...target });
     },
     flush(): Promise<{ noteId: string; document: NotebookDocument }> {
-      const requestId = `flush-${++sequence}`;
-      return new Promise((resolve, reject) => {
-        const timer = setTimeout(() => {
-          pending.delete(requestId);
-          reject(new Error('编辑器没有响应，当前草稿已保留。请先导出备份再重试。'));
-        }, 5000);
-        pending.set(requestId, { resolve, reject, timer });
-        send('flush', { requestId });
-      });
+      return request('flush');
     },
     dispose() {
       disposed = true;
-      for (const request of pending.values()) {
-        clearTimeout(request.timer);
-        request.reject(new Error('编辑器已关闭'));
-      }
-      pending.clear();
-      for (const load of loads.values()) {
-        clearTimeout(load.timer);
-        load.reject(new Error('编辑器已关闭'));
-      }
-      loads.clear();
+      active = null;
+      rejectRequests('编辑器已关闭');
     },
   };
 }

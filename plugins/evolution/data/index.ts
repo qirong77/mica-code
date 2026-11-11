@@ -4,6 +4,7 @@ import { harnessReviewAssessments } from './harness-review.js';
 import { memoryScopes } from './memory.js';
 import { pluginStartupHealth } from './plugin-health.js';
 import { sessionTagSlots } from './session-tags.js';
+import { subagentTaskFiles } from './subagent-tasks.js';
 import type { DataMigration } from './types.js';
 
 export { runDataMigrations } from './types.js';
@@ -16,4 +17,5 @@ export const DATA_MIGRATIONS: DataMigration[] = [
   browserCookieSyncExtension,
   harnessReviewAssessments,
   pluginStartupHealth,
+  subagentTaskFiles,
 ];

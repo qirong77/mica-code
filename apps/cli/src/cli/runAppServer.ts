@@ -2254,16 +2254,11 @@ function validateTurnOverride(agent: AgentRuntime, override: AgentRuntimeConfigO
   if (agent.isRunning) throw new Error('Cannot configure agent while it is running');
   const current = agent.config;
   const providerId = override.providerId ?? current.provider.id;
-  const next = readAgentRuntimeConfig({
+  readAgentRuntimeConfig({
     providerId,
     model: override.model ?? (providerId === current.provider.id ? current.model : undefined),
     effort: override.effort ?? current.effort,
   });
-  if (current.provider.protocol !== next.provider.protocol && agent.captureClientSnapshot()) {
-    throw new Error(
-      `Cannot resume a ${current.provider.protocol} session with ${next.provider.protocol}; start a fresh session instead.`,
-    );
-  }
 }
 
 /**
@@ -2297,11 +2292,6 @@ async function resolveClientOverride(
   const probe = resolveRuntimeConfigOverride(refreshed, model, undefined, { fallbackProviderId });
   const targetProvider = refreshed.providers.find((provider) => provider.id === (probe.providerId ?? fallbackProviderId));
   if (!targetProvider) throw new Error(`Provider not found: ${probe.providerId ?? fallbackProviderId}`);
-  if (targetProvider.protocol !== ctx.agent.config.provider.protocol && ctx.agent.captureClientSnapshot()) {
-    throw new Error(
-      `Cannot resume a ${ctx.agent.config.provider.protocol} session with ${targetProvider.protocol}; start a fresh session instead.`,
-    );
-  }
   const targetModel = probe.model ?? ctx.agent.config.model;
   await ensureChatHostModelRule(targetModel, targetProvider);
   // 只给了 effort 时用「会话当前模型」解析，而不是全局默认模型：两者可以不同（切换过

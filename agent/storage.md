@@ -11,13 +11,16 @@
 - 会话级状态都在快照里：`capabilitySelection` / `capabilitiesCustomized`、`pluginState`（插件自己的 JSON）、`pluginSessionSettings`（插件设置的会话覆盖，只存改过的键）、`notes`。`startNewSession` 清空，resume/fork 沿用，rewind 随 checkpoint 回滚。`turnTimings`（最近 50 轮的耗时分解）是例外：它记录这条会话跑过的轮次，`startNewSession` 与 fork 都清空，读盘时坏掉的条目丢掉而不是判整份会话损坏。
 - `snapshot.systemPrompt` 是「最近一次请求真正发出去的 system prompt」的存档（角色 + 项目说明 + skills 索引 + 环境信息 + 插件段落），只给界面看，绝不用于重建请求——下一轮仍然现场拼装。写在 `AgentRuntime` 解析 `systemPrompt` 的那一刻，随 checkpoint 落盘；旧会话没有这个字段，界面如实说「没有记录」而不重新拼一份冒充。
 - `subagentUsageHistory` 独立于主 `usageHistory`；fork 清空两类历史，只保留描述继承上下文的 `lastUsage`。
+- 插件模型用量按发起时捕获的会话追加。`SessionController.acquireTurnLease()` 显式登记该 controller 持有的租约；迟到用量只借用自己的句柄，否则异步等待写入者释放，再读取最新磁盘快照、只追加用量。不能用 PID 或 `agent.isRunning` 代替归属，也不能用 idle agent 的旧正文完整保存。记账不合并回已被 rewind 移除的用量，不复活已删除的会话；新草稿的首笔用量可创建会话，有用量的空会话不作为草稿删除。`createPluginModels` 等待异步 recorder，记账异常只写日志，不重发已经计费的模型请求。
 - 请求用量可选保存 `providerId`、`durationMs`、`firstTokenMs`、`responseWaitMs` 与成对的 `generationDurationMs` / `generationOutputTokens`。`responseWaitMs` 包含 provider 内重试；生成计时只量成功尝试首末非空正文增量，分子是 API 输出量扣除明确记录的推理 tokens 与首 token（至少 32 个非推理输出 tokens、两个正文增量、500ms，无工具或其它输出）。缺少推理明细不假设为零；旧形态不再支持，迁移将未配分子的旧时长归档为 `legacyGenerationDurationMs`，统计不回退；账本旧行原样留存但不采纳。`provider` 仍表示协议，不能当作服务商 ID。
 - **不落盘 provider 的原始 usage**：聚合网关会在 `usage.attribution.items` 里逐条回传 token 归因（实测一份 1085 条、单条 247KB），没有任何消费方——界面与统计只读记录自身的 `inputTokens` / `cachedInputTokens` / `outputTokens` / `totalTokens`。早先的版本存过它，让一份会话的 22% 成了死数据（单文件最大 153MB，其中 74MB 是它）。provider adapter 现在只写 token 数字，存量由 `evolution` 的 `drop-raw-usage` 迁移删掉；不要为了「留着排查网关」再把它加回来。
 - compact 保留 `lastUsage` / `usageHistory` 供 Stats 对账；界面 ctx 优先读 `displayUsage`。
 - 无手动标题时取最后一条真实用户消息（最长 60 字符）；自动改名不得覆盖 `titleSource === 'manual'`。
 - `$MICA_HOME/session-index.json` 是可重建缓存，不进 `sessions/`；索引 v3 记录读不出摘要的 `rejects`（id + size/mtime），避免每次全量重扫，并带上侧栏嵌套要用的 `parentSessionId`（v2 没有它，版本对不上就整份重建）。
 - `sessions/.turn-locks/<id>.lock` 是跨进程写入的唯一事实来源（`wx` + owner pid 存活判定）；孤儿锁在 acquire 时回收。
+- `SessionTurnLease.isHeld()` 逐次核对未释放且磁盘 token 仍属于该句柄；同 PID 的新 token 也属于另一 writer。Controller 借用与刷新前校验，失效登记清理后重新取得租约。`SessionStore.delete()` 也必须取得 turn lease，活跃 writer 存在时返回 false，不删除它的锁或 BTW 状态；删除的异常和缺文件路径都释放自身句柄。
 - `sessions/.turn-locks/<id>.writes` 是这条会话「本轮写过哪些文件」的台账（JSONL，`{path, at}`，`sessionWrites.ts`）。它只服务一个判断：一批未提交改动属于哪个会话——`git status` 不记录作者，并发同 cwd 的会话之间只能靠它分辨。写入方是工具层的 `observeToolExecution`（`write_file` / `apply_patch` 的路径），`run_shell` 里的重定向看不见，所以它只是证据之一；读方是 `session_peers`，按对方 turn 的开始时间过滤。台账按行追加、超 128KB 压成最近 200 行，坏行跳过，任何读写失败都吞掉（辅助信息不该让工具报错）。
+- 子代理任务只读写 `subagent-tasks/<sessionId>/<taskId>.json`，独立记录避免跨进程覆盖；旧 `<sessionId>.json` 数组不再在运行期读取或探测，由 Evolution 的 `subagent-task-files` 拆分并保留原文件归档。
 - 垃圾占位须同时满足：默认占位标题、无对话、无 usage；`turnState === 'running'` 永不隐藏或删除。
 - 只读会话顶层字段（cwd、标题等）用 `host/session-file-head.js` 读文件头，不要为单个字段整份 `JSON.parse`：最大的一份会话 19MB（清掉 `rawUsage` 之前是 153MB，随对话长度这笔开销还会再涨）。
 - TUI 空闲检测会话外部改动先看文件身份（设备/inode/大小/纳秒 mtime/ctime），稳定时不读正文；元信息变动才加载并核对内容，读取期间身份又变化则下次重试。`SessionController` 只保留快照 JSON 的短哈希与 cwd，不长期持有整份序列化 JSON；这不改变会话文件格式，也不替代跨进程 turn lease。

@@ -1,13 +1,6 @@
-import { describe, expect, mock, test } from 'bun:test'
+import { describe, expect, test } from 'bun:test'
 import { restoreChatNotices } from './chat-notices'
-
-// ChatView's Vite-only plugin discovery is unrelated to these pure projection tests.
-mock.module('./plugin-entries', () => ({
-  loadPluginPageEntry: async () => null,
-  pluginEntryLoader: () => null,
-  usePluginEntries: () => []
-}))
-const { historyBeforeRunReplay, historyMessages, mergeReplayEvents } = await import('./ChatView')
+import { historyBeforeRunReplay, historyMessages, mergeReplayEvents } from './ChatView'
 
 describe('persisted notice restoration', () => {
   test('retains a finished digest after reply replay without duplicate rows', () => {

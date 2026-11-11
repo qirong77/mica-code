@@ -14,14 +14,18 @@ describe('notebook persistence boundary', () => {
     expect(() => session.snapshot()).toThrow('尚未就绪');
   });
 
-  it('never serializes source-mode text as the saved rich document', () => {
-    const session = new NotebookSession('a', {version: 1, editorState: null, comments: []});
-    const read = vi.fn();
-    session.editor = {getRootElement: () => ({dataset: {sourceMode: 'markdown'}}), getEditorState: read} as never;
-    expect(() => session.snapshot()).toThrow('返回富文本');
-    expect(read).not.toHaveBeenCalled();
-    session.editor = {getRootElement: () => ({dataset: {sourceMode: 'wysiwyg', sourcePending: 'true'}})} as never;
-    expect(() => session.snapshot()).toThrow('返回富文本');
+  it('reports failed content snapshots with their load identity instead of silently dropping the last input', async () => {
+    const post = vi.mocked(window.parent.postMessage);
+    post.mockClear();
+    const session = new NotebookSession('a', {version: 1, editorState: null, comments: []}, 'load-failed');
+    const detach = session.attach({update: () => {}, getEditorState: () => {throw new Error('invalid node');}} as never);
+    await Promise.resolve();
+    session.dirty();
+    await Promise.resolve();
+    expect(post).toHaveBeenLastCalledWith(expect.objectContaining({
+      type: 'error', loadId: 'load-failed', noteId: 'a', message: 'Error: invalid node',
+    }), '*');
+    detach();
   });
 
   it('clones and validates comments so note sessions cannot share mutable comments', () => {
@@ -49,5 +53,30 @@ describe('notebook persistence boundary', () => {
     updates.length = 0;
     session.snapshot();
     expect(updates).toEqual(['document']);
+  });
+
+  it('tags loaded, outline and content messages with the mounted load identity and stops after detach', async () => {
+    const post = vi.mocked(window.parent.postMessage);
+    post.mockClear();
+    const session = new NotebookSession('a', {version: 1, editorState: null, comments: []}, 'load-current');
+    const editor = {
+      getRootElement: () => ({dataset: {}}),
+      update: () => {},
+      getEditorState: () => ({toJSON: () => ({root: {children: []}})}),
+    } as never;
+    const detach = session.attach(editor);
+    await Promise.resolve();
+    session.publishOutline({items: [], activeKey: null, blocks: {table: false, code: false, mermaid: false, image: false}});
+    session.dirty();
+    await Promise.resolve();
+    expect(post.mock.calls.map(([message]) => message)).toEqual([
+      expect.objectContaining({type: 'loaded', noteId: 'a', requestId: 'load-current', loadId: 'load-current'}),
+      expect.objectContaining({type: 'outline', noteId: 'a', loadId: 'load-current'}),
+      expect.objectContaining({type: 'change', noteId: 'a', loadId: 'load-current'}),
+    ]);
+    detach();
+    session.dirty();
+    await Promise.resolve();
+    expect(post).toHaveBeenCalledTimes(3);
   });
 });

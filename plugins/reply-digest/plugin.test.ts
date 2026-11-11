@@ -36,6 +36,17 @@ describe('reply-digest plugin', () => {
     expect(harness.notices).toEqual([]);
   });
 
+  it('does not summarize an old long reply after a completed turn without assistant text', async () => {
+    const harness = createHarness();
+    await harness.emitAfter([
+      ...longMessages,
+      { role: 'user', content: 'new request' },
+      { role: 'notice', content: 'completed tool activity' },
+    ]);
+    expect(harness.query).not.toHaveBeenCalled();
+    expect(harness.notices).toEqual([]);
+  });
+
   it('shows running before the pending request completes and replaces it with the summary', async () => {
     const pending = deferred();
     const harness = createHarness();

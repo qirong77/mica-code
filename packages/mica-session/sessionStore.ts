@@ -175,11 +175,14 @@ export type SessionStoreLike = {
   /** 只改「正在等你选」这一个顶层标记（见实现里的说明）；文件不存在返回 false。 */
   patchAwaitingInput?(id: string, text: string | null): boolean;
   replaceValidated?(id: string, content: string): PersistedSession;
+  /** Acquires the turn lease; returns false if the session is missing or a writer holds the lease. */
   delete(id: string): boolean;
 };
 
 export type SessionTurnLease = {
   sessionId: string;
+  /** True only while this handle is unreleased and its token still owns the disk lock. */
+  isHeld(): boolean;
   release(): void;
 };
 
@@ -358,36 +361,29 @@ export class SessionStore implements SessionStoreLike {
   delete(id: string): boolean {
     const safeId = sanitizeSessionId(id);
     if (!safeId) return false;
-    const path = sessionPath(safeId);
-    if (!existsSync(path)) {
-      // The session file is gone, so any lock for it is an orphan. Clear it so a
-      // later continue/resume of the same id is never blocked by a stale lock.
-      try {
-        rmSync(turnLockPath(safeId), { force: true });
-      } catch {
-        // best-effort; a leftover lock is reconciled on acquire if it persists.
+    // A writer can hold a lease before its first save. A missing session file
+    // does not make that writer's lock an orphan or permit deleting its state.
+    const lease = acquireSessionTurnLease(safeId);
+    if (!lease) return false;
+    try {
+      const path = sessionPath(safeId);
+      if (!existsSync(path)) {
+        // 会话文件已经没了，但它的 btw 线程可能还在（另一进程删的会话）。
+        deleteBtwState(safeId);
+        return false;
       }
-      // 会话文件已经没了，但它的 btw 线程可能还在（另一进程删的会话）。
+      rmSync(path, { force: true });
+      try {
+        this.removeFromIndex(safeId);
+      } catch {
+        // best-effort metadata index; a rebuild reconciles it on the next list.
+      }
+      // By The Way threads belong to the session too（$MICA_HOME/btw/<id>.json）。
       deleteBtwState(safeId);
-      return false;
+      return true;
+    } finally {
+      lease.release();
     }
-    rmSync(path, { force: true });
-    try {
-      this.removeFromIndex(safeId);
-    } catch {
-      // best-effort metadata index; a rebuild reconciles it on the next list.
-    }
-    // Drop the turn-lock alongside the session so a removed id never leaves a
-    // lock behind. The lease dir is not part of the session scan, so it leaks.
-    try {
-      rmSync(turnLockPath(safeId), { force: true });
-    } catch {
-      // best-effort; a leftover lock is reconciled on acquire if it persists.
-    }
-    // By The Way threads belong to the session too（$MICA_HOME/btw/<id>.json）；
-    // 不清掉的话，删了会话以后它的问答还会留着，且没有任何入口能再打开它。
-    deleteBtwState(safeId);
-    return true;
   }
   /** Returns all summaries (sorted by updatedAt desc) without parsing session bodies. */
   private ensureIndex(): SessionSummary[] {
@@ -619,14 +615,22 @@ export function acquireSessionTurnLease(sessionId: string): SessionTurnLease | n
         closeSync(fd);
       }
       let released = false;
+      const hasMatchingToken = (): boolean => {
+        try {
+          const owner = JSON.parse(readFileSync(lockPath, 'utf8')) as { token?: unknown };
+          return owner.token === token;
+        } catch {
+          return false;
+        }
+      };
       return {
         sessionId: safeId,
+        isHeld: () => !released && hasMatchingToken(),
         release() {
           if (released) return;
           released = true;
           try {
-            const owner = JSON.parse(readFileSync(lockPath, 'utf8')) as { token?: unknown };
-            if (owner.token === token) rmSync(lockPath, { force: true });
+            if (hasMatchingToken()) rmSync(lockPath, { force: true });
           } catch {
             // Never remove a lock unless its token proves that we own it.
           }

@@ -10,7 +10,7 @@ function fixture(value = '# Original\r\n\r\n', readOnly = false) {
   const bridge = createMarkdownBridge({ token: 'secret', target: () => target, onChange: changes, onSave: saves, onStatus: statuses, timeoutMs: 100 });
   const send = (data: Record<string, unknown>, overrides: Record<string, unknown> = {}) => bridge.receive({
     source: target,
-    data: { channel: MARKDOWN_CHANNEL, token: 'secret', ...data },
+    data: { channel: MARKDOWN_CHANNEL, token: 'secret', loadId: last('load')?.requestId, ...data },
     ...overrides,
   } as MessageEvent);
   const messages = () => vi.mocked(target.postMessage).mock.calls.map(([message]) => message as Record<string, unknown>);
@@ -149,6 +149,38 @@ describe('Markdown iframe bridge', () => {
     expect(f.statuses.mock.lastCall?.[0]).toBe('loading');
     f.loaded('b');
     expect(f.bridge.getValue()).toBe('Second again');
+    f.bridge.dispose();
+  });
+
+  it('ignores changes and save shortcuts from a replaced editor of the same document', () => {
+    const f = fixture('initial');
+    f.send({ type: 'ready' });
+    f.loaded();
+    const previous = f.last('load').requestId;
+    f.bridge.setDocument({ documentId: 'a', value: 'external replacement', readOnly: false });
+    f.loaded();
+    f.send({ type: 'change', documentId: 'a', loadId: previous, value: 'stale editor' });
+    f.send({ type: 'save', documentId: 'a', loadId: previous, value: 'stale editor' });
+    f.send({ type: 'change', documentId: 'a', loadId: undefined, value: 'missing identity' });
+    expect(f.changes).not.toHaveBeenCalled();
+    expect(f.saves).not.toHaveBeenCalled();
+    expect(f.bridge.getValue()).toBe('external replacement');
+    f.send({ type: 'change', documentId: 'a', value: 'fresh editor' });
+    expect(f.changes).toHaveBeenCalledWith('a', 'fresh editor');
+    f.bridge.dispose();
+  });
+
+  it('rejects the old flush if accepting its last input synchronously switches documents', async () => {
+    const f = fixture('initial');
+    f.send({ type: 'ready' });
+    f.loaded();
+    const flushed = f.bridge.flush();
+    const switched = expect(flushed).rejects.toThrow('文档已切换');
+    await vi.advanceTimersByTimeAsync(0);
+    f.changes.mockImplementation(() => f.bridge.setDocument({ documentId: 'b', value: 'other file', readOnly: false }));
+    f.send({ type: 'result', documentId: 'a', requestId: f.last('flush').requestId, value: 'last input' });
+    await switched;
+    expect(f.bridge.getValue()).toBe('other file');
     f.bridge.dispose();
   });
 

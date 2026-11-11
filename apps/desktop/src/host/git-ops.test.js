@@ -112,6 +112,50 @@ describe('stageFile / unstageFile', () => {
   })
 })
 
+describe('single-file pathspecs', () => {
+  let dir
+  beforeEach(async () => {
+    dir = await setup()
+    for (const name of ['group[1].txt', 'group1.txt']) {
+      await writeFile(path.join(dir, name), 'original\n')
+    }
+    await git(dir, ['add', '.'])
+    await commit(dir, 'literal names')
+    for (const name of ['group[1].txt', 'group1.txt']) {
+      await writeFile(path.join(dir, name), 'changed\n')
+    }
+  })
+  afterEach(() => rm(dir, { recursive: true, force: true }))
+
+  it('暂存和取消暂存按字面匹配，绝对路径也只影响所选文件', async () => {
+    await stageFile(dir, 'group[1].txt')
+    expect(await git(dir, ['diff', '--cached', '--name-only'])).toBe('group[1].txt\n')
+    await stageFile(dir, 'group1.txt')
+    await unstageFile(dir, path.join(dir, 'group[1].txt'))
+    expect(await git(dir, ['diff', '--cached', '--name-only'])).toBe('group1.txt\n')
+  })
+
+  it('回退带通配字符的文件时不恢复另一个匹配文件', async () => {
+    await discardFile(dir, path.join(dir, 'group[1].txt'))
+    expect(await readFile(path.join(dir, 'group[1].txt'), 'utf8')).toBe('original\n')
+    expect(await readFile(path.join(dir, 'group1.txt'), 'utf8')).toBe('changed\n')
+  })
+
+  it('unborn 仓库取消暂存也按字面匹配文件名', async () => {
+    const fresh = await mkdtemp(path.join(tmpdir(), 'mica-git-ops-literal-'))
+    try {
+      await git(fresh, ['init', '-q'])
+      await writeFile(path.join(fresh, 'group[1].txt'), 'one\n')
+      await writeFile(path.join(fresh, 'group1.txt'), 'two\n')
+      await git(fresh, ['add', '.'])
+      await unstageFile(fresh, 'group[1].txt')
+      expect(await git(fresh, ['ls-files'])).toBe('group1.txt\n')
+    } finally {
+      await rm(fresh, { recursive: true, force: true })
+    }
+  })
+})
+
 describe('discardFile', () => {
   let dir
   beforeEach(async () => {
@@ -251,6 +295,7 @@ describe('safeFilePath', () => {
     expect(() => safeFilePath('/repo', '../etc/passwd')).toThrow('Invalid repository path')
     expect(() => safeFilePath('/repo', '/etc/passwd')).toThrow('Invalid repository path')
     expect(safeFilePath('/repo', 'src/a.ts')).toBe('/repo/src/a.ts')
+    expect(safeFilePath('/repo', '..config')).toBe('/repo/..config')
   })
 
   it('仓库根是符号链接时按真实路径认，不把同一目录判成越界', async () => {

@@ -34,7 +34,7 @@ const RECOVERY_RESULT = 'Recovery task completed.';
 const bunAvailable = process.env.MICA_BIN || spawnSync('bun', ['--version'], { stdio: 'ignore' }).status === 0;
 const suite = bunAvailable ? describe : describe.skip;
 
-/** Open a `node:http` server pretending to be an OpenAI-compatible responses
+/** Open a `node:http` server pretending to be an OpenAI-compatible Responses / Chat
  * provider. Programmable per test: normal SSE stream, 400 error, or a delay
  * before the text arrives (to keep a turn busy long enough to steer into it). */
 function createMockProvider() {
@@ -43,6 +43,7 @@ function createMockProvider() {
     errorMessage: '',
     delayBeforeTextMs: 0,
     requests: [] as Array<{
+      protocol: 'openai_responses' | 'openai_chat_completions';
       model: string;
       input: unknown[];
       reasoning?: { effort?: string };
@@ -80,6 +81,28 @@ function createMockProvider() {
     inputTokens: 10,
   };
   const server: Server = createServer((req, res) => {
+    if (req.method === 'POST' && req.url?.startsWith('/v1/chat/completions')) {
+      let body = '';
+      req.on('data', (chunk) => (body += chunk.toString()));
+      req.on('end', () => {
+        const { model, messages } = JSON.parse(body) as { model: string; messages: unknown[] };
+        state.requests.push({ protocol: 'openai_chat_completions', model, input: messages });
+        res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' });
+        const emit = (delta: Record<string, unknown>, finish_reason: string | null) =>
+          res.write(`data: ${JSON.stringify({
+            id: 'chatcmpl_mock',
+            object: 'chat.completion.chunk',
+            created: 1,
+            model,
+            choices: [{ index: 0, delta, finish_reason }],
+          })}\n\n`);
+        emit({ role: 'assistant', content: state.longText || '你好，我是 mock 模型的回复' }, null);
+        emit({}, 'stop');
+        res.end('data: [DONE]\n\n');
+        state.responsesFinished += 1;
+      });
+      return;
+    }
     if (req.method === 'POST' && req.url?.startsWith('/v1/responses')) {
       let body = '';
       req.on('data', (chunk) => (body += chunk.toString()));
@@ -96,7 +119,7 @@ function createMockProvider() {
           // keep defaults
         }
         const { model = '', input = [], reasoning, instructions } = parsed;
-        state.requests.push({ model, input, reasoning, instructions });
+        state.requests.push({ protocol: 'openai_responses', model, input, reasoning, instructions });
         if (state.mode === 'error') {
           res.writeHead(400, { 'content-type': 'application/json' });
           res.end(JSON.stringify({ error: { message: state.errorMessage || 'mock provider error' } }));
@@ -582,9 +605,9 @@ function makeHome(tag: string): string {
     ),
   );
   mkdirSync(join(home, 'sessions'), { recursive: true });
-  // 这些用例量的是 turn 机制（请求顺序、排队、中断），不是自动起标题：插件现在默认
-  // 复用会话模型，会在每轮之前多打一次模型请求，把请求序列对乱。要测标题行为时单独开。
-  writeFileSync(join(home, 'plugins-state.json'), JSON.stringify({ disabled: ['session-rename'] }));
+  // 这些用例量的是 turn 机制（请求顺序、排队、中断），不是起标题或回复摘要：这两类
+  // 插件会在轮前/轮后复用 mock 模型，污染「最后一次主请求」的断言。插件各有独立回归。
+  writeFileSync(join(home, 'plugins-state.json'), JSON.stringify({ disabled: ['session-rename', 'reply-digest'] }));
   return home;
 }
 
@@ -617,9 +640,7 @@ function makeHomeWithoutEffortLevels(tag: string): string {
   return home;
 }
 
-/** makeHome variant with a slow stdio MCP server (3s initialize delay), used to
- * verify the host becomes ready before MCP init finishes and the first turn
- * waits for it. */
+/** A gated stdio MCP initialization proves event order without depending on host boot speed. */
 function makeHomeWithSlowMcp(tag: string): string {
   const home = makeHome(tag);
   writeFileSync(
@@ -649,6 +670,7 @@ function makeHomeWithSlowMcp(tag: string): string {
     join(home, 'slow-mcp-server.mjs'),
     [
       "import { createInterface } from 'node:readline';",
+      "import { existsSync, writeFileSync } from 'node:fs';",
       'const rl = createInterface({ input: process.stdin });',
       'const sleep = (ms) => new Promise((r) => setTimeout(r, ms));',
       "const respond = (id, result) => process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id, result }) + '\\n');",
@@ -656,7 +678,9 @@ function makeHomeWithSlowMcp(tag: string): string {
       '  let msg;',
       '  try { msg = JSON.parse(line); } catch { return; }',
       "  if (msg.method === 'initialize') {",
-      '    await sleep(3000);',
+      `    writeFileSync(${JSON.stringify(join(home, 'mcp-initialize-requested'))}, 'ready');`,
+      `    while (!existsSync(${JSON.stringify(join(home, 'mcp-initialize-release'))})) await sleep(20);`,
+      `    writeFileSync(${JSON.stringify(join(home, 'mcp-initialized-at'))}, String(Date.now()));`,
       "    respond(msg.id, { protocolVersion: '2024-11-05', capabilities: {}, serverInfo: { name: 'slow-mock', version: '1.0.0' } });",
       "  } else if (msg.method === 'tools/list') {",
       '    respond(msg.id, { tools: [] });',
@@ -1611,7 +1635,6 @@ suite('mica app-server real-user flows (mock provider)', () => {
     config.providers.push({
       ...config.providers[0],
       id: 'other',
-      protocol: 'openai_chat_completions',
       models: ['other-model'],
     });
     writeFileSync(configPath, JSON.stringify(config));
@@ -1619,15 +1642,15 @@ suite('mica app-server real-user flows (mock provider)', () => {
     hosts.push(host);
     await waitFor(host, hostReady, 'host ready', 30_000);
 
+    config.providers.pop();
+    writeFileSync(configPath, JSON.stringify(config));
     await send(host, 1, 'turn/start', {
       model: 'other/other-model',
-      input: [{ type: 'text', text: 'incompatible protocol' }],
+      input: [{ type: 'text', text: 'deleted provider' }],
     });
-    const incompatible = await waitFor(host, (message) => message.id === 1, 'protocol error');
-    expect(incompatible.error).toMatchObject({ code: -32602 });
-    expect(JSON.stringify(incompatible.error)).toContain(
-      'Cannot resume a openai_responses session with openai_chat_completions',
-    );
+    const invalidProvider = await waitFor(host, (message) => message.id === 1, 'deleted provider error');
+    expect(invalidProvider.error).toMatchObject({ code: -32602 });
+    expect(JSON.stringify(invalidProvider.error)).toContain('Provider not found: other');
     await send(host, 2, 'turn/start', {
       model: 'mock/',
       input: [{ type: 'text', text: 'missing model name' }],
@@ -1643,6 +1666,70 @@ suite('mica app-server real-user flows (mock provider)', () => {
     expect(response.error).toBeUndefined();
     await waitFor(host, turnCompleted((response.result as { turn: { id: string } }).turn.id), 'valid turn completed');
     expect(mock.state.requests[0]?.model).toBe('mock-chat');
+  });
+
+  itE2E('resident host switches provider protocols and resumes with the full history and current model', async () => {
+    const home = makeHome('cross-protocol-history');
+    // Four turns trigger memory extraction; keep the recorded requests specific to this conversation.
+    writeFileSync(join(home, 'plugins-state.json'), JSON.stringify({ disabled: ['session-rename', 'memory'] }));
+    const configPath = join(home, 'config.json');
+    const config = JSON.parse(readFileSync(configPath, 'utf8')) as { providers: Array<Record<string, unknown>> };
+    config.providers.push({
+      ...config.providers[0],
+      id: 'chat',
+      protocol: 'openai_chat_completions',
+      models: ['mock-chat-completions'],
+    });
+    writeFileSync(configPath, JSON.stringify(config));
+    const host = spawnHost('cross-protocol-history', [], home);
+    hosts.push(host);
+    await waitFor(host, hostReady, 'host ready', 30_000);
+
+    const prompts = ['first Responses question', 'switch to Chat', 'keep Chat model', 'switch back to Responses'];
+    const replies = ['first Responses answer', 'first Chat answer', 'second Chat answer', 'second Responses answer'];
+    const runTurn = async (target: Host, id: number, text: string, reply: string, model?: string) => {
+      mock.state.longText = reply;
+      await send(target, id, 'turn/start', { model, input: [{ type: 'text', text }] });
+      const response = await waitFor(target, (message) => message.id === id, 'turn response');
+      expect(response.error).toBeUndefined();
+      const { turn } = response.result as { turn: { id: string } };
+      const completed = await waitFor(target, turnCompleted(turn.id), 'turn completed');
+      expect(completed.params?.turn).toMatchObject({ status: 'completed' });
+    };
+    const expectHistory = (index: number, protocol: string, model: string) => {
+      const request = mock.state.requests[index];
+      expect(request).toMatchObject({ protocol, model });
+      const history = request.input as Array<{ role?: string; content?: unknown }>;
+      for (let previous = 0; previous < index; previous += 1) {
+        expect(history.some((message) =>
+          message.role === 'user' && JSON.stringify(message.content).includes(prompts[previous]),
+        )).toBe(true);
+        expect(history.some((message) =>
+          message.role === 'assistant' && JSON.stringify(message.content).includes(replies[previous]),
+        )).toBe(true);
+      }
+    };
+
+    await runTurn(host, 1, prompts[0], replies[0]);
+    await runTurn(host, 2, prompts[1], replies[1], 'chat/mock-chat-completions');
+    expectHistory(1, 'openai_chat_completions', 'mock-chat-completions');
+    await runTurn(host, 3, prompts[2], replies[2]);
+    expectHistory(2, 'openai_chat_completions', 'mock-chat-completions');
+    await runTurn(host, 4, prompts[3], replies[3], 'mock/mock-chat-return');
+    expectHistory(3, 'openai_responses', 'mock-chat-return');
+
+    const sessionFile = readdirSync(join(home, 'sessions')).find((file) => file.endsWith('.json'))!;
+    const sessionId = sessionFile.replace(/\.json$/, '');
+    const saved = JSON.parse(readFileSync(join(home, 'sessions', sessionFile), 'utf8'));
+    expect(saved.snapshot).toMatchObject({ providerId: 'mock', model: 'mock-chat-return' });
+    killHost(host);
+    await host.closePromise;
+    const resumed = spawnHost('cross-protocol-history-resumed', ['--session', sessionId], home);
+    hosts.push(resumed);
+    await waitFor(resumed, hostReady, 'resumed host ready', 30_000);
+    await runTurn(resumed, 1, 'continue after resume', 'resumed answer');
+    expect(mock.state.requests).toHaveLength(5);
+    expectHistory(4, 'openai_responses', 'mock-chat-return');
   });
 
   itE2E('a plugin turn starting during a client guard never inherits the client model', async () => {
@@ -1932,19 +2019,25 @@ suite('mica app-server real-user flows (mock provider)', () => {
     hosts.push(host);
 
     const ready = await waitFor(host, hostReady, 'host ready or error', 30_000);
-    const readyAt = ready.emittedAtMs ?? 0;
+    expect(ready.method).toBe('mica/backgroundTasks/updated');
+    const initRequested = join(home, 'mcp-initialize-requested');
+    const initDeadline = Date.now() + 10_000;
+    while (!existsSync(initRequested) && Date.now() < initDeadline) await sleep(20);
+    expect(existsSync(initRequested)).toBe(true);
 
     await send(host, 1, 'turn/start', {
       threadId: '',
       input: [{ type: 'text', text: '你好' }],
       model: 'mock/mock-chat',
     });
-    // The MCP server sleeps 3s before answering initialize. The host must have
-    // become ready before that (background MCP init), and the turn/started
-    // notification only fires after MCP is up -> started trails ready by ~3s.
+    expect(host.lines.some((message) => message.method === 'turn/started')).toBe(false);
+    // Release only after readiness and the first input. The turn must start
+    // after MCP initializes, regardless of how much CPU host startup consumed.
+    writeFileSync(join(home, 'mcp-initialize-release'), 'continue');
     const started = await waitFor(host, (m) => m.method === 'turn/started', 'turn/started');
-    const startedAt = started.emittedAtMs ?? 0;
-    expect(startedAt - readyAt).toBeGreaterThan(1500);
+    const initializedAt = Number(readFileSync(join(home, 'mcp-initialized-at'), 'utf8'));
+    expect(ready.emittedAtMs).toBeLessThanOrEqual(initializedAt);
+    expect(started.emittedAtMs).toBeGreaterThanOrEqual(initializedAt);
 
     const turnId = (started.params?.turn as { id?: string }).id!;
     const completed = await waitFor(host, turnCompleted(turnId), 'turn/completed');
@@ -3411,11 +3504,8 @@ suite('mica app-server real-user flows (mock provider)', () => {
     const resumed = await waitFor(hostB, (m) => m.id === 1, 'thread resumed');
     expect(resumed.error).toBeUndefined();
     expect(resumed.result).toMatchObject({ thread: { id: sessionId } });
-    await waitFor(
-      hostB,
-      (m) => m.method === 'mica/subagentTasks/updated' && taskFrom(m, taskId)?.status === 'failed',
-      'recovered failed subagent',
-    );
+    // Terminal tasks are retained for detail/restart but no longer projected
+    // into the active-task dock, so recovery must be checked through detail.
     const recovered = await readDetail(hostB, taskId);
     expect(recovered).toMatchObject({
       ...liveDetail,

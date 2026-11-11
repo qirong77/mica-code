@@ -39,8 +39,8 @@ function projectSession(raw) {
   let meta = null
   try { if (snapshot && typeof snapshot === 'object') {
     // Provider history contains tool calls omitted from conversationMessages.
-    // A text user message starts a new plan scope; a media message after a tool
-    // result is the rest of the same turn's tool output.
+    // pi-ai gives tool output its own toolResult role. Every user message starts
+    // a new plan scope, including requests with images or other attachments.
     const calls = new Map()
     let todoInput = null
     const failed = (result, output) => {
@@ -58,9 +58,7 @@ function projectSession(raw) {
     }
     for (const message of Array.isArray(snapshot.messages) ? snapshot.messages : []) {
       const blocks = Array.isArray(message?.content) ? message.content : []
-      const user = message?.role === 'user' && !blocks.some((block) => block?.type === 'tool_result')
-      const media = blocks.some((block) => block?.type && block.type !== 'text')
-      if (user && !media) {
+      if (message?.role === 'user') {
         calls.clear()
         todoInput = null
       }
@@ -163,8 +161,9 @@ export function createSessionReader({
 
   return function readSession(file) {
     if (!file) return Promise.resolve(empty())
-    if (pending.has(file)) return pending.get(file)
     const signature = fileSignature(file)
+    const inFlight = pending.get(file)
+    if (inFlight && inFlight.signature?.key === signature?.key) return inFlight.promise
     const hit = cached.get(file)
     if (hit && Date.now() - hit.at >= CACHE_TTL_MS) {
       cachedBytes -= hit.size
@@ -199,12 +198,17 @@ export function createSessionReader({
       .then((value) => {
         // 走降级路径说明 Worker 这次坏了，不把它当成「这个文件已经读好」缓存起来：
         // 下一次调用应该重新试一次 Worker（缓存的是失败现场，不是文件内容）。
-        if (!usedFallback) remember(file, signature, value)
+        if (
+          !usedFallback &&
+          pending.get(file)?.promise === task &&
+          signature?.key === fileSignature(file)?.key
+        )
+          remember(file, signature, value)
         return value
       })
-    pending.set(file, task)
+    pending.set(file, { signature, promise: task })
     task.finally(() => {
-      if (pending.get(file) === task) pending.delete(file)
+      if (pending.get(file)?.promise === task) pending.delete(file)
     })
     return task
   }

@@ -17,6 +17,7 @@ import {
   type PersistedSessionTurnState,
   type SessionStoreLike,
   type SessionSummary,
+  type SessionTurnLease,
 } from '@packages/mica-session/index.js';
 import { getActiveContext } from '../app/activeContext.js';
 import { micaContext } from '@packages/mica-context/index.js';
@@ -85,7 +86,10 @@ export class SessionController {
   private currentPersistedSignature: string | null = null;
   private currentFileSignature: string | null = null;
   private currentPersistedCwd: string | null = null;
+  private currentSessionHasBeenPersisted = false;
   private recoveredActiveThinkingSignature: string | null = null;
+  /** Only handles acquired by this controller confer ownership, even within one process. */
+  private readonly turnLeases = new Map<string, SessionTurnLease>();
   private todoPersistenceEnabled = true;
   private readonly agent: SessionAgentAdapter;
   private readonly store: SessionStoreLike;
@@ -130,27 +134,92 @@ export class SessionController {
     return this.store.load(id);
   }
 
-  /** 后台模型用量按发起时的会话归账；resume 之后只更新旧快照的用量字段。 */
-  recordSubagentUsageForSession(sessionId: string, record: SubagentUsageRecord): boolean {
-    if (sessionId === this.currentSessionId) {
-      if (!this.agent.recordSubagentUsage) return false;
-      this.agent.recordSubagentUsage(record);
-      if (!this.agent.isRunning) this.saveCurrent({ allowEmpty: true });
-      return true;
-    }
-    const session = this.store.load(sessionId);
-    // 用户可能已经删除旧会话：迟到的请求不能把它重新建回来。
-    if (!session) return false;
-    this.store.save({
-      ...session,
-      revision: (session.revision ?? 0) + 1,
-      updatedAt: new Date().toISOString(),
-      snapshot: {
-        ...session.snapshot,
-        subagentUsageHistory: [...(session.snapshot.subagentUsageHistory ?? []), record],
+  /** Acquire before refresh/run; releasing the handle also clears this controller's ownership. */
+  acquireTurnLease(): SessionTurnLease | null {
+    const sessionId = this.currentSessionId;
+    if (this.getHeldTurnLease(sessionId)) return null;
+    const acquired = micaSession.acquireTurnLease(sessionId);
+    if (!acquired) return null;
+    const lease: SessionTurnLease = {
+      sessionId,
+      isHeld: () => acquired.isHeld(),
+      release: () => {
+        if (this.turnLeases.get(sessionId) === lease) this.turnLeases.delete(sessionId);
+        acquired.release();
       },
-    });
-    return true;
+    };
+    this.turnLeases.set(sessionId, lease);
+    return lease;
+  }
+
+  private getHeldTurnLease(sessionId: string): SessionTurnLease | null {
+    const lease = this.turnLeases.get(sessionId);
+    if (!lease) return null;
+    if (lease.isHeld()) return lease;
+    lease.release();
+    return null;
+  }
+
+  /**
+   * Charge the captured session, borrowing only our own live turn's lease. A
+   * different writer (including another controller in this PID) must finish
+   * first. The latest disk snapshot supplies everything except the new usage;
+   * the idle agent's conversation or a pre-rewind history is never written back.
+   */
+  async recordSubagentUsageForSession(sessionId: string, record: SubagentUsageRecord): Promise<boolean> {
+    let acquired: SessionTurnLease | null = null;
+    while (!this.getHeldTurnLease(sessionId)) {
+      acquired = micaSession.acquireTurnLease(sessionId);
+      if (acquired) break;
+      // Deletion also cancels a pending charge; it must not recreate a session.
+      if (!(this.store.statSignature ? this.store.statSignature(sessionId) : this.store.load(sessionId))) return false;
+      if (sessionId === this.currentSessionId) this.currentSessionHasBeenPersisted = true;
+      await new Promise<void>((resolve) => setTimeout(resolve, 100));
+    }
+    try {
+      const session = this.store.load(sessionId);
+      if (!session) {
+        // A request may be the first activity in a brand-new local draft. Only
+        // that draft may be created; a previously persisted/deleted session may
+        // not. Keep the normal snapshot path limited to this first save.
+        if (
+          sessionId !== this.currentSessionId ||
+          this.currentSessionHasBeenPersisted ||
+          !this.agent.recordSubagentUsage
+        ) {
+          return false;
+        }
+        this.agent.recordSubagentUsage(record);
+        return this.saveCurrent({ allowEmpty: true });
+      }
+      const saved: PersistedSession = {
+        ...session,
+        revision: (session.revision ?? 0) + 1,
+        updatedAt: new Date().toISOString(),
+        snapshot: {
+          ...session.snapshot,
+          subagentUsageHistory: [...(session.snapshot.subagentUsageHistory ?? []), record],
+        },
+      };
+      const matchesBaseline =
+        sessionId === this.currentSessionId && sessionSignature(session) === this.currentPersistedSignature;
+      this.store.save(saved);
+      if (sessionId === this.currentSessionId) {
+        this.currentSessionHasBeenPersisted = true;
+        // Keep the live turn's next checkpoint in sync without reloading its
+        // messages or unioning disk usage into an intentional rewind. When
+        // another writer changed the baseline, leave its signature outstanding
+        // so the next leased refresh loads that writer's complete history.
+        this.agent.recordSubagentUsage?.(record);
+        if (matchesBaseline) {
+          this.currentPersistedSignature = sessionSignature(saved);
+          this.currentFileSignature = null;
+        }
+      }
+      return true;
+    } finally {
+      acquired?.release();
+    }
   }
 
   /**
@@ -178,6 +247,7 @@ export class SessionController {
     this.recoveredActiveThinkingSignature = null;
     this.currentFileSignature = null;
     this.currentPersistedCwd = null;
+    this.currentSessionHasBeenPersisted = false;
   }
 
   /** 当前会话的父会话 id（没有则为 null）。 */
@@ -226,7 +296,7 @@ export class SessionController {
       this.currentAwaitingInput = null;
     }
     const hasContent = hasConversation(snapshot.messages, conversationMessages);
-    if (!hasContent && !options.allowEmpty && this.currentTitleSource !== 'manual') {
+    if (!hasContent && !hasUsage(snapshot) && !options.allowEmpty && this.currentTitleSource !== 'manual') {
       this.store.delete(this.currentSessionId);
       // The file is gone, so the recorded signature no longer describes
       // anything on disk. Clearing it keeps the next save (this session is
@@ -240,6 +310,7 @@ export class SessionController {
     // agent 的进程（插件面板动作、能力开关这类不跑 turn 的入口）如果照原样存，
     // 用户几百条对话会被一次点击抹掉。宁可这次不落盘。
     const existing = this.store.load(this.currentSessionId);
+    if (existing) this.currentSessionHasBeenPersisted = true;
     if (
       options.allowEmpty &&
       !hasContent &&
@@ -298,6 +369,7 @@ export class SessionController {
     session.revision = (existing?.revision ?? 0) + 1;
     session.updatedAt = now;
     this.store.save(session);
+    this.currentSessionHasBeenPersisted = true;
     this.parentSessionOwned = false;
     this.currentParentSessionId = session.parentSessionId ?? null;
     this.currentPersistedSignature = sessionSignature(session);
@@ -321,6 +393,7 @@ export class SessionController {
     // 别落盘」的保护，而提问恰好发生在第一个答案之前，标记会被那条保护一起挡掉。
     // 文件被改动之后，之前记下的签名不再描述它，下一次保存据此重新写一份完整快照。
     if (this.store.patchAwaitingInput?.(this.currentSessionId, next)) {
+      this.currentSessionHasBeenPersisted = true;
       this.currentPersistedSignature = null;
       this.currentFileSignature = null;
     }
@@ -361,6 +434,7 @@ export class SessionController {
       snapshot: existing?.snapshot ?? toPersistedSnapshot(snapshot, conversationMessages),
     };
     this.store.save(session);
+    this.currentSessionHasBeenPersisted = true;
     this.parentSessionOwned = false;
     this.currentParentSessionId = session.parentSessionId ?? null;
     this.currentPersistedSignature = sessionSignature(session);
@@ -390,6 +464,7 @@ export class SessionController {
     try {
       const existing = this.store.load(this.currentSessionId);
       if (!existing) return false;
+      this.currentSessionHasBeenPersisted = true;
       const cwd = process.cwd();
       if (existing.cwd === cwd) return true;
       const saved: PersistedSession = {
@@ -509,6 +584,7 @@ export class SessionController {
     if (recoverActiveThinking) this.agent.loadSnapshot(runtimeSnapshot, { recoverActiveThinking: true });
     else this.agent.loadSnapshot(runtimeSnapshot);
     this.currentSessionId = session.id;
+    this.currentSessionHasBeenPersisted = true;
     this.currentTurnState = session.turnState ?? 'completed';
     // 恢复时照原样带着：真问题可能还在等（宿主刚刚崩过），下一个 `saveCurrent` 会
     // 按 `turnState` 决定要不要留下它。
@@ -539,6 +615,7 @@ export class SessionController {
    */
   refreshFromStore(): ResumeSessionResult | null {
     if (this.agent.isRunning) return null;
+    const heldLease = this.getHeldTurnLease(this.currentSessionId);
     const session = this.store.load(this.currentSessionId);
     if (!session) return null;
     const signature = sessionSignature(session);
@@ -549,11 +626,9 @@ export class SessionController {
         signature === this.recoveredActiveThinkingSignature)
     )
       return null;
-    if (this.todoPersistenceEnabled || session.turnState !== 'running') {
-      return this.restoreLoaded(session, this.todoPersistenceEnabled);
-    }
-    // No-save executors do not hold a lease. Avoid refreshing a live writer's
-    // snapshot, and read it again after taking the lease if it has stopped.
+    if (heldLease) return this.restoreLoaded(session, true);
+    // Callers outside a persistent turn do not hold a lease. Avoid refreshing a
+    // live writer's snapshot; read it again once we can own the lease ourselves.
     const lease = micaSession.acquireTurnLease(session.id);
     if (!lease) return null;
     try {
@@ -625,6 +700,7 @@ export class SessionController {
     const snapshot = this.agent.getSnapshot();
     const conversationMessages = getPersistableConversationMessages(this.agent);
     if (hasConversation(snapshot.messages, conversationMessages)) return false;
+    if (hasUsage(snapshot)) return false;
     // 用户亲手起过名字的空会话不是草稿：重命名就是「这条会话要留下」的表达。
     // 换会话时把它删掉，侧栏里那条刚命名好的会话就会凭空消失。
     if (this.currentTitleSource === 'manual') return false;
@@ -704,6 +780,10 @@ function hasConversation(providerMessages: unknown[], conversationMessages: Mica
     const role = (message as { role?: unknown }).role;
     return role === 'user' || role === 'assistant';
   });
+}
+
+function hasUsage(snapshot: AgentRuntimeSnapshot): boolean {
+  return snapshot.usageHistory.length > 0 || (snapshot.subagentUsageHistory?.length ?? 0) > 0;
 }
 
 function normalizeSessionTitle(title: string): string {

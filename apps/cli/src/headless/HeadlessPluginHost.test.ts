@@ -8,6 +8,7 @@ import { writePluginState } from '@packages/mica-plugin/PluginState.js';
 import { micaSkills } from '@packages/mica-skills/index.js';
 import { micaTools } from '@packages/mica-tools/index.js';
 import { micaRuntime } from '@packages/mica-runtime/index.js';
+import { micaSession } from '@packages/mica-session/index.js';
 import type { AgentRuntime } from '../agent/AgentRuntime.js';
 import type { SessionController } from '../session/SessionController.js';
 import { HeadlessTurnExecutor } from '../runtime/HeadlessTurnExecutor.js';
@@ -48,6 +49,7 @@ function mockAgent(overrides: Record<string, unknown> = {}): AgentRuntime {
 function mockSessionController(saveSpy: ReturnType<typeof vi.fn>): SessionController {
   return {
     getCurrentSessionId: () => 'sess-headless',
+    acquireTurnLease: () => micaSession.acquireTurnLease('sess-headless'),
     // 官方插件会在 turn:before 里读展示标题（session-rename），桩缺了它整条 hook 会抛错。
     getCurrentDisplayTitle: () => 'headless test session',
     getCurrentTitleSource: () => 'derived',

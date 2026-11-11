@@ -126,6 +126,7 @@
   --motion-fast: 90ms;
   --motion-base: 140ms;
   --motion-slow: 200ms;
+  --motion-breathe: 1.6s;
 }
 
 /*
@@ -7503,7 +7504,7 @@ html body #root {
 /* 摘要生成中复用轻量呼吸，只改变透明度；折叠后标题仍有运行反馈。 */
 .chat-digest-meta.is-running,
 .chat-digest-pending {
-  animation: chat-dot-breathe 1.6s ease-in-out infinite;
+  animation: chat-dot-breathe var(--motion-breathe) ease-in-out infinite;
 }
 
 /* 按压反馈。只给非整行的 arco 按钮加缩放：整行按钮（`mica-arco-row`）缩一下会让

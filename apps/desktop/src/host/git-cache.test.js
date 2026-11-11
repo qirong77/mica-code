@@ -21,7 +21,7 @@ import {
 const dirs = []
 
 function temporaryDirectory() {
-  const dir = mkdtempSync(path.join(os.tmpdir(), 'mica-git-cache-'))
+  const dir = realpathSync.native(mkdtempSync(path.join(os.tmpdir(), 'mica-git-cache-')))
   dirs.push(dir)
   return dir
 }

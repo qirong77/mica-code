@@ -1,7 +1,7 @@
 import type { AgentQueryContent } from '@packages/mica-agent/index.js';
 import { micaAgent } from '@packages/mica-agent/index.js';
 import { runtimeEnv } from '@packages/mica-config/runtimeEnv.js';
-import { micaSession, type SessionTurnLease } from '@packages/mica-session/index.js';
+import type { SessionTurnLease } from '@packages/mica-session/index.js';
 import { micaTools } from '@packages/mica-tools/index.js';
 import { micaUi, type MicaUiConversationMessage } from '@packages/mica-ui/index.js';
 import type { CommandRegistry } from '@packages/mica-commands/index.js';
@@ -428,7 +428,7 @@ export class LocalRuntimeController implements RuntimeController {
       return { ok: false, reason: 'busy' };
     }
 
-    const lease = micaSession.acquireTurnLease(targetSessionController.getCurrentSessionId());
+    const lease = targetSessionController.acquireTurnLease();
     if (!lease) {
       this.events.publish({
         type: 'notification',

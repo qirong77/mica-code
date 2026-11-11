@@ -39,6 +39,51 @@ afterAll(() => {
 });
 
 describe('LocalRuntimeController queue drain', () => {
+  it('registers its turn lease before a model usage recorder needs to borrow it', async () => {
+    const { micaSession } = await import('@packages/mica-session/index.js');
+    const { buildSubagentUsageRecord } = await import('@packages/mica-agent/index.js');
+    const snapshot: AgentRuntimeSnapshot = {
+      providerId: 'openai', protocol: 'openai_chat_completions', model: 'test-model', effort: 'none',
+      role: 'default', messageFormat: 'pi-ai-v1', messages: [], usageHistory: [], lastUsage: undefined,
+      subagentUsageHistory: [],
+    };
+    const record = buildSubagentUsageRecord({
+      taskId: 'plugin:within-turn', origin: 'plugin', pluginId: 'test', subagentType: 'plugin:test',
+      description: 'during turn', status: 'completed', startedAt: new Date().toISOString(), requests: [],
+    });
+    let sessionController!: InstanceType<typeof SessionController>;
+    let runId = 0;
+    const agent = {
+      events: { on: vi.fn(), off: vi.fn(), emit: vi.fn() },
+      reserveRunId: () => ++runId,
+      isCurrent: () => true,
+      captureClientSnapshot: () => undefined,
+      run: vi.fn(async () => {
+        // Awaiting this would deadlock if the runtime's lease was not registered
+        // with the controller and accounting tried to acquire another one.
+        expect(await sessionController.recordSubagentUsageForSession(sessionController.getCurrentSessionId(), record)).toBe(true);
+        return { runId, text: 'done' };
+      }),
+      recordSubagentUsage: (value: typeof record) => snapshot.subagentUsageHistory!.push(value),
+      toConversationMessages: () => [], getSnapshot: () => snapshot,
+      setSessionId: vi.fn(), loadSnapshot: vi.fn(), reloadConfig: vi.fn(), preserveAbortedTurn: vi.fn(),
+    } as unknown as AgentRuntime;
+    sessionController = new SessionController(agent);
+    const hooks = new micaPlugin.HookRegistry();
+    let releasedBeforeAfter = false;
+    hooks.on('turn:after', () => {
+      const available = micaSession.acquireTurnLease(sessionController.getCurrentSessionId());
+      releasedBeforeAfter = available !== null;
+      available?.release();
+    });
+    const runtime = new LocalRuntimeController(
+      agent, sessionController, new micaCommands.CommandRegistry(), hooks, new micaPlugin.ServiceContainer(),
+    );
+    await expect(runtime.submit('hello')).resolves.toMatchObject({ ok: true });
+    expect(releasedBeforeAfter).toBe(true);
+    expect(sessionController.load(sessionController.getCurrentSessionId())!.snapshot.subagentUsageHistory).toEqual([record]);
+  });
+
   it('stops the background subagents a finished turn left running', async () => {
     const snapshot: AgentRuntimeSnapshot = {
       providerId: 'openai',

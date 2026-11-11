@@ -62,11 +62,6 @@ export class NotebookSession {
 
   snapshot(): NotebookDocument {
     if (!this.editor) throw new Error('编辑器尚未就绪，请稍后再试');
-    const root = this.editor.getRootElement();
-    if (root?.dataset.sourcePending === 'true' ||
-        (root?.dataset.sourceMode && root.dataset.sourceMode !== 'wysiwyg')) {
-      throw new Error('请先返回富文本模式，再保存或切换笔记。源码内容尚未保存。');
-    }
     // Commit any pending edit (including captions) before serializing.
     for (const nested of this.nestedEditors) nested.update(() => {}, {discrete: true});
     this.editor.update(() => {}, {discrete: true});
@@ -84,7 +79,7 @@ export class NotebookSession {
     queueMicrotask(() => {
       if (this.active && !this.loaded) {
         this.loaded = true;
-        post({type: 'loaded', noteId: this.noteId, requestId: this.requestId});
+        post({type: 'loaded', noteId: this.noteId, requestId: this.requestId, loadId: this.requestId});
       }
     });
     return () => { this.active = false; this.editor = null; this.restoreEditor(editor); };
@@ -97,7 +92,7 @@ export class NotebookSession {
 
   publishOutline(snapshot: NotebookOutlineSnapshot): boolean {
     if (!this.active || !this.editor) return false;
-    post({type: 'outline', noteId: this.noteId, ...snapshot});
+    post({type: 'outline', noteId: this.noteId, loadId: this.requestId, ...snapshot});
     return true;
   }
 
@@ -116,8 +111,8 @@ export class NotebookSession {
     queueMicrotask(() => {
       this.queued = false;
       if (!this.active || !this.loaded) return;
-      try { post({type: 'change', noteId: this.noteId, document: this.snapshot()}); }
-      catch { /* Source mode is deliberately not persisted. Flush reports why. */ }
+      try { post({type: 'change', noteId: this.noteId, loadId: this.requestId, document: this.snapshot()}); }
+      catch (error) { post({type: 'error', loadId: this.requestId, noteId: this.noteId, message: String(error)}); }
     });
   };
 }
@@ -129,7 +124,7 @@ class DocumentBoundary extends Component<{session: NotebookSession; children: Re
   state = {error: null as string | null};
   static getDerivedStateFromError(error: unknown) { return {error: String(error)}; }
   componentDidCatch(error: unknown) {
-    post({type: 'error', requestId: this.props.session.requestId, noteId: this.props.session.noteId, message: String(error)});
+    post({type: 'error', requestId: this.props.session.requestId, loadId: this.props.session.requestId, noteId: this.props.session.noteId, message: String(error)});
   }
   render() {
     return this.state.error ? <div className="notebook-loading" role="alert">无法打开这篇笔记：{this.state.error}</div> : this.props.children;
@@ -167,42 +162,34 @@ export function NotebookFrame({children}: {children: ReactNode}) {
         current.current?.setFrozen(message.frozen);
       } else if (message.type === 'navigate') {
         const active = current.current;
-        if (!active || message.noteId !== active.noteId) return;
+        if (!active || message.noteId !== active.noteId || message.loadId !== active.requestId) return;
         if (typeof message.heading === 'string') active.navigate({heading: message.heading});
         else if (['top', 'table', 'code', 'mermaid', 'image'].includes(message.block)) active.navigate({block: message.block});
       } else if (message.type === 'load') {
         try {
           const doc = message.document;
-          if (typeof message.noteId !== 'string' || !doc || doc.version !== 1 ||
+          if (!requestId || message.loadId !== requestId || typeof message.noteId !== 'string' || !doc || doc.version !== 1 ||
               (doc.editorState !== null && typeof doc.editorState !== 'string') || !Array.isArray(doc.comments)) throw new Error('笔记文档格式无效');
           if (doc.editorState !== null) {
             const parsed = JSON.parse(doc.editorState);
             if (parsed?.root?.type !== 'root' || !Array.isArray(parsed.root.children)) throw new Error('笔记正文格式无效');
           }
-          // Do not allow even a direct load to discard uncommitted source edits.
-          if (current.current?.editor) current.current.snapshot();
           const next = new NotebookSession(message.noteId, doc, requestId);
           next.setFrozen(frozen.current);
           current.current = next;
           setSession(next);
         } catch (error) {
-          post({type: 'error', requestId, noteId: message.noteId, message: String(error)});
+          post({type: 'error', requestId, loadId: requestId, noteId: message.noteId, message: String(error)});
         }
       } else if (message.type === 'flush') {
         try {
           if (!current.current) throw new Error('尚未载入笔记');
-          post({type: 'result', requestId, noteId: current.current.noteId, document: current.current.snapshot(), ok: true});
+          if (message.loadId !== current.current.requestId || message.noteId !== current.current.noteId) throw new Error('笔记已切换，请重试');
+          post({type: 'result', requestId, loadId: current.current.requestId, noteId: current.current.noteId, document: current.current.snapshot(), ok: true});
         } catch (error) {
           // The host rejects this request, leaving the current note mounted.
-          post({type: 'error', requestId, noteId: current.current?.noteId, message: String(error)});
+          post({type: 'error', requestId, loadId: message.loadId, noteId: current.current?.noteId, message: String(error)});
         }
-      }
-    };
-    const beforeUnload = (event: BeforeUnloadEvent) => {
-      const root = current.current?.editor?.getRootElement();
-      if (root?.dataset.sourcePending === 'true' || (root?.dataset.sourceMode && root.dataset.sourceMode !== 'wysiwyg')) {
-        event.preventDefault();
-        event.returnValue = '';
       }
     };
     // Portalled menus and native inputs do not all consult Lexical editability.
@@ -216,11 +203,9 @@ export function NotebookFrame({children}: {children: ReactNode}) {
     const inputEvents = ['keydown', 'keypress', 'keyup', 'beforeinput', 'paste', 'cut', 'drop', 'compositionstart', 'click', 'pointerdown', 'pointerup', 'contextmenu'];
     for (const type of inputEvents) window.addEventListener(type, stopFrozenInput, true);
     window.addEventListener('message', receive);
-    window.addEventListener('beforeunload', beforeUnload);
     post({type: 'ready'});
     return () => {
       window.removeEventListener('message', receive);
-      window.removeEventListener('beforeunload', beforeUnload);
       for (const type of inputEvents) window.removeEventListener(type, stopFrozenInput, true);
     };
   }, []);

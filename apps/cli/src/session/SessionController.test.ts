@@ -485,7 +485,7 @@ describe('SessionController', () => {
     } finally {
       liveLease?.release();
     }
-    const nextLease = micaSession.acquireTurnLease(session.id);
+    const nextLease = controller.acquireTurnLease();
     expect(nextLease).not.toBeNull();
     try {
       expect(controller.refreshFromStore()?.ok).toBe(true);
@@ -646,7 +646,7 @@ describe('SessionController', () => {
         requests: [],
       });
 
-      expect(controller.recordSubagentUsageForSession(original.id, record)).toBe(!deleted);
+      expect(await controller.recordSubagentUsageForSession(original.id, record)).toBe(!deleted);
 
       expect(recordSubagentUsage).not.toHaveBeenCalled();
       if (deleted) expect(store.save).not.toHaveBeenCalled();
@@ -657,36 +657,6 @@ describe('SessionController', () => {
           updatedAt: expect.any(String),
           snapshot: { ...original.snapshot, subagentUsageHistory: [record] },
         });
-    },
-  );
-
-  it.each([false, true])(
-    'records current-session plugin usage and saves only when idle (running: %s)',
-    async (running) => {
-      const { SessionController } = await import('./SessionController.js');
-      const recordSubagentUsage = vi.fn();
-      const controller = new SessionController({
-        agent: { recordSubagentUsage, isRunning: running } as unknown as SessionAgentAdapter,
-      });
-      const save = vi.spyOn(controller, 'saveCurrent').mockReturnValue(true);
-      const record = buildSubagentUsageRecord({
-        taskId: 'plugin:memory',
-        origin: 'plugin',
-        pluginId: 'memory',
-        subagentType: 'plugin:memory',
-        description: '整理记忆',
-        model: 'mini',
-        status: 'completed',
-        startedAt: new Date(0).toISOString(),
-        finishedAt: new Date(1).toISOString(),
-        requests: [],
-      });
-
-      expect(controller.recordSubagentUsageForSession(controller.getCurrentSessionId(), record)).toBe(true);
-
-      expect(recordSubagentUsage).toHaveBeenCalledWith(record);
-      if (running) expect(save).not.toHaveBeenCalled();
-      else expect(save).toHaveBeenCalledWith({ allowEmpty: true });
     },
   );
 
