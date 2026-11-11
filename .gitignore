@@ -16,3 +16,7 @@ out
 .eslintcache
 *.log*
 private
+
+# electron-vite 加载 ESM 配置时会写 <config>.<时间戳>-<随机>.mjs 临时文件，
+# 进程被中断（dev 重启、Ctrl-C、崩溃）时不会清理，别再把它提交进来
+electron.vite.config.mjs.[0-9]*-*.mjs
