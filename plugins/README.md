@@ -19,7 +19,7 @@
 
 ## Notebook 本地笔记本
 
-随包 `notebook` 在侧栏提供 Notebook 整页：目录树、本地富文本与表格编辑，和会话笔记相互独立。
+随包 `notebook` 在顶栏右侧（与 Schedule 同一排）提供 Notebook 整页：目录树、本地富文本与表格编辑，和会话笔记相互独立。
 编辑器是共享包 `packages/mica-editor`（笔记用其富文本模式，配置页 Role / Skill 用同一份运行时的 Markdown 模式），第三方依赖固定版本从 CDN 运行时加载；数据在 `plugin-data/notebook/data.json` 与 `documents/<id>.json`。首次打开需要 CDN 网络。
 具体能力、限制与开发方式见 [Notebook](./notebook/README.md)。
 

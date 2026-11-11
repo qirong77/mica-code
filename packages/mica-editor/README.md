@@ -40,7 +40,10 @@ await ref.current?.flush(); // 切换条目/离开页面前把最后一批输入
 ## Markdown 模式的取舍
 
 - 打开文档先过 `src/markdown/markdownPolicy.ts`：frontmatter、HTML、引用式链接、脚注、图片、公式、复杂表格等
-  无法无损表达的写法默认留在**源码模式**，保证「看一眼不会改坏 prompt」。简单表格、标题、列表、引用、代码块可排版编辑。
+  无法无损表达的写法默认留在**源码模式**，保证「看一眼不会改坏 prompt」。标题、列表、表格、代码块可排版编辑。
+- 引用（`>`）按 GFM 当**块容器**解析：引用里的列表、代码块、表格和嵌套引用都是真正的节点，
+  单独一个 `>` 是引用内部的空行。`src/markdown/transformers.ts` 里的 `MARKDOWN_QUOTE` 负责整块
+  导入与逐行加 `>` 导出，往返原样；因此「引用里套列表」的文档也直接可编辑，不再整篇降到源码。
 - 文本进出只有一条路径：`src/markdown/markdownDocument.ts` 的 `$importMarkdown` / `$exportMarkdown`。
   转换不保留 Markdown 空行（否则空行会变成空段落、排版撑成双倍行距），导出时由块分隔补回，
   并沿用文件原本的收尾换行；只有连续多行空行会收敛成一个空行。

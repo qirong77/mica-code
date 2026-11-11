@@ -3,11 +3,11 @@ import {AutoLinkNode, LinkNode} from '@lexical/link';
 import {ListItemNode, ListNode} from '@lexical/list';
 import {
   $convertFromMarkdownString,
+  $generateNodesFromMarkdownString,
   CHECK_LIST,
   HEADING,
   LINK,
   ORDERED_LIST,
-  QUOTE,
   TEXT_FORMAT_TRANSFORMERS,
   UNORDERED_LIST,
   type ElementTransformer,
@@ -15,7 +15,7 @@ import {
   type Transformer,
 } from '@lexical/markdown';
 import {$createHorizontalRuleNode, $isHorizontalRuleNode, HorizontalRuleNode} from '@lexical/react/LexicalHorizontalRuleNode';
-import {HeadingNode, QuoteNode} from '@lexical/rich-text';
+import {$createQuoteNode, $isQuoteNode, HeadingNode, QuoteNode} from '@lexical/rich-text';
 import {
   $createTableCellNode,
   $createTableNode,
@@ -28,7 +28,7 @@ import {
   TableNode,
   TableRowNode,
 } from '@lexical/table';
-import {$createParagraphNode, $createTextNode, $getState, $isElementNode, $setState, createState} from 'lexical';
+import {$createParagraphNode, $createTextNode, $getState, $isElementNode, $setState, createState, type ElementNode, type LexicalNode} from 'lexical';
 import {closesMarkdownFence, markdownTableAlignments, readMarkdownFence, splitMarkdownTableRow} from './markdownPolicy';
 
 /** No notebook decorators or nested editors are registered in Markdown mode. */
@@ -102,6 +102,75 @@ export const MARKDOWN_CODE: MultilineElementTransformer = {
     return `${fence}${info}\n${text}\n${fence}`;
   },
 };
+
+/**
+ * 引用按 GFM 当块容器：`>` 之后的内容再走一遍完整导入，所以引用里的列表、代码块、
+ * 表格与嵌套引用都留成真正的节点，而不是一行行字面文本；单独一个 `>` 是引用内部的
+ * 空行，导出写回 `>`（不带尾随空格），恢复时仍是同一个空行。
+ */
+export const MARKDOWN_QUOTE: MultilineElementTransformer = {
+  type: 'multiline-element',
+  dependencies: [QuoteNode],
+  regExpStart: /^ {0,3}>/,
+  handleImportAfterStartMatch({lines, startLineIndex, rootNode}) {
+    let end = startLineIndex;
+    const body: string[] = [];
+    while (end < lines.length && /^ {0,3}>/.test(lines[end])) {
+      body.push(lines[end].replace(/^ {0,3}> ?/, ''));
+      end++;
+    }
+    if (!body.length) return null;
+    const quote = $createQuoteNode();
+    // 空行是引用内部的段落分隔：它既不能省略（导出要写回 `>`），也不能靠
+    // `$convertFromMarkdownString` 得到——那边把空行当分隔符吃掉，所以在引用里
+    // 显式留一个空段落，其余连续行按一组一起导入。
+    let group: string[] = [];
+    const flush = () => {
+      if (!group.length) return;
+      // 用「只生成节点」的接口：`$convertFromMarkdownString` 会先清空目标，
+      // 分组导入时会把前一组擦掉。
+      quote.append(...$generateNodesFromMarkdownString(group.join('\n'), MARKDOWN_TRANSFORMERS, false));
+      group = [];
+    };
+    for (const line of body) {
+      if (line.trim()) {
+        group.push(line);
+        continue;
+      }
+      flush();
+      quote.append($createParagraphNode());
+    }
+    flush();
+    if (!quote.getChildrenSize()) quote.append($createParagraphNode());
+    rootNode.append(quote);
+    return [true, end - 1];
+  },
+  replace(parent, children) {
+    if (!children) return false;
+    const quote = $createQuoteNode();
+    quote.append(...children);
+    parent.replace(quote);
+    quote.selectStart();
+  },
+  export(node, exportChildren) {
+    if (!$isQuoteNode(node)) return null;
+    // 引用内部是块序列，而 exportChildren 只做子节点拼接、不带块间分隔，
+    // 所以这里逐块按同一个导出器取每一块，再统一加 `>` 前缀。
+    const body = node.getChildren()
+      .map(child => exportMarkdownBlock(child, exportChildren))
+      .join('\n');
+    return body.split('\n').map(line => line ? `> ${line}` : '>').join('\n');
+  },
+};
+
+/** 引用内部的一整块：与根节点用的是同一批 element transformer，只是没有分隔符。 */
+function exportMarkdownBlock(node: LexicalNode, exportChildren: (node: ElementNode) => string): string {
+  for (const transformer of MARKDOWN_BLOCK_TRANSFORMERS) {
+    const result = transformer.export?.(node, exportChildren);
+    if (result != null) return result;
+  }
+  return $isElementNode(node) ? exportChildren(node) : node.getTextContent();
+}
 
 // Highlight (==text==) is not GFM; keep it literal rather than adding formats
 // that a Markdown consumer might not understand.
@@ -180,6 +249,15 @@ const HORIZONTAL_RULE: ElementTransformer = {
  * export alone do not prove that the source has changed.
  */
 export const MARKDOWN_TRANSFORMERS: Transformer[] = [
-  MARKDOWN_CODE, MARKDOWN_TABLE, HORIZONTAL_RULE, HEADING, QUOTE,
+  MARKDOWN_CODE, MARKDOWN_TABLE, HORIZONTAL_RULE, HEADING, MARKDOWN_QUOTE,
   CHECK_LIST, UNORDERED_LIST, ORDERED_LIST, ...INLINE_TRANSFORMERS,
+];
+
+/**
+ * 块级 transformer，顺序与 `MARKDOWN_TRANSFORMERS` 里的块级部分一致。
+ * 引用内部要自己按块导出（见 `exportMarkdownBlock`），所以单独留一份。
+ */
+const MARKDOWN_BLOCK_TRANSFORMERS: (ElementTransformer | MultilineElementTransformer)[] = [
+  MARKDOWN_CODE, MARKDOWN_TABLE, HORIZONTAL_RULE, HEADING, MARKDOWN_QUOTE,
+  CHECK_LIST, UNORDERED_LIST, ORDERED_LIST,
 ];
