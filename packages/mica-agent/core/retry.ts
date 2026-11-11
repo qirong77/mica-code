@@ -20,6 +20,16 @@ function isUpstreamBodyParseFailure(error: Record<string, unknown>): boolean {
   );
 }
 
+function isUpstreamBodyReadFailure(error: Record<string, unknown>): boolean {
+  const detail = error.error;
+  const nestedCode = detail && typeof detail === 'object' ? (detail as Record<string, unknown>).code : undefined;
+  const codes = ['request_incomplete', 'request_read_error', 'request_timeout'];
+  if ([error.code, nestedCode].some((code) => typeof code === 'string' && codes.includes(code.toLowerCase()))) {
+    return true;
+  }
+  return typeof error.message === 'string' && /\brequest_(?:incomplete|read_error|timeout)\b/i.test(error.message);
+}
+
 export function isRetryableError(error: unknown): boolean {
   if (!error || typeof error !== 'object') return false;
   const err = error as Record<string, unknown>;
@@ -34,6 +44,7 @@ export function isRetryableError(error: unknown): boolean {
     if (status === 429) return true;
     if (status >= 500 && status < 600) return true;
     if (status === 400 && isUpstreamBodyParseFailure(err)) return true;
+    if ((status === 400 || status === 408) && isUpstreamBodyReadFailure(err)) return true;
     return false;
   }
 

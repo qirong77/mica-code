@@ -359,15 +359,22 @@ describe('real SDK request policy', () => {
     },
   );
 
-  it.each(['openai_chat_completions', 'openai_responses'] as const)(
-    '%s retries the exact codexgo invalid_json response with the same request body',
-    async (protocol) => {
+  it.each(
+    (['openai_chat_completions', 'openai_responses'] as const).flatMap((protocol) => [
+      { protocol, status: 400, code: 'invalid_json', message: '请求体必须是有效 JSON，最大 8MB' },
+      { protocol, status: 400, code: 'request_incomplete', message: '请求体未完整接收，请检查连接后重试' },
+      { protocol, status: 400, code: 'request_read_error', message: '读取请求体失败，请检查连接后重试' },
+      { protocol, status: 408, code: 'request_timeout', message: '读取请求体超时，请检查连接后重试' },
+    ]),
+  )(
+    '$protocol retries codexgo $code with the same request body',
+    async ({ protocol, status, code, message }) => {
       const wire = await server((response, index) => {
         if (index === 0) {
-          response.writeHead(400, { 'content-type': 'application/json' });
+          response.writeHead(status, { 'content-type': 'application/json' });
           response.end(
             JSON.stringify({
-              error: { code: 'invalid_json', message: '请求体必须是有效 JSON，最大 8MB', type: 'codexgo_error' },
+              error: { code, message, type: 'codexgo_error' },
             }),
           );
         } else if (protocol === 'openai_responses') responses(response, false);

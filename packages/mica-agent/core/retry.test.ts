@@ -79,6 +79,18 @@ describe('isRetryableError', () => {
     expect(isRetryableError({ name: 'AbortError', status: 400, code: 'invalid_json' })).toBe(false);
   });
 
+  it.each([
+    [400, 'request_incomplete'],
+    [400, 'request_read_error'],
+    [408, 'request_timeout'],
+  ] as const)('retries codexgo HTTP %s body read failure %s', (status, code) => {
+    expect(isRetryableError({ status, code })).toBe(true);
+    expect(isRetryableError({ status, error: { code } })).toBe(true);
+    expect(isRetryableError({ status, message: `${status} {"error":{"code":"${code}"}}` })).toBe(true);
+    expect(isRetryableError({ status: 413, code })).toBe(false);
+    expect(isRetryableError({ status, code, name: 'AbortError' })).toBe(false);
+  });
+
   it('stops retrying persistent codexgo parse failures at the retry limit', async () => {
     const error = Object.assign(new Error('400 请求体必须是有效 JSON，最大 8MB'), { status: 400 });
     let calls = 0;
