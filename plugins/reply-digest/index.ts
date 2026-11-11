@@ -1,5 +1,5 @@
 import type { PluginContext } from '@packages/mica-plugin/index.js';
-import type { RuntimeTurnAfterHookEvent } from '@packages/mica-runtime/index.js';
+import type { RuntimeTurnAfterHookEvent, RuntimeTurnBeforeHookEvent } from '@packages/mica-runtime/index.js';
 import {
   cleanSummary,
   DEFAULT_CHAR_THRESHOLD,
@@ -20,35 +20,47 @@ const DEFAULT_PROMPT = [
 
 export { DEFAULT_PROMPT };
 
-type DigestState = { inputId: string; controller: AbortController };
+type DigestState = { inputId: string; cancel: (message: string) => void };
 
 export default function setup(ctx: PluginContext): void {
   const states = new Map<string, DigestState>();
-  // 同一条会话里已经处理过的回合：同一轮即使被重复派发也只摘要一次。
-  const handled = new Map<string, string>();
+  // 保留近期已处理回合，重复派发旧事件也不会再请求模型或插入卡片。
+  const handled = new Set<string>();
+  const inputKey = (sessionId: string, inputId: string) => JSON.stringify([sessionId, inputId]);
   const rememberHandled = (sessionId: string, inputId: string) => {
-    handled.delete(sessionId);
-    handled.set(sessionId, inputId);
-    if (handled.size > 50) {
+    handled.add(inputKey(sessionId, inputId));
+    if (handled.size > 200) {
       const oldest = handled.keys().next();
       if (!oldest.done) handled.delete(oldest.value);
     }
   };
   let disposed = false;
 
-  const dispose = () => {
+  ctx.onDispose(() => {
     disposed = true;
-    for (const state of states.values()) state.controller.abort();
+    for (const state of states.values()) state.cancel('摘要生成已取消：插件已停用，原回复不受影响。');
     states.clear();
     handled.clear();
-  };
-  ctx.onDispose(dispose);
+  });
 
+  const beforeSubscription = ctx.hooks.on<RuntimeTurnBeforeHookEvent>(
+    'turn:before',
+    (event) => {
+      if (disposed || !event.owner) return;
+      const info = ctx.session?.describe(event.owner);
+      const previous = info && states.get(info.id);
+      if (previous && previous.inputId !== event.input.id) {
+        previous.cancel('摘要生成已取消：已开始新一轮对话，原回复不受影响。');
+      }
+    },
+    { pluginId: ctx.pluginId },
+  );
+  ctx.onDispose(() => beforeSubscription.dispose());
 
   const subscription = ctx.hooks.on<RuntimeTurnAfterHookEvent>(
     'turn:after',
     (event) => {
-      if (disposed || event.outcome !== 'completed' || ctx.agent?.mode === 'one-shot') return;
+      if (disposed || ctx.agent?.mode === 'one-shot') return;
       const session = ctx.session;
       const llm = ctx.llm;
       const ui = ctx.ui;
@@ -56,9 +68,16 @@ export default function setup(ctx: PluginContext): void {
 
       const info = session.describe(event.owner);
       if (!info) return;
-      if (handled.get(info.id) === event.input.id) return;
-      const previous = states.get(info.id);
-      previous?.controller.abort();
+      const alreadyHandled = handled.has(inputKey(info.id, event.input.id));
+      if (event.outcome !== 'completed') {
+        const previous = states.get(info.id);
+        if (!alreadyHandled || previous?.inputId === event.input.id) {
+          previous?.cancel('摘要生成已取消：对话已中止或失败，原回复不受影响。');
+        }
+        return;
+      }
+      if (alreadyHandled) return;
+      states.get(info.id)?.cancel('摘要生成已取消：对话已进入下一轮，原回复不受影响。');
 
       const settings = ctx.settings.get();
       const limits = {
@@ -67,15 +86,10 @@ export default function setup(ctx: PluginContext): void {
         inputLimit: parseSetting(settings.inputLimit, DEFAULT_INPUT_LIMIT, 1_000, 100_000),
         summaryLimit: parseSetting(settings.summaryLimit, DEFAULT_SUMMARY_LIMIT, 100, 2_000),
       };
-      const messages = session.messages(event.owner);
-      const reply = lastAssistantText(messages);
-      if (!shouldDigest(reply, limits)) {
-        states.delete(info.id);
-        rememberHandled(info.id, event.input.id);
-        return;
-      }
+      const reply = lastAssistantText(session.messages(event.owner));
+      rememberHandled(info.id, event.input.id);
+      if (!shouldDigest(reply, limits)) return;
       if (!llm.configured(event.owner)) {
-        rememberHandled(info.id, event.input.id);
         ctx.health.report({
           level: 'warn',
           message: '检测到长回复，但摘要模型未配置，未生成摘要',
@@ -84,12 +98,38 @@ export default function setup(ctx: PluginContext): void {
         return;
       }
 
-      rememberHandled(info.id, event.input.id);
       const controller = new AbortController();
-      states.set(info.id, { inputId: event.input.id, controller });
+      // 默认只替换同 command 的 running 项，按 input 隔离以保留每轮摘要。
+      const noticeOptions = {
+        owner: event.owner,
+        command: `${ctx.pluginId}:${event.input.id}`,
+        variant: 'digest' as const,
+      };
+      const finish = (content: string, status: 'info' | 'warning') => {
+        if (states.get(info.id) !== state) return;
+        states.delete(info.id);
+        // owner 可能已被 resume 到另一条会话，迟到结果不能写到新会话。
+        if (session.describe(event.owner)?.id !== info.id) return;
+        ui.notice(content, { ...noticeOptions, status });
+      };
+      const state: DigestState = {
+        inputId: event.input.id,
+        cancel: (message) => {
+          finish(message, 'warning');
+          controller.abort();
+        },
+      };
+      states.set(info.id, state);
+      ui.notice('正在整理这次长回复的重点，请稍候…', { ...noticeOptions, status: 'running' });
       void summarize(ctx, event, digestInput(reply, limits.inputLimit), limits.summaryLimit, controller.signal)
+        .then((summary) => {
+          if (controller.signal.aborted || disposed || states.get(info.id) !== state) return;
+          finish(summary, 'info');
+          ctx.health.report({ level: 'ok', message: '长回复摘要已生成' });
+        })
         .catch((error) => {
-          if (controller.signal.aborted || disposed) return;
+          if (controller.signal.aborted || disposed || states.get(info.id) !== state) return;
+          finish('摘要生成失败，未能生成摘要，原回复不受影响。请稍后重试或检查摘要模型配置。', 'warning');
           ctx.logger.warn('reply-digest:failed', {
             sessionId: info.id,
             error: error instanceof Error ? error.message : String(error),
@@ -101,7 +141,7 @@ export default function setup(ctx: PluginContext): void {
           });
         })
         .finally(() => {
-          if (states.get(info.id)?.controller === controller) states.delete(info.id);
+          if (states.get(info.id) === state) states.delete(info.id);
         });
     },
     { pluginId: ctx.pluginId },
@@ -115,7 +155,7 @@ async function summarize(
   reply: string,
   summaryLimit: number,
   signal: AbortSignal,
-): Promise<void> {
+): Promise<string> {
   const result = await ctx.llm!.request({
     purpose: '长回复摘要',
     system: String(ctx.settings.get().prompt || DEFAULT_PROMPT),
@@ -126,10 +166,5 @@ async function summarize(
   });
   const summary = cleanSummary(result.text, summaryLimit);
   if (!summary || signal.aborted) throw new Error('摘要模型返回了空内容');
-  ctx.ui!.notice(summary, {
-    owner: event.owner,
-    status: 'info',
-    variant: 'digest',
-  });
-  ctx.health.report({ level: 'ok', message: '长回复摘要已生成' });
+  return summary;
 }

@@ -11,7 +11,7 @@ import type { AgentRuntime } from '../agent/AgentRuntime.js';
 import type { SubagentTaskManager } from '../agents/SubagentTaskManager.js';
 import type { SessionController } from '../session/SessionController.js';
 import { toCompactedConversationDisplay } from '../plugins/commands/compactConversation.js';
-import type { TurnNoticeLog } from '../runtime/turnNotices.js';
+import type { TurnNotice, TurnNoticeLog } from '../runtime/turnNotices.js';
 
 export type HeadlessRuntimeServicesOptions = {
   runtimeOverride?: AgentRuntimeConfigOverride;
@@ -20,6 +20,8 @@ export type HeadlessRuntimeServicesOptions = {
   subagentTasks: SubagentTaskManager;
   /** Session notices (retry hints, failures, command results) kept out of the provider history. */
   notices: { ensure(): TurnNoticeLog };
+  /** Called only after a notice has been saved; resident hosts can push it to clients. */
+  onNotice?: (notice: TurnNotice, options: { replace?: boolean; noticeIndex: number }) => void;
   isBusy: () => boolean;
   submit: (
     text: string,
@@ -39,6 +41,13 @@ export function createHeadlessRuntimeServices(options: HeadlessRuntimeServicesOp
     });
   };
 
+  const showNotice = (notice: TurnNotice, noticeOptions: { replace?: boolean } = {}): void => {
+    noticeLog().upsert(notice, noticeOptions);
+    save({ allowEmpty: true });
+    const noticeIndex = noticeLog().compose().filter((message) => message.role === 'notice').indexOf(notice);
+    options.onNotice?.(notice, { ...noticeOptions, noticeIndex });
+  };
+
   return {
     async clearUI(_agent, targetSessionController) {
       const defaults = await micaConfig.prepareSessionModelDefaults();
@@ -56,7 +65,7 @@ export function createHeadlessRuntimeServices(options: HeadlessRuntimeServicesOp
       // No message bar in headless mode; notices are surfaced as conversation messages.
     },
     showNotice(text, _ownerSessionId, noticeOptions = {}) {
-      noticeLog().upsert(
+      showNotice(
         {
           role: 'notice',
           content: text,
@@ -66,17 +75,15 @@ export function createHeadlessRuntimeServices(options: HeadlessRuntimeServicesOp
         },
         { replace: noticeOptions.replace },
       );
-      save({ allowEmpty: true });
     },
     showCommitNotice(text) {
-      noticeLog().upsert({
+      showNotice({
         role: 'notice',
         content: text,
         variant: 'commit',
         command: '/commit',
         status: 'success',
       });
-      save({ allowEmpty: true });
     },
     setPluginStatus() {},
     clearPluginStatus() {},

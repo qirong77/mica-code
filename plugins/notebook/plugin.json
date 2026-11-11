@@ -1,7 +1,7 @@
 {
   "id": "notebook",
   "name": "Notebook",
-  "icon": "notebook-pen",
+  "icon": "book-spine",
   "version": "1.1.0",
   "description": "本地笔记本：左侧目录树，右侧完整富文本编辑器，支持表格、图片、代码与公式，自动保存到本机。",
   "author": "Mica Code",

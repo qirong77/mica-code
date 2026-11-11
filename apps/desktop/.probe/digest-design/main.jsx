@@ -78,6 +78,8 @@ function syncUrl({ variant, theme, compare }) {
 }
 
 const initialState = readInitialState()
+// ?status=running / warning：复用正式组件预览请求中和失败收尾，不调用模型。
+const digestStatus = new URLSearchParams(window.location.search).get('status') || 'success'
 applyThemePreference(initialState.theme, { cache: false })
 
 function Markdown({ text, className = 'digest-design-markdown' }) {
@@ -116,8 +118,8 @@ function DigestCandidate({ variant }) {
 
   if (variant === 'c') {
     return (
-      <DigestNotice>
-        <Markdown text={SUMMARY} className="" />
+      <DigestNotice status={digestStatus}>
+        <Markdown text={digestStatus === 'warning' ? '摘要未生成，原回复不受影响。' : SUMMARY} className="" />
       </DigestNotice>
     )
   }

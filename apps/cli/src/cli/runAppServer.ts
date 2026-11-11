@@ -608,6 +608,14 @@ export async function runAppServer(options: AppServerOptions): Promise<void> {
       sessionController,
       subagentTasks,
       asks: desktopHost ? pluginAsks : undefined,
+      onNotice: (notice, noticeOptions) => {
+        writeNotification(MICA_SESSION_NOTIFICATIONS.noticeUpdated, {
+          threadId: sessionController!.getCurrentSessionId(),
+          notice,
+          replace: noticeOptions.replace === true,
+          noticeIndex: noticeOptions.noticeIndex,
+        });
+      },
       // 桌面端的运行时 spawn 这个进程时会带上标记（见 apps/desktop/src/host/chat.js）。
       // 插件据此决定自己要不要提供只有桌面页面能兑现的能力。
       desktopHost,

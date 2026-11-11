@@ -39,6 +39,62 @@ function record(sequence, type, text, sessionID = 's1') {
 }
 
 describe('chat event buffering', () => {
+  it('projects saved notice progress updates without replacing history or losing replay data', () => {
+    const events = []
+    const emitted = []
+    const timers = timerHarness()
+    const pacer = createChatEventPacer((value) => emitted.push(value), timers)
+    for (const [index, status] of ['running', 'success'].entries()) {
+      const event = codexNotificationToEvent({
+        method: 'mica/notice/updated',
+        emittedAtMs: 123 + index,
+        params: {
+          threadId: 's1',
+          notice: { role: 'notice', content: status, variant: 'info', command: '/progress', status },
+          replace: true,
+          noticeIndex: 3
+        }
+      })
+      expect(event).toEqual({
+        type: 'notice', timestamp: 123 + index, sessionID: 's1', text: status,
+        variant: 'info', command: '/progress', status, replace: true, noticeIndex: 3
+      })
+      const value = { sequence: index + 1, event }
+      appendBufferedEvent(events, value)
+      pacer.push(value)
+    }
+    expect(events).toHaveLength(2)
+    expect(emitted).toEqual(events)
+  })
+
+  it('defaults notice replacement to false while preserving the existing warning projection', () => {
+    const notice = codexNotificationToEvent({
+      method: 'mica/notice/updated',
+      params: { notice: { content: 'Saved' } }
+    })
+    expect(notice).toMatchObject({ type: 'notice', text: 'Saved', replace: false })
+    expect(notice).not.toHaveProperty('noticeIndex')
+    expect(codexNotificationToEvent({
+      method: 'warning', emittedAtMs: 123,
+      params: { threadId: 's1', warning: { message: 'Non-fatal' } }
+    })).toEqual({ type: 'notice', timestamp: 123, sessionID: 's1', variant: 'warn', text: 'Non-fatal' })
+  })
+
+  it('projects only safe non-negative integer notice slots', () => {
+    for (const noticeIndex of [0, 1, Number.MAX_SAFE_INTEGER]) {
+      expect(codexNotificationToEvent({
+        method: 'mica/notice/updated',
+        params: { notice: { content: 'Saved' }, noticeIndex }
+      })).toMatchObject({ noticeIndex })
+    }
+    for (const noticeIndex of [undefined, null, -1, 0.5, '0', NaN, Infinity, Number.MAX_SAFE_INTEGER + 1]) {
+      expect(codexNotificationToEvent({
+        method: 'mica/notice/updated',
+        params: { notice: { content: 'Saved' }, noticeIndex }
+      })).not.toHaveProperty('noticeIndex')
+    }
+  })
+
   it('keeps attempt boundaries when buffering and pacing text', () => {
     const events = []
     const emitted = []

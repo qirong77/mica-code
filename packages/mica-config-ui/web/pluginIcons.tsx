@@ -1,5 +1,6 @@
 import type { LucideIcon } from 'lucide-react';
 import {
+  createLucideIcon,
   Archive,
   Blocks,
   Bot,
@@ -39,6 +40,11 @@ import {
   Zap,
 } from 'lucide-react';
 
+const BookSpine = createLucideIcon('BookSpine', [
+  ['rect', { x: '5', y: '3', width: '14', height: '18', rx: '2', key: 'cover' }],
+  ['path', { d: 'M9 3v18', key: 'spine' }],
+]);
+
 /**
  * 插件图标表：`plugin.json` 的 `icon` 写这里的键（kebab-case），界面据此取图标组件。
  *
@@ -49,6 +55,7 @@ import {
 export const PLUGIN_ICONS = {
   archive: Archive,
   blocks: Blocks,
+  'book-spine': BookSpine,
   bot: Bot,
   brain: Brain,
   cable: Cable,

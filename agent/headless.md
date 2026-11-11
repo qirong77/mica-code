@@ -18,6 +18,7 @@
 - 客户端模型解析前重读磁盘 providers（不重置会话 model/effort）；删除的服务商及非空会话协议变更报错，不能把旧选择静默发往其他服务商。turn 即使没有模型参数也刷新并验证当前服务商。
 - `--parent <sessionId>` 标记这条会话由谁派生（子会话、fork 分支），写进会话文件的 `parentSessionId`。只对新建会话生效：resume 时以文件里记的那条为准。`thread/start` 的 `parentSessionId` 同样只被尚未落盘的会话采纳，且已有值时幂等——重复 startNewSession 会换掉会话 id，客户端手里那份 thread 就对不上落盘文件名了。
 - `mica/*` 扩展通知直接送 renderer，不进 turn 重放缓冲：queue、tasks、BTW、history、capabilities、turn retrying、host maintenance。
+- `mica/notice/updated` 在 `ctx.ui.notice` 的展示记录保存后即时推送 `{ threadId, notice: { role: 'notice', content, variant?, command?, status? }, replace: boolean, noticeIndex: number }`；`HeadlessPluginHost.onNotice` 是内部可选回调，exec 不传，第二参数为 `{ replace?, noticeIndex }`。`noticeIndex` 是保存后 `noticeLog().compose()` 中所有 `role: 'notice'` 行的 0-based 派生 slot，不是持久字段，也不改变持久结构或需要迁移。桌面端将其投影为普通 `notice` 事件（`text/variant/command/status/replace`，仅安全非负整数时带 `noticeIndex`），直接推送 renderer、不进 turn 缓冲；历史行按相同口径派生 slot，upsert 优先按 slot 幂等更新，既避免恢复期间 pending 终态与磁盘行重复，又保留同一 command 的多次历史。更新不重读会话、不轮询，也不借 `historyReplaced` 结束正文流。持久形态与插件 API 不变。
 - `mica/capabilities/get|set` 读写会话能力；运行中 set 返回 `ok:false`。
 - `mica/input/activity` 是「用户在输入框敲了字」（不是提交）：宿主只把它翻成运行期事件 `input:activity`，由插件决定要不要动作。桌面端在 `ChatView` 里节流 2s 发出，没有常驻进程时 host 直接吞掉（绝不为几个按键 spawn 一个）；TUI 与 `mica exec` 不发。自动压缩不订阅它——轮次之外不压，只当「人在不在」的通用信号。
 - `mica/input/focus` 是「焦点回到了输入框」（还没敲字）：同样只翻成运行期事件 `input:focus`。桌面端在 `ChatComposer` 获得焦点时发，并且只在会话没在跑（本页或其他进程都没在跑）时发。与 `input/activity` 一样，当前没有插件消费它。

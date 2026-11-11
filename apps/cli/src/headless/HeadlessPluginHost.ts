@@ -46,6 +46,7 @@ import {
 } from '@packages/mica-builtin-commands/index.js';
 import { officialPlugins } from '@packages/mica-official-plugins/index.js';
 import { createHeadlessRuntimeServices } from './headlessRuntimeServices.js';
+import type { HeadlessRuntimeServicesOptions } from './headlessRuntimeServices.js';
 import { TurnNoticeLog } from '../runtime/turnNotices.js';
 import type { HeadlessTurnStartResult } from '../runtime/HeadlessTurnExecutor.js';
 import type { PluginAskHost } from './PluginAskBroker.js';
@@ -102,6 +103,8 @@ export type HeadlessPluginHostOptions = {
    * `requires: ['ask']` 的插件在这些宿主里整插件跳过。
    */
   asks?: PluginAskHost;
+  /** Push saved display-only notices with their derived notice slot, without replacing provider history. */
+  onNotice?: HeadlessRuntimeServicesOptions['onNotice'];
   submit: (
     text: string,
     options?: { queueMode?: 'after_iteration' | 'after_turn'; displayText?: string },
@@ -207,6 +210,7 @@ export function createHeadlessPluginHost(options: HeadlessPluginHostOptions): He
     sessionController,
     subagentTasks,
     notices,
+    onNotice: options.onNotice,
     isBusy: options.isBusy,
     submit: options.submit,
   });

@@ -1479,6 +1479,19 @@ function handleHostNotification(id, run, notification) {
       })
     }
     return
+  } else if (method === 'mica/notice/updated') {
+    // notice 已持久化；只推当前更新，不进 turn 重放，否则恢复时会与磁盘记录重复。
+    // 也不能重载整份历史：后台结果可能在下一轮正文流式输出期间到达。
+    run.eventPacer.flush()
+    if (event && run.sender && !run.sender.isDestroyed()) {
+      run.sender.send('chat:event', {
+        id,
+        sessionId: runSessionId(run),
+        sequence: ++run.sequence,
+        event
+      })
+    }
+    return
   } else if (method === 'mica/sessionHistory/replaced') {
     // A session_* tool replaced the persisted history mid-host (emitted after
     // the host applied the change and saved the session file). Reload the

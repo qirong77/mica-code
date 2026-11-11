@@ -103,6 +103,7 @@ const SessionDetailModal = lazyView(
 import { applyTurnTimingEvent, createTurnTimingState, summarizeTurnTiming } from './turn-timing'
 import { CodeView } from './CodeView'
 import { DigestNotice } from './DigestNotice'
+import { restoreChatNotices, upsertChatNotice } from './chat-notices'
 import { newlyAnsweredBtwEntries } from './btw-thread'
 import { canCollapseMessage, measureChatCollapse } from './chat-collapse'
 import { useChatTooltip } from './chat-hover-tooltip'
@@ -2856,7 +2857,7 @@ function MessageRowView({
   if (message.kind === 'notice') {
     if (message.variant === 'digest') {
       return (
-        <DigestNotice>
+        <DigestNotice status={message.status}>
           <Markdown text={message.text || ''} onOpenFile={onOpenFile} />
         </DigestNotice>
       )
@@ -3076,12 +3077,14 @@ export function mergeReplayEvents(buffered = [], pending = []) {
   for (const record of pending) {
     const event = record?.event || record
     const sequence = Number(record?.sequence) || 0
-    if (sequence ? sequence > lastSequence : !seen.has(eventKey(event))) events.push(event)
+    if ((event.type === 'notice' && Number.isInteger(event.noticeIndex)) ||
+        (sequence ? sequence > lastSequence : !seen.has(eventKey(event)))) events.push(event)
   }
   return events
 }
 
 export function historyMessages(rows, key) {
+  let noticeIndex = 0
   // 压缩留下的 boundary（内部 JSON）与 checkpoint（摘要长文）先合成一块，压缩折叠
   // 出来的那串工具调用说明再并成一行「已清理 N 轮工具调用」。
   return collapseCompactToolNotes(mergeCompactCheckpoints(Array.isArray(rows) ? rows : []).map((row, index) => ({
@@ -3104,6 +3107,7 @@ export function historyMessages(rows, key) {
     variant: row.variant ?? (row.role === 'notice' ? 'info' : undefined),
     command: row.command ?? undefined,
     status: row.status ?? undefined,
+    ...(row.role === 'notice' ? { noticeIndex: noticeIndex++ } : {}),
     usage: row.usage ?? null,
     done: true
   })), key)
@@ -3923,20 +3927,11 @@ export function ChatView({
   // 复用同一条 notice（按 command 认领上一次的位置）：重试每次都刷新同一条，
   // 而不是往会话里堆 5 条。
   const upsertNotice = useCallback(
-    (text, variant = 'info', command = '') => {
+    (text, variant = 'info', command = '', status = '', replace = false, noticeIndex) => {
       if (!text) return null
-      updateMessages((previous) => {
-        const index = previous.findLastIndex(
-          (message) => message.kind === 'notice' && command && message.command === command
-        )
-        if (index < 0) {
-          return [
-            ...previous,
-            { id: uid('notice'), kind: 'notice', role: 'notice', text, variant, command }
-          ]
-        }
-        return previous.map((message, i) => (i === index ? { ...message, text, variant } : message))
-      })
+      updateMessages((previous) => upsertChatNotice(previous, {
+        id: uid('notice'), kind: 'notice', role: 'notice', text, variant, command, status, noticeIndex
+      }, { replace }))
     },
     [updateMessages]
   )
@@ -4914,9 +4909,12 @@ export function ChatView({
           break
         }
         case 'notice':
-          // Host 侧非致命降级（stale --dir、MCP 初始化失败、游离 rejection）：
-          // 只提示，不改变运行状态，turn 继续。
-          if (event.text) appendNotice(event.text, event.variant || 'info')
+          // 插件进度与非致命提示都不改变正文流或 turn 状态。
+          if (event.text) {
+            if (event.command || Number.isInteger(event.noticeIndex)) {
+              upsertNotice(event.text, event.variant || 'info', event.command, event.status || '', event.replace, event.noticeIndex)
+            } else appendNotice(event.text, event.variant || 'info', event.status || '')
+          }
           break
         case 'usage':
           // 实时用量（每次模型请求后到达）：只刷新状态栏数字，不改变 turn 状态。
@@ -5333,6 +5331,9 @@ export function ChatView({
       setStopping(false)
       setPhase('idle')
       finishedRef.current = true
+      // history 读取与实时通知可能交错；已保存行先恢复，再用期间到达的状态覆盖。
+      updateMessages((previous) => restoreChatNotices(previous, finalMessages,
+        pendingEventsRef.current.map((record) => record.event || record)))
       pendingEventsRef.current = []
       restoringRef.current = false
       if (pendingExitRef.current) {
@@ -5489,6 +5490,7 @@ export function ChatView({
           hasStart: replayHasStart
         }))
       }
+      updateMessages((previous) => restoreChatNotices(previous, restored, replayEvents))
       pendingEventsRef.current = []
       restoringRef.current = false
       if (pendingExitRef.current) {

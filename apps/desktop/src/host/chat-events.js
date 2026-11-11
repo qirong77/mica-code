@@ -345,6 +345,22 @@ export function codexNotificationToEvent(notification) {
         timestamp,
         sessionID
       }
+    case 'mica/notice/updated':
+      // A saved display-only row: update it in place without reloading history
+      // or interrupting any assistant text that is still streaming.
+      return {
+        type: 'notice',
+        timestamp,
+        sessionID,
+        text: params.notice?.content || '',
+        variant: params.notice?.variant,
+        command: params.notice?.command,
+        status: params.notice?.status,
+        replace: params.replace === true,
+        ...(Number.isSafeInteger(params.noticeIndex) && params.noticeIndex >= 0
+          ? { noticeIndex: params.noticeIndex }
+          : {})
+      }
     case 'warning':
       // Non-fatal host degradation (stale --dir, failed MCP init, stray
       // rejection). Deliberately NOT mapped onto the error path: the host

@@ -11,7 +11,7 @@
 
 `deepseek-harness` 监管独立的 DeepSeek Harness `dsh web` 进程；它不启动 Electron GUI，也不把 Harness 页面嵌入 Mica，地址和进程状态只通过插件设置展示。实现与生命周期边界见 [DeepSeek Harness](deepseek-harness/README.md)。
 
-[Long Reply Digest](reply-digest/README.md) 在成功回合结束后识别过长的 Agent 回复，调用摘要模型并以会话 notice 展示简短摘要；短回复不会额外调用模型。
+[Long Reply Digest](reply-digest/README.md) 在成功回合结束后识别过长的 Agent 回复，先展示运行中摘要卡，再调用模型并原位更新简短摘要；失败或取消会停止运行态，各轮摘要分别保留，短回复不会额外调用模型。
 
 [Harness Review](harness-review/README.md) 记录运行轨迹并聚合问题候选，工具错误与健康率共用分类并标出数据覆盖缺口；评估按历史追加，验证后的新证据提醒复核但不自动宣判回归。用户纠正独立持久化，仅由下一次同会话主运行消费。它不自动修改代码、提示词或记忆，也不把运行完成当成验收通过。
 

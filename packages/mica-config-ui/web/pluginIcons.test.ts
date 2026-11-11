@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
+import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
 import { officialPluginManifests } from '../../mica-official-plugins/manifests.js';
-import { DEFAULT_PLUGIN_ICON, PLUGIN_ICONS, resolvePluginIcon } from './pluginIcons.js';
+import { DEFAULT_PLUGIN_ICON, PLUGIN_ICONS, PluginIcon, resolvePluginIcon } from './pluginIcons.js';
 
 /**
  * 图标表的两个约束：官方插件声明的名字必须真的解析得到（清单写错一个字母，界面上只会
@@ -25,5 +27,16 @@ describe('plugin icons', () => {
 
   it('resolves a registered name to its own component', () => {
     expect(resolvePluginIcon('list-checks')).toBe(PLUGIN_ICONS['list-checks']);
+  });
+
+  it('uses the minimal book spine for Notebook without changing session notes', () => {
+    expect(officialPluginManifests.find((manifest) => manifest.id === 'notebook')?.icon).toBe('book-spine');
+    expect(officialPluginManifests.find((manifest) => manifest.id === 'session-notes')?.icon).toBe('notebook-pen');
+    const html = renderToStaticMarkup(createElement(PluginIcon, { name: 'book-spine', size: 24 }));
+    expect(html).toContain('width="24"');
+    expect(html).toContain('stroke="currentColor"');
+    expect(html).toContain('stroke-width="1.8"');
+    expect(html).toContain('<rect x="5" y="3" width="14" height="18" rx="2"');
+    expect(html).toContain('d="M9 3v18"');
   });
 });

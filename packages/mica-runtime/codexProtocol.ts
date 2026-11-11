@@ -137,14 +137,14 @@ export const MICA_TASK_NOTIFICATIONS = {
 } as const;
 
 /**
- * Mica extension notification: the host replaced the persisted
- * conversation history mid-host. The Codex protocol has no event for it, so
- * the desktop app would otherwise keep showing the stale transcript until the
- * session is reopened. Emitted once per applied history replacement; the
- * client reloads the session file.
+ * Mica extension notifications for persisted conversation display updates.
+ * History replacements reload the session; notice updates carry the saved
+ * display-only row directly so the client can upsert it without ending a stream.
  */
 export const MICA_SESSION_NOTIFICATIONS = {
   historyReplaced: 'mica/sessionHistory/replaced',
+  /** Payload: { threadId, notice: { role: 'notice', content, variant?, command?, status? }, replace: boolean, noticeIndex: number }. noticeIndex is the derived zero-based slot among composed notice rows, never persisted. */
+  noticeUpdated: 'mica/notice/updated',
 } as const;
 
 /**

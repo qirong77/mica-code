@@ -9,6 +9,7 @@
 - `RuntimeInput` 可携带 `displayText`，用于让 UI 展示更友好的输入摘要，同时保留完整 `text` 发送给 agent。
 - 定义 runtime event 与 event bus。
 - 定义 headless 的 Codex exec `ThreadEvent` JSONL（`codexExecEvents.ts`）与 app-server v2 JSONL（`codexProtocol.ts`）事件 schema 与编码辅助。
+- `MICA_SESSION_NOTIFICATIONS.noticeUpdated`（`mica/notice/updated`）实时推送已保存的会话 notice（`threadId` / `notice` / `noticeIndex` / `replace`）；`noticeIndex` 是当前持久化对话内 notice 的零基槽位索引，不写回存储。客户端据此幂等更新同一行，并按 `command` 原位收尾运行中记录，不替换正文历史，也不重放已落盘 notice。
 - 定义可用于 UI 同步或会话保存的 view snapshot。
 - 提供 `MessageQueueService` 管理运行中输入排队状态。
 - 定义插件可用的 owner-aware queue capability，以及 `input:received`、`turn:after` hook event 类型。

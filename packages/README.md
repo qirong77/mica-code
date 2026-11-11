@@ -26,7 +26,7 @@
 - `mica-tools`：内置工具、支持文本/图片的工具结果、工具 registry、MCP 工具接入；`MicaTool.canOverlap(input)` 与 `micaTools.isOverlappable(name, input)` 为 provider 提供按调用输入判断的重叠调度能力。
 - `mica-mcp`：MCP 配置读取、server 连接管理和工具注册；工具适配保留标准图片块、混合图文顺序及文本资源，二进制不转成截断的 JSON/base64 文本。
 - `mica-ui`：Ink 终端 UI 组件和 UI 状态。
-- `mica-runtime`：运行时协议、事件、状态、输入、消息队列，以及 Codex 两套协议（`codexExecEvents.ts` 的 exec `ThreadEvent`、`codexProtocol.ts` 的 app-server v2 JSONL）。
+- `mica-runtime`：运行时协议、事件、状态、输入、消息队列，以及 Codex 两套协议（`codexExecEvents.ts` 的 exec `ThreadEvent`、`codexProtocol.ts` 的 app-server v2 JSONL，含 `mica/notice/updated` 会话 notice 实时更新）。
 - `@anthropic/ink`：仓库内 vendored 的 Ink 分支，`mica-ui` 各组件唯一的 Ink 来源。
 - `mica-session`：会话快照的本地保存、读取和列表。
 - `mica-config`：本地配置读写；provider 模型列表由用户手填，`defaultModel` 配置新会话的 provider/model/effort，`micaConfig.resetSessionModelDefaults()` 重读默认值。

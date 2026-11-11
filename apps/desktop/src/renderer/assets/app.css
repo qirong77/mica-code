@@ -1546,6 +1546,15 @@ html[data-appearance='light'] .chat-modal-arco-wrap {
   white-space: nowrap;
 }
 
+.chat-digest-meta.is-running {
+  color: var(--color-accent);
+}
+
+.chat-digest-pending {
+  margin: 0;
+  color: var(--color-fg-dim);
+}
+
 .chat-digest-notice .collapsible-body {
   padding: 8px 13px;
 }
@@ -7489,6 +7498,12 @@ html body #root {
    淡入 + 抬 4px 比"凭空多出一块"容易跟上。 */
 .chat-digest-notice {
   animation: motion-rise-in var(--motion-base) var(--ease-soft) backwards;
+}
+
+/* 摘要生成中复用轻量呼吸，只改变透明度；折叠后标题仍有运行反馈。 */
+.chat-digest-meta.is-running,
+.chat-digest-pending {
+  animation: chat-dot-breathe 1.6s ease-in-out infinite;
 }
 
 /* 按压反馈。只给非整行的 arco 按钮加缩放：整行按钮（`mica-arco-row`）缩一下会让

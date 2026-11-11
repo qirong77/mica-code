@@ -55,6 +55,9 @@ npx vite --config .probe/notebook-workbench/vite.config.mjs # http://127.0.0.1:5
 `digest.ts`（`shouldDigest` / `digestInput` / `cleanSummary`），只有卡片里的摘要正文是
 一次固定的模型样例输出——页面不联网，所以它不随文本变化。
 
+`digest-design/` 默认展示摘要结果；加 `?status=running` 预览正式组件的运行中文案与呼吸动效，
+`?status=warning` 预览未生成时的收尾，均不发模型请求。
+
 ## 约定
 
 - 探针只加假数据（`api`、`items`、`PLUGINS` 这类），不改真实组件去迁就探针；组件在探针里显示不对，就是真实界面有问题。
