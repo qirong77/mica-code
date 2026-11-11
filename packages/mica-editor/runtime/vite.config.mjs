@@ -24,6 +24,11 @@ export default defineConfig({
       return readFileSync(file, 'utf8').replace(/^@import[^;]*;\s*$/gm, '')
     },
     transform(code, id) {
+      if (id.endsWith('/mica-config-ui/web/arco-settings.css')) {
+        // The isolated runtime already loads the pinned Arco stylesheet from
+        // its import map page; shared controls keep only the host adaptation.
+        return code.replace(/^@import[^;]*;\s*$/gm, '')
+      }
       if (id.endsWith('/workspace/notebook.css')) {
         const file = fileURLToPath(new URL('../../../packages/mica-config-ui/web/arco-settings.css', import.meta.url))
         this.addWatchFile(file)
@@ -31,7 +36,12 @@ export default defineConfig({
       }
       if (!/\.[jt]sx?$/.test(id)) return null
       // 外部 CSS 由 HTML 固定版本链接加载；不让 Vite 将字体和第三方控件混进插件产物。
-      return code.replace(/^import\s*['"]([^'"]+\.css)['"];?\s*$/gm, (line, specifier) => bare(specifier) && !specifier.startsWith('virtual:') ? '' : line)
+      return code
+        .replace(/^import\s*['"]([^'"]+\.css)['"];?\s*$/gm, (line, specifier) => bare(specifier) && !specifier.startsWith('virtual:') ? '' : line)
+        // Shared controls use deep imports in the desktop bundle. Here they
+        // must use the same CDN module as the existing editor controls.
+        .replace(/import\s+(\w+)\s+from\s+['"]@arco-design\/web-react\/es\/(\w+)['"]/g,
+          (_line, local, component) => `import {${component} as ${local}} from '@arco-design/web-react'`)
     },
     transformIndexHtml: {
       order: 'pre',

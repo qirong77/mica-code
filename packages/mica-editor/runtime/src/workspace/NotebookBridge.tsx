@@ -4,11 +4,12 @@ import {Component, createContext, type ReactNode, useContext, useEffect, useRef,
 
 import NotebookOutline, {type NotebookNavigation, type NotebookOutlineSnapshot} from './NotebookOutline';
 import {applyNotebookBarInsets, applyNotebookTheme} from './theme';
+import {isNotebookAction, NOTEBOOK_ACTION_COMMAND, type NotebookAction} from './notebookActions';
 
 export interface NotebookDocument {
   version: 1;
   editorState: string | null;
-  // Preserve existing comments as opaque data when saving body edits.
+  // Comment threads and unrecognized historical rows travel with the document.
   comments: unknown[];
 }
 
@@ -28,14 +29,48 @@ export class NotebookSession {
   private active = true;
   private loaded = false;
   private frozen = false;
+  private presenting = false;
   private frozenBeforeEditable: boolean | null = null;
   private navigateOutline: ((navigation: NotebookNavigation) => void) | null = null;
+  private comments: unknown[];
+  private commentListeners = new Set<() => void>();
 
   constructor(
     readonly noteId: string,
     readonly document: NotebookDocument,
     readonly requestId?: string,
-  ) { this.mountKey = `${noteId}:${++mountSequence}`; }
+  ) {
+    this.mountKey = `${noteId}:${++mountSequence}`;
+    this.comments = structuredClone(document.comments);
+  }
+
+  getComments(): readonly unknown[] {
+    return structuredClone(this.comments);
+  }
+
+  // React's external-store contract needs the same reference until a write.
+  getCommentSnapshot(): readonly unknown[] {
+    return this.comments;
+  }
+
+  setComments(next: unknown[]): boolean {
+    if (!this.active || this.frozen || !this.editor?.isEditable()) return false;
+    this.comments = structuredClone(next);
+    for (const listener of this.commentListeners) listener();
+    this.dirty();
+    return true;
+  }
+
+  subscribeComments(listener: () => void): () => void {
+    this.commentListeners.add(listener);
+    return () => { this.commentListeners.delete(listener); };
+  }
+
+  performAction(action: NotebookAction): void {
+    if (this.active && !this.frozen && this.editor) {
+      this.editor.dispatchCommand(NOTEBOOK_ACTION_COMMAND, action);
+    }
+  }
 
   private restoreEditor(editor: LexicalEditor): void {
     const editable = this.frozenBeforeEditable;
@@ -46,8 +81,17 @@ export class NotebookSession {
 
   setFrozen(frozen: boolean): void {
     this.frozen = frozen;
+    this.syncEditability();
+  }
+
+  setPresenting(presenting: boolean): void {
+    this.presenting = presenting;
+    this.syncEditability();
+  }
+
+  private syncEditability(): void {
     if (!this.editor) return;
-    if (frozen) {
+    if (this.frozen || this.presenting) {
       // Repeated freezes must not replace the user's pre-existing read-only
       // state. Nested composers keep their own parent editability binding;
       // DOM/input guards also cover captions and native inputs.
@@ -67,14 +111,14 @@ export class NotebookSession {
     return {
       version: 1,
       editorState: JSON.stringify(this.editor.getEditorState().toJSON()),
-      comments: structuredClone(this.document.comments),
+      comments: structuredClone(this.comments),
     };
   }
 
   attach(editor: LexicalEditor): () => void {
     this.editor = editor;
     this.active = true;
-    if (this.frozen) this.setFrozen(true);
+    this.syncEditability();
     queueMicrotask(() => {
       if (this.active && !this.loaded) {
         this.loaded = true;
@@ -161,6 +205,11 @@ export function NotebookFrame({children}: {children: ReactNode}) {
         frozen.current = message.frozen;
         document.documentElement.dataset.frozen = String(message.frozen);
         current.current?.setFrozen(message.frozen);
+      } else if (message.type === 'action') {
+        const active = current.current;
+        if (active && message.noteId === active.noteId && message.loadId === active.requestId && isNotebookAction(message.action)) {
+          active.performAction(message.action);
+        }
       } else if (message.type === 'navigate') {
         const active = current.current;
         if (!active || message.noteId !== active.noteId || message.loadId !== active.requestId) return;

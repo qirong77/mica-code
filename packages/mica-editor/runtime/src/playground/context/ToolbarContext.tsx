@@ -21,7 +21,7 @@ import React, {
 
 export const MIN_ALLOWED_FONT_SIZE = 8;
 export const MAX_ALLOWED_FONT_SIZE = 72;
-export const DEFAULT_FONT_SIZE = 16;
+export const DEFAULT_FONT_SIZE = 15;
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 const rootTypeToRootName = {
@@ -55,7 +55,7 @@ const INITIAL_TOOLBAR_STATE = {
   codeTheme: '',
   elementFormat: 'left' as ElementFormatType,
   fontColor: '#000',
-  fontFamily: 'Arial',
+  fontFamily: '',
   // Current font size in px
   fontSize: `${DEFAULT_FONT_SIZE}px`,
   // Font size input value - for controlled input

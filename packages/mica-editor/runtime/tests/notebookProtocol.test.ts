@@ -102,6 +102,57 @@ describe('notebook persistence boundary', () => {
     expect(updates).toEqual(['document']);
   });
 
+  it('keeps comment store snapshots stable and isolates writes from caller mutations', () => {
+    const session = new NotebookSession('a', {version: 1, editorState: null, comments: []});
+    const editor = createHeadlessEditor({namespace: 'comment-store', onError(error) {throw error;}});
+    session.editor = editor;
+    const original = session.getCommentSnapshot();
+    const notified = vi.fn();
+    const unsubscribe = session.subscribeComments(notified);
+    expect(session.getCommentSnapshot()).toBe(original);
+    const next = [{content: '已保存'}];
+    expect(session.setComments(next)).toBe(true);
+    const updated = session.getCommentSnapshot();
+    expect(updated).not.toBe(original);
+    expect(session.getCommentSnapshot()).toBe(updated);
+    next[0].content = '外部修改';
+    expect(session.getComments()).toEqual([{content: '已保存'}]);
+    expect(notified).toHaveBeenCalledTimes(1);
+    unsubscribe();
+    session.setComments([]);
+    expect(notified).toHaveBeenCalledTimes(1);
+  });
+
+  it('restores presentation editability only after an overlapping freeze ends', () => {
+    const session = new NotebookSession('a', {version: 1, editorState: null, comments: []});
+    const editor = createHeadlessEditor({namespace: 'presentation-freeze', onError(error) {throw error;}});
+    session.editor = editor;
+    session.setPresenting(true);
+    expect(editor.isEditable()).toBe(false);
+    expect(session.setComments([{content: 'blocked'}])).toBe(false);
+    session.setFrozen(true);
+    session.setPresenting(false);
+    expect(editor.isEditable()).toBe(false);
+    session.setFrozen(false);
+    expect(editor.isEditable()).toBe(true);
+    session.setFrozen(true);
+    session.setPresenting(true);
+    session.setFrozen(false);
+    expect(editor.isEditable()).toBe(false);
+    session.setPresenting(false);
+    expect(editor.isEditable()).toBe(true);
+  });
+
+  it('preserves a document that was already read-only before presentation', () => {
+    const session = new NotebookSession('a', {version: 1, editorState: null, comments: []});
+    const editor = createHeadlessEditor({namespace: 'presentation-readonly', editable: false, onError(error) {throw error;}});
+    session.editor = editor;
+    session.setPresenting(true);
+    session.setPresenting(true);
+    session.setPresenting(false);
+    expect(editor.isEditable()).toBe(false);
+  });
+
   it('tags loaded, outline and content messages with the mounted load identity and stops after detach', async () => {
     const post = vi.mocked(window.parent.postMessage);
     post.mockClear();

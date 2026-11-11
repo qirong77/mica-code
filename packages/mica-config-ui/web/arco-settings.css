@@ -542,6 +542,29 @@ html[data-appearance='light'] :is(body.mica-arco-theme, .mica-config-ui) {
   margin: 0;
 }
 
+/* Optional single-choice layouts share the existing Radio.Group interaction.
+   The default segmented control keeps its current appearance. */
+:where(body.mica-arco-theme, .mica-config-ui) .config-segmented[data-variant='radio'] .arco-radio-group { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; }
+:where(body.mica-arco-theme, .mica-config-ui) .config-segmented[data-variant='radio'] .arco-radio { margin: 0; font-size: inherit; }
+:where(body.mica-arco-theme, .mica-config-ui) .config-segmented[data-variant='cards'] .arco-radio-group { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+:where(body.mica-arco-theme, .mica-config-ui) .config-segmented[data-variant='cards'] .arco-radio {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  margin: 0;
+  padding: 12px 8px;
+  border: 1px solid var(--mica-arco-line-soft);
+  border-radius: 6px;
+  color: var(--mica-arco-text-soft);
+  background: var(--mica-arco-bg);
+}
+:where(body.mica-arco-theme, .mica-config-ui) .config-segmented[data-variant='cards'] .arco-radio-mask-wrapper { display: none; }
+:where(body.mica-arco-theme, .mica-config-ui) .config-segmented[data-variant='cards'] .arco-radio-text { min-width: 0; padding: 0; color: inherit; }
+:where(body.mica-arco-theme, .mica-config-ui) .config-segmented[data-variant='cards'] .arco-radio-checked { border-color: var(--mica-arco-accent); color: var(--mica-arco-accent); }
+:where(body.mica-arco-theme, .mica-config-ui) .config-segmented[data-variant='cards'] .arco-radio:has(.arco-radio-input:focus-visible) { outline: 2px solid var(--mica-arco-accent); outline-offset: 2px; }
+:where(body.mica-arco-theme, .mica-config-ui) .config-segmented[data-variant='cards'] .arco-radio-disabled { color: var(--mica-arco-text-disabled); cursor: not-allowed; }
+
 .mica-config-ui .arco-settings {
   position: relative;
   display: grid;

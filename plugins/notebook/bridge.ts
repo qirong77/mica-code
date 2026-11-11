@@ -186,6 +186,9 @@ export function createEditorBridge(options: {
     navigate(noteId: string, target: { heading?: string; block?: 'top' | keyof NotebookOutline['blocks'] }) {
       if (active?.loaded && active.noteId === noteId) send('navigate', { noteId, loadId: active.loadId, ...target });
     },
+    action(noteId: string, action: 'comments' | 'style' | 'present') {
+      if (active?.loaded && active.noteId === noteId) send('action', { noteId, loadId: active.loadId, action });
+    },
     flush(): Promise<{ noteId: string; document: NotebookDocument }> {
       return request('flush');
     },

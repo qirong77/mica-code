@@ -7,24 +7,129 @@
  */
 
 import {calculateZoomLevel} from '@lexical/utils';
-import {type LexicalEditor, registerEventListeners} from 'lexical';
+import {type LexicalEditor} from 'lexical';
 import * as React from 'react';
-import {type JSX, useEffect, useRef} from 'react';
+import {type JSX, useEffect, useRef, useState} from 'react';
 
-function clamp(value: number, min: number, max: number) {
-  return Math.min(Math.max(value, min), max);
+import {imageContentWidth, type ImageSize, resizeImage} from './imageResize';
+
+const HANDLES = [
+  {direction: 'n', label: '调整图片上边尺寸'},
+  {direction: 'ne', label: '调整图片右上角尺寸'},
+  {direction: 'e', label: '调整图片右边尺寸'},
+  {direction: 'se', label: '调整图片右下角尺寸'},
+  {direction: 's', label: '调整图片下边尺寸'},
+  {direction: 'sw', label: '调整图片左下角尺寸'},
+  {direction: 'w', label: '调整图片左边尺寸'},
+  {direction: 'nw', label: '调整图片左上角尺寸'},
+];
+
+type StyleValue = {value: string; priority: string};
+type StyleLease = {original: StyleValue; values: StyleValue[]};
+
+// A document can contain several editors. Releasing one drag must not reset
+// another editor's cursor or selection suppression, even with two touch inputs.
+const styleLeases = new WeakMap<CSSStyleDeclaration, Map<string, StyleLease>>();
+
+function readStyle(style: CSSStyleDeclaration, property: string): StyleValue {
+  return {
+    priority: style.getPropertyPriority(property),
+    value: style.getPropertyValue(property),
+  };
 }
 
-const Direction = {
-  east: 1 << 0,
-  north: 1 << 3,
-  south: 1 << 1,
-  west: 1 << 2,
-};
+function restoreStyle(
+  style: CSSStyleDeclaration,
+  property: string,
+  previous: StyleValue,
+): void {
+  if (previous.value === '') {
+    style.removeProperty(property);
+  } else {
+    style.setProperty(property, previous.value, previous.priority);
+  }
+}
+
+function temporaryStyle(
+  style: CSSStyleDeclaration | undefined,
+  property: string,
+  value: string,
+): () => void {
+  if (!style) {
+    return () => {};
+  }
+  let properties = styleLeases.get(style);
+  if (!properties) {
+    properties = new Map();
+    styleLeases.set(style, properties);
+  }
+  let lease = properties.get(property);
+  if (!lease) {
+    lease = {original: readStyle(style, property), values: []};
+    properties.set(property, lease);
+  }
+  const entry = {priority: 'important', value};
+  lease.values.push(entry);
+  style.setProperty(property, entry.value, entry.priority);
+  return () => {
+    const index = lease.values.indexOf(entry);
+    if (index === -1) {
+      return;
+    }
+    const wasLast = index === lease.values.length - 1;
+    lease.values.splice(index, 1);
+    const current = readStyle(style, property);
+    if (
+      wasLast &&
+      current.value === entry.value &&
+      current.priority === entry.priority
+    ) {
+      restoreStyle(
+        style,
+        property,
+        lease.values[lease.values.length - 1] ?? lease.original,
+      );
+    }
+    if (lease.values.length === 0) {
+      properties.delete(property);
+      if (properties.size === 0) {
+        styleLeases.delete(style);
+      }
+    }
+  };
+}
+
+function imageZoom(image: HTMLElement): number {
+  const zoom = calculateZoomLevel(image, true);
+  return Number.isFinite(zoom) && zoom > 0 ? zoom : 1;
+}
+
+function displayedSize(image: HTMLElement, zoom: number): ImageSize {
+  const rect = image.getBoundingClientRect();
+  return {height: rect.height / zoom, width: rect.width / zoom};
+}
+
+function applySize(image: HTMLElement, size: ImageSize): void {
+  image.style.width = `${size.width}px`;
+  image.style.height = `${size.height}px`;
+}
+
+function cursorFor(direction: string): string {
+  if (direction.length === 1) {
+    return direction === 'e' || direction === 'w' ? 'ew-resize' : 'ns-resize';
+  }
+  return direction === 'nw' || direction === 'se' ? 'nwse-resize' : 'nesw-resize';
+}
+
+function stopHandleClick(event: React.MouseEvent<HTMLDivElement>): void {
+  event.preventDefault();
+  event.stopPropagation();
+}
 
 export default function ImageResizer({
   onResizeStart,
   onResizeEnd,
+  onResizeCancel,
   buttonRef,
   imageRef,
   maxWidth,
@@ -32,6 +137,8 @@ export default function ImageResizer({
   showCaption,
   setShowCaption,
   captionsEnabled,
+  lockAspectRatio = false,
+  showSideHandles = true,
 }: {
   editor: LexicalEditor;
   buttonRef: {current: null | HTMLButtonElement};
@@ -39,221 +146,224 @@ export default function ImageResizer({
   maxWidth?: number;
   onResizeEnd: (width: 'inherit' | number, height: 'inherit' | number) => void;
   onResizeStart: () => void;
+  onResizeCancel?: () => void;
   setShowCaption: (show: boolean) => void;
   showCaption: boolean;
   captionsEnabled: boolean;
+  lockAspectRatio?: boolean;
+  showSideHandles?: boolean;
 }): JSX.Element {
   const controlWrapperRef = useRef<HTMLDivElement>(null);
   const resizeCleanupRef = useRef<(() => void) | null>(null);
-  useEffect(() => () => resizeCleanupRef.current?.(), []);
-  const userSelect = useRef({
-    priority: '',
-    value: 'default',
-  });
-  const positioningRef = useRef<{
-    currentHeight: 'inherit' | number;
-    currentWidth: 'inherit' | number;
-    direction: number;
-    isResizing: boolean;
-    ratio: number;
-    startHeight: number;
-    startWidth: number;
-    startX: number;
-    startY: number;
-  }>({
-    currentHeight: 0,
-    currentWidth: 0,
-    direction: 0,
-    isResizing: false,
-    ratio: 0,
-    startHeight: 0,
-    startWidth: 0,
-    startX: 0,
-    startY: 0,
-  });
-  const editorRootElement = editor.getRootElement();
-  // Find max width, accounting for editor padding.
-  const maxWidthContainer = maxWidth
-    ? maxWidth
-    : editorRootElement !== null
-      ? editorRootElement.getBoundingClientRect().width - 20
-      : 100;
-  const maxHeightContainer =
-    editorRootElement !== null
-      ? editorRootElement.getBoundingClientRect().height - 20
-      : 100;
+  const [isEditable, setIsEditable] = useState(() => editor.isEditable());
+  useEffect(() => {
+    setIsEditable(editor.isEditable());
+    const unregister = editor.registerEditableListener(editable => {
+      setIsEditable(editable);
+      if (!editable) {
+        resizeCleanupRef.current?.();
+      }
+    });
+    return () => {
+      unregister();
+      resizeCleanupRef.current?.();
+    };
+  }, [editor]);
 
-  const minWidth = 100;
-  const minHeight = 100;
-
-  const setStartCursor = (direction: number) => {
-    const ew = direction === Direction.east || direction === Direction.west;
-    const ns = direction === Direction.north || direction === Direction.south;
-    const nwse =
-      (direction & Direction.north && direction & Direction.west) ||
-      (direction & Direction.south && direction & Direction.east);
-
-    const cursorDir = ew ? 'ew' : ns ? 'ns' : nwse ? 'nwse' : 'nesw';
-
-    if (editorRootElement !== null) {
-      editorRootElement.style.setProperty(
-        'cursor',
-        `${cursorDir}-resize`,
-        'important',
-      );
-    }
-    const body = imageRef.current?.ownerDocument?.body;
-    if (body != null) {
-      body.style.setProperty('cursor', `${cursorDir}-resize`, 'important');
-      userSelect.current.value = body.style.getPropertyValue(
-        '-webkit-user-select',
-      );
-      userSelect.current.priority = body.style.getPropertyPriority(
-        '-webkit-user-select',
-      );
-      body.style.setProperty('-webkit-user-select', `none`, 'important');
-    }
-  };
-
-  const setEndCursor = () => {
-    if (editorRootElement !== null) {
-      editorRootElement.style.setProperty('cursor', 'text');
-    }
-    const body = imageRef.current?.ownerDocument?.body;
-    if (body != null) {
-      body.style.setProperty('cursor', 'default');
-      body.style.setProperty(
-        '-webkit-user-select',
-        userSelect.current.value,
-        userSelect.current.priority,
-      );
-    }
+  const availableWidth = (image: HTMLElement) => {
+    const root = editor.getRootElement();
+    const rootZoom = root ? imageZoom(root) : imageZoom(image);
+    // Usually the two zooms are equal; this also covers a locally zoomed image.
+    const contentWidth =
+      (imageContentWidth(root, root ? undefined : maxWidth) * rootZoom) /
+      imageZoom(image);
+    return Math.min(
+      contentWidth,
+      maxWidth !== undefined && Number.isFinite(maxWidth) && maxWidth >= 0
+        ? maxWidth
+        : Infinity,
+    );
   };
 
   const handlePointerDown = (
     event: React.PointerEvent<HTMLDivElement>,
-    direction: number,
+    direction: string,
   ) => {
-    if (!editor.isEditable()) {
+    if (!editor.isEditable() || event.button !== 0 || !event.isPrimary) {
       return;
     }
-
     const image = imageRef.current;
     const controlWrapper = controlWrapperRef.current;
-
-    if (image !== null && controlWrapper !== null) {
-      event.preventDefault();
-      const {width, height} = image.getBoundingClientRect();
-      const zoom = calculateZoomLevel(image);
-      const positioning = positioningRef.current;
-      positioning.startWidth = width;
-      positioning.startHeight = height;
-      positioning.ratio = width / height;
-      positioning.currentWidth = width;
-      positioning.currentHeight = height;
-      positioning.startX = event.clientX / zoom;
-      positioning.startY = event.clientY / zoom;
-      positioning.isResizing = true;
-      positioning.direction = direction;
-
-      setStartCursor(direction);
-      onResizeStart();
-
-      controlWrapper.classList.add('image-control-wrapper--resizing');
-      image.style.height = `${height}px`;
-      image.style.width = `${width}px`;
-
-      const doc = image.ownerDocument;
-      resizeCleanupRef.current?.();
-      resizeCleanupRef.current = registerEventListeners(doc, {
-        pointermove: handlePointerMove,
-        pointerup: handlePointerUp,
-      });
+    if (image === null || controlWrapper === null || availableWidth(image) < 1) {
+      return;
     }
-  };
-  const handlePointerMove = (event: PointerEvent) => {
-    const image = imageRef.current;
-    const positioning = positioningRef.current;
+    event.preventDefault();
+    event.stopPropagation();
+    resizeCleanupRef.current?.();
 
-    const isHorizontal =
-      positioning.direction & (Direction.east | Direction.west);
-    const isVertical =
-      positioning.direction & (Direction.south | Direction.north);
+    const target = event.currentTarget;
+    const pointerId = event.pointerId;
+    const zoom = imageZoom(image);
+    const startSize = displayedSize(image, zoom);
+    const startX = event.clientX;
+    const startY = event.clientY;
+    const originalWidth = readStyle(image.style, 'width');
+    const originalHeight = readStyle(image.style, 'height');
+    const doc = image.ownerDocument;
+    const win = doc.defaultView;
+    const cursor = cursorFor(direction);
+    const restoreStyles = [
+      temporaryStyle(editor.getRootElement()?.style, 'cursor', cursor),
+      temporaryStyle(doc.body?.style, 'cursor', cursor),
+      temporaryStyle(doc.body?.style, 'user-select', 'none'),
+      temporaryStyle(doc.body?.style, '-webkit-user-select', 'none'),
+    ];
+    let active = true;
+    let currentSize = startSize;
 
-    if (image !== null && positioning.isResizing) {
-      const zoom = calculateZoomLevel(image);
-      // Corner cursor
-      if (isHorizontal && isVertical) {
-        let diff = Math.floor(positioning.startX - event.clientX / zoom);
-        diff = positioning.direction & Direction.east ? -diff : diff;
-
-        const width = clamp(
-          positioning.startWidth + diff,
-          minWidth,
-          maxWidthContainer,
-        );
-
-        const height = width / positioning.ratio;
-        image.style.width = `${width}px`;
-        image.style.height = `${height}px`;
-        positioning.currentHeight = height;
-        positioning.currentWidth = width;
-      } else if (isVertical) {
-        let diff = Math.floor(positioning.startY - event.clientY / zoom);
-        diff = positioning.direction & Direction.south ? -diff : diff;
-
-        const height = clamp(
-          positioning.startHeight + diff,
-          minHeight,
-          maxHeightContainer,
-        );
-
-        image.style.height = `${height}px`;
-        positioning.currentHeight = height;
-      } else {
-        let diff = Math.floor(positioning.startX - event.clientX / zoom);
-        diff = positioning.direction & Direction.east ? -diff : diff;
-
-        const width = clamp(
-          positioning.startWidth + diff,
-          minWidth,
-          maxWidthContainer,
-        );
-
-        image.style.width = `${width}px`;
-        positioning.currentWidth = width;
+    const finish = (commit: boolean) => {
+      if (!active) {
+        return;
       }
-    }
-  };
-  const handlePointerUp = () => {
-    const image = imageRef.current;
-    const positioning = positioningRef.current;
-    const controlWrapper = controlWrapperRef.current;
-    if (image !== null && controlWrapper !== null && positioning.isResizing) {
-      const width = positioning.currentWidth;
-      const height = positioning.currentHeight;
-      positioning.startWidth = 0;
-      positioning.startHeight = 0;
-      positioning.ratio = 0;
-      positioning.startX = 0;
-      positioning.startY = 0;
-      positioning.currentWidth = 0;
-      positioning.currentHeight = 0;
-      positioning.isResizing = false;
-
-      controlWrapper.classList.remove('image-control-wrapper--resizing');
-
-      setEndCursor();
-      onResizeEnd(width, height);
-
-      resizeCleanupRef.current?.();
+      active = false;
+      doc.removeEventListener('pointermove', move, true);
+      doc.removeEventListener('pointerup', up, true);
+      doc.removeEventListener('pointercancel', cancelPointer, true);
+      target.removeEventListener('lostpointercapture', cancelPointer);
+      win?.removeEventListener('blur', cancel);
       resizeCleanupRef.current = null;
+      controlWrapper.classList.remove('image-control-wrapper--resizing');
+      for (const restore of restoreStyles.reverse()) {
+        restore();
+      }
+      if (target.hasPointerCapture?.(pointerId)) {
+        target.releasePointerCapture(pointerId);
+      }
+      if (commit && editor.isEditable() && imageRef.current === image) {
+        onResizeEnd(currentSize.width, currentSize.height);
+      } else {
+        restoreStyle(image.style, 'width', originalWidth);
+        restoreStyle(image.style, 'height', originalHeight);
+        onResizeCancel?.();
+      }
+    };
+    const cancel = () => finish(false);
+    const cancelPointer = (pointer: PointerEvent) => {
+      if (pointer.pointerId === pointerId) {
+        cancel();
+      }
+    };
+    const move = (pointer: PointerEvent) => {
+      if (pointer.pointerId !== pointerId || !active) {
+        return;
+      }
+      if (
+        !editor.isEditable() ||
+        imageRef.current !== image ||
+        !image.isConnected
+      ) {
+        cancel();
+        return;
+      }
+      const widthLimit = availableWidth(image);
+      if (widthLimit < 1) {
+        cancel();
+        return;
+      }
+      pointer.preventDefault();
+      currentSize = resizeImage(
+        startSize,
+        {
+          x: (pointer.clientX - startX) / zoom,
+          y: (pointer.clientY - startY) / zoom,
+        },
+        direction,
+        widthLimit,
+        lockAspectRatio,
+      );
+      applySize(image, currentSize);
+    };
+    const up = (pointer: PointerEvent) => {
+      if (pointer.pointerId === pointerId) {
+        move(pointer);
+        finish(true);
+      }
+    };
+
+    resizeCleanupRef.current = cancel;
+    doc.addEventListener('pointermove', move, {capture: true, passive: false});
+    doc.addEventListener('pointerup', up, true);
+    doc.addEventListener('pointercancel', cancelPointer, true);
+    target.addEventListener('lostpointercapture', cancelPointer);
+    win?.addEventListener('blur', cancel);
+    // Document listeners also cover environments without pointer capture.
+    try {
+      target.setPointerCapture?.(pointerId);
+    } catch {
+      // A pointer may already have been released before capture is established.
+    }
+    controlWrapper.classList.add('image-control-wrapper--resizing');
+    applySize(image, startSize);
+    onResizeStart();
+    if (!editor.isEditable()) {
+      cancel();
     }
   };
+
+  const handleKeyDown = (
+    event: React.KeyboardEvent<HTMLDivElement>,
+    direction: string,
+  ) => {
+    if (
+      !editor.isEditable() ||
+      resizeCleanupRef.current !== null ||
+      event.altKey ||
+      event.ctrlKey ||
+      event.metaKey
+    ) {
+      return;
+    }
+    const step = event.shiftKey ? 10 : 1;
+    const delta = {
+      x: event.key === 'ArrowLeft' ? -step : event.key === 'ArrowRight' ? step : 0,
+      y: event.key === 'ArrowUp' ? -step : event.key === 'ArrowDown' ? step : 0,
+    };
+    if (
+      (!delta.x || !/[ew]/.test(direction)) &&
+      (!delta.y || !/[ns]/.test(direction))
+    ) {
+      return;
+    }
+    const image = imageRef.current;
+    if (image === null || availableWidth(image) < 1) {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    const size = displayedSize(image, imageZoom(image));
+    const next = resizeImage(
+      size,
+      delta,
+      direction,
+      availableWidth(image),
+      lockAspectRatio,
+    );
+    if (next.width === size.width && next.height === size.height) {
+      return;
+    }
+    onResizeStart();
+    if (editor.isEditable() && imageRef.current === image && image.isConnected) {
+      applySize(image, next);
+      onResizeEnd(next.width, next.height);
+    }
+  };
+
   return (
     <div ref={controlWrapperRef}>
       {!showCaption && captionsEnabled && (
         <button
+          type="button"
+          disabled={!isEditable}
           className="image-caption-button"
           ref={buttonRef}
           onClick={() => {
@@ -262,54 +372,22 @@ export default function ImageResizer({
           Add Caption
         </button>
       )}
-      <div
-        className="image-resizer image-resizer-n"
-        onPointerDown={event => {
-          handlePointerDown(event, Direction.north);
-        }}
-      />
-      <div
-        className="image-resizer image-resizer-ne"
-        onPointerDown={event => {
-          handlePointerDown(event, Direction.north | Direction.east);
-        }}
-      />
-      <div
-        className="image-resizer image-resizer-e"
-        onPointerDown={event => {
-          handlePointerDown(event, Direction.east);
-        }}
-      />
-      <div
-        className="image-resizer image-resizer-se"
-        onPointerDown={event => {
-          handlePointerDown(event, Direction.south | Direction.east);
-        }}
-      />
-      <div
-        className="image-resizer image-resizer-s"
-        onPointerDown={event => {
-          handlePointerDown(event, Direction.south);
-        }}
-      />
-      <div
-        className="image-resizer image-resizer-sw"
-        onPointerDown={event => {
-          handlePointerDown(event, Direction.south | Direction.west);
-        }}
-      />
-      <div
-        className="image-resizer image-resizer-w"
-        onPointerDown={event => {
-          handlePointerDown(event, Direction.west);
-        }}
-      />
-      <div
-        className="image-resizer image-resizer-nw"
-        onPointerDown={event => {
-          handlePointerDown(event, Direction.north | Direction.west);
-        }}
-      />
+      {HANDLES.filter(handle => showSideHandles || handle.direction.length === 2).map(
+        ({direction, label}) => (
+          <div
+            key={direction}
+            className={`image-resizer image-resizer-${direction}`}
+            role="button"
+            tabIndex={isEditable ? 0 : -1}
+            aria-label={label}
+            aria-disabled={!isEditable}
+            style={{touchAction: 'none'}}
+            onClick={stopHandleClick}
+            onPointerDown={event => handlePointerDown(event, direction)}
+            onKeyDown={event => handleKeyDown(event, direction)}
+          />
+        ),
+      )}
     </div>
   );
 }

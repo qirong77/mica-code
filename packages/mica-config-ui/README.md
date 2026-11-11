@@ -63,6 +63,8 @@ render(<ConfigWebApp />)
 
 ## 约定
 
+- `Segmented` 的 `variant` 支持默认 `segmented`、紧凑单选 `radio` 和图文选项卡 `cards`；`options[].label` 可传 ReactNode。三种布局复用同一个 Arco Radio.Group 的受控值、键盘与禁用行为，卡片只改共享样式，不在业务页面重画单选控件。未传 `variant` 时保留现有分段外观。
+
 - **Roles**：内置 `default` 以「默认系统提示词」展示，只读、可复制，不可创建同名覆盖、编辑或删除。自定义 Role 编辑的只是追加正文，紧接默认正文且同属系统提示词。会话详情优先使用历史存档；没有记录时只展示当前默认正文与 Role 的参考，不写回快照。
 
 - Web 基础控件统一基于 Arco Design React：共享 `Button` / `Switch` / `Checkbox` / `Tag` / `Alert` / `Empty` / `Segmented` 保留业务接口；`SelectMenu` / `DateField` / `Modal` / `DataTable` 分别适配 Arco 的下拉、日期、弹窗、表格，普通输入从共享入口导入 `Input` / `InputNumber` / `Select`（`onChange` 接收值而非 DOM event）。设置页、桌面内嵌界面和插件复用这一套；保留 `PageFrame` / `SettingsGroup` / `SettingRow` 与原有布局。完整 App 使用 `ArcoProvider`，普通工具栏动作用透传原生属性与 ref 的 `ArcoAction`（`appearance` / `tone` 控制 Arco 类型与状态，`iconOnly` 使用 Arco 的纯图标尺寸与零内边距，双轴居中；文字动作继承宿主字号和中性色；富内容悬浮卡片使用共享 `ArcoPopover`；动作菜单用 `MenuList` / `MenuItem` / `MenuSeparator`（统一表面与行尺寸，支持方向键、禁用项、选中与危险状态，`onClose` 处理 Esc / Tab），定位与展开由调用方负责）。`arco-settings.css` 按需载入样式，将现有主题映射到 `body.mica-arco-theme` 与 `.mica-config-ui`，不引全局 reset；原生开关几何与交互状态由 Arco 自己绘制，Portal 继承同一份主题。

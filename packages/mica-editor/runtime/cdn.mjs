@@ -23,6 +23,7 @@ Object.assign(cdnImports, {
   'react/jsx-dev-runtime': esm('react', '19.2.5', '/jsx-dev-runtime', 'react'),
   'react-dom': esm('react-dom', '19.2.5'),
   'react-dom/client': esm('react-dom', '19.2.5', '/client'),
+  'lucide-react': esm('lucide-react', '0.542.0'),
   '@arco-design/web-react': esm('@arco-design/web-react', '2.66.18'),
   '@arco-design/web-react/icon': esm('@arco-design/web-react', '2.66.18', '/icon'),
   '@arco-design/web-react/es/locale/zh-CN': esm('@arco-design/web-react', '2.66.18', '/es/locale/zh-CN'),

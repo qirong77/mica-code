@@ -61,6 +61,7 @@ export default function DropDown({
   buttonAriaLabel,
   buttonClassName,
   buttonIconClassName,
+  buttonIcon,
   children,
   stopCloseOnClickSelf,
   hideChevron,
@@ -72,6 +73,7 @@ export default function DropDown({
   buttonAriaLabel?: string;
   buttonClassName: string;
   buttonIconClassName?: string;
+  buttonIcon?: ReactNode;
   buttonLabel?: string;
   children: ReactNode;
   stopCloseOnClickSelf?: boolean;
@@ -212,7 +214,7 @@ export default function DropDown({
         className={buttonClassName}
         onClick={handleOnClick}
         ref={buttonRef}>
-        {buttonIconClassName && <span className={buttonIconClassName} />}
+        {buttonIcon ?? (buttonIconClassName && <span className={buttonIconClassName} />)}
         {buttonLabel && (
           <span className="text dropdown-button-text">{buttonLabel}</span>
         )}

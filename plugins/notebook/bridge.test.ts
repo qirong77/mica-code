@@ -137,6 +137,28 @@ describe('Notebook iframe boundary', () => {
     expect(f.target.postMessage).not.toHaveBeenCalled();
   });
 
+  it('routes document actions only to a loaded note and never to a replacement in flight', async () => {
+    const f = fixture();
+    f.bridge.action('a', 'comments');
+    expect(f.target.postMessage).not.toHaveBeenCalled();
+    await f.load('a');
+    const loadId = f.last('load').loadId;
+    for (const action of ['comments', 'style', 'present'] as const) {
+      f.bridge.action('a', action);
+      expect(f.last('action')).toEqual({channel: NOTEBOOK_CHANNEL, token: 'nonce', type: 'action', noteId: 'a', loadId, action});
+    }
+    const replacement = f.bridge.load('b', document);
+    vi.mocked(f.target.postMessage).mockClear();
+    f.bridge.action('a', 'style');
+    f.bridge.action('b', 'present');
+    expect(f.target.postMessage).not.toHaveBeenCalled();
+    f.receive({type: 'loaded', noteId: 'b', requestId: 'load-2', loadId: 'load-2'});
+    await replacement;
+    f.bridge.dispose();
+    f.bridge.action('b', 'comments');
+    expect(f.target.postMessage).not.toHaveBeenCalled();
+  });
+
   it('rejects replaced loads and ignores late acknowledgments, changes and errors for the same note', async () => {
     const f = fixture();
     const first = f.bridge.load('a', document);

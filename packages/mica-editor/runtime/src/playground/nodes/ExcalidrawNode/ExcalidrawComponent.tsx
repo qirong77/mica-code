@@ -223,6 +223,7 @@ export default function ExcalidrawComponent({
               imageRef={imageContainerRef}
               editor={editor}
               onResizeStart={onResizeStart}
+              onResizeCancel={() => setIsResizing(false)}
               onResizeEnd={onResizeEnd}
               captionsEnabled={true}
             />

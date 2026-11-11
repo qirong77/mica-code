@@ -15,13 +15,16 @@ import {
   FolderOpen,
   FolderPlus,
   Menu,
+  MessageSquare,
   MoreHorizontal,
   PanelLeftClose,
   Pencil,
   Plus,
+  Presentation,
   RefreshCw,
   Search,
   ShieldCheck,
+  SlidersHorizontal,
   Trash2,
   Undo2,
   X,
@@ -1013,6 +1016,33 @@ export default function NotebookPage({ api }) {
                     </span>
                     <Button
                       variant="ghost"
+                      icon={<MessageSquare size={16} strokeWidth={1.6} />}
+                      title="评论"
+                      aria-label="评论"
+                      disabled={busy || frameState !== 'ready'}
+                      onMouseDown={(event) => event.preventDefault()}
+                      onClick={() => bridge.current?.action(active.id, 'comments')}
+                    />
+                    <Button
+                      variant="ghost"
+                      icon={<Presentation size={16} strokeWidth={1.6} />}
+                      title="演示"
+                      aria-label="演示"
+                      disabled={busy || frameState !== 'ready'}
+                      onMouseDown={(event) => event.preventDefault()}
+                      onClick={() => bridge.current?.action(active.id, 'present')}
+                    />
+                    <Button
+                      variant="ghost"
+                      icon={<SlidersHorizontal size={16} strokeWidth={1.6} />}
+                      title="样式设置"
+                      aria-label="样式设置"
+                      disabled={busy || frameState !== 'ready'}
+                      onMouseDown={(event) => event.preventDefault()}
+                      onClick={() => bridge.current?.action(active.id, 'style')}
+                    />
+                    <Button
+                      variant="ghost"
                       icon={<Focus size={16} />}
                       title={focused ? '退出专注' : '专注写作'}
                       aria-label={focused ? '退出专注' : '专注写作'}
@@ -1072,7 +1102,8 @@ export default function NotebookPage({ api }) {
                 title="笔记富文本编辑器"
                 src={`/editor/index.html#${token}`}
                 sandbox="allow-scripts allow-downloads allow-popups"
-                allow="clipboard-read; clipboard-write"
+                allow="clipboard-read; clipboard-write; fullscreen"
+                allowFullScreen
               />
               {!active ? (
                 <div className="notebook-welcome">

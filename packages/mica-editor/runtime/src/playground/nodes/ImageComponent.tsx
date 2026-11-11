@@ -8,6 +8,9 @@
 
 import './ImageNode.css';
 
+import {Button} from '@arco-design/web-react';
+import {IconDelete, IconExpand, IconImageClose} from '@arco-design/web-react/icon';
+import {TOGGLE_LINK_COMMAND} from '@lexical/link';
 import {useCollaborationContext} from '@lexical/react/LexicalCollaborationContext';
 import {CollaborationPlugin} from '@lexical/react/LexicalCollaborationPlugin';
 import {useLexicalComposerContext} from '@lexical/react/LexicalComposerContext';
@@ -16,223 +19,92 @@ import {useLexicalEditable} from '@lexical/react/useLexicalEditable';
 import {useLexicalNodeSelection} from '@lexical/react/useLexicalNodeSelection';
 import {
   $getNodeByKey,
-  $getRoot,
   $getSelection,
   $isNodeSelection,
-  $isRangeSelection,
   $setSelection,
-  BLUR_COMMAND,
   CLICK_COMMAND,
-  COMMAND_PRIORITY_EDITOR,
   COMMAND_PRIORITY_LOW,
   createCommand,
   DRAGSTART_COMMAND,
-  getActiveElement,
+  KEY_BACKSPACE_COMMAND,
+  KEY_DELETE_COMMAND,
   KEY_ENTER_COMMAND,
   KEY_ESCAPE_COMMAND,
   type LexicalCommand,
-  type LexicalEditor,
   type LexicalEditorWithDispose,
   mergeRegister,
   type NodeKey,
-  registerEventListener,
-  SELECTION_CHANGE_COMMAND,
 } from 'lexical';
-import * as React from 'react';
-import {
-  type JSX,
-  Suspense,
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from 'react';
+import {type JSX, Suspense, useCallback, useEffect, useRef, useState} from 'react';
 
+import {useNotebookNestedEditor} from '../../workspace/NotebookBridge';
 import {createWebsocketProvider, skipCollaborationInit} from '../collaboration';
 import {useSettings} from '../context/SettingsContext';
-import brokenImage from '../images/image-broken.svg';
 import TreeViewPlugin from '../plugins/TreeViewPlugin';
+import ImageCropDialog from '../ui/ImageCropDialog';
 import ImageResizer from '../ui/ImageResizer';
-import {$isCaptionEditorEmpty, $isImageNode} from './ImageNode';
-import {useNotebookNestedEditor} from '../../workspace/NotebookBridge';
+import {
+  type ImageAction,
+  type ImageAlignment,
+  ImageDescriptionDialog,
+  ImagePreviewDialog,
+  ImageSizeDialog,
+  ImageToolbar,
+} from '../ui/ImageTools';
+import {imageContentWidth} from '../ui/imageResize';
+import {type ImageTransformResult, rotateImage} from '../ui/imageTransform';
+import {InsertImageDialog} from '../plugins/ImagesExtension';
+import Modal from '../ui/Modal';
+import {$imageBlock, $removeImage, $selectImage, updateImage} from './imageEditing';
+import {$isImageNode} from './ImageNode';
 
-type ImageStatus =
-  | {error: true}
-  | {error: false; width: number; height: number};
-
+type ImageStatus = {error: true} | {error: false; width: number; height: number};
 const imageCache = new Map<string, Promise<ImageStatus> | ImageStatus>();
 
-export const RIGHT_CLICK_IMAGE_COMMAND: LexicalCommand<MouseEvent> =
-  createCommand('RIGHT_CLICK_IMAGE_COMMAND');
-
-function DisableCaptionOnBlur({
-  setShowCaption,
-}: {
-  setShowCaption: (show: boolean) => void;
-}) {
-  const [editor] = useLexicalComposerContext();
-  useEffect(() =>
-    editor.registerCommand(
-      BLUR_COMMAND,
-      () => {
-        if ($isCaptionEditorEmpty()) {
-          setShowCaption(false);
-        }
-        return false;
-      },
-      COMMAND_PRIORITY_EDITOR,
-    ),
-  );
-  return null;
-}
+export const RIGHT_CLICK_IMAGE_COMMAND: LexicalCommand<MouseEvent> = createCommand(
+  'RIGHT_CLICK_IMAGE_COMMAND',
+);
 
 function useSuspenseImage(src: string): ImageStatus {
-  let cached = imageCache.get(src);
-  if (cached && 'error' in cached && typeof cached.error === 'boolean') {
-    return cached;
-  } else if (!cached) {
-    cached = new Promise<ImageStatus>(resolve => {
-      const img = new Image();
-      img.src = src;
-      img.onload = () =>
-        resolve({
-          error: false,
-          height: img.naturalHeight,
-          width: img.naturalWidth,
-        });
-      img.onerror = () => resolve({error: true});
-    }).then(rval => {
-      imageCache.set(src, rval);
-      return rval;
-    });
-    imageCache.set(src, cached);
-    throw cached;
-  }
-  throw cached;
+  const cached = imageCache.get(src);
+  if (cached && 'error' in cached) return cached;
+  if (cached) throw cached;
+  const pending = new Promise<ImageStatus>(resolve => {
+    const image = new Image();
+    image.onload = () =>
+      resolve({error: false, width: image.naturalWidth, height: image.naturalHeight});
+    image.onerror = () => resolve({error: true});
+    image.src = src;
+  }).then(result => {
+    imageCache.set(src, result);
+    return result;
+  });
+  imageCache.set(src, pending);
+  throw pending;
 }
 
-function isSVG(src: string): boolean {
-  const lowerCaseSrc = src.toLowerCase();
-  return (
-    lowerCaseSrc.endsWith('.svg') ||
-    lowerCaseSrc.startsWith('data:image/svg+xml')
-  );
-}
-
-function LazyImage({
-  altText,
-  className,
-  imageRef,
-  src,
-  width,
-  height,
-  maxWidth,
-  onError,
-}: {
-  altText: string;
-  className: string | null;
-  height: 'inherit' | number;
-  imageRef: {current: null | HTMLImageElement};
-  maxWidth: number;
+type Props = {
   src: string;
+  altText: string;
+  nodeKey: NodeKey;
   width: 'inherit' | number;
-  onError: () => void;
-}): JSX.Element {
-  const status = useSuspenseImage(src);
+  height: 'inherit' | number;
+  maxWidth: number;
+  resizable: boolean;
+  showCaption: boolean;
+  caption: LexicalEditorWithDispose;
+  captionsEnabled: boolean;
+};
 
-  useEffect(() => {
-    if (status.error) {
-      onError();
-    }
-  }, [status.error, onError]);
-
-  if (status.error) {
-    return <BrokenImage />;
-  }
-
-  // Calculate final dimensions with proper scaling
-  const calculateDimensions = () => {
-    if (width !== 'inherit' && height !== 'inherit') {
-      return {
-        height,
-        maxWidth,
-        width,
-      };
-    }
-
-    const isActuallySVG = isSVG(src);
-
-    // For standard images, Lexical expects 'inherit'
-    if (!isActuallySVG) {
-      return {
-        height,
-        maxWidth,
-        width,
-      };
-    }
-
-    // Use natural dimensions if available, otherwise fallback to defaults
-    const naturalWidth = status.width;
-    const naturalHeight = status.height;
-
-    //  If SVG has no intrinsic dimensions (0), fallback to a sensible default (maxWidth)
-    let finalWidth = naturalWidth || maxWidth;
-    let finalHeight = naturalHeight || finalWidth;
-
-    // Scale down if width exceeds maxWidth while maintaining aspect ratio
-    if (finalWidth > maxWidth) {
-      const scale = maxWidth / finalWidth;
-      finalWidth = maxWidth;
-      finalHeight = Math.round(finalHeight * scale);
-    }
-
-    // Scale down if height exceeds maxHeight while maintaining aspect ratio
-    const maxHeight = 500;
-    if (finalHeight > maxHeight) {
-      const scale = maxHeight / finalHeight;
-      finalHeight = maxHeight;
-      finalWidth = Math.round(finalWidth * scale);
-    }
-
-    return {
-      height: finalHeight,
-      maxWidth,
-      width: finalWidth,
-    };
-  };
-
-  const imageStyle = calculateDimensions();
-
+export default function ImageComponent(props: Props): JSX.Element {
   return (
-    <img
-      className={className || undefined}
-      src={src}
-      alt={altText}
-      ref={imageRef}
-      style={imageStyle}
-      onError={onError}
-      draggable="false"
-    />
+    <Suspense fallback={<span className="image-loading" aria-label="图片加载中" />}>
+      <ImageEditor {...props} />
+    </Suspense>
   );
 }
 
-function BrokenImage(): JSX.Element {
-  return (
-    <img
-      src={brokenImage}
-      style={{
-        height: 200,
-        opacity: 0.2,
-        width: 200,
-      }}
-      draggable="false"
-      alt="Broken image"
-    />
-  );
-}
-
-export default function ImageComponent({
+function ImageEditor({
   src,
   altText,
   nodeKey,
@@ -243,282 +115,437 @@ export default function ImageComponent({
   showCaption,
   caption,
   captionsEnabled,
-}: {
-  altText: string;
-  caption: LexicalEditorWithDispose;
-  height: 'inherit' | number;
-  maxWidth: number;
-  nodeKey: NodeKey;
-  resizable: boolean;
-  showCaption: boolean;
-  src: string;
-  width: 'inherit' | number;
-  captionsEnabled: boolean;
-}): JSX.Element {
+}: Props) {
+  const status = useSuspenseImage(src);
   useNotebookNestedEditor(caption);
-  const imageRef = useRef<null | HTMLImageElement>(null);
-  const buttonRef = useRef<HTMLButtonElement | null>(null);
-  const [isSelected, setSelected, clearSelection] =
-    useLexicalNodeSelection(nodeKey);
-  const [isResizing, setIsResizing] = useState<boolean>(false);
-  const {isCollabActive} = useCollaborationContext();
   const [editor] = useLexicalComposerContext();
-  const activeEditorRef = useRef<LexicalEditor | null>(null);
-  const [isLoadError, setIsLoadError] = useState<boolean>(false);
   const isEditable = useLexicalEditable();
-  const isInNodeSelection = useMemo(
-    () =>
-      isSelected &&
+  const {isCollabActive} = useCollaborationContext();
+  const {
+    settings: {showNestedEditorTreeView},
+  } = useSettings();
+  const [isSelected, setSelected, clearSelection] = useLexicalNodeSelection(nodeKey);
+  const [isResizing, setIsResizing] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [dialog, setDialog] = useState<
+    'size' | 'description' | 'crop' | 'replace' | 'preview' | null
+  >(null);
+  const [alignment, setAlignment] = useState<ImageAlignment>('left');
+  const [singleSelection, setSingleSelection] = useState(false);
+  const frameRef = useRef<HTMLDivElement>(null);
+  const imageRef = useRef<HTMLImageElement>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const mounted = useRef(false);
+  const previousDialog = useRef(dialog);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
+  useEffect(() => {
+    if (!isEditable) {
+      setDialog(null);
+      setError(null);
+    }
+  }, [isEditable]);
+  useEffect(() => {
+    const closed = previousDialog.current !== null && dialog === null;
+    previousDialog.current = dialog;
+    if (closed) {
+      // Modal releases its focus trap during unmount. Focus after that release,
+      // including when the menu item that opened it no longer exists.
+      queueMicrotask(() => {
+        if (mounted.current && editor.isEditable())
+          editor.getRootElement()?.focus({preventScroll: true});
+      });
+    }
+  }, [dialog, editor]);
+
+  const natural = status.error
+    ? {width: 240, height: 160}
+    : {width: status.width || maxWidth, height: status.height || maxWidth};
+  const storedWidth = typeof width === 'number' && width > 0 ? width : natural.width;
+  const storedHeight =
+    typeof height === 'number' && height > 0
+      ? height
+      : (storedWidth * natural.height) / natural.width;
+  const renderedWidth = Math.min(storedWidth, maxWidth);
+  const renderedHeight = (renderedWidth * storedHeight) / storedWidth;
+  const imageSize = () => {
+    const frame = frameRef.current;
+    return {
+      width: frame?.offsetWidth || renderedWidth,
+      height: frame?.offsetHeight || renderedHeight,
+    };
+  };
+  const availableWidth = () =>
+    imageContentWidth(
+      frameRef.current?.closest<HTMLElement>('td, th, .PlaygroundEditorTheme__layoutItem') ??
+        editor.getRootElement(),
+    );
+  const change = (update: Parameters<typeof updateImage>[2], expectedSrc?: string) =>
+    updateImage(editor, nodeKey, update, expectedSrc);
+  const setSize = (nextWidth: number, nextHeight: number) =>
+    change(node => {
+      node.setMaxWidth(Math.max(node.__maxWidth, nextWidth));
+      node.setWidthAndHeight(Math.round(nextWidth), Math.round(nextHeight));
+      $selectImage(node);
+    });
+  const restoreFocus = () => {
+    setDialog(null);
+  };
+  const dismiss = useCallback(() => {
+    editor.update(() => {
+      const node = $getNodeByKey(nodeKey);
+      if ($isImageNode(node)) $imageBlock(node)?.selectEnd();
+    });
+    editor.getRootElement()?.focus({preventScroll: true});
+  }, [editor, nodeKey]);
+
+  useEffect(() => {
+    if (!isSelected) return;
+    const sync = () =>
       editor.read('latest', () => {
+        const node = $getNodeByKey(nodeKey);
+        if (!$isImageNode(node)) return;
         const selection = $getSelection();
-        return $isNodeSelection(selection) && selection.has(nodeKey);
-      }),
-    [editor, isSelected, nodeKey],
-  );
-
-  const $onEnter = useCallback(
-    (event: KeyboardEvent | null) => {
-      const latestSelection = $getSelection();
-      const buttonElem = buttonRef.current;
-      if (
-        $isNodeSelection(latestSelection) &&
-        latestSelection.has(nodeKey) &&
-        latestSelection.getNodes().length === 1
-      ) {
-        if (showCaption) {
-          // Move focus into nested editor
-          $setSelection(null);
-          if (event !== null) {
-            event.preventDefault();
-          }
-          caption.focus();
-          return true;
-        } else if (
-          buttonElem !== null &&
-          // getActiveElement rather than document.activeElement, which reports
-          // the shadow host when the editor is in a shadow root.
-          buttonElem !== getActiveElement(buttonElem)
-        ) {
-          if (event !== null) {
-            event.preventDefault();
-          }
-          buttonElem.focus();
-          return true;
-        }
-      }
-      return false;
-    },
-    [caption, nodeKey, showCaption],
-  );
-
-  const $onEscape = useCallback(
-    (event: KeyboardEvent) => {
-      if (
-        activeEditorRef.current === caption ||
-        buttonRef.current === event.target
-      ) {
-        $setSelection(null);
-        editor.update(() => {
-          setSelected(true);
-          const parentRootElement = editor.getRootElement();
-          if (parentRootElement !== null) {
-            parentRootElement.focus();
-          }
-        });
-        return true;
-      }
-      return false;
-    },
-    [caption, editor, setSelected],
-  );
+        setSingleSelection(
+          $isNodeSelection(selection) &&
+            selection.has(nodeKey) &&
+            selection.getNodes().length === 1,
+        );
+        const format = $imageBlock(node)?.getFormatType();
+        const next = format === 'center' || format === 'right' ? format : 'left';
+        setAlignment(previous => (previous === next ? previous : next));
+      });
+    sync();
+    return editor.registerUpdateListener(sync);
+  }, [editor, isSelected, nodeKey]);
 
   const onClick = useCallback(
-    (payload: MouseEvent) => {
-      const event = payload;
-
-      if (isResizing) {
-        return true;
+    (event: MouseEvent) => {
+      if (
+        event.target !== imageRef.current &&
+        event.target !== frameRef.current &&
+        !(
+          event.target instanceof Element &&
+          frameRef.current?.contains(event.target) &&
+          event.target.closest('.image-broken')
+        )
+      )
+        return false;
+      if (!editor.isEditable()) return false;
+      event.preventDefault();
+      editor.getRootElement()?.focus({preventScroll: true});
+      if (event.shiftKey) setSelected(!isSelected);
+      else {
+        clearSelection();
+        setSelected(true);
       }
-      if (event.target === imageRef.current) {
-        if (event.shiftKey) {
-          setSelected(!isSelected);
-        } else {
-          clearSelection();
-          setSelected(true);
-        }
-        return true;
-      }
-
-      return false;
+      setError(null);
+      return true;
     },
-    [isResizing, isSelected, setSelected, clearSelection],
-  );
-
-  const onRightClick = useCallback(
-    (event: MouseEvent): void => {
-      editor.read('latest', () => {
-        const latestSelection = $getSelection();
-        const domElement = event.target as HTMLElement;
-        if (
-          domElement.tagName === 'IMG' &&
-          $isRangeSelection(latestSelection) &&
-          latestSelection.getNodes().length === 1
-        ) {
-          editor.dispatchCommand(RIGHT_CLICK_IMAGE_COMMAND, event);
-        }
-      });
-    },
-    [editor],
+    [editor, clearSelection, isSelected, setSelected],
   );
 
   useEffect(() => {
+    const remove = (event: KeyboardEvent) => {
+      const selection = $getSelection();
+      if (!editor.isEditable() || !$isNodeSelection(selection) || !selection.has(nodeKey))
+        return false;
+      const target = event.target;
+      if (
+        target instanceof Element &&
+        target.closest('input, textarea, button, [role="dialog"], .mica-menu')
+      )
+        return false;
+      // The normal editor handler owns multi-image deletion.
+      if (selection.getNodes().length !== 1) return false;
+      event.preventDefault();
+      const node = $getNodeByKey(nodeKey);
+      if ($isImageNode(node)) $removeImage(node);
+      return true;
+    };
     return mergeRegister(
+      editor.registerCommand(CLICK_COMMAND, onClick, COMMAND_PRIORITY_LOW),
+      editor.registerCommand(RIGHT_CLICK_IMAGE_COMMAND, onClick, COMMAND_PRIORITY_LOW),
+      editor.registerCommand(KEY_DELETE_COMMAND, remove, COMMAND_PRIORITY_LOW),
+      editor.registerCommand(KEY_BACKSPACE_COMMAND, remove, COMMAND_PRIORITY_LOW),
       editor.registerCommand(
-        SELECTION_CHANGE_COMMAND,
-        (_, activeEditor) => {
-          activeEditorRef.current = activeEditor;
-          return false;
+        KEY_ENTER_COMMAND,
+        event => {
+          const selection = $getSelection();
+          if (
+            !editor.isEditable() ||
+            !$isNodeSelection(selection) ||
+            !selection.has(nodeKey) ||
+            selection.getNodes().length !== 1
+          )
+            return false;
+          event?.preventDefault();
+          if (showCaption) {
+            $setSelection(null);
+            caption.focus();
+          } else buttonRef.current?.focus();
+          return true;
+        },
+        COMMAND_PRIORITY_LOW,
+      ),
+      editor.registerCommand(
+        KEY_ESCAPE_COMMAND,
+        event => {
+          const selection = $getSelection();
+          if (!$isNodeSelection(selection) || !selection.has(nodeKey)) return false;
+          event?.preventDefault();
+          dismiss();
+          return true;
         },
         COMMAND_PRIORITY_LOW,
       ),
       editor.registerCommand(
         DRAGSTART_COMMAND,
         event => {
-          if (event.target === imageRef.current) {
-            // TODO This is just a temporary workaround for FF to behave like other browsers.
-            // Ideally, this handles drag & drop too (and all browsers).
-            event.preventDefault();
-            return true;
-          }
-          return false;
+          if (event.target !== imageRef.current) return false;
+          event.preventDefault();
+          return true;
         },
         COMMAND_PRIORITY_LOW,
       ),
     );
-  }, [editor]);
-  useEffect(() => {
-    return mergeRegister(
-      editor.registerCommand(CLICK_COMMAND, onClick, COMMAND_PRIORITY_LOW),
-      editor.registerCommand(
-        RIGHT_CLICK_IMAGE_COMMAND,
-        onClick,
-        COMMAND_PRIORITY_LOW,
-      ),
-      editor.registerCommand(KEY_ENTER_COMMAND, $onEnter, COMMAND_PRIORITY_LOW),
-      editor.registerCommand(
-        KEY_ESCAPE_COMMAND,
-        $onEscape,
-        COMMAND_PRIORITY_LOW,
-      ),
-      editor.registerRootListener(rootElement => {
-        if (rootElement) {
-          return registerEventListener(
-            rootElement,
-            'contextmenu',
-            onRightClick,
-          );
-        }
-      }),
+  }, [caption, dismiss, editor, nodeKey, onClick, showCaption]);
+
+  const applyTransform = (result: ImageTransformResult, expectedSrc: string, rotate = false) => {
+    if (!mounted.current) return false;
+    const display = imageSize();
+    const nextWidth = Math.min(
+      rotate ? display.height : display.width,
+      availableWidth(),
+      result.width,
     );
-  }, [editor, $onEnter, $onEscape, onClick, onRightClick]);
-
-  const setShowCaption = (show: boolean) => {
-    editor.update(() => {
-      const node = $getNodeByKey(nodeKey);
-      if ($isImageNode(node)) {
-        node.setShowCaption(show);
-        if (show) {
-          node.__caption.update(() => {
-            if (!$getSelection()) {
-              $getRoot().selectEnd();
-            }
-          });
-        }
-      }
-    });
+    const applied = change(node => {
+      node.setSrc(result.src);
+      node.setMaxWidth(Math.max(node.__maxWidth, nextWidth));
+      node.setWidthAndHeight(
+        Math.round(nextWidth),
+        Math.round((nextWidth * result.height) / result.width),
+      );
+      $selectImage(node);
+    }, expectedSrc);
+    if (!applied) setError('图片已变化，请重新选择后再试。');
+    return applied;
   };
-
-  const onResizeEnd = (
-    nextWidth: 'inherit' | number,
-    nextHeight: 'inherit' | number,
-  ) => {
-    // Delay hiding the resize bars for click case
-    setTimeout(() => {
-      setIsResizing(false);
-    }, 200);
-
-    editor.update(() => {
-      const node = $getNodeByKey(nodeKey);
-      if ($isImageNode(node)) {
-        node.setWidthAndHeight(nextWidth, nextHeight);
-      }
-    });
+  const onAction = (action: ImageAction) => {
+    if (!editor.isEditable()) return;
+    setError(null);
+    if (action === 'delete') {
+      change($removeImage);
+      editor.focus();
+    } else if (action === 'link') {
+      editor.update(() => {
+        const node = $getNodeByKey(nodeKey);
+        if ($isImageNode(node)) $selectImage(node);
+      });
+      editor.dispatchCommand(TOGGLE_LINK_COMMAND, 'https://');
+    } else if (action === 'reset') {
+      change(node => {
+        node.setWidthAndHeight('inherit', 'inherit');
+        $selectImage(node);
+      });
+    } else if (action === 'rotate') {
+      setBusy(true);
+      const originalSrc = src;
+      rotateImage(src)
+        .then(result => applyTransform(result, originalSrc, true))
+        .catch(reason => {
+          if (mounted.current)
+            setError(reason instanceof Error ? reason.message : '旋转图片失败，请重试。');
+        })
+        .finally(() => {
+          if (mounted.current) setBusy(false);
+        });
+    } else setDialog(action);
   };
-
-  const onResizeStart = () => {
-    setIsResizing(true);
-  };
-
-  const {
-    settings: {showNestedEditorTreeView},
-  } = useSettings();
-
-  const draggable = isInNodeSelection && !isResizing;
-  const isFocused = (isSelected || isResizing) && isEditable;
+  const showTools = isSelected && singleSelection && isEditable && !isResizing && !dialog;
   return (
-    <Suspense fallback={null}>
-      <>
-        <div draggable={draggable}>
-          {isLoadError ? (
-            <BrokenImage />
-          ) : (
-            <LazyImage
-              className={
-                isFocused
-                  ? `focused ${isInNodeSelection ? 'draggable' : ''}`
-                  : null
-              }
-              src={src}
-              altText={altText}
-              imageRef={imageRef}
-              width={width}
-              height={height}
-              maxWidth={maxWidth}
-              onError={() => setIsLoadError(true)}
+    <>
+      <div
+        ref={frameRef}
+        className={`image-frame${isSelected && isEditable ? ' is-selected' : ''}${isResizing ? ' is-resizing' : ''}${status.error ? ' is-broken' : ''}`}
+        style={{
+          width: renderedWidth,
+          maxWidth: '100%',
+          aspectRatio: `${storedWidth} / ${storedHeight}`,
+        }}
+        draggable={isSelected && isEditable && !isResizing}
+        onDoubleClick={event => {
+          if (!status.error && event.target === imageRef.current) {
+            event.preventDefault();
+            setDialog('preview');
+          }
+        }}
+        onContextMenu={event => {
+          if (isEditable) {
+            clearSelection();
+            setSelected(true);
+          }
+        }}>
+        {status.error ? (
+          <span className="image-broken">
+            <IconImageClose />
+            <span>图片加载失败</span>
+            <span>{altText || '可在图片菜单中替换图片'}</span>
+          </span>
+        ) : (
+          <img ref={imageRef} src={src} alt={altText} draggable={false} />
+        )}
+        {isSelected && singleSelection && isEditable && !status.error && !isResizing && !busy && (
+          <div className="image-quick-actions" onMouseDown={event => event.preventDefault()}>
+            <Button
+              type="text"
+              size="mini"
+              icon={<IconExpand />}
+              aria-label="预览图片"
+              title="预览图片"
+              onClick={() => onAction('preview')}
             />
-          )}
-        </div>
-
-        {showCaption && (
-          <div className="image-caption-container">
-            <LexicalExtensionEditorComposer initialEditor={caption}>
-              <DisableCaptionOnBlur setShowCaption={setShowCaption} />
-              {isCollabActive ? (
-                <CollaborationPlugin
-                  id={caption.getKey()}
-                  providerFactory={createWebsocketProvider}
-                  shouldBootstrap={!skipCollaborationInit}
-                  selectionHighlight={true}
-                />
-              ) : null}
-              {showNestedEditorTreeView === true ? <TreeViewPlugin /> : null}
-            </LexicalExtensionEditorComposer>
+            <Button
+              type="text"
+              size="mini"
+              icon={<IconDelete />}
+              aria-label="删除图片"
+              title="删除图片"
+              onClick={() => onAction('delete')}
+            />
           </div>
         )}
-        {resizable && isInNodeSelection && isFocused && (
-          <ImageResizer
-            showCaption={showCaption}
-            setShowCaption={setShowCaption}
-            editor={editor}
-            buttonRef={buttonRef}
-            imageRef={imageRef}
-            maxWidth={maxWidth}
-            onResizeStart={onResizeStart}
-            onResizeEnd={onResizeEnd}
-            captionsEnabled={!isLoadError && captionsEnabled}
+        {resizable &&
+          isSelected &&
+          singleSelection &&
+          isEditable &&
+          !status.error &&
+          !dialog &&
+          !busy && (
+            <ImageResizer
+              editor={editor}
+              buttonRef={buttonRef}
+              imageRef={frameRef}
+              maxWidth={availableWidth()}
+              captionsEnabled={false}
+              showCaption={showCaption}
+              setShowCaption={() => {}}
+              lockAspectRatio
+              showSideHandles={false}
+              onResizeStart={() => setIsResizing(true)}
+              onResizeCancel={() => {if (mounted.current) setIsResizing(false);}}
+              onResizeEnd={(nextWidth, nextHeight) => {
+                frameRef.current?.style.removeProperty('height');
+                if (typeof nextWidth === 'number' && typeof nextHeight === 'number')
+                  setSize(nextWidth, nextHeight);
+                setIsResizing(false);
+              }}
+            />
+          )}
+      </div>
+      {showCaption && (
+        <div
+          className="image-caption-container"
+          onKeyDown={event => {
+            if (event.key === 'Escape') {
+              event.preventDefault();
+              event.stopPropagation();
+              change($selectImage);
+              editor.focus();
+            }
+          }}>
+          <LexicalExtensionEditorComposer initialEditor={caption}>
+            {isCollabActive && (
+              <CollaborationPlugin
+                id={caption.getKey()}
+                providerFactory={createWebsocketProvider}
+                shouldBootstrap={!skipCollaborationInit}
+                selectionHighlight
+              />
+            )}
+            {showNestedEditorTreeView && <TreeViewPlugin />}
+          </LexicalExtensionEditorComposer>
+        </div>
+      )}
+      {showTools && (
+        <ImageToolbar
+          anchor={frameRef}
+          buttonRef={buttonRef}
+          alignment={alignment}
+          showCaption={showCaption}
+          captionsEnabled={captionsEnabled}
+          busy={busy}
+          broken={status.error}
+          onAction={onAction}
+          onDismiss={dismiss}
+          onAlign={value =>
+            change(node => {
+              $imageBlock(node)?.setFormat(value);
+              $selectImage(node);
+            })
+          }
+        />
+      )}
+      {error && isSelected && (
+        <div className="image-operation-error" role="alert">
+          {error}
+        </div>
+      )}
+      {dialog === 'preview' && (
+        <ImagePreviewDialog src={src} altText={altText} onClose={restoreFocus} />
+      )}
+      {isEditable && dialog === 'size' && (
+        <ImageSizeDialog
+          {...imageSize()}
+          maxWidth={availableWidth()}
+          onApply={setSize}
+          onClose={restoreFocus}
+        />
+      )}
+      {isEditable && dialog === 'description' && (
+        <ImageDescriptionDialog
+          altText={altText}
+          showCaption={showCaption}
+          captionsEnabled={captionsEnabled}
+          onApply={(description, visible) => {
+            change(node => {
+              node.setAltText(description);
+              node.setShowCaption(visible);
+              $selectImage(node);
+            });
+          }}
+          onClose={restoreFocus}
+        />
+      )}
+      {isEditable && dialog === 'crop' && (
+        <ImageCropDialog
+          src={src}
+          altText={altText}
+          onApply={result => applyTransform(result, src)}
+          onClose={restoreFocus}
+        />
+      )}
+      {isEditable && dialog === 'replace' && (
+        <Modal title="替换图片" onClose={restoreFocus} className="image-settings-modal">
+          <InsertImageDialog
+            activeEditor={editor}
+            onClose={restoreFocus}
+            onInsert={payload => {
+              change(node => {
+                node.setSrc(payload.src);
+                node.setAltText(payload.altText || altText);
+                node.setWidthAndHeight(Math.round(imageSize().width), 'inherit');
+                $selectImage(node);
+              }, src);
+            }}
           />
-        )}
-      </>
-    </Suspense>
+        </Modal>
+      )}
+    </>
   );
 }

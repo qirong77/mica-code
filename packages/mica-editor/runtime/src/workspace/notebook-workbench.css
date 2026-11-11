@@ -195,12 +195,6 @@ body:has(.notebook-workbench) {
   vertical-align: top;
 }
 
-.notebook-workbench .editor-image img {
-  max-width: 100% !important;
-  height: auto !important;
-  border-radius: 7px;
-}
-
 body.mica-arco-theme .notebook-workbench .editor-image .image-caption-container {
   position: relative;
   bottom: auto;

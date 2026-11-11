@@ -71,7 +71,7 @@ const CaptionEditorExtension = defineExtension({
     // FIXME - The current playground has tests that assume that image captions don't have shared history
     // SharedHistoryExtension,
     HistoryExtension,
-    NestedEditorExtension,
+    configExtension(NestedEditorExtension, {inheritEditableFromParent: true}),
     ReactProviderExtension,
     RichTextExtension,
     HashtagExtension,
@@ -81,7 +81,7 @@ const CaptionEditorExtension = defineExtension({
     configExtension(ReactExtension, {
       contentEditable: (
         <ContentEditable
-          placeholder="Enter a caption..."
+          placeholder="添加图注…"
           placeholderClassName="ImageNode__placeholder"
           className="ImageNode__contentEditable"
         />
@@ -225,8 +225,8 @@ export class ImageNode extends DecoratorNode<JSX.Element> {
     const imgElement = $getDocument().createElement('img');
     imgElement.setAttribute('src', this.__src);
     imgElement.setAttribute('alt', this.__altText);
-    imgElement.setAttribute('width', this.__width.toString());
-    imgElement.setAttribute('height', this.__height.toString());
+    if (typeof this.__width === 'number' && Number.isFinite(this.__width) && this.__width > 0) imgElement.setAttribute('width', String(this.__width));
+    if (typeof this.__height === 'number' && Number.isFinite(this.__height) && this.__height > 0) imgElement.setAttribute('height', String(this.__height));
 
     if (this.__showCaption && this.__caption) {
       const captionEditor = this.__caption;

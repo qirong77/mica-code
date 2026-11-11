@@ -68,7 +68,6 @@ import {type Dispatch, Fragment, type JSX, type MouseEvent, type ReactNode, useC
 import {useSettings} from '../../context/SettingsContext';
 import {
   blockTypeToBlockName,
-  DEFAULT_FONT_SIZE,
   useToolbarState,
 } from '../../context/ToolbarContext';
 import useModal from '../../hooks/useModal';
@@ -76,6 +75,7 @@ import {MenuSeparator} from '../../../../../../mica-config-ui/web/components/Act
 import ColorPicker from '../../ui/ColorPicker';
 import DropDown, {DropDownItem} from '../../ui/DropDown';
 import DropdownColorPicker from '../../ui/DropdownColorPicker';
+import EditorIcon from '../../ui/EditorIcon';
 import {isKeyboardInput} from '../../utils/focusUtils';
 import {getSelectedNode} from '../../utils/getSelectedNode';
 import {INSERT_COLLAPSIBLE_COMMAND} from '../CollapsibleExtension';
@@ -89,6 +89,12 @@ import {shortcut} from '../ShortcutsExtension/shortcuts';
 import {InsertTableDialog} from '../TablePlugin';
 import FontSize, {parseFontSizeForToolbar} from './fontSize';
 import {type ToolbarGroup, useAdaptiveToolbar} from './useAdaptiveToolbar';
+import {
+  $getToolbarFontSize,
+  FONT_SIZE_PRESETS,
+  HEADING_FONT_SIZES,
+} from './typography';
+import './toolbar.css';
 import {
   clearFormatting,
   formatBulletList,
@@ -197,6 +203,7 @@ const CODE_THEME_OPTIONS_SHIKI: [string, string][] =
   );
 
 const FONT_FAMILY_OPTIONS: [string, string][] = [
+  ['', '默认字体'],
   ['Arial', 'Arial'],
   ['Courier New', 'Courier New'],
   ['Georgia', 'Georgia'],
@@ -205,19 +212,16 @@ const FONT_FAMILY_OPTIONS: [string, string][] = [
   ['Verdana', 'Verdana'],
 ];
 
-const FONT_SIZE_OPTIONS: [string, string][] = [
-  ['10px', '10px'],
-  ['11px', '11px'],
-  ['12px', '12px'],
-  ['13px', '13px'],
-  ['14px', '14px'],
-  ['15px', '15px'],
-  ['16px', '16px'],
-  ['17px', '17px'],
-  ['18px', '18px'],
-  ['19px', '19px'],
-  ['20px', '20px'],
-];
+const FONT_SIZE_OPTIONS: [string, string][] = FONT_SIZE_PRESETS.map(size => [
+  `${size}px`,
+  String(size),
+]);
+
+const HEADING_SHORTCUTS: Partial<Record<keyof typeof HEADING_FONT_SIZES, string>> = {
+  h1: shortcut('HEADING1'),
+  h2: shortcut('HEADING2'),
+  h3: shortcut('HEADING3'),
+};
 
 const ELEMENT_FORMAT_OPTIONS: {
   [key in Exclude<ElementFormatType, ''>]: {
@@ -281,7 +285,6 @@ function BlockFormatDropDown({
     <DropDown
       disabled={disabled}
       buttonClassName="toolbar-item block-controls"
-      buttonIconClassName={'icon block-type ' + blockType}
       buttonLabel={BLOCK_TYPE_LABELS[blockType]}
       buttonAriaLabel="段落样式">
       <BlockFormatItems editor={editor} blockType={blockType} />
@@ -293,48 +296,36 @@ function BlockFormatItems({editor, blockType}: {editor: LexicalEditor; blockType
   return (
     <>
       <DropDownItem
-        className={
-          'item wide ' + dropDownActiveClass(blockType === 'paragraph')
-        }
+        className={'item wide ' + dropDownActiveClass(blockType === 'paragraph')}
         onClick={() => formatParagraph(editor)}>
         <div className="icon-text-container">
-          <i className="icon paragraph" />
+          <EditorIcon icon="paragraph" />
           <span className="text">正文</span>
         </div>
         <span className="shortcut">{shortcut('NORMAL')}</span>
       </DropDownItem>
-      <DropDownItem
-        className={'item wide ' + dropDownActiveClass(blockType === 'h1')}
-        onClick={() => formatHeading(editor, blockType, 'h1')}>
-        <div className="icon-text-container">
-          <i className="icon h1" />
-          <span className="text">标题 1</span>
-        </div>
-        <span className="shortcut">{shortcut('HEADING1')}</span>
-      </DropDownItem>
-      <DropDownItem
-        className={'item wide ' + dropDownActiveClass(blockType === 'h2')}
-        onClick={() => formatHeading(editor, blockType, 'h2')}>
-        <div className="icon-text-container">
-          <i className="icon h2" />
-          <span className="text">标题 2</span>
-        </div>
-        <span className="shortcut">{shortcut('HEADING2')}</span>
-      </DropDownItem>
-      <DropDownItem
-        className={'item wide ' + dropDownActiveClass(blockType === 'h3')}
-        onClick={() => formatHeading(editor, blockType, 'h3')}>
-        <div className="icon-text-container">
-          <i className="icon h3" />
-          <span className="text">标题 3</span>
-        </div>
-        <span className="shortcut">{shortcut('HEADING3')}</span>
-      </DropDownItem>
+      {Object.entries(HEADING_FONT_SIZES).map(([tag, size]) => (
+        <DropDownItem
+          key={tag}
+          className={'item wide toolbar-heading-item ' + dropDownActiveClass(blockType === tag)}
+          onClick={() => formatHeading(editor, blockType, tag as keyof typeof HEADING_FONT_SIZES)}>
+          <div className="icon-text-container">
+            <EditorIcon icon={tag} />
+            <span className="text toolbar-heading-preview" style={{fontSize: `${size}px`}}>标题 {tag.slice(1)}</span>
+          </div>
+          <span className="toolbar-heading-meta">
+            <span className="toolbar-heading-size">{size}</span>
+            {HEADING_SHORTCUTS[tag as keyof typeof HEADING_FONT_SIZES] && (
+              <span className="shortcut">{HEADING_SHORTCUTS[tag as keyof typeof HEADING_FONT_SIZES]}</span>
+            )}
+          </span>
+        </DropDownItem>
+      ))}
       <DropDownItem
         className={'item wide ' + dropDownActiveClass(blockType === 'number')}
         onClick={() => formatNumberedList(editor, blockType)}>
         <div className="icon-text-container">
-          <i className="icon numbered-list" />
+          <EditorIcon icon="numbered-list" />
           <span className="text">有序列表</span>
         </div>
         <span className="shortcut">{shortcut('NUMBERED_LIST')}</span>
@@ -343,7 +334,7 @@ function BlockFormatItems({editor, blockType}: {editor: LexicalEditor; blockType
         className={'item wide ' + dropDownActiveClass(blockType === 'bullet')}
         onClick={() => formatBulletList(editor, blockType)}>
         <div className="icon-text-container">
-          <i className="icon bullet-list" />
+          <EditorIcon icon="bullet-list" />
           <span className="text">无序列表</span>
         </div>
         <span className="shortcut">{shortcut('BULLET_LIST')}</span>
@@ -352,7 +343,7 @@ function BlockFormatItems({editor, blockType}: {editor: LexicalEditor; blockType
         className={'item wide ' + dropDownActiveClass(blockType === 'check')}
         onClick={() => formatCheckList(editor, blockType)}>
         <div className="icon-text-container">
-          <i className="icon check-list" />
+          <EditorIcon icon="check-list" />
           <span className="text">任务列表</span>
         </div>
         <span className="shortcut">{shortcut('CHECK_LIST')}</span>
@@ -361,7 +352,7 @@ function BlockFormatItems({editor, blockType}: {editor: LexicalEditor; blockType
         className={'item wide ' + dropDownActiveClass(blockType === 'quote')}
         onClick={() => formatQuote(editor, blockType)}>
         <div className="icon-text-container">
-          <i className="icon quote" />
+          <EditorIcon icon="quote" />
           <span className="text">引用</span>
         </div>
         <span className="shortcut">{shortcut('QUOTE')}</span>
@@ -370,7 +361,7 @@ function BlockFormatItems({editor, blockType}: {editor: LexicalEditor; blockType
         className={'item wide ' + dropDownActiveClass(blockType === 'code')}
         onClick={() => formatCode(editor, blockType)}>
         <div className="icon-text-container">
-          <i className="icon code" />
+          <EditorIcon icon="code" />
           <span className="text">代码块</span>
         </div>
         <span className="shortcut">{shortcut('CODE_BLOCK')}</span>
@@ -397,7 +388,7 @@ function FontDropDown({
         const selection = $getSelection();
         if (selection !== null) {
           $patchStyleText(selection, {
-            [style]: option,
+            [style]: option || null,
           });
         }
       });
@@ -411,10 +402,7 @@ function FontDropDown({
     <DropDown
       disabled={disabled}
       buttonClassName={'toolbar-item ' + style}
-      buttonLabel={value}
-      buttonIconClassName={
-        style === 'font-family' ? 'icon block-type font-family' : ''
-      }
+      buttonLabel={value || (style === 'font-family' ? '默认' : '')}
       buttonAriaLabel={buttonAriaLabel}>
       {(style === 'font-family' ? FONT_FAMILY_OPTIONS : FONT_SIZE_OPTIONS).map(
         ([option, text]) => (
@@ -447,7 +435,7 @@ function ElementFormatDropdown({
     <DropDown
       disabled={disabled}
       buttonLabel={formatOption.name}
-      buttonIconClassName={`icon ${isRTL ? formatOption.iconRTL : formatOption.icon}`}
+      buttonIcon={<EditorIcon icon={isRTL ? formatOption.iconRTL : formatOption.icon} />}
       buttonClassName="toolbar-item spaced alignment"
       buttonAriaLabel="对齐与缩进">
       <ElementFormatItems editor={editor} isRTL={isRTL} />
@@ -464,7 +452,7 @@ function ElementFormatItems({editor, isRTL}: {editor: LexicalEditor; isRTL: bool
         }}
         className="item wide">
         <div className="icon-text-container">
-          <i className="icon left-align" />
+          <EditorIcon icon="left-align" />
           <span className="text">左对齐</span>
         </div>
         <span className="shortcut">{shortcut('LEFT_ALIGN')}</span>
@@ -475,7 +463,7 @@ function ElementFormatItems({editor, isRTL}: {editor: LexicalEditor; isRTL: bool
         }}
         className="item wide">
         <div className="icon-text-container">
-          <i className="icon center-align" />
+          <EditorIcon icon="center-align" />
           <span className="text">居中对齐</span>
         </div>
         <span className="shortcut">{shortcut('CENTER_ALIGN')}</span>
@@ -486,7 +474,7 @@ function ElementFormatItems({editor, isRTL}: {editor: LexicalEditor; isRTL: bool
         }}
         className="item wide">
         <div className="icon-text-container">
-          <i className="icon right-align" />
+          <EditorIcon icon="right-align" />
           <span className="text">右对齐</span>
         </div>
         <span className="shortcut">{shortcut('RIGHT_ALIGN')}</span>
@@ -497,7 +485,7 @@ function ElementFormatItems({editor, isRTL}: {editor: LexicalEditor; isRTL: bool
         }}
         className="item wide">
         <div className="icon-text-container">
-          <i className="icon justify-align" />
+          <EditorIcon icon="justify-align" />
           <span className="text">两端对齐</span>
         </div>
         <span className="shortcut">{shortcut('JUSTIFY_ALIGN')}</span>
@@ -507,9 +495,7 @@ function ElementFormatItems({editor, isRTL}: {editor: LexicalEditor; isRTL: bool
           editor.dispatchCommand(FORMAT_ELEMENT_COMMAND, 'start');
         }}
         className="item wide">
-        <i
-          className={`icon ${isRTL ? ELEMENT_FORMAT_OPTIONS.start.iconRTL : ELEMENT_FORMAT_OPTIONS.start.icon}`}
-        />
+        <EditorIcon icon={isRTL ? ELEMENT_FORMAT_OPTIONS.start.iconRTL : ELEMENT_FORMAT_OPTIONS.start.icon} />
         <span className="text">起始对齐</span>
       </DropDownItem>
       <DropDownItem
@@ -517,9 +503,7 @@ function ElementFormatItems({editor, isRTL}: {editor: LexicalEditor; isRTL: bool
           editor.dispatchCommand(FORMAT_ELEMENT_COMMAND, 'end');
         }}
         className="item wide">
-        <i
-          className={`icon ${isRTL ? ELEMENT_FORMAT_OPTIONS.end.iconRTL : ELEMENT_FORMAT_OPTIONS.end.icon}`}
-        />
+        <EditorIcon icon={isRTL ? ELEMENT_FORMAT_OPTIONS.end.iconRTL : ELEMENT_FORMAT_OPTIONS.end.icon} />
         <span className="text">末端对齐</span>
       </DropDownItem>
       <MenuSeparator />
@@ -529,7 +513,7 @@ function ElementFormatItems({editor, isRTL}: {editor: LexicalEditor; isRTL: bool
         }}
         className="item wide">
         <div className="icon-text-container">
-          <i className={'icon ' + (isRTL ? 'indent' : 'outdent')} />
+          <EditorIcon icon={isRTL ? 'indent' : 'outdent'} />
           <span className="text">减少缩进</span>
         </div>
         <span className="shortcut">{shortcut('OUTDENT')}</span>
@@ -540,7 +524,7 @@ function ElementFormatItems({editor, isRTL}: {editor: LexicalEditor; isRTL: bool
         }}
         className="item wide">
         <div className="icon-text-container">
-          <i className={'icon ' + (isRTL ? 'outdent' : 'indent')} />
+          <EditorIcon icon={isRTL ? 'outdent' : 'indent'} />
           <span className="text">增加缩进</span>
         </div>
         <span className="shortcut">{shortcut('INDENT')}</span>
@@ -573,102 +557,6 @@ type ToolbarAction = {
   keys?: string;
   onClick: (event: MouseEvent<HTMLButtonElement>) => void;
 };
-
-function ActionIcon({icon}: {icon: string}) {
-  if (icon === 'undo' || icon === 'redo')
-    return (
-      <svg
-        className="format-icon"
-        width="16"
-        height="16"
-        viewBox="0 0 16 16"
-        fill="none"
-        aria-hidden="true">
-        <path
-          d={
-            icon === 'undo'
-              ? 'm5 3-3 3 3 3M2 6h7a4 4 0 0 1 0 8'
-              : 'm11 3 3 3-3 3M14 6H7a4 4 0 0 0 0 8'
-          }
-          stroke="currentColor"
-          strokeWidth="1.4"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        />
-      </svg>
-    );
-  if (icon === 'quote')
-    return (
-      <svg
-        className="format-icon"
-        width="16"
-        height="16"
-        viewBox="0 0 16 16"
-        fill="none"
-        aria-hidden="true">
-        <path
-          d="M3 4h4v5H3V4Zm0 5c0 2 1 3 3 3M10 4h4v5h-4V4Zm0 5c0 2 1 3 3 3"
-          stroke="currentColor"
-          strokeWidth="1.3"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        />
-      </svg>
-    );
-  if (icon === 'horizontal-rule')
-    return (
-      <svg
-        className="format-icon"
-        width="16"
-        height="16"
-        viewBox="0 0 16 16"
-        fill="none"
-        aria-hidden="true">
-        <path
-          d="M2 8h12"
-          stroke="currentColor"
-          strokeWidth="1.5"
-          strokeLinecap="round"
-        />
-      </svg>
-    );
-  if (icon === 'italic')
-    return (
-      <svg
-        className="format-icon"
-        width="16"
-        height="16"
-        viewBox="0 0 16 16"
-        fill="none"
-        aria-hidden="true">
-        <path
-          d="M7 3h6M3 13h6M10 3 6 13"
-          stroke="currentColor"
-          strokeWidth="1.5"
-          strokeLinecap="round"
-        />
-      </svg>
-    );
-  if (icon === 'clear')
-    return (
-      <svg
-        className="format-icon"
-        width="16"
-        height="16"
-        viewBox="0 0 16 16"
-        fill="none"
-        aria-hidden="true">
-        <path
-          d="m9.5 2.5 4 4a1 1 0 0 1 0 1.4L7.4 14H4.5l-2-2a1 1 0 0 1 0-1.4l7-8.1ZM6 6.5l5 5M7 14h7"
-          stroke="currentColor"
-          strokeWidth="1.3"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        />
-      </svg>
-    );
-  return <i className={`icon ${icon}`} aria-hidden="true" />;
-}
 
 export default function ToolbarPlugin({
   editor,
@@ -880,7 +768,7 @@ export default function ToolbarPlugin({
       );
       updateToolbarState(
         'fontFamily',
-        $getSelectionStyleValueForProperty(selection, 'font-family', 'Arial'),
+        $getSelectionStyleValueForProperty(selection, 'font-family', ''),
       );
       let matchingParent;
       if ($isLinkNode(parent)) {
@@ -916,11 +804,7 @@ export default function ToolbarPlugin({
       updateToolbarState('isCode', selection.hasFormat('code'));
       updateToolbarState(
         'fontSize',
-        $getSelectionStyleValueForProperty(
-          selection,
-          'font-size',
-          `${DEFAULT_FONT_SIZE}px`,
-        ),
+        $getToolbarFontSize(activeEditor, selection),
       );
       updateToolbarState('isLowercase', selection.hasFormat('lowercase'));
       updateToolbarState('isUppercase', selection.hasFormat('uppercase'));
@@ -1007,7 +891,7 @@ export default function ToolbarPlugin({
 
   const applyStyleText = useCallback(
     (
-      styles: Record<string, string>,
+      styles: Record<string, string | null>,
       skipHistoryStack?: boolean,
       skipRefocus: boolean = false,
     ) => {
@@ -1295,7 +1179,7 @@ export default function ToolbarPlugin({
       aria-pressed={action.active}
       title={action.keys ? `${action.label} (${action.keys})` : action.label}
       onClick={action.onClick}>
-      <ActionIcon icon={action.icon} />
+      <EditorIcon icon={action.icon} />
     </button>
   );
   const actionItem = (action: ToolbarAction) => (
@@ -1305,7 +1189,7 @@ export default function ToolbarPlugin({
       disabled={!isEditable || action.disabled}
       onClick={action.onClick}>
       <div className="icon-text-container">
-        <ActionIcon icon={action.icon} />
+        <EditorIcon icon={action.icon} />
         <span className="text">{action.label}</span>
       </div>
       {action.keys && <span className="shortcut">{action.keys}</span>}
@@ -1320,7 +1204,7 @@ export default function ToolbarPlugin({
         setMorePage(page);
       }}>
       <div className="icon-text-container">
-        <ActionIcon icon={icon} />
+        <EditorIcon icon={icon} />
         <span className="text">{label}</span>
       </div>
       <span className="toolbar-menu-forward" aria-hidden="true">
@@ -1406,7 +1290,7 @@ export default function ToolbarPlugin({
         <DropDownItem
           key={value}
           className={`item ${dropDownActiveClass(value === (morePage === 'font-family' ? toolbarState.fontFamily : toolbarState.fontSize))}`}
-          onClick={() => applyStyleText({[morePage]: value})}>
+          onClick={() => applyStyleText({[morePage]: value || null})}>
           <span className="text">{label}</span>
         </DropDownItem>
       ))
@@ -1437,7 +1321,7 @@ export default function ToolbarPlugin({
             buttonClassName="toolbar-item insert-menu"
             hideChevron
             buttonAriaLabel="插入内容"
-            buttonIconClassName="icon plus">
+            buttonIcon={<EditorIcon icon="plus" />}>
             <DropDownItem
               onClick={() => {
                 showModal('插入表格', onClose => (
@@ -1448,7 +1332,7 @@ export default function ToolbarPlugin({
                 ));
               }}
               className="item">
-              <i className="icon table" />
+              <EditorIcon icon="table" />
               <span className="text">表格</span>
             </DropDownItem>
             <DropDownItem
@@ -1456,7 +1340,7 @@ export default function ToolbarPlugin({
                 dispatchToolbarCommand(INSERT_HORIZONTAL_RULE_COMMAND)
               }
               className="item">
-              <i className="icon horizontal-rule" />
+              <EditorIcon icon="horizontal-rule" />
               <span className="text">分隔线</span>
             </DropDownItem>
 
@@ -1470,14 +1354,14 @@ export default function ToolbarPlugin({
                 ));
               }}
               className="item">
-              <i className="icon image" />
+              <EditorIcon icon="image" />
               <span className="text">图片</span>
             </DropDownItem>
 
             <DropDownItem
               onClick={() => dispatchToolbarCommand(INSERT_EXCALIDRAW_COMMAND)}
               className="item">
-              <i className="icon diagram-2" />
+              <EditorIcon icon="diagram-2" />
               <span className="text">绘图</span>
             </DropDownItem>
 
@@ -1491,7 +1375,7 @@ export default function ToolbarPlugin({
                 ));
               }}
               className="item">
-              <i className="icon columns" />
+              <EditorIcon icon="columns" />
               <span className="text">分栏布局</span>
             </DropDownItem>
 
@@ -1505,14 +1389,14 @@ export default function ToolbarPlugin({
                 ));
               }}
               className="item">
-              <i className="icon equation" />
+              <EditorIcon icon="equation" />
               <span className="text">公式</span>
             </DropDownItem>
 
             <DropDownItem
               onClick={() => dispatchToolbarCommand(INSERT_COLLAPSIBLE_COMMAND)}
               className="item">
-              <i className="icon caret-right" />
+              <EditorIcon icon="caret-right" />
               <span className="text">折叠区块</span>
             </DropDownItem>
             <DropDownItem
@@ -1522,7 +1406,7 @@ export default function ToolbarPlugin({
                 dispatchToolbarCommand(INSERT_DATETIME_COMMAND, {dateTime});
               }}
               className="item">
-              <i className="icon calendar" />
+              <EditorIcon icon="calendar" />
               <span className="text">日期</span>
             </DropDownItem>
           </DropDown>
@@ -1728,7 +1612,7 @@ export default function ToolbarPlugin({
           buttonClassName="toolbar-item"
           hideChevron
           buttonAriaLabel="更多"
-          buttonIconClassName="icon toolbar-ellipsis"
+          buttonIcon={<EditorIcon icon="toolbar-ellipsis" />}
           onOpen={() => setMorePage(null)}
           stopCloseOnClickSelf={
             morePage === 'font-color' || morePage === 'bg-color'

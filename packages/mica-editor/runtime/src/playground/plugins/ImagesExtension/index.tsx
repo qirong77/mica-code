@@ -61,6 +61,7 @@ import Button from '../../ui/Button';
 import {DialogActions, DialogButtonsList} from '../../ui/Dialog';
 import FileInput from '../../ui/FileInput';
 import TextInput from '../../ui/TextInput';
+import {$imageBlock, $selectImage} from '../../nodes/imageEditing';
 
 /**
  * Google Docs serializes its bullet/check list markers as a leading
@@ -233,9 +234,11 @@ export function InsertImageUploadedDialogBody({
 export function InsertImageDialog({
   activeEditor,
   onClose,
+  onInsert,
 }: {
   activeEditor: LexicalEditor;
   onClose: () => void;
+  onInsert?: (payload: InsertImagePayload) => void;
 }): JSX.Element {
   const [mode, setMode] = useState<null | 'url' | 'file'>(null);
   const hasModifier = useRef(false);
@@ -249,7 +252,8 @@ export function InsertImageDialog({
   }, [activeEditor]);
 
   const onClick = (payload: InsertImagePayload) => {
-    activeEditor.dispatchCommand(INSERT_IMAGE_COMMAND, payload);
+    if (onInsert) onInsert(payload);
+    else activeEditor.dispatchCommand(INSERT_IMAGE_COMMAND, payload);
     onClose();
   };
 
@@ -357,7 +361,6 @@ function $onDragStart(event: DragEvent): boolean {
     JSON.stringify({
       data: {
         altText: node.__altText,
-        caption: node.__caption,
         height: node.__height,
         key: node.getKey(),
         maxWidth: node.__maxWidth,
@@ -397,19 +400,28 @@ function $onDrop(event: DragEvent, editor: LexicalEditor): boolean {
     (parent): parent is LinkNode =>
       !$isAutoLinkNode(parent) && $isLinkNode(parent),
   );
+  const linkAttributes = existingLink ? {
+    url: existingLink.getURL(), target: existingLink.getTarget(),
+    rel: existingLink.getRel(), title: existingLink.getTitle(),
+  } : null;
+  const originalFormat = $imageBlock(node)?.getFormatType();
   event.preventDefault();
   if (canDropImage(event)) {
     const range = getDragSelection(event, editor.getRootElement());
-    node.remove();
+    if (!range || data.key !== node.getKey()) return true;
     const rangeSelection = $createRangeSelection();
-    if (range !== null && range !== undefined) {
-      rangeSelection.applyDOMRange(range);
-    }
+    rangeSelection.applyDOMRange(range);
     $setSelection(rangeSelection);
-    editor.dispatchCommand(INSERT_IMAGE_COMMAND, data);
-    if (existingLink) {
-      editor.dispatchCommand(TOGGLE_LINK_COMMAND, existingLink.getURL());
+    // Relocate the original node: serializing its nested caption editor into
+    // drag data turns it into a plain object and loses its history/identity.
+    $insertNodes([node]);
+    if ($isRootOrShadowRoot(node.getParentOrThrow())) {
+      $wrapNodeInElement(node, $createParagraphNode).selectEnd();
     }
+    const targetBlock = $imageBlock(node);
+    if (targetBlock?.getChildrenSize() === 1 && originalFormat) targetBlock.setFormat(originalFormat);
+    $selectImage(node);
+    if (linkAttributes) editor.dispatchCommand(TOGGLE_LINK_COMMAND, linkAttributes);
   }
   return true;
 }
@@ -420,6 +432,7 @@ function $getImageNodeInSelection(): ImageNode | null {
     return null;
   }
   const nodes = selection.getNodes();
+  if (nodes.length !== 1) return null;
   const node = nodes[0];
   return $isImageNode(node) ? node : null;
 }

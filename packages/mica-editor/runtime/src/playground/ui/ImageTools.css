@@ -1,0 +1,369 @@
+/* Image chrome only. The shared Arco controls and MenuList own their surfaces. */
+.editor-shell span.editor-image:has(.image-frame) {
+  max-width: 100%;
+  overflow: visible;
+  vertical-align: top;
+  line-height: 0;
+}
+
+.editor-shell .editor-image .image-frame {
+  position: relative;
+  display: block;
+  overflow: visible;
+  border-radius: 6px;
+  line-height: 0;
+  user-select: none;
+}
+
+.editor-shell .editor-image .image-frame > img {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  border-radius: inherit;
+  object-fit: fill;
+  cursor: pointer;
+}
+
+.image-frame.is-selected::after {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  border: 1.5px solid var(--color-accent);
+  border-radius: inherit;
+  pointer-events: none;
+  content: '';
+}
+
+.image-frame[draggable='true'] > img {
+  cursor: grab;
+}
+.image-frame.is-resizing > img {
+  cursor: inherit;
+}
+.image-loading {
+  display: block;
+  width: min(500px, 100%);
+  aspect-ratio: 5 / 3;
+  border-radius: 6px;
+  background: var(--color-panel);
+}
+.image-broken {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 8px;
+  height: 100%;
+  padding: 16px;
+  border: 1px dashed var(--color-line-strong);
+  border-radius: inherit;
+  background: var(--color-panel);
+  color: var(--color-fg-faint);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.image-broken > svg {
+  width: 24px;
+  height: 24px;
+}
+.image-broken > span:last-child {
+  overflow: hidden;
+  max-width: 100%;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.editor-shell .editor-image .image-frame .image-resizer {
+  z-index: 4;
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--color-canvas);
+  border-radius: 50%;
+  background: var(--color-accent);
+  box-shadow: 0 0 0 1px var(--color-accent);
+  touch-action: none;
+}
+.editor-shell .editor-image .image-frame .image-resizer-nw {
+  top: -6px;
+  left: -6px;
+}
+.editor-shell .editor-image .image-frame .image-resizer-ne {
+  top: -6px;
+  right: -6px;
+}
+.editor-shell .editor-image .image-frame .image-resizer-sw {
+  bottom: -6px;
+  left: -6px;
+}
+.editor-shell .editor-image .image-frame .image-resizer-se {
+  bottom: -6px;
+  right: -6px;
+}
+.image-resize-dimensions {
+  position: absolute;
+  left: 50%;
+  bottom: 10px;
+  transform: translateX(-50%);
+  border-radius: 4px;
+  padding: 4px 8px;
+  background: var(--color-panel);
+  color: var(--color-fg);
+  box-shadow: 0 2px 8px var(--color-overlay-strong);
+  font-size: 11px;
+  line-height: 1.5;
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+.image-toolbar {
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  box-sizing: border-box;
+  max-width: calc(100vw - 20px);
+  padding: 5px;
+  border: 1px solid var(--color-line);
+  border-radius: 8px;
+  background: var(--color-canvas);
+  box-shadow: 0 4px 18px var(--color-overlay-strong);
+  color: var(--color-fg-soft);
+  font: 12px/1.5 var(--font-family);
+}
+.image-toolbar-group {
+  display: flex;
+  align-items: center;
+  flex: none;
+  gap: 2px;
+}
+body:has(.link-editor:not([hidden])) .image-toolbar {
+  visibility: hidden;
+  pointer-events: none;
+}
+.image-toolbar-group + .image-toolbar-group {
+  border-left: 1px solid var(--color-line-soft);
+  padding-left: 6px;
+}
+.image-toolbar .arco-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  height: 28px;
+  min-width: 28px;
+  padding: 4px 6px;
+  border-radius: 4px;
+  color: inherit;
+}
+.image-toolbar .arco-btn > svg,
+.image-toolbar .arco-btn .arco-icon,
+.image-toolbar .arco-btn-icon {
+  width: 16px;
+  height: 16px;
+}
+.image-toolbar .arco-btn:disabled {
+  color: var(--color-fg-faint);
+}
+.image-toolbar .arco-btn[aria-expanded='true'] {
+  background: var(--color-active);
+}
+.image-toolbar .image-tool-dropdown {
+  gap: 3px;
+}
+.image-tool-dropdown .chevron-down {
+  display: block;
+  width: 9px;
+  height: 9px;
+  background: currentColor;
+  mask: url('../images/icons/chevron-down.svg') center / contain no-repeat;
+  opacity: 0.55;
+}
+.image-toolbar .arco-btn:hover:not(:disabled) {
+  background: var(--color-active);
+}
+.image-delete-item .icon-text-container {
+  color: var(--color-danger);
+}
+.image-quick-actions {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--color-line-soft);
+  border-radius: 6px;
+  background: var(--color-canvas);
+  box-shadow: 0 2px 8px var(--color-overlay-strong);
+  line-height: 1;
+}
+.image-quick-actions .arco-btn {
+  width: 28px;
+  height: 26px;
+  padding: 4px;
+  color: var(--color-fg-soft);
+}
+.image-quick-actions .arco-icon {
+  width: 16px;
+  height: 16px;
+}
+.image-operation-error {
+  margin-top: 8px;
+  max-width: 500px;
+  color: var(--color-danger);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.editor-shell .editor-image .image-caption-container {
+  position: relative;
+  inset: auto;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: var(--color-fg-faint);
+  line-height: 1.6;
+}
+.image-caption-container .ImageNode__placeholder {
+  inset: 9px 8px auto;
+  text-align: center;
+  color: var(--color-fg-faint);
+  font-size: 11px;
+  line-height: 1.7;
+}
+.image-caption-container .ImageNode__contentEditable {
+  padding: 9px 8px;
+  color: var(--color-fg-soft);
+  text-align: center;
+  font-size: 11px;
+  line-height: 1.7;
+}
+.image-caption-container .ImageNode__contentEditable:focus {
+  background: var(--color-overlay);
+  border-radius: 4px;
+}
+.image-caption-container .PlaygroundEditorTheme__paragraph {
+  margin: 0;
+}
+
+.image-settings-modal .editor-modal-body {
+  height: auto;
+  min-height: 170px;
+}
+.image-size-fields {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+}
+.image-size-fields > label {
+  flex: 1;
+  min-width: 0;
+  color: var(--color-fg-soft);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.image-size-fields > label > span {
+  color: var(--color-fg-faint);
+}
+.image-size-fields .arco-input-number {
+  display: flex;
+  width: 100%;
+  margin-top: 6px;
+}
+.image-size-fields > .arco-btn {
+  flex: none;
+  margin-bottom: 2px;
+  color: var(--color-fg-soft);
+}
+.image-size-fields > .arco-btn[aria-pressed='true'] {
+  color: var(--color-accent);
+}
+.image-settings-hint {
+  margin: 12px 0 0;
+  color: var(--color-fg-faint);
+  font-size: 11px;
+  line-height: 1.7;
+}
+.image-size-presets {
+  display: flex;
+  gap: 8px;
+  margin-top: 6px;
+}
+.image-caption-setting {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-top: 18px;
+  color: var(--color-fg-soft);
+  font-size: 12px;
+}
+.image-preview-modal .editor-modal-body {
+  height: auto;
+  overflow: hidden;
+}
+.image-preview-stage {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: min(65vh, 760px);
+  overflow: auto;
+  border-radius: 6px;
+  background: var(--color-panel);
+}
+.image-preview-stage > img {
+  display: block;
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  cursor: zoom-in;
+}
+.image-preview-stage.is-zoomed {
+  display: block;
+}
+.image-preview-stage.is-zoomed > img {
+  max-width: none;
+  max-height: none;
+  margin: auto;
+  cursor: zoom-out;
+}
+.image-preview-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 10px;
+  color: var(--color-fg-faint);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.image-preview-footer > span {
+  overflow: hidden;
+  min-width: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.image-preview-footer > button {
+  flex: none;
+}
+@media (max-width: 420px) {
+  .image-toolbar {
+    gap: 3px;
+    padding: 4px;
+  }
+  .image-toolbar-group + .image-toolbar-group {
+    padding-left: 3px;
+  }
+  .image-toolbar .arco-btn {
+    padding-inline: 4px;
+    min-width: 26px;
+  }
+  .image-toolbar .arco-btn > span:not(.arco-btn-icon) {
+    display: none;
+  }
+}

@@ -3,8 +3,13 @@ import {$getRoot} from 'lexical';
 import {type ReactNode, useEffect, useState} from 'react';
 
 import './notebook-workbench.css';
+import './notebook-document.css';
 
 import {useNotebookSession} from './NotebookBridge';
+import NotebookBlockEditing from './NotebookBlockEditing';
+import NotebookCommentsPanel from './NotebookCommentsPanel';
+import NotebookDocumentStyle from './NotebookDocumentStyle';
+import NotebookPresentation from './NotebookPresentation';
 import {countCharacters} from './storage';
 
 export default function WorkspaceShell({children}: {children: ReactNode}) {
@@ -26,6 +31,10 @@ export default function WorkspaceShell({children}: {children: ReactNode}) {
     <div className="workspace notebook-editor notebook-workbench">
       <section className="editor-canvas" aria-label="笔记富文本编辑器">
         {children}
+        <NotebookBlockEditing />
+        <NotebookCommentsPanel />
+        <NotebookDocumentStyle />
+        <NotebookPresentation />
         <footer className="document-statusbar">
           <span role="status">{characters.toLocaleString()} 字</span>
         </footer>

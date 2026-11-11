@@ -8,20 +8,14 @@
 
 import './fontSize.css';
 
-import {type LexicalEditor} from 'lexical';
+import { type LexicalEditor } from 'lexical';
 import * as React from 'react';
 
-import {
-  MAX_ALLOWED_FONT_SIZE,
-  MIN_ALLOWED_FONT_SIZE,
-} from '../../context/ToolbarContext';
-import {isKeyboardInput} from '../../utils/focusUtils';
-import {shortcut} from '../ShortcutsExtension/shortcuts';
-import {
-  updateFontSize,
-  updateFontSizeInSelection,
-  UpdateFontSizeType,
-} from './utils';
+import { MAX_ALLOWED_FONT_SIZE, MIN_ALLOWED_FONT_SIZE } from '../../context/ToolbarContext';
+import DropDown, { DropDownItem } from '../../ui/DropDown';
+import { isKeyboardInput } from '../../utils/focusUtils';
+import { updateFontSizeInSelection } from './utils';
+import { FONT_SIZE_PRESETS } from './typography';
 
 function parseFontSize(input: string): [number, string] | null {
   const match = input.match(/^(\d+(?:\.\d+)?)(px|pt)$/);
@@ -33,9 +27,7 @@ function normalizeToPx(fontSize: number, unit: string): number {
 }
 
 function isValidFontSize(fontSizePx: number): boolean {
-  return (
-    fontSizePx >= MIN_ALLOWED_FONT_SIZE && fontSizePx <= MAX_ALLOWED_FONT_SIZE
-  );
+  return fontSizePx >= MIN_ALLOWED_FONT_SIZE && fontSizePx <= MAX_ALLOWED_FONT_SIZE;
 }
 
 export function parseFontSizeForToolbar(input: string): string {
@@ -69,126 +61,69 @@ export default function FontSize({
   disabled: boolean;
   editor: LexicalEditor;
 }) {
-  const [inputValue, setInputValue] = React.useState<string>(selectionFontSize);
-  const [inputChangeFlag, setInputChangeFlag] = React.useState<boolean>(false);
-  const [isMouseMode, setIsMouseMode] = React.useState(false);
+  const [inputValue, setInputValue] = React.useState(selectionFontSize);
+  const [dirty, setDirty] = React.useState(false);
 
-  const handleKeyPress = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    const inputValueNumber = Number(inputValue);
-
-    if (e.key === 'Tab') {
+  const commit = (value: string, skipRefocus = false) => {
+    const size = Number(value);
+    if (!value.trim() || !Number.isFinite(size) || size <= 0) {
+      setInputValue(selectionFontSize);
+      setDirty(false);
       return;
     }
-    if (['e', 'E', '+', '-'].includes(e.key) || isNaN(inputValueNumber)) {
-      e.preventDefault();
-      setInputValue('');
-      return;
-    }
-    setInputChangeFlag(true);
-    if (e.key === 'Enter' || e.key === 'Escape') {
-      e.preventDefault();
-
-      updateFontSizeByInputValue(inputValueNumber, !isMouseMode);
-    }
-  };
-
-  const handleInputBlur = () => {
-    setIsMouseMode(false);
-
-    if (inputValue !== '' && inputChangeFlag) {
-      const inputValueNumber = Number(inputValue);
-      updateFontSizeByInputValue(inputValueNumber);
-    }
-  };
-
-  const handleClick = (e: React.MouseEvent) => {
-    setIsMouseMode(true);
-  };
-
-  const updateFontSizeByInputValue = (
-    inputValueNumber: number,
-    skipRefocus: boolean = false,
-  ) => {
-    let updatedFontSize = inputValueNumber;
-    if (inputValueNumber > MAX_ALLOWED_FONT_SIZE) {
-      updatedFontSize = MAX_ALLOWED_FONT_SIZE;
-    } else if (inputValueNumber < MIN_ALLOWED_FONT_SIZE) {
-      updatedFontSize = MIN_ALLOWED_FONT_SIZE;
-    }
-
-    setInputValue(String(updatedFontSize));
-    updateFontSizeInSelection(
-      editor,
-      String(updatedFontSize) + 'px',
-      null,
-      skipRefocus,
-    );
-    setInputChangeFlag(false);
+    const nextSize = Math.min(MAX_ALLOWED_FONT_SIZE, Math.max(MIN_ALLOWED_FONT_SIZE, size));
+    setInputValue(String(nextSize));
+    setDirty(false);
+    updateFontSizeInSelection(editor, `${nextSize}px`, null, skipRefocus);
   };
 
   React.useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setInputValue(selectionFontSize);
+    setDirty(false);
   }, [selectionFontSize]);
 
   return (
     <>
-      <button
-        type="button"
-        disabled={
-          disabled ||
-          (selectionFontSize !== '' &&
-            Number(inputValue) <= MIN_ALLOWED_FONT_SIZE)
-        }
-        onClick={e => {
-          updateFontSize(
-            editor,
-            UpdateFontSizeType.decrement,
-            inputValue,
-            isKeyboardInput(e),
-          );
-        }}
-        className="toolbar-item font-decrement"
-        aria-label="减小字号"
-        title={`减小字号 (${shortcut('DECREASE_FONT_SIZE')})`}>
-        <i className="format minus-icon" />
-      </button>
-
       <input
-        type="number"
-        title="字号"
+        type="text"
+        inputMode="decimal"
+        title="字号（可输入自定义值）"
         aria-label="字号"
         value={inputValue}
         disabled={disabled}
         className="toolbar-item font-size-input"
-        min={MIN_ALLOWED_FONT_SIZE}
-        max={MAX_ALLOWED_FONT_SIZE}
-        onChange={e => setInputValue(e.target.value)}
-        onClick={handleClick}
-        onKeyDown={handleKeyPress}
-        onBlur={handleInputBlur}
-      />
-
-      <button
-        type="button"
-        disabled={
-          disabled ||
-          (selectionFontSize !== '' &&
-            Number(inputValue) >= MAX_ALLOWED_FONT_SIZE)
-        }
-        onClick={e => {
-          updateFontSize(
-            editor,
-            UpdateFontSizeType.increment,
-            inputValue,
-            isKeyboardInput(e),
-          );
+        autoComplete="off"
+        onChange={(event) => {
+          setInputValue(event.target.value);
+          setDirty(true);
         }}
-        className="toolbar-item font-increment"
-        aria-label="增大字号"
-        title={`增大字号 (${shortcut('INCREASE_FONT_SIZE')})`}>
-        <i className="format add-icon" />
-      </button>
+        onKeyDown={(event) => {
+          if (event.key === 'Enter') {
+            event.preventDefault();
+            commit(inputValue, true);
+          } else if (event.key === 'Escape') {
+            event.preventDefault();
+            setInputValue(selectionFontSize);
+            setDirty(false);
+          }
+        }}
+        onBlur={() => {
+          if (dirty) commit(inputValue, true);
+        }}
+      />
+      <span className="font-size-unit" aria-hidden="true">px</span>
+      <DropDown disabled={disabled} buttonClassName="toolbar-item font-size-presets" buttonAriaLabel="选择字号">
+        {FONT_SIZE_PRESETS.map((size) => (
+          <DropDownItem
+            key={size}
+            className={`item fontsize-item${String(size) === selectionFontSize ? ' active dropdown-item-active' : ''}`}
+            onClick={(event) => commit(String(size), isKeyboardInput(event))}
+          >
+            <span className="text">{size}</span>
+          </DropDownItem>
+        ))}
+      </DropDown>
     </>
   );
 }

@@ -1,0 +1,30 @@
+.toolbar .editor-icon,
+.editor-dropdown .editor-icon {
+  display: block;
+  flex: 0 0 16px;
+  width: 16px;
+  height: 16px;
+  color: inherit;
+}
+
+.editor-dropdown .toolbar-heading-item {
+  min-height: 38px;
+}
+
+.editor-dropdown .toolbar-heading-preview {
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.editor-dropdown .toolbar-heading-meta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-inline-start: 24px;
+}
+
+.editor-dropdown .toolbar-heading-size {
+  color: var(--color-fg-muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}

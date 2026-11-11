@@ -14,13 +14,13 @@ import {
 import {TOGGLE_LINK_COMMAND} from '@lexical/link';
 import {$isListNode, ListNode} from '@lexical/list';
 import {$isHeadingNode} from '@lexical/rich-text';
-import {$getSelectionStyleValueForProperty} from '@lexical/selection';
 import {
   $findMatchingParent,
   $getNearestNodeOfType,
   mergeRegister,
 } from '@lexical/utils';
 import {
+  $getEditor,
   $getSelection,
   $isRangeSelection,
   $isRootOrShadowRoot,
@@ -38,6 +38,7 @@ import {
 } from 'lexical';
 
 import {DEFAULT_FONT_SIZE} from '../../context/ToolbarContext';
+import {$getToolbarFontSize} from '../ToolbarPlugin/typography';
 import {
   $clearFormatting,
   $formatBulletList,
@@ -118,11 +119,7 @@ function $getBlockType(): string {
 function $getFontSizeInputValue(): string {
   const selection = $getSelection();
   return $isRangeSelection(selection)
-    ? $getSelectionStyleValueForProperty(
-        selection,
-        'font-size',
-        `${DEFAULT_FONT_SIZE}px`,
-      ).slice(0, -2)
+    ? $getToolbarFontSize($getEditor(), selection).slice(0, -2)
     : `${DEFAULT_FONT_SIZE}`;
 }
 

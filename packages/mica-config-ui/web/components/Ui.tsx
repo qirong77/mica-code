@@ -102,15 +102,18 @@ export function Segmented({
   id,
   disabled = false,
   size = 'default',
+  variant = 'segmented',
 }: {
   value: string;
-  options: { value: string; label: string }[];
+  options: { value: string; label: ReactNode }[];
   onChange(next: string): void;
   ariaLabel?: string;
   id?: string;
   disabled?: boolean;
   /** `compact` 与 `Button` / `SelectMenu` / `DateField` 的紧凑尺寸等高（24px）。 */
   size?: 'default' | 'compact';
+  /** 同一套单选语义：紧凑分段、普通单选或带图文的选项卡。 */
+  variant?: 'segmented' | 'radio' | 'cards';
 }) {
   const name = useId();
   return (
@@ -118,10 +121,11 @@ export function Segmented({
       className={`config-segmented${size === 'compact' ? ' is-compact' : ''}`}
       role="group"
       aria-label={ariaLabel}
+      data-variant={variant}
       id={id}
     >
       <Radio.Group
-        type="button"
+        type={variant === 'segmented' ? 'button' : 'radio'}
         size={size === 'compact' ? 'mini' : 'small'}
         name={name}
         value={value}

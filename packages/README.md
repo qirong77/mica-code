@@ -47,6 +47,8 @@
 - `mica-file-mentions`：`@` 文件补全的唯一实现（触发判定、工作区扫描 + 缓存、评分排序、插入文本）。CLI 输入框/插件与 `apps/desktop` 的聊天输入框共用它，纯逻辑在 `rank.ts`，Node 侧扫描在 `search.ts`。
 - `mica-config-ui`：配置页（Mica Config）的唯一实现——页面组件、数据动作与共享类型；Web 基础控件统一以 Arco Design React 实现，公开 `Input` / `InputNumber` / `Select`、全应用 `ArcoProvider`、富内容浮层 `ArcoPopover`、共享动作菜单 `MenuList` / `MenuItem` / `MenuSeparator`、透传原生按钮事件与 ref 的 `ArcoAction` 和保留业务接口的按钮、开关、下拉、日期、表格供宿主与插件复用，布局不由组件库接管。浏览器宿主 `apps/config-web` 用它托管页面（HTTP `/api/*`），桌面宿主 `apps/desktop` 直接渲染它的组件、数据走运行时 IPC，两边各有一份数据实现（见该包 README）。
 
+  `Segmented` 复用 Arco Radio.Group，`variant` 提供 `segmented` / `radio` / `cards` 三种单选布局，选项标签接受 ReactNode；图文卡片与紧凑设置项也使用这一份控件，默认外观保持原样。
+
 ## 应用目录
 
 可运行产品统一放在 `apps/`：

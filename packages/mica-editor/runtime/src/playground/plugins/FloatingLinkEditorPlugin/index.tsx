@@ -37,6 +37,7 @@ import {
 import * as React from 'react';
 import {type Dispatch, type JSX, useCallback, useEffect, useId, useRef, useState} from 'react';
 import {createPortal} from 'react-dom';
+import {$isImageNode} from '../../nodes/ImageNode';
 
 import {
   $applyLinkEdit,
@@ -186,6 +187,12 @@ function FloatingLinkEditor({
       return;
     }
     const selection = $getSelection();
+    // Images have their own toolbar. Only an explicit link-edit request should
+    // open this form for them; passive previews would stack both toolbars.
+    if ($isNodeSelection(selection) && selection.getNodes().some($isImageNode)) {
+      hide();
+      return;
+    }
     if (dismissedSelection.current?.is(selection)) {
       return;
     }
@@ -445,6 +452,11 @@ function FloatingLinkEditor({
                 : '支持网址、邮箱和电话；Enter 保存，Esc 取消。')}
             </p>
             <div className="mica-link-editor__actions">
+              {target.linkKey && (
+                <Button htmlType="button" type="text" size="mini" onClick={remove}>
+                  移除链接
+                </Button>
+              )}
               <Button htmlType="button" size="mini" onClick={() => dismiss(true)}>
                 取消
               </Button>
