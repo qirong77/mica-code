@@ -18,149 +18,40 @@ import {
   type JSX,
   type CSSProperties,
   type ReactNode,
-  useCallback,
   useEffect,
-  useMemo,
+  useLayoutEffect,
   useRef,
   useState,
 } from 'react';
 import {createPortal} from 'react-dom';
 
-import {focusNearestDescendant, isKeyboardInput} from '../utils/focusUtils';
+import {MenuItem, MenuList} from '../../../../../mica-config-ui/web/components/ActionMenu';
+import {isKeyboardInput} from '../utils/focusUtils';
 
-type DropDownContextType = {
-  registerItem: (ref: React.RefObject<null | HTMLButtonElement>) => void;
-};
-
-const DropDownContext = React.createContext<DropDownContextType | null>(null);
-
-const dropDownPadding = 4;
+const dropDownPadding = 6;
 
 export function DropDownItem({
   children,
   className,
   onClick,
   title,
+  disabled,
 }: {
   children: React.ReactNode;
   className: string;
   onClick: (event: React.MouseEvent<HTMLButtonElement>) => void;
   title?: string;
+  disabled?: boolean;
 }) {
-  const ref = useRef<null | HTMLButtonElement>(null);
-
-  const dropDownContext = React.useContext(DropDownContext);
-
-  if (dropDownContext === null) {
-    throw new Error('DropDownItem must be used within a DropDown');
-  }
-
-  const {registerItem} = dropDownContext;
-
-  useEffect(() => {
-    if (ref && ref.current) {
-      registerItem(ref);
-    }
-  }, [ref, registerItem]);
-
   return (
-    <button
+    <MenuItem
       className={className}
+      selected={/(^|\s)active(\s|$)/.test(className) || undefined}
+      disabled={disabled}
       onClick={onClick}
-      ref={ref}
-      title={title}
-      type="button">
+      title={title}>
       {children}
-    </button>
-  );
-}
-
-function DropDownItems({
-  children,
-  dropDownRef,
-  onClose,
-  autofocus,
-}: {
-  children: React.ReactNode;
-  dropDownRef: React.RefObject<HTMLDivElement | null>;
-  onClose: () => void;
-  autofocus: boolean;
-}) {
-  const [items, setItems] =
-    useState<React.RefObject<null | HTMLButtonElement>[]>();
-  const [highlightedItem, setHighlightedItem] =
-    useState<React.RefObject<null | HTMLButtonElement>>();
-
-  const registerItem = useCallback(
-    (itemRef: React.RefObject<null | HTMLButtonElement>) => {
-      setItems(prev => (prev ? [...prev, itemRef] : [itemRef]));
-    },
-    [setItems],
-  );
-
-  const handleKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
-    const key = event.key;
-    if (key === 'Escape') {
-      onClose();
-    }
-    if (!items) {
-      return;
-    }
-
-    if (['Escape', 'ArrowUp', 'ArrowDown', 'Tab'].includes(key)) {
-      event.preventDefault();
-    }
-
-    if (key === 'Escape' || key === 'Tab') {
-      onClose();
-    } else if (key === 'ArrowUp') {
-      setHighlightedItem(prev => {
-        if (!prev) {
-          return items[0];
-        }
-        const index = items.indexOf(prev) - 1;
-        return items[index === -1 ? items.length - 1 : index];
-      });
-    } else if (key === 'ArrowDown') {
-      setHighlightedItem(prev => {
-        if (!prev) {
-          return items[0];
-        }
-        return items[(items.indexOf(prev) + 1) % items.length];
-      });
-    }
-  };
-
-  const contextValue = useMemo(
-    () => ({
-      registerItem,
-    }),
-    [registerItem],
-  );
-
-  useEffect(() => {
-    if (items && !highlightedItem) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setHighlightedItem(items[0]);
-    }
-
-    if (highlightedItem && highlightedItem.current) {
-      highlightedItem.current.focus();
-    }
-  }, [items, highlightedItem]);
-
-  useEffect(() => {
-    if (autofocus && dropDownRef.current) {
-      focusNearestDescendant(dropDownRef.current);
-    }
-  }, [autofocus, dropDownRef]);
-
-  return (
-    <DropDownContext.Provider value={contextValue}>
-      <div className="dropdown" ref={dropDownRef} onKeyDown={handleKeyDown}>
-        {children}
-      </div>
-    </DropDownContext.Provider>
+    </MenuItem>
   );
 }
 
@@ -175,6 +66,7 @@ export default function DropDown({
   hideChevron,
   title,
   buttonStyle,
+  onOpen,
 }: {
   disabled?: boolean;
   buttonAriaLabel?: string;
@@ -186,11 +78,11 @@ export default function DropDown({
   hideChevron?: boolean;
   title?: string;
   buttonStyle?: CSSProperties;
+  onOpen?: () => void;
 }): JSX.Element {
   const dropDownRef = useRef<HTMLDivElement>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
   const [showDropDown, setShowDropDown] = useState(false);
-  const [shouldAutofocus, setShouldAutofocus] = useState(false);
 
   const handleClose = () => {
     setShowDropDown(false);
@@ -199,11 +91,17 @@ export default function DropDown({
     }
   };
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const button = buttonRef.current;
     const dropDown = dropDownRef.current;
-    const zoom = calculateZoomLevel(dropDown, true);
-    if (showDropDown && button !== null && dropDown !== null) {
+    if (!showDropDown || button === null || dropDown === null) return;
+    const updatePosition = () => {
+      // Container resizing can move this tool into More without a window resize.
+      if (!button.getClientRects().length) {
+        setShowDropDown(false);
+        return;
+      }
+      const zoom = calculateZoomLevel(dropDown, true);
       const {top, bottom, left} = button.getBoundingClientRect();
       const menuHeight = dropDown.getBoundingClientRect().height;
       const menuWidth = dropDown.getBoundingClientRect().width;
@@ -214,14 +112,21 @@ export default function DropDown({
           : Math.max(8, top - menuHeight - dropDownPadding);
       dropDown.style.top = `${menuTop / zoom}px`;
       dropDown.style.left = `${Math.max(8, Math.min(left, window.innerWidth - menuWidth - 8)) / zoom}px`;
-    }
-  }, [dropDownRef, buttonRef, showDropDown]);
+    };
+    updatePosition();
+    const observer = new ResizeObserver(updatePosition);
+    observer.observe(button);
+    observer.observe(dropDown);
+    return () => observer.disconnect();
+  }, [dropDownRef, buttonRef, showDropDown, children]);
 
   useEffect(() => {
     const button = buttonRef.current;
 
     if (button !== null && showDropDown) {
       const handle = (event: PointerEvent) => {
+        // A menu can replace its content with a deeper set of choices.
+        if (event.defaultPrevented) return;
         // click bubbles up from a shadow tree with event.target retargeted
         // to the shadow host, which would make button.contains(target) false
         // and immediately close the dropdown. Use the composed-path target.
@@ -278,15 +183,19 @@ export default function DropDown({
       'resize',
       handleButtonPositionUpdate,
     );
+    // Pointer events in the host do not bubble out of this sandbox document.
+    // Leaving the frame must dismiss its menu just like clicking outside it.
+    const stopBlur = registerEventListener(window, 'blur', () => setShowDropDown(false));
     return () => {
       stopScroll();
       stopResize();
+      stopBlur();
     };
   }, [buttonRef, dropDownRef, showDropDown]);
 
-  const handleOnClick = (e: Event & {detail?: number}) => {
-    setShowDropDown(!showDropDown);
-    setShouldAutofocus(e.detail === 0);
+  const handleOnClick = () => {
+    if (!showDropDown) onOpen?.();
+    setShowDropDown(visible => !visible);
   };
 
   return (
@@ -297,7 +206,7 @@ export default function DropDown({
         disabled={disabled}
         aria-label={buttonAriaLabel || buttonLabel}
         aria-expanded={showDropDown}
-        aria-haspopup="true"
+        aria-haspopup="menu"
         title={title || buttonAriaLabel || buttonLabel}
         style={buttonStyle}
         className={buttonClassName}
@@ -312,12 +221,14 @@ export default function DropDown({
 
       {showDropDown &&
         createPortal(
-          <DropDownItems
-            dropDownRef={dropDownRef}
+          <MenuList
+            className="editor-dropdown"
+            aria-label={buttonAriaLabel || buttonLabel}
+            ref={dropDownRef}
             onClose={handleClose}
-            autofocus={shouldAutofocus}>
+            autoFocus>
             {children}
-          </DropDownItems>,
+          </MenuList>,
           buttonRef.current?.ownerDocument?.body ?? document.body,
         )}
     </>

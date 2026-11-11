@@ -35,7 +35,6 @@ export const SHORTCUT_BINDINGS = Object.freeze({
   CHECK_LIST: {key: '9', modifiers: CONTROL_OR_META_SHIFT},
   CODE_BLOCK: {key: 'c', modifiers: CONTROL_OR_META_ALT},
   QUOTE: {key: 'q', modifiers: CONTROL_SHIFT},
-  ADD_COMMENT: {key: 'm', modifiers: CONTROL_OR_META_ALT},
 
   INCREASE_FONT_SIZE: {
     key: '>',

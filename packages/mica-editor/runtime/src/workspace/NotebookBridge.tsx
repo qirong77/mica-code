@@ -2,13 +2,13 @@ import {useLexicalComposerContext} from '@lexical/react/LexicalComposerContext';
 import {type LexicalEditor} from 'lexical';
 import {Component, createContext, type ReactNode, useContext, useEffect, useRef, useState} from 'react';
 
-import {type Comments, type CommentStore} from '../playground/commenting';
 import NotebookOutline, {type NotebookNavigation, type NotebookOutlineSnapshot} from './NotebookOutline';
-import {applyNotebookTheme} from './theme';
+import {applyNotebookBarInsets, applyNotebookTheme} from './theme';
 
 export interface NotebookDocument {
   version: 1;
   editorState: string | null;
+  // Preserve existing comments as opaque data when saving body edits.
   comments: unknown[];
 }
 
@@ -23,7 +23,6 @@ let mountSequence = 0;
 export class NotebookSession {
   readonly mountKey: string;
   editor: LexicalEditor | null = null;
-  commentStore: CommentStore | null = null;
   nestedEditors = new Set<LexicalEditor>();
   private queued = false;
   private active = true;
@@ -51,7 +50,7 @@ export class NotebookSession {
     if (frozen) {
       // Repeated freezes must not replace the user's pre-existing read-only
       // state. Nested composers keep their own parent editability binding;
-      // DOM/input guards also cover captions, comments and native inputs.
+      // DOM/input guards also cover captions and native inputs.
       if (this.frozenBeforeEditable === null) this.frozenBeforeEditable = this.editor.isEditable();
       if (this.editor.isEditable()) this.editor.setEditable(false);
     } else {
@@ -68,7 +67,7 @@ export class NotebookSession {
     return {
       version: 1,
       editorState: JSON.stringify(this.editor.getEditorState().toJSON()),
-      comments: structuredClone(this.commentStore?.getComments() ?? this.document.comments),
+      comments: structuredClone(this.document.comments),
     };
   }
 
@@ -156,6 +155,8 @@ export function NotebookFrame({children}: {children: ReactNode}) {
       const requestId = typeof message.requestId === 'string' ? message.requestId : undefined;
       if (message.type === 'theme') {
         applyNotebookTheme(message.appearance, message.tokens);
+      } else if (message.type === 'layout') {
+        applyNotebookBarInsets(message);
       } else if (message.type === 'freeze' && typeof message.frozen === 'boolean') {
         frozen.current = message.frozen;
         document.documentElement.dataset.frozen = String(message.frozen);
@@ -212,34 +213,6 @@ export function NotebookFrame({children}: {children: ReactNode}) {
   return session
     ? <Context.Provider key={session.mountKey} value={session}><DocumentBoundary session={session}>{children}</DocumentBoundary></Context.Provider>
     : <div className="notebook-loading" role="status">正在载入笔记…</div>;
-}
-
-/** Safely hydrate only the CommentStore's documented JSON shape. */
-export function hydrateComments(input: unknown[]): Comments {
-  const comment = (value: unknown): value is Comments[number] & {type: 'comment'} => {
-    if (!value || typeof value !== 'object') return false;
-    const c = value as Record<string, unknown>;
-    return c.type === 'comment' && typeof c.id === 'string' && typeof c.author === 'string' &&
-      typeof c.content === 'string' && typeof c.deleted === 'boolean' && typeof c.timeStamp === 'number';
-  };
-  return structuredClone(input.filter((value): value is Comments[number] => {
-    if (comment(value)) return true;
-    if (!value || typeof value !== 'object') return false;
-    const thread = value as Record<string, unknown>;
-    return thread.type === 'thread' && typeof thread.id === 'string' && typeof thread.quote === 'string' &&
-      Array.isArray(thread.comments) && thread.comments.every(comment);
-  }));
-}
-
-export function NotebookCommentBinding({store}: {store: CommentStore}) {
-  const session = useNotebookSession();
-  useEffect(() => {
-    if (!session) return;
-    session.commentStore = store;
-    const stop = store.registerOnChange(session.dirty);
-    return () => { stop(); if (session.commentStore === store) session.commentStore = null; };
-  }, [session, store]);
-  return null;
 }
 
 export function NotebookEditorBinding() {

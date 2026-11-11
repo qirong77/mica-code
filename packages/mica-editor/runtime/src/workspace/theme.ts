@@ -26,3 +26,21 @@ export function applyNotebookTheme(appearance: unknown, tokens: unknown): void {
     }
   }
 }
+
+/** The host draws the notebook's document bar in this toolbar's row, left and
+ * right of it. It reports how wide each segment is so the toolbar can reserve
+ * exactly that much instead of guessing a fixed padding.
+ */
+export function applyNotebookBarInsets(input: unknown): void {
+  const source = (input && typeof input === 'object' ? input : {}) as Record<string, unknown>;
+  const root = document.documentElement;
+  const clamp = (value: unknown, max: number) => {
+    const number = typeof value === 'number' && Number.isFinite(value) ? Math.round(value) : 0;
+    return Math.min(Math.max(number, 0), max);
+  };
+  root.style.setProperty('--notebook-bar-inset-left', `${clamp(source.left, 720)}px`);
+  root.style.setProperty('--notebook-bar-inset-right', `${clamp(source.right, 720)}px`);
+  const height = clamp(source.height, 96);
+  if (height >= 36) root.style.setProperty('--notebook-bar-height', `${height}px`);
+  else root.style.removeProperty('--notebook-bar-height');
+}

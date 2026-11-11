@@ -32,23 +32,25 @@ body :is(input, textarea)::placeholder { color: var(--color-fg-faint); }
 .notebook-editor .editor-canvas { min-height: 100vh; display: flex; flex-direction: column; background: var(--color-canvas); border: 0; border-radius: 0; box-shadow: none; }
 .notebook-editor .editor-shell { flex: 1; display: flex; flex-direction: column; color: var(--color-fg-soft); font-family: var(--font-family); }
 .notebook-editor .editor-shell .editor-container { flex: 1; background: transparent; }
-.notebook-editor .toolbar { position: sticky; top: 0; border-radius: 0; padding: 7px 12px; min-height: 44px; gap: 0; background: var(--color-canvas); border-color: var(--color-line-soft); box-shadow: none; flex-wrap: nowrap; overflow: visible; }
-.notebook-editor .toolbar-primary, .notebook-editor .toolbar-secondary { display: flex; align-items: center; flex: none; min-width: 0; }
-.notebook-editor .toolbar-group { display: flex; align-items: center; gap: 2px; flex: none; padding: 0 7px; }
-.notebook-editor .toolbar-group + .toolbar-group, .notebook-editor .toolbar-secondary { border-left: 1px solid var(--color-line-soft); }
-.notebook-editor .toolbar-primary > .toolbar-group:first-child { padding-left: 0; }
-.notebook-editor .toolbar-secondary > .toolbar-group:last-child { padding-right: 0; }
-.notebook-editor .toolbar button.toolbar-item { height: 28px; min-width: 28px; padding: 5px 6px; margin: 0; border-radius: 4px; gap: 3px; color: var(--color-fg-soft); }
+/* One operation bar: actual group widths decide which tools move to More.
+   Horizontal scrolling only covers viewports narrower than the fixed actions. */
+.notebook-editor .toolbar { position: sticky; top: 0; display: flex; align-items: center; height: auto; border-radius: 0; padding: 7px 12px; min-height: 44px; --toolbar-group-gap: 2px; --toolbar-section-gap: 13px; gap: var(--toolbar-group-gap); background: var(--color-canvas); border-color: var(--color-line-soft); box-shadow: none; flex-wrap: nowrap; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
+.notebook-editor .toolbar::-webkit-scrollbar { display: none; }
+.notebook-editor .toolbar-group { display: flex; align-items: center; gap: 2px; flex: none; padding: 0; margin: 0; }
+.notebook-editor .toolbar-group[data-section-start='true'] { margin-left: 6px; padding-left: 6px; border-left: 1px solid var(--color-line-soft); }
+.notebook-editor .toolbar:not([data-measuring='true']) > .toolbar-group[data-overflowed='true'] { display: none; }
+.notebook-editor .toolbar[data-measuring='true'] > .toolbar-group { display: flex; margin: 0; padding: 0; border: 0; }
+.notebook-editor .toolbar button.toolbar-item { height: 28px; min-width: 28px; padding: 5px; margin: 0; border-radius: 4px; gap: 3px; color: var(--color-fg-soft); }
 .notebook-editor .toolbar .toolbar-item .text { font-size: 12px; color: inherit; padding: 0; line-height: 18px; white-space: nowrap; }
 .notebook-editor .toolbar .toolbar-item :is(.icon, i.format) { width: 16px; height: 16px; margin: 0; opacity: 1; }
 .format-icon { display: block; flex: none; color: inherit; }
 .notebook-editor .toolbar .toolbar-item i.chevron-down { width: 10px; height: 10px; margin: 0 0 0 3px; opacity: .55; }
-.notebook-editor .toolbar .block-controls { min-width: 78px; }
+.notebook-editor .toolbar .block-controls { min-width: 64px; }
 .notebook-editor .toolbar .block-controls .icon { display: none; }
 .notebook-editor .toolbar .block-controls .dropdown-button-text { width: auto; min-width: 44px; }
-.notebook-editor .toolbar .font-family { width: 76px; justify-content: space-between; }
-.notebook-editor .toolbar .font-family .text { max-width: 52px; display: block; }
-.notebook-editor .toolbar .toolbar-font-size { display: flex; align-items: center; height: 26px; margin-left: 4px; border: 1px solid var(--color-line-soft); border-radius: 4px; }
+.notebook-editor .toolbar .font-family { width: 64px; justify-content: space-between; }
+.notebook-editor .toolbar .font-family .text { max-width: 44px; display: block; }
+.notebook-editor .toolbar .toolbar-font-size { display: flex; align-items: center; height: 26px; border: 1px solid var(--color-line-soft); border-radius: 4px; }
 .notebook-editor .toolbar .toolbar-font-size button { width: 22px; min-width: 22px; height: 24px; padding: 3px; }
 .notebook-editor .toolbar .toolbar-font-size input { width: 30px; height: 24px; padding: 0; margin: 0; border: 0; border-radius: 0; font: 12px var(--font-family); background: transparent; color: var(--color-fg-soft); }
 .notebook-editor .toolbar .toolbar-font-size:focus-within { border-color: var(--color-accent); }
@@ -60,7 +62,8 @@ body :is(input, textarea)::placeholder { color: var(--color-fg-faint); }
 .notebook-editor .toolbar .toolbar-font-size input::-webkit-outer-spin-button { appearance: none; margin: 0; }
 .notebook-editor .toolbar .alignment .text { display: none; }
 .notebook-editor .toolbar .code-language { width: 136px; justify-content: space-between; }
-.notebook-editor .toolbar .insert-menu { gap: 5px; }
+.notebook-editor .toolbar .insert-menu { width: 28px; color: var(--color-accent); }
+.notebook-editor .toolbar .insert-menu .icon { width: 18px; height: 18px; }
 .notebook-editor .toolbar .toolbar-more button { width: 28px; }
 .notebook-editor .toolbar .toolbar-ellipsis { background: currentColor; mask: url('data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"%3E%3Ccircle cx="3" cy="8" r="1.25"/%3E%3Ccircle cx="8" cy="8" r="1.25"/%3E%3Ccircle cx="13" cy="8" r="1.25"/%3E%3C/svg%3E') center / contain no-repeat; }
 .notebook-editor .toolbar .color-picker .icon { position: relative; background: currentColor; mask: none; background-image: none; }
@@ -70,6 +73,8 @@ body :is(input, textarea)::placeholder { color: var(--color-fg-faint); }
 .notebook-editor .toolbar .color-picker i.chevron-down { display: none; }
 .notebook-editor .toolbar .color-picker::after { content: ''; position: absolute; width: 13px; height: 2px; bottom: 3px; left: 7px; border-radius: 1px; background: var(--toolbar-swatch); box-shadow: 0 0 0 .5px var(--color-line-strong); }
 .notebook-editor .toolbar button.toolbar-item:hover:not(:disabled) { background: var(--color-active); }
+.notebook-editor .toolbar button.toolbar-item[aria-expanded='true'] { background: var(--color-active); color: var(--color-fg-strong); }
+.notebook-editor .toolbar button.toolbar-item:focus:not(:focus-visible):not(:hover):not(.active):not([aria-expanded='true']) { background: transparent; }
 .notebook-editor .toolbar button.toolbar-item.active { background: var(--color-primary-light-1); color: var(--color-accent); }
 .notebook-editor .toolbar .divider { background: var(--color-line-soft); margin: 0 4px; }
 .notebook-editor .ContentEditable__root { padding: 36px 48px; min-height: max(260px, calc(100vh - 170px)); font-family: var(--font-family); font-size: 15px; line-height: 1.85; color: var(--color-fg-soft); caret-color: var(--color-fg-strong); }
@@ -150,20 +155,17 @@ body.mica-arco-theme {
 .table-selection-drop-line { background: var(--color-accent); box-shadow: 0 0 0 1px var(--color-canvas); }
 }
 
+/* Menu geometry is local; its surface and rows come from the shared ActionMenu. */
+.editor-dropdown { position: fixed; z-index: 100; }
+
 /* Menus are portalled outside .notebook-editor. Keep anchors/positions as-is. */
 body.mica-arco-theme {
-.dropdown, .typeahead-popover, .floating-text-format-popup, .link-editor, .ruby-editor, .find-replace-panel, .PlaygroundEditorTheme__contextMenu, .dateTimePicker { background: var(--color-panel); color: var(--color-fg-soft); border: 1px solid var(--color-line); border-radius: 6px; box-shadow: var(--notebook-popup-shadow); font-family: var(--font-family); font-size: 12px; }
-.dropdown { max-width: calc(100vw - 16px); max-height: calc(100dvh - 24px); overflow: auto; padding: 4px 0; }
-.dropdown .item { border-radius: 4px; margin: 0 4px; }
-.dropdown .item:first-child, .dropdown .item:last-child { margin-top: 0; margin-bottom: 0; }
-.dropdown .item, .typeahead-popover li, .PlaygroundEditorTheme__contextMenuItem { color: var(--color-fg-soft); background: transparent; font: 12px/1.6 var(--font-family); }
-.dropdown .item { min-height: 28px; padding: 5px 9px; }
-.dropdown .item .text { font-size: 12px; }
-.dropdown .item .shortcut { font-size: 11px; color: var(--color-fg-faint); }
-.dropdown .item:hover:not([disabled]), .dropdown .item:focus, .typeahead-popover li:hover, .PlaygroundEditorTheme__contextMenuItem:is(:hover, :focus, .open):not(:disabled) { background: var(--color-active); }
-.dropdown .item.active, .dropdown .item.active .text, .typeahead-popover ul li.selected { background: var(--color-primary-light-1); color: var(--color-accent); }
+.typeahead-popover, .floating-text-format-popup, .link-editor, .ruby-editor, .find-replace-panel, .PlaygroundEditorTheme__contextMenu, .dateTimePicker { background: var(--color-panel); color: var(--color-fg-soft); border: 1px solid var(--color-line); border-radius: 6px; box-shadow: var(--notebook-popup-shadow); font-family: var(--font-family); font-size: 12px; }
+.typeahead-popover li, .PlaygroundEditorTheme__contextMenuItem { color: var(--color-fg-soft); background: transparent; font: 12px/1.6 var(--font-family); }
+.typeahead-popover li:hover, .PlaygroundEditorTheme__contextMenuItem:is(:hover, :focus, .open):not(:disabled) { background: var(--color-active); }
+.typeahead-popover ul li.selected { background: var(--color-primary-light-1); color: var(--color-accent); }
 .PlaygroundEditorTheme__contextMenuItem:disabled { color: var(--color-fg-faint); background: transparent; }
-.dropdown .divider, .floating-text-format-popup .divider, .find-replace-separator { background: var(--color-line-soft); }
+.floating-text-format-popup .divider, .find-replace-separator { background: var(--color-line-soft); }
 .floating-sort-menu__item { color: var(--color-fg-soft); }
 .floating-sort-menu__item:hover { background: var(--color-active); }
 /* The floating bar sits on top of正文, so it must read as the same control family as the
@@ -203,12 +205,10 @@ body.mica-arco-theme {
 /* Icon masks follow currentColor. Multi-color font/background color previews
    and the actual document/images are intentionally excluded from filtering. */
 body .toolbar .toolbar-item :is(i.format, i.chevron-down, .icon:not(.font-color):not(.bg-color)),
-body .actions i, body .dropdown .item .icon, body .typeahead-popover li .icon,
+body .actions i, body .mica-menu-item .icon, body .typeahead-popover li .icon,
 body .floating-text-format-popup button.popup-item i.format, body .table-cell-action-button i,
 body .code-action-menu-container button.menu-item i.format { background-color: currentColor; filter: none; }
-body[arco-theme='dark'] :is(.link-edit, .link-trash, .link-cancel, .link-confirm, .ruby-confirm, .ruby-trash, .draggable-block-menu .icon, i.comments, i.add-comment, i.send, i.delete) { filter: invert(1); }
-body .CommentPlugin_CommentsPanel_SendButton:hover i.send { filter: none; }
-body[arco-theme='dark'] .CommentPlugin_CommentsPanel_SendButton:hover i.send { filter: invert(1); }
+body[arco-theme='dark'] :is(.link-edit, .link-trash, .link-cancel, .link-confirm, .ruby-confirm, .ruby-trash, .draggable-block-menu .icon) { filter: invert(1); }
 
 /* Arco controls get palette + primary channel mapping from the virtual import;
    only notebook-specific density/layout belongs here. */
@@ -236,29 +236,6 @@ body.mica-arco-theme {
 .color-picker-basic-color button.active { outline-color: var(--color-accent); box-shadow: none; }
 .color-picker-hue_cursor, .color-picker-saturation_cursor { border-color: var(--color-fg-strong); box-shadow: 0 0 0 1px var(--color-canvas); }
 }
-
-/* Comments are another set of portalled editors, not canvas text. */
-body.mica-arco-theme {
-.CommentPlugin_CommentsPanel { top: 0; height: 100%; background: var(--color-panel); color: var(--color-fg-soft); border-color: var(--color-line); box-shadow: none; }
-.CommentPlugin_AddCommentBox, .CommentPlugin_CommentInputBox, .CommentPlugin_CommentsPanel_EditorContainer { background: var(--color-panel); color: var(--color-fg-soft); box-shadow: var(--notebook-popup-shadow); }
-.CommentPlugin_AddCommentBox_button:hover { background: var(--color-active); }
-.CommentPlugin_CommentInputBox::before { border-color: transparent transparent var(--color-panel) var(--color-panel); box-shadow: none; }
-.CommentPlugin_CommentInputBox_Editor, .CommentPlugin_CommentsPanel_Editor { color: var(--color-fg-soft); caret-color: var(--color-fg-strong); background: var(--color-canvas); border-color: var(--color-line); font: 12px/1.7 var(--font-family); }
-.CommentPlugin_CommentInputBox_Editor:focus, .CommentPlugin_CommentsPanel_Editor:focus { outline-color: var(--color-accent); }
-.CommentPlugin_CommentsPanel_Heading { display: flex; align-items: center; justify-content: space-between; padding: 10px 12px 10px 16px; height: 45px; color: var(--color-fg-strong); border-color: var(--color-line-soft); font-size: 14px; }
-.CommentPlugin_CommentsPanel_List_Thread { background: transparent; color: var(--color-fg-soft); border-color: var(--color-line-soft); }
-.CommentPlugin_CommentsPanel_List_Thread.interactive:hover { background: var(--color-active); }
-.CommentPlugin_CommentsPanel_List_Thread.active { background: var(--color-overlay); border-left-color: var(--color-line); }
-.CommentPlugin_CommentsPanel_List_Comment, .CommentPlugin_CommentsPanel_Empty { font-size: 12px; }
-.CommentPlugin_CommentsPanel_List_Comment p, .CommentPlugin_CommentsPanel_List_Details { color: var(--color-fg-soft); }
-.CommentPlugin_CommentsPanel_List_Comment_Time, .CommentPlugin_CommentsPanel_Empty, .CommentPlugin_CommentsPanel_List_Thread_QuoteBox { color: var(--color-fg-faint); }
-.CommentPlugin_CommentsPanel_List_Thread_Quote span { color: var(--color-fg-strong); background: var(--color-warning-light-2); }
-.CommentPlugin_CommentsPanel_List_Thread_Comments .CommentPlugin_CommentsPanel_List_Comment { border-color: var(--color-line-soft); }
-.CommentPlugin_CommentInputBox_Button.primary { background: var(--color-accent); color: var(--mica-arco-accent-contrast); }
-.CommentPlugin_CommentInputBox_Button.primary:hover { background: var(--color-accent-hover); }
-.CommentPlugin_CommentInputBox_Button[disabled], .CommentPlugin_CommentInputBox_Button[disabled]:hover { background: var(--color-panel-hi); color: var(--color-fg-faint); }
-}
-body .CommentPlugin_CommentsPanel_List_DeleteButton:hover { filter: none; }
 
 /* Rich-text decorators retain their inline/user-selected colors. */
 body.mica-arco-theme {
@@ -299,22 +276,21 @@ body.mica-arco-theme {
 }
 
 @media (max-width: 820px) {
-  .notebook-editor .toolbar { flex-wrap: wrap; padding: 5px 10px; row-gap: 5px; }
-  .notebook-editor .toolbar-primary, .notebook-editor .toolbar-secondary { width: 100%; }
-  .notebook-editor .toolbar-secondary { border-left: 0; padding-top: 5px; border-top: 1px solid var(--color-line-soft); }
-  .notebook-editor .toolbar-secondary > .toolbar-group:first-child { padding-left: 0; }
+  .notebook-editor .toolbar { padding: 5px 10px; }
 }
 @media (max-width: 600px) {
   .notebook-editor .ContentEditable__root { padding: 28px 24px; font-size: 15px; }
   .notebook-editor .ContentEditable__placeholder { top: 28px; left: 24px; }
   .notebook-editor .toolbar { padding: 5px 8px; }
-  .notebook-editor .toolbar-group { padding: 0 5px; }
-  .notebook-editor .toolbar-primary, .notebook-editor .toolbar-secondary { overflow-x: auto; scrollbar-width: none; }
-  .notebook-editor .toolbar-primary::-webkit-scrollbar, .notebook-editor .toolbar-secondary::-webkit-scrollbar { display: none; }
   .notebook-editor .toolbar .toolbar-item .text { font-size: 12px; }
-  .CommentPlugin_CommentsPanel { top: 0; height: 100%; }
   .find-replace-panel { top: 48px; }
 }
 @media print {
   .notebook-editor .ContentEditable__root { padding: 0; }
 }
+
+/* More uses the shared menu surface, with a single view for deeper choices. */
+.editor-dropdown .toolbar-menu-forward { margin-left: auto; color: var(--color-fg-faint); font-size: 18px; line-height: 16px; }
+.editor-dropdown .toolbar-menu-back-icon { display: grid; place-items: center; width: 16px; height: 16px; font-size: 22px; line-height: 1; }
+.editor-dropdown .toolbar-menu-back { font-weight: 500; }
+.editor-dropdown .icon-text-container .format-icon { flex: none; }

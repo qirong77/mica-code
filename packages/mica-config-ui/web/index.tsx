@@ -58,6 +58,9 @@ export { SecretInput } from './components/SecretInput.js';
 export { Alert, Button, Checkbox, CollapsiblePanel, Empty, Segmented, SplitView, Tag } from './components/Ui.js';
 export { Input, InputNumber, Select } from './components/ArcoSettings.js';
 export { ArcoAction, ArcoPopover, ArcoProvider } from './components/ArcoSettings.js';
+/** Shared action-menu surface and rows for host popovers and iframe portals. */
+export { MenuList, MenuItem, MenuSeparator } from './components/ActionMenu.js';
+export type { MenuListProps, MenuItemProps } from './components/ActionMenu.js';
 
 /**
  * 数据表：统计页的 By source / By session 与会话详情共用一份形态（表头可排序、按列宽

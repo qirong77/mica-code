@@ -372,6 +372,143 @@ html[data-appearance='light'] :is(body.mica-arco-theme, .mica-config-ui) {
   margin-left: 0;
 }
 
+/* Shared action menus are also used by iframe portals outside the settings scope. */
+.mica-menu {
+  box-sizing: border-box;
+  min-width: 180px;
+  max-width: calc(100vw - 16px);
+  max-height: calc(100dvh - 24px);
+  overflow: auto;
+  padding: 6px;
+  border: 1px solid var(--mica-arco-line-soft);
+  border-radius: 8px;
+  outline: none;
+  background: var(--mica-arco-bg);
+  color: var(--mica-arco-text);
+  box-shadow:
+    0 6px 20px color-mix(in srgb, var(--color-black) 14%, transparent),
+    0 2px 6px color-mix(in srgb, var(--color-black) 6%, transparent);
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 20px;
+}
+
+.mica-menu-item.arco-btn {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  height: 32px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--mica-arco-text);
+  box-shadow: none;
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 20px;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.mica-menu-item.arco-btn > :is(span, svg) {
+  margin: 0;
+  letter-spacing: normal;
+}
+
+.mica-menu-item[aria-checked='true'] {
+  background: color-mix(in srgb, var(--mica-arco-accent) 10%, transparent);
+  color: var(--mica-arco-accent);
+}
+
+.mica-menu-item:not(:disabled):not([aria-disabled='true']):is(:hover, :focus-visible) {
+  background: var(--mica-arco-active);
+}
+
+.mica-menu-item.is-danger {
+  color: var(--mica-arco-danger);
+}
+
+.mica-menu-item:is(:disabled, [aria-disabled='true']) {
+  color: var(--mica-arco-text-disabled);
+  opacity: 1;
+}
+
+.mica-menu-item .mica-menu-icon {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  color: var(--mica-arco-text-soft);
+}
+
+.mica-menu-item .mica-menu-icon > svg {
+  width: 16px;
+  height: 16px;
+}
+
+.mica-menu-item .icon-text-container {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.mica-menu-item i.icon {
+  display: block;
+  flex: none;
+  width: 16px;
+  height: 16px;
+  color: var(--mica-arco-text-soft);
+  background-color: currentColor;
+  mask-position: center;
+  mask-size: contain;
+  mask-repeat: no-repeat;
+}
+
+.mica-menu-item :is(.mica-menu-label, .text) {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mica-menu-item.arco-btn .shortcut {
+  flex: none;
+  margin-left: auto;
+  padding-left: 24px;
+  color: var(--mica-arco-text-faint);
+  font-size: 11px;
+  line-height: 20px;
+}
+
+.mica-menu-item[aria-checked='true'] :is(.mica-menu-icon, i.icon),
+.mica-menu-item.is-danger :is(.mica-menu-icon, i.icon),
+.mica-menu-item:is(:disabled, [aria-disabled='true']) :is(.mica-menu-icon, i.icon, .shortcut) {
+  color: inherit;
+}
+
+.mica-menu .mica-menu-separator {
+  height: 1px;
+  margin: 4px 0;
+  border: 0;
+  background: var(--mica-arco-line-soft);
+}
+
+.mica-menu-popover .arco-popover-content,
+.mica-menu-popover.arco-popover-content {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
 :where(body.mica-arco-theme, .mica-config-ui) .ui-button-icon {
   display: inline-flex;
   flex: none;

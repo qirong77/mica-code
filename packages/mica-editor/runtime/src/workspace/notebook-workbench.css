@@ -21,17 +21,19 @@ body:has(.notebook-workbench) {
   background: var(--color-canvas);
 }
 
-.notebook-workbench .toolbar {
+.notebook-editor.notebook-workbench .toolbar {
   box-sizing: border-box;
   position: sticky;
   top: 0;
   min-width: 0;
   max-width: 100%;
-  min-height: 44px;
-  padding: 7px 12px;
+  min-height: var(--notebook-bar-height, 44px);
+  /* The host's document bar occupies this row on both ends; keep its width as
+     inner padding so no control ends up underneath it when the row scrolls. */
+  padding: 7px calc(12px + var(--notebook-bar-inset-right, 0px)) 7px calc(12px + var(--notebook-bar-inset-left, 0px));
   border-bottom: 1px solid var(--color-line-soft);
   border-radius: 0;
-  background: color-mix(in srgb, var(--color-canvas) 55%, var(--color-panel));
+  background: var(--color-canvas);
   box-shadow: none;
   z-index: 30;
 }
@@ -44,10 +46,11 @@ body:has(.notebook-workbench) {
 
 .notebook-workbench .toolbar-group {
   gap: 2px;
-  padding-inline: 6px;
 }
 
 .notebook-workbench .toolbar .toolbar-font-size {
+  box-sizing: border-box;
+  height: 28px;
   border-color: var(--color-line-soft);
   border-radius: 5px;
   background: var(--color-canvas);
@@ -287,15 +290,6 @@ body.mica-arco-theme .notebook-workbench .editor-image .image-caption-container 
     padding: 6px 10px;
   }
 
-  .notebook-workbench :is(.toolbar-primary, .toolbar-secondary) {
-    max-width: 100%;
-    overflow-x: auto;
-    scrollbar-width: thin;
-  }
-
-  .notebook-workbench .toolbar-group {
-    padding-inline: 5px;
-  }
 }
 
 @media (max-width: 600px) {

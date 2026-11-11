@@ -127,15 +127,6 @@ kbd { font: 12px/1.5 monospace; border: 1px solid var(--workspace-line); border-
 .find-replace-input:focus { border-color: var(--workspace-accent); }
 
 /* Portalled menus and floating controls share Arco's visual rhythm. */
-.dropdown { border: 1px solid var(--workspace-line); border-radius: 6px; box-shadow: 0 4px 16px #1d212914; padding: 5px; max-height: min(65vh, 480px); overflow-y: auto; font-family: inherit; z-index: 100; }
-.dropdown .item { min-height: 32px; padding: 7px 10px; margin: 0; border-radius: 4px; font-size: 13px; color: var(--color-text-2); gap: 14px; }
-.dropdown .item.wide { min-width: 234px; }
-.dropdown .item .text { font-size: 13px; }
-.dropdown .item .shortcut { color: var(--color-text-4); font-size: 11px; }
-.dropdown .item .icon { height: 16px; width: 16px; margin-right: 10px; opacity: .75; }
-.dropdown .item:hover, .dropdown .item:focus { background: var(--color-fill-2); outline: none; }
-.dropdown .item.active, .dropdown .item.active .text { background: rgb(var(--primary-1)); color: var(--workspace-accent); }
-.dropdown .divider { height: 1px; margin: 5px 0; background: var(--workspace-line); }
 .typeahead-popover { border: 1px solid var(--workspace-line); border-radius: 6px; box-shadow: 0 4px 16px #1d212914; z-index: 100; }
 .typeahead-popover ul { padding: 5px; border-radius: 6px; max-height: 330px; }
 .typeahead-popover ul li { padding: 8px 10px; border-radius: 4px; margin: 0; font-size: 13px; }
@@ -188,12 +179,6 @@ kbd { font: 12px/1.5 monospace; border: 1px solid var(--workspace-line); border-
 .workspace-devtools .editor-dev-button { position: relative; inset: auto; height: 28px; width: 28px; border-radius: 4px; box-shadow: none; }
 .workspace-devtools .editor-dev-button::after { width: 16px; height: 16px; margin: 6px; }
 
-.CommentPlugin_ShowCommentsButton.arco-btn { position: fixed; top: 188px; right: 0; width: 35px; height: 37px; border: 1px solid var(--workspace-line); border-right: 0; border-radius: 5px 0 0 5px; background: #fff; box-shadow: 0 2px 8px #1d212908; padding: 7px; z-index: 35; }
-.CommentPlugin_ShowCommentsButton i.comments { width: 17px; height: 17px; vertical-align: middle; opacity: .65; }
-.CommentPlugin_ShowCommentsButton.active { background: rgb(var(--primary-1)); }
-.CommentPlugin_CommentsPanel { top: 64px; height: calc(100% - 64px); border-radius: 0; border-left: 1px solid var(--workspace-line); box-shadow: -5px 0 20px #1d21290a; z-index: 40; }
-.CommentPlugin_CommentsPanel_Heading { font-size: 16px; padding: 18px 20px; height: 62px; }
-.CommentPlugin_CommentsPanel_Empty { color: var(--color-text-3); font-size: 13px; }
 
 
 @media (max-width: 1200px) {
@@ -232,11 +217,9 @@ kbd { font: 12px/1.5 monospace; border: 1px solid var(--workspace-line); border-
   .find-replace-panel { left: 12px; right: 12px; top: 110px; column-gap: 1px; }
   .find-replace-input { min-width: 0; width: 100%; }
   .find-replace-count { min-width: 48px; font-size: 10px; }
-  .CommentPlugin_ShowCommentsButton.arco-btn { top: auto; bottom: 22px; display: flex; }
-  .CommentPlugin_CommentsPanel { top: 56px; height: calc(100% - 56px); }
 }
 @media print {
-  .editor-header, .editor-page-intro, .toolbar, .actions, .document-statusbar, .editor-footnote, .CommentPlugin_ShowCommentsButton, .workspace-devtools { display: none !important; }
+  .editor-header, .editor-page-intro, .toolbar, .actions, .document-statusbar, .editor-footnote, .workspace-devtools { display: none !important; }
   .editor-page { margin: 0; padding: 0; max-width: none; }
   .editor-canvas { border: 0; box-shadow: none; }
   .workspace .ContentEditable__root { padding: 0; min-height: 0; }

@@ -47,7 +47,6 @@ import {createPortal} from 'react-dom';
 import {getDOMRangeRect} from '../../utils/getDOMRangeRect';
 import {getSelectedNode} from '../../utils/getSelectedNode';
 import {setFloatingElemPosition} from '../../utils/setFloatingElemPosition';
-import {INSERT_INLINE_COMMAND} from '../CommentPlugin';
 
 function TextFormatFloatingToolbar({
   editor,
@@ -91,10 +90,6 @@ function TextFormatFloatingToolbar({
     setIsLinkEditMode(true);
     editor.dispatchCommand(TOGGLE_LINK_COMMAND, 'https://');
   }, [editor, setIsLinkEditMode]);
-
-  const insertComment = () => {
-    editor.dispatchCommand(INSERT_INLINE_COMMAND);
-  };
 
   function mouseMoveListener(e: MouseEvent) {
     if (
@@ -358,19 +353,8 @@ function TextFormatFloatingToolbar({
               <i className="format link" />
             </button>
           </div>
-          <span className="divider" aria-hidden="true" />
         </>
       )}
-      <div className="popup-group">
-        <button
-          type="button"
-          onClick={insertComment}
-          className="popup-item insert-comment"
-          title="插入评论"
-          aria-label="插入评论">
-          <i className="format add-comment" />
-        </button>
-      </div>
     </div>
   );
 }
@@ -381,6 +365,7 @@ function useFloatingTextFormatToolbar(
   setIsLinkEditMode: Dispatch<boolean>,
   isRubyEditMode: boolean,
 ): JSX.Element | null {
+  const isEditable = useLexicalEditable();
   const [isText, setIsText] = useState(false);
   const [isLink, setIsLink] = useState(false);
   const [isBold, setIsBold] = useState(false);
@@ -499,7 +484,7 @@ function useFloatingTextFormatToolbar(
     );
   }, [editor, updatePopup]);
 
-  if (!isText || isLink || isRubyEditMode) {
+  if (!isEditable || !isText || isLink || isRubyEditMode) {
     return null;
   }
 

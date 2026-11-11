@@ -1,20 +1,23 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { cloneElement, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   BookOpen,
   Check,
   ChevronDown,
   ChevronRight,
   Download,
+  Eye,
+  EyeOff,
   FilePlus2,
   FileText,
   Focus,
   Folder,
+  FolderInput,
   FolderOpen,
   FolderPlus,
-  ListTree,
   Menu,
   MoreHorizontal,
   PanelLeftClose,
+  Pencil,
   Plus,
   RefreshCw,
   Search,
@@ -23,7 +26,17 @@ import {
   Undo2,
   X,
 } from 'lucide-react';
-import { Alert, Button, Empty, Input, SelectMenu } from '@mica-config-ui/web';
+import {
+  Alert,
+  ArcoPopover,
+  Button,
+  Empty,
+  Input,
+  MenuItem,
+  MenuList,
+  MenuSeparator,
+  SelectMenu,
+} from '@mica-config-ui/web';
 import { Modal } from '../../packages/mica-config-ui/web/components/Modal';
 import { createNotebookController, NotebookConflictError } from './controller';
 import {
@@ -62,6 +75,79 @@ function download(value, name) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
+/**
+ * 浮层菜单的一行：图标 + 左对齐文字。删除类动作沿用 danger 的红色。
+ */
+function MenuRow({ action, label, Icon, variant = 'ghost', onSelect }) {
+  return (
+    <MenuItem
+      danger={variant === 'danger-ghost'}
+      icon={<Icon size={16} strokeWidth={1.7} />}
+      onClick={() => onSelect(action)}
+    >
+      <span className="mica-menu-label">{label}</span>
+    </MenuItem>
+  );
+}
+
+/**
+ * 笔记的「更多」菜单：重命名 / 移动 / 删除。目录行与顶栏共用。
+ *
+ * ArcoPopover 负责定位与点外关闭；菜单行、键盘导航与 Esc 交给共享菜单。
+ */
+function PopoverMenu({ open, onOpen, onClose, label, position = 'br', trigger, children }) {
+  const anchor = useRef(null);
+  return (
+    <ArcoPopover
+      trigger="click"
+      className="mica-menu-popover"
+      position={position}
+      escToClose
+      popupVisible={open}
+      onVisibleChange={(visible) => (visible ? onOpen() : onClose())}
+      triggerProps={{ showArrow: false }}
+      content={
+        <MenuList
+          aria-label={label}
+          autoFocus
+          onClose={() => {
+            onClose();
+            anchor.current?.querySelector('button')?.focus({ preventScroll: true });
+          }}
+        >
+          {children}
+        </MenuList>
+      }
+    >
+      {cloneElement(trigger, { ref: anchor })}
+    </ArcoPopover>
+  );
+}
+
+function NoteMenu({ node, open, onOpen, onClose, onAction, extraRows, trigger, position = 'br' }) {
+  return (
+    <PopoverMenu
+      open={open}
+      onOpen={onOpen}
+      onClose={onClose}
+      label={`${node.title} 的操作`}
+      position={position}
+      trigger={trigger}
+    >
+      {extraRows && (
+        <>
+          {extraRows}
+          <MenuSeparator />
+        </>
+      )}
+      <MenuRow action="rename" label="重命名" Icon={Pencil} onSelect={onAction} />
+      <MenuRow action="move" label="移动到…" Icon={FolderInput} onSelect={onAction} />
+      <MenuSeparator />
+      <MenuRow action="delete" label="移到最近删除" Icon={Trash2} variant="danger-ghost" onSelect={onAction} />
+    </PopoverMenu>
+  );
+}
+
 /** 所有笔记在插件数据目录内，不属于会话、工作区或浏览器 localStorage。 */
 export default function NotebookPage({ api }) {
   const [index, setIndex] = useState(emptyIndex);
@@ -72,6 +158,8 @@ export default function NotebookPage({ api }) {
   const [expanded, setExpanded] = useState(new Set());
   const [query, setQuery] = useState('');
   const [trash, setTrash] = useState(false);
+  const [menu, setMenu] = useState(null);
+  const [newMenu, setNewMenu] = useState(false);
   const [railOpen, setRailOpen] = useState(() => !window.matchMedia('(max-width: 760px)').matches);
   const [outlineOpen, setOutlineOpen] = useState(() => !window.matchMedia('(max-width: 1100px)').matches);
   const [layout, setLayout] = useState(() => ({
@@ -89,6 +177,9 @@ export default function NotebookPage({ api }) {
   const pageRoot = useRef(null);
   const rail = useRef(null);
   const outlinePanel = useRef(null);
+  const barLead = useRef(null);
+  const barActions = useRef(null);
+  const syncLayout = useRef(() => {});
   const layoutRef = useRef(layout);
   layoutRef.current = layout;
   const bridge = useRef(null);
@@ -118,15 +209,8 @@ export default function NotebookPage({ api }) {
     () => flattenVisibleTree(index, { expanded, query, showTrash: trash }),
     [index, expanded, query, trash],
   );
-  const notesCount = index.nodes.filter((node) => node.kind === 'note' && !node.trashedAt).length;
-  const outlinePosition = outline.items.findIndex((item) => item.key === outline.activeKey);
   const railOverlay = layout.mobile && railOpen && !focused;
   const outlineOverlay = layout.overlay && outlineOpen && !focused && !!active;
-  let sectionNumber = 0;
-  const headings = outline.items.map((item) => ({
-    ...item,
-    number: item.level === 1 ? '—' : item.level === 2 ? String(++sectionNumber).padStart(2, '0') : '·',
-  }));
 
   const save = useCallback(
     async (target = current.current) => {
@@ -286,6 +370,8 @@ export default function NotebookPage({ api }) {
       onReady() {
         ready.current = true;
         syncTheme();
+        // The iframe listener only exists now; re-send the bar insets it needs.
+        syncLayout.current();
         if (lifecycle.closing) {
           instance.freeze(true);
           return;
@@ -384,16 +470,49 @@ export default function NotebookPage({ api }) {
     return () => observer.disconnect();
   }, []);
 
+  // 顶栏与编辑器工具栏是同一行：把两侧实际占的宽度告诉 iframe，让它给工具栏空出同样的位置，
+  // 只靠 CSS 猜宽度会在标题变长或增删按钮时互相压住。
+  useEffect(() => {
+    const send = () => {
+      const mobile = layoutRef.current.mobile;
+      const height = barLead.current?.offsetHeight || barActions.current?.offsetHeight || 0;
+      bridge.current?.layout({
+        left: mobile ? 0 : (barLead.current?.offsetWidth ?? 0),
+        right: mobile ? 0 : (barActions.current?.offsetWidth ?? 0),
+        height: mobile ? 0 : height,
+      });
+    };
+    send();
+    syncLayout.current = send;
+    const observer = new ResizeObserver(send);
+    for (const node of [barLead.current, barActions.current]) if (node) observer.observe(node);
+    return () => {
+      observer.disconnect();
+      syncLayout.current = () => {};
+    };
+  }, [activeId, frameKey, focused, layout.mobile, railOpen, saveState]);
+
   useEffect(() => {
     const escape = (event) => {
-      if (event.key !== 'Escape' || event.defaultPrevented || dialog) return;
+      if (event.key !== 'Escape' || event.defaultPrevented || dialog || menu || newMenu) return;
       if (focused) setFocused(false);
       else if (layout.overlay && outlineOpen) setOutlineOpen(false);
       else if (layout.mobile && railOpen) setRailOpen(false);
     };
     window.addEventListener('keydown', escape);
     return () => window.removeEventListener('keydown', escape);
-  }, [focused, dialog, outlineOpen, railOpen, layout]);
+  }, [focused, dialog, menu, newMenu, outlineOpen, railOpen, layout]);
+
+  // iframe 内的点击不冒泡到宿主；焦点进入编辑器时也要收起宿主的菜单。
+  useEffect(() => {
+    if (!menu && !newMenu) return;
+    const closeMenus = () => {
+      setMenu(null);
+      setNewMenu(false);
+    };
+    window.addEventListener('blur', closeMenus);
+    return () => window.removeEventListener('blur', closeMenus);
+  }, [menu, newMenu]);
 
   useEffect(() => {
     const panel = railOverlay ? rail.current : outlineOverlay ? outlinePanel.current : null;
@@ -486,6 +605,26 @@ export default function NotebookPage({ api }) {
       parentId: parentForNew,
     });
   const edit = (node) => setDialog({ type: 'rename', node, title: '重命名', name: node.title });
+  const downloadActive = async () => {
+    setMenu(null);
+    const note = active;
+    if (!note) return;
+    if (ready.current && loadedNote.current === note.id) {
+      try {
+        const value = await bridge.current.flush();
+        acceptChange(value.noteId, value.document);
+      } catch (cause) {
+        setError(message(cause));
+      }
+    }
+    if (current.current) download(current.current.document, note.title);
+  };
+  const runAction = (node, action) => {
+    setMenu(null);
+    if (action === 'rename') edit(node);
+    else if (action === 'move') setDialog({ type: 'move', title: '移动到', node, parentId: node.parentId || '' });
+    else setDialog({ type: 'delete', title: '移到最近删除', node });
+  };
   const submitDialog = async () => {
     const value = dialog;
     if (!value || busy || lifecycle.closing) return;
@@ -592,12 +731,9 @@ export default function NotebookPage({ api }) {
         <aside ref={rail} className="notebook-rail" aria-label="笔记目录" inert={outlineOverlay}>
           <div className="notebook-rail-title">
             <span className="notebook-book-icon">
-              <BookOpen size={17} strokeWidth={1.5} />
+              <BookOpen size={15} strokeWidth={1.6} />
             </span>
-            <div>
-              <strong>我的笔记</strong>
-              <small>本地笔记本</small>
-            </div>
+            <strong>我的笔记</strong>
             <Button
               variant="ghost"
               icon={<PanelLeftClose size={15} />}
@@ -606,41 +742,69 @@ export default function NotebookPage({ api }) {
               onClick={() => setRailOpen(false)}
             />
           </div>
-          <div className="notebook-search">
-            <Search size={14} />
-            <Input value={query} onChange={setQuery} placeholder="搜索笔记标题" aria-label="搜索笔记标题" />
-          </div>
-          <nav className="notebook-rail-nav" aria-label="笔记分类">
-            <Button
-              variant="ghost"
-              fullWidth
-              className={`mica-arco-row ${!trash ? 'is-active' : ''}`}
-              icon={<BookOpen size={14} />}
-              aria-current={!trash ? 'page' : undefined}
-              onClick={() => {
-                setTrash(false);
-                setQuery('');
-              }}
-            >
-              所有笔记<span className="notebook-note-count">{notesCount}</span>
-            </Button>
-          </nav>
-          <div className="notebook-tree-heading">
-            <span>
-              {trash ? '最近删除' : '笔记目录'}
-              {trash && <small>{index.nodes.filter((node) => node.trashedAt).length}</small>}
-            </span>
-            <div>
-              <Button
-                variant="ghost"
-                icon={<FolderPlus size={14} />}
-                title="新建文件夹"
-                aria-label="新建文件夹"
-                disabled={!loaded || busy || trash}
-                onClick={() => create('folder')}
+          {/* 搜索与新建共用一栏：左边找笔记，右边就地新建，不再各占一行。 */}
+          <div className="notebook-rail-tools">
+            <div className="notebook-search">
+              <Input
+                value={query}
+                onChange={setQuery}
+                placeholder="搜索笔记"
+                aria-label="搜索笔记"
+                prefix={<Search size={14} strokeWidth={1.7} />}
+                allowClear
               />
             </div>
+            <PopoverMenu
+              open={newMenu}
+              onOpen={() => {
+                setMenu(null);
+                setNewMenu(true);
+              }}
+              onClose={() => setNewMenu(false)}
+              label="新建"
+              position="bl"
+              trigger={
+                <span className="notebook-rail-add-anchor">
+                  <Button
+                    variant="ghost"
+                    className="notebook-rail-add"
+                    icon={<Plus size={16} />}
+                    title="新建笔记或文件夹"
+                    aria-label="新建"
+                    pressed={newMenu}
+                    disabled={!loaded || busy || trash}
+                    onClick={() => {}}
+                  />
+                </span>
+              }
+            >
+              <MenuRow
+                action="note"
+                label="新建笔记"
+                Icon={FilePlus2}
+                onSelect={(kind) => {
+                  setNewMenu(false);
+                  create(kind);
+                }}
+              />
+              <MenuRow
+                action="folder"
+                label="新建文件夹"
+                Icon={FolderPlus}
+                onSelect={(kind) => {
+                  setNewMenu(false);
+                  create(kind);
+                }}
+              />
+            </PopoverMenu>
           </div>
+          {trash && (
+            <div className="notebook-tree-heading">
+              <span>
+                最近删除<small>{index.nodes.filter((node) => node.trashedAt).length}</small>
+              </span>
+            </div>
+          )}
           <div
             className="notebook-tree"
             role="tree"
@@ -693,23 +857,46 @@ export default function NotebookPage({ api }) {
                     )}
                     <span>{node.title}</span>
                   </button>
-                  <Button
-                    variant="ghost"
-                    icon={trash ? <Undo2 size={13} /> : <MoreHorizontal size={14} />}
-                    title={trash ? '恢复' : '更多操作'}
-                    aria-label={`${trash ? '恢复' : '更多操作'}：${node.title}`}
-                    className="notebook-row-actions"
-                    onClick={() => {
-                      setSelectedId(node.id);
-                      if (trash) {
+                  {trash ? (
+                    <Button
+                      variant="ghost"
+                      icon={<Undo2 size={13} />}
+                      title="恢复"
+                      aria-label={`恢复：${node.title}`}
+                      className="notebook-row-actions"
+                      onClick={() => {
                         let root = node;
                         while (index.nodes.find((item) => item.id === root.parentId)?.trashedAt)
                           root = index.nodes.find((item) => item.id === root.parentId);
                         const now = new Date().toISOString();
                         void mutate((latest) => restoreNode(latest, root.id, now));
-                      } else setDialog({ type: 'actions', title: node.title, node });
-                    }}
-                  />
+                      }}
+                    />
+                  ) : (
+                    <NoteMenu
+                      node={node}
+                      open={menu?.id === node.id && menu.source === 'row'}
+                      onOpen={() => {
+                        setNewMenu(false);
+                        setSelectedId(node.id);
+                        setMenu({ id: node.id, source: 'row' });
+                      }}
+                      onClose={() => setMenu(null)}
+                      onAction={(action) => runAction(node, action)}
+                      trigger={
+                        <span className="notebook-row-actions">
+                          <Button
+                            variant="ghost"
+                            icon={<MoreHorizontal size={14} />}
+                            title="更多操作"
+                            aria-label={`更多操作：${node.title}`}
+                            pressed={menu?.id === node.id && menu.source === 'row'}
+                            onClick={() => setSelectedId(node.id)}
+                          />
+                        </span>
+                      }
+                    />
+                  )}
                 </div>
               ))
             ) : (
@@ -722,18 +909,6 @@ export default function NotebookPage({ api }) {
                 )}
               </div>
             )}
-          </div>
-          <div className="notebook-rail-new">
-            <Button
-              variant="ghost"
-              fullWidth
-              className="mica-arco-row"
-              icon={<FilePlus2 size={14} />}
-              disabled={!loaded || busy}
-              onClick={() => create('note')}
-            >
-              新建笔记
-            </Button>
           </div>
           <div className="notebook-rail-footer">
             <span title="笔记自动保存在本机">
@@ -763,82 +938,6 @@ export default function NotebookPage({ api }) {
           />
         )}
         <main className="notebook-main" inert={railOverlay}>
-          <header className="notebook-document-header">
-            {(!railOpen || focused) && (
-              <Button
-                variant="ghost"
-                icon={<Menu size={16} />}
-                title={focused ? '显示目录并退出专注' : '展开目录'}
-                onClick={() => {
-                  setFocused(false);
-                  setRailOpen(true);
-                  if (layoutRef.current.overlay) setOutlineOpen(false);
-                }}
-              />
-            )}
-            <span className="notebook-breadcrumb" title={path.join(' / ')}>
-              <span className="notebook-breadcrumb-parent">
-                {active ? path.slice(0, -1).join(' / ') || '我的笔记' : '本地笔记本'}
-              </span>
-              {active && (
-                <>
-                  <ChevronRight size={12} />
-                  <strong>{active.title}</strong>
-                </>
-              )}
-            </span>
-            {active && (
-              <>
-                <span className={`notebook-save notebook-save--${saveState}`} role="status">
-                  {saveState === 'saved' ? <Check size={12} /> : null}
-                  {saveState === 'saved' ? '已保存' : saveState === 'error' ? '未保存' : '保存中'}
-                </span>
-                <Button
-                  variant="ghost"
-                  icon={<Download size={15} />}
-                  title="下载当前笔记"
-                  aria-label="下载当前笔记"
-                  onClick={async () => {
-                    if (ready.current && loadedNote.current === activeId) {
-                      try {
-                        const value = await bridge.current.flush();
-                        acceptChange(value.noteId, value.document);
-                      } catch (cause) {
-                        setError(message(cause));
-                      }
-                    }
-                    if (current.current) download(current.current.document, active.title);
-                  }}
-                />
-                <span className="notebook-header-divider" />
-                <Button
-                  variant="ghost"
-                  icon={<Focus size={16} />}
-                  title={focused ? '退出专注' : '专注写作'}
-                  pressed={focused}
-                  onClick={() => setFocused(!focused)}
-                />
-                <Button
-                  variant="ghost"
-                  icon={<ListTree size={16} />}
-                  title={outlineOpen && !focused ? '收起大纲' : '展开大纲'}
-                  pressed={outlineOpen && !focused}
-                  onClick={() => {
-                    setFocused(false);
-                    setOutlineOpen(focused || !outlineOpen);
-                    if (layoutRef.current.mobile) setRailOpen(false);
-                  }}
-                />
-                <Button
-                  variant="ghost"
-                  icon={<MoreHorizontal size={16} />}
-                  title="笔记操作"
-                  aria-label="笔记操作"
-                  onClick={() => setDialog({ type: 'actions', title: active.title, node: active })}
-                />
-              </>
-            )}
-          </header>
           {error && (
             <div className="notebook-error">
               <Alert message={error} />
@@ -883,6 +982,89 @@ export default function NotebookPage({ api }) {
           )}
           <div className="notebook-document-body">
             <div className={`notebook-editor-area ${active ? 'has-note' : ''}`} inert={outlineOverlay}>
+              {/* 顶栏与编辑器工具栏是同一条操作栏：只有目录收起时才在左边出现目录开关与位置，
+                  右边常驻保存状态与文档操作；工具栏按这两段的实测宽度让位。 */}
+              <div className="notebook-bar">
+                {(focused || !railOpen) && (
+                  <div className="notebook-bar-lead" ref={barLead}>
+                    <Button
+                      variant="ghost"
+                      icon={<Menu size={16} />}
+                      title={focused ? '显示目录并退出专注' : '展开目录'}
+                      aria-label={focused ? '显示目录并退出专注' : '展开目录'}
+                      onClick={() => {
+                        setFocused(false);
+                        setRailOpen(true);
+                        if (layoutRef.current.overlay) setOutlineOpen(false);
+                      }}
+                    />
+                    {active && (
+                      <span className="notebook-breadcrumb" title={path.join(' / ')}>
+                        {path.slice(0, -1).join(' / ') || '我的笔记'}
+                      </span>
+                    )}
+                  </div>
+                )}
+                {active && (
+                  <div className="notebook-bar-actions" ref={barActions}>
+                    <span className={`notebook-save notebook-save--${saveState}`} role="status">
+                      {saveState === 'saved' ? <Check size={12} /> : null}
+                      {saveState === 'saved' ? '已保存' : saveState === 'error' ? '未保存' : '保存中'}
+                    </span>
+                    <Button
+                      variant="ghost"
+                      icon={<Focus size={16} />}
+                      title={focused ? '退出专注' : '专注写作'}
+                      aria-label={focused ? '退出专注' : '专注写作'}
+                      pressed={focused}
+                      onClick={() => setFocused(!focused)}
+                    />
+                    <NoteMenu
+                      node={active}
+                      open={menu?.id === active.id && menu.source === 'header'}
+                      onOpen={() => {
+                        setNewMenu(false);
+                        setMenu({ id: active.id, source: 'header' });
+                      }}
+                      onClose={() => setMenu(null)}
+                      onAction={(action) => runAction(active, action)}
+                      position="bl"
+                      extraRows={
+                        <>
+                          <MenuRow
+                            action="download"
+                            label="下载 JSON"
+                            Icon={Download}
+                            onSelect={() => void downloadActive()}
+                          />
+                          <MenuRow
+                            action="focus"
+                            label={focused ? '退出专注' : '专注写作'}
+                            Icon={Focus}
+                            onSelect={() => {
+                              setMenu(null);
+                              setFocused(!focused);
+                            }}
+                          />
+                        </>
+                      }
+                      trigger={
+                        /* 开合由浮层的 onVisibleChange 驱动，按钮自己不切换状态。 */
+                        <span className="notebook-menu-anchor">
+                          <Button
+                            variant="ghost"
+                            icon={<MoreHorizontal size={16} />}
+                            title="笔记操作"
+                            aria-label="笔记操作"
+                            pressed={menu?.id === active.id && menu.source === 'header'}
+                            onClick={() => {}}
+                          />
+                        </span>
+                      }
+                    />
+                  </div>
+                )}
+              </div>
               <iframe
                 key={frameKey}
                 ref={iframe}
@@ -956,34 +1138,24 @@ export default function NotebookPage({ api }) {
                 />
                 <aside ref={outlinePanel} className="notebook-outline" aria-label="文档大纲">
                   <header>
-                    <strong>文档大纲</strong>
+                    <strong>大纲</strong>
                     <Button
                       variant="ghost"
                       size="compact"
-                      icon={<X size={14} />}
-                      title="关闭大纲"
+                      className="notebook-outline-eye"
+                      icon={<EyeOff size={14} />}
+                      title="收起大纲"
+                      aria-label="收起大纲"
                       onClick={() => setOutlineOpen(false)}
                     />
                   </header>
-                  <div className="notebook-outline-summary">
-                    <span>
-                      {outline.items.length} 处标题 · 当前 {outline.items.length ? Math.max(1, outlinePosition + 1) : 0}
-                    </span>
-                    <div aria-hidden="true">
-                      <i
-                        style={{
-                          width: `${outline.items.length ? (Math.max(1, outlinePosition + 1) / outline.items.length) * 100 : 0}%`,
-                        }}
-                      />
-                    </div>
-                  </div>
                   <nav className="notebook-outline-list" aria-label="当前笔记的标题">
-                    {!headings.length && (
+                    {!outline.items.length && (
                       <p className="notebook-outline-empty">
                         {frameState !== 'ready' ? '正在读取文档结构…' : '添加标题后，文档结构会显示在这里。'}
                       </p>
                     )}
-                    {headings.map((item) => (
+                    {outline.items.map((item) => (
                       <Button
                         key={item.key}
                         variant="ghost"
@@ -995,9 +1167,6 @@ export default function NotebookPage({ api }) {
                         disabled={busy}
                         onClick={() => jump({ heading: item.key })}
                       >
-                        <span className="notebook-outline-number" aria-hidden="true">
-                          {item.number}
-                        </span>
                         <span>{item.text.replace(/^\d+\s*[·.、]\s*/, '') || '未命名标题'}</span>
                       </Button>
                     ))}
@@ -1005,94 +1174,101 @@ export default function NotebookPage({ api }) {
                 </aside>
               </>
             )}
+            {/* 收起态的刻度条：标题按顺序标在右侧，当前标题高亮，悬停时出现眼睛按钮展开。 */}
+            {active && !outlineOpen && !focused && outline.items.length > 0 && (
+              <aside className="notebook-outline-rail" aria-label="文档大纲（已收起）">
+                <Button
+                  variant="ghost"
+                  className="notebook-outline-eye"
+                  icon={<Eye size={14} />}
+                  title="展开大纲"
+                  aria-label="展开大纲"
+                  onClick={() => {
+                    setFocused(false);
+                    setOutlineOpen(true);
+                  }}
+                />
+                <div className="notebook-outline-track">
+                  {outline.items.map((item, index) => (
+                    <button
+                      key={item.key}
+                      type="button"
+                      className={`notebook-outline-mark ${item.key === outline.activeKey ? 'is-active' : ''}`}
+                      style={{ top: `${((index + 0.5) / outline.items.length) * 100}%`, '--heading-level': item.level }}
+                      title={item.text || '未命名标题'}
+                      aria-label={item.text || '未命名标题'}
+                      aria-current={item.key === outline.activeKey ? 'location' : undefined}
+                      disabled={busy}
+                      onClick={() => jump({ heading: item.key })}
+                    />
+                  ))}
+                </div>
+              </aside>
+            )}
           </div>
         </main>
       </div>
       {dialog && (
         <Modal title={dialog.title} onClose={() => !busy && setDialog(null)} portal>
-          {dialog.type === 'actions' ? (
-            <div className="notebook-action-list">
-              <Button variant="ghost" fullWidth onClick={() => edit(dialog.node)}>
-                重命名
+          <div className="notebook-dialog">
+            {dialog.type === 'reload' ? (
+              <p>将先下载当前草稿备份，再载入磁盘上的最新正文。不会覆盖其他窗口的内容。</p>
+            ) : dialog.type === 'delete' ? (
+              <p>
+                将「{dialog.node.title}」{dialog.node.kind === 'folder' ? '及其全部内容' : ''}
+                移到最近删除？之后可以恢复，正文文件不会被删除。
+              </p>
+            ) : dialog.type === 'move' ? (
+              <label>
+                目标文件夹
+                <SelectMenu
+                  value={dialog.parentId}
+                  ariaLabel="目标文件夹"
+                  options={[
+                    { value: '', label: '我的笔记（根目录）' },
+                    ...folders
+                      .filter((folder) => !forbidden.has(folder.id))
+                      .map((folder) => ({ value: folder.id, label: folder.title })),
+                  ]}
+                  onChange={(parentId) => setDialog({ ...dialog, parentId })}
+                />
+              </label>
+            ) : (
+              <label>
+                名称
+                <Input
+                  autoFocus
+                  value={dialog.name}
+                  maxLength={100}
+                  placeholder={dialog.kind === 'folder' ? '文件夹名称' : '笔记标题'}
+                  aria-label="名称"
+                  onChange={(name) => setDialog({ ...dialog, name })}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' && !event.nativeEvent.isComposing && dialog.name.trim())
+                      void submitDialog();
+                  }}
+                />
+              </label>
+            )}
+            <footer>
+              <Button onClick={() => setDialog(null)} disabled={busy}>
+                取消
               </Button>
               <Button
-                variant="ghost"
-                fullWidth
-                onClick={() =>
-                  setDialog({ ...dialog, type: 'move', title: '移动到', parentId: dialog.node.parentId || '' })
-                }
+                variant={dialog.type === 'delete' ? 'danger' : 'accent'}
+                disabled={busy || (['create', 'rename'].includes(dialog.type) && !dialog.name.trim())}
+                onClick={() => void submitDialog()}
               >
-                移动到…
+                {busy
+                  ? '处理中'
+                  : dialog.type === 'delete'
+                    ? '移到最近删除'
+                    : dialog.type === 'create'
+                      ? '创建'
+                      : '确定'}
               </Button>
-              <Button
-                variant="danger-ghost"
-                fullWidth
-                onClick={() => setDialog({ ...dialog, type: 'delete', title: '移到最近删除' })}
-              >
-                移到最近删除
-              </Button>
-            </div>
-          ) : (
-            <div className="notebook-dialog">
-              {dialog.type === 'reload' ? (
-                <p>将先下载当前草稿备份，再载入磁盘上的最新正文。不会覆盖其他窗口的内容。</p>
-              ) : dialog.type === 'delete' ? (
-                <p>
-                  将「{dialog.node.title}」{dialog.node.kind === 'folder' ? '及其全部内容' : ''}
-                  移到最近删除？之后可以恢复，正文文件不会被删除。
-                </p>
-              ) : dialog.type === 'move' ? (
-                <label>
-                  目标文件夹
-                  <SelectMenu
-                    value={dialog.parentId}
-                    ariaLabel="目标文件夹"
-                    options={[
-                      { value: '', label: '我的笔记（根目录）' },
-                      ...folders
-                        .filter((folder) => !forbidden.has(folder.id))
-                        .map((folder) => ({ value: folder.id, label: folder.title })),
-                    ]}
-                    onChange={(parentId) => setDialog({ ...dialog, parentId })}
-                  />
-                </label>
-              ) : (
-                <label>
-                  名称
-                  <Input
-                    autoFocus
-                    value={dialog.name}
-                    maxLength={100}
-                    placeholder={dialog.kind === 'folder' ? '文件夹名称' : '笔记标题'}
-                    aria-label="名称"
-                    onChange={(name) => setDialog({ ...dialog, name })}
-                    onKeyDown={(event) => {
-                      if (event.key === 'Enter' && !event.nativeEvent.isComposing && dialog.name.trim())
-                        void submitDialog();
-                    }}
-                  />
-                </label>
-              )}
-              <footer>
-                <Button onClick={() => setDialog(null)} disabled={busy}>
-                  取消
-                </Button>
-                <Button
-                  variant={dialog.type === 'delete' ? 'danger' : 'accent'}
-                  disabled={busy || (['create', 'rename'].includes(dialog.type) && !dialog.name.trim())}
-                  onClick={() => void submitDialog()}
-                >
-                  {busy
-                    ? '处理中'
-                    : dialog.type === 'delete'
-                      ? '移到最近删除'
-                      : dialog.type === 'create'
-                        ? '创建'
-                        : '确定'}
-                </Button>
-              </footer>
-            </div>
-          )}
+            </footer>
+          </div>
         </Modal>
       )}
     </div>

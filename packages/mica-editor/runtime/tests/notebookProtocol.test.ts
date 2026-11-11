@@ -1,11 +1,13 @@
+import {createHeadlessEditor} from '@lexical/headless';
+import {$createMarkNode, $isMarkNode, MarkNode} from '@lexical/mark';
+import {$createParagraphNode, $createTextNode, $getRoot} from 'lexical';
 import {beforeAll, describe, expect, it, vi} from 'vitest';
 
 let NotebookSession: typeof import('../src/workspace/NotebookBridge').NotebookSession;
-let hydrateComments: typeof import('../src/workspace/NotebookBridge').hydrateComments;
 
 beforeAll(async () => {
   vi.stubGlobal('window', {location: {hash: '#test-nonce'}, parent: {postMessage: vi.fn()}});
-  ({NotebookSession, hydrateComments} = await import('../src/workspace/NotebookBridge'));
+  ({NotebookSession} = await import('../src/workspace/NotebookBridge'));
 });
 
 describe('notebook persistence boundary', () => {
@@ -28,13 +30,58 @@ describe('notebook persistence boundary', () => {
     detach();
   });
 
-  it('clones and validates comments so note sessions cannot share mutable comments', () => {
-    const input = [{type: 'comment', id: 'c1', author: '我', content: 'hello', deleted: false, timeStamp: 10}];
-    const result = hydrateComments([...input, {type: 'thread', id: 'bad', comments: [null]}]);
-    expect(result).toEqual(input);
-    expect(result[0]).not.toBe(input[0]);
-    result[0].id = 'changed';
-    expect(input[0].id).toBe('c1');
+  it('round-trips existing comments as opaque deep copies while editing the body and retaining marks', () => {
+    const thread = {
+      type: 'thread', id: 't1', quote: '原有正文',
+      comments: [{type: 'comment', id: 'c1', author: '我', content: 'hello', deleted: false, timeStamp: 10}],
+      metadata: {labels: ['stored']},
+    };
+    const comments = [thread, {type: 'thread', id: 'unvalidated', comments: [null]}, {unknown: {values: [1, null]}}, null];
+    const createEditor = () => createHeadlessEditor({
+      namespace: 'notebook-protocol-comments', nodes: [MarkNode], onError(error) {throw error;},
+    });
+    const editor = createEditor();
+    editor.update(() => {
+      $getRoot().append($createParagraphNode().append($createMarkNode(['t1']).append($createTextNode('原有正文'))));
+    }, {discrete: true});
+    const document = {version: 1 as const, editorState: JSON.stringify(editor.getEditorState().toJSON()), comments};
+    const session = new NotebookSession('a', document);
+    session.editor = editor;
+    editor.update(() => {
+      $getRoot().getAllTextNodes()[0].setTextContent('修改后的正文');
+    }, {discrete: true});
+
+    const snapshot = session.snapshot();
+    expect(snapshot.editorState).not.toBe(document.editorState);
+    expect(snapshot.comments).toEqual(comments);
+    expect(snapshot.comments).not.toBe(comments);
+    const savedThread = snapshot.comments[0] as typeof thread;
+    expect(savedThread).not.toBe(thread);
+    expect(savedThread.comments[0]).not.toBe(thread.comments[0]);
+    expect(savedThread.metadata.labels).not.toBe(thread.metadata.labels);
+
+    const reopened = createEditor();
+    reopened.setEditorState(reopened.parseEditorState(snapshot.editorState!));
+    reopened.getEditorState().read(() => {
+      expect($getRoot().getTextContent()).toBe('修改后的正文');
+      const mark = $getRoot().getAllTextNodes()[0].getParent();
+      expect($isMarkNode(mark) && mark.getIDs()).toEqual(['t1']);
+    });
+    const reopenedSession = new NotebookSession('a', snapshot);
+    reopenedSession.editor = reopened;
+    reopened.update(() => {
+      $getRoot().getAllTextNodes()[0].setTextContent('再次修改正文');
+    }, {discrete: true});
+    const roundTrip = reopenedSession.snapshot();
+    expect(roundTrip.comments).toEqual(comments);
+    expect(roundTrip.comments[0]).not.toBe(savedThread);
+
+    savedThread.comments[0].content = 'changed in snapshot';
+    savedThread.metadata.labels[0] = 'changed in snapshot';
+    expect(session.snapshot().comments).toEqual(comments);
+    expect(roundTrip.comments).toEqual(comments);
+    expect(thread.comments[0].content).toBe('hello');
+    expect(thread.metadata.labels).toEqual(['stored']);
   });
 
   it('flushes attached captions before serializing and detaches them on unmount', () => {

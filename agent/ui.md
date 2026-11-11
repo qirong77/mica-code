@@ -13,7 +13,7 @@
 - 两个宿主都整页打开：桌面端点左下角设置按钮、左上角插件菜单，都以覆盖整窗的一层渲染 `<App>`（`section` 定位到 Config 或 Plugins、`pluginId` 定位到插件详情，`onClose` 渲染左上角返回）。页面内导航由侧栏切换，不做弹窗内嵌。
 - 新页面只用既有积木：`PageFrame`、`Button`、`Tag`、`Switch`、`CollapsiblePanel`、`SettingsGroup`、`SettingRow`、`SplitView`、`ControlEndpointList`；文案走 `labels.ts`。
 - 三块骨架：`PageFrame`（窄页头 + 内容区）、`SettingsGroup` + `SettingRow`（一页一块面，行间分隔线）、`SplitView`（左列表 + 右详情）。
-- Web 基础控件以 Arco Design React 为实现：`Ui.tsx` 保留共享语义接口，`SelectMenu` / `DateField` / `Modal` / `DataTable` 适配原有业务契约，普通输入从共享入口引入 `Input` / `InputNumber`。`ArcoProvider` 供完整 App 统一配置语言、尺寸与弹层容器；`ArcoAction` 透传原生按钮事件与 ref。标准表单使用 Arco `small`（28px / 14px），密集工具栏使用 `mini`（24px / 12px）；不按设置页容器重写基础控件高度，20/22px 纯图标动作保留业务特例。设置骨架圆角采用 2 / 4 / 8 / 12px 阶梯。`arco-settings.css` 按需载入控件样式，在 `body.mica-arco-theme` 与 `.mica-config-ui` 映射主题；页面旧控件皮肤不得覆盖 Arco。保留页面骨架、导航、布局与专用编辑器，不另写第二套基础控件。
+- Web 基础控件以 Arco Design React 为实现：`Ui.tsx` 保留共享语义接口，`SelectMenu` / `DateField` / `Modal` / `DataTable` 适配原有业务契约，普通输入从共享入口引入 `Input` / `InputNumber`，动作菜单复用 `MenuList` / `MenuItem` / `MenuSeparator`（定位与开合交给调用方，共享表面、行样式及键盘导航）。`ArcoProvider` 供完整 App 统一配置语言、尺寸与弹层容器；`ArcoAction` 透传原生按钮事件与 ref。标准表单使用 Arco `small`（28px / 14px），密集工具栏使用 `mini`（24px / 12px）；不按设置页容器重写基础控件高度，20/22px 纯图标动作保留业务特例。设置骨架圆角采用 2 / 4 / 8 / 12px 阶梯。`arco-settings.css` 按需载入控件样式，在 `body.mica-arco-theme` 与 `.mica-config-ui` 映射主题；页面旧控件皮肤不得覆盖 Arco。保留页面骨架、导航、布局与专用编辑器，不另写第二套基础控件。
 - 纯图标动作显式传 `iconOnly`，共享适配层用双轴居中，禁止沿用文字内边距；文字动作继承所在工具栏字号与字色，状态色仍交给 Arco。普通导航、工具栏与文字动作使用当前主题的中性色，不套 Arco 默认蓝色；主操作与选中态才使用主题强调色，危险/成功/警告保留语义色。主题沿用现有六套与 `auto`，组件及 body Portal 通过同一份 token 映射即时更新。
 - 折叠按容器宽度（`@container page (max-width: 860px)`），不按视口。
 - Config 页只按字段编辑 providers；`mcpServers` 与 `capabilityDefaults` 不在这页编辑——前者在 MCP 页按字段填，后者跳到 Capabilities 页。

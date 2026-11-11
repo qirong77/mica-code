@@ -11,7 +11,7 @@ npx vite --config .probe/notebook-workbench/vite.config.mjs
 
 访问 `http://127.0.0.1:5287/`，默认浅色。辅助条可即时切换项目注册表中的六套主题，也可以用 `/?theme=dark`、`/?theme=mocha`、`/?theme=latte`、`/?theme=tokyo-night`、`/?theme=tokyo-night-light` 指定主题。主题只更新本页 DOM 和 URL，不写用户偏好。
 
-需要已安装桌面端与 `packages/mica-editor/runtime` 的开发依赖。第一次请求 `/editor/` 时调用共享 `packages/mica-editor/build.mjs`，输出到仓库的 `temp/notebook-workbench-runtime/`；后续运行时源码或共享 Arco CSS 改动会使这份隔离产物失效，并在下次请求时重建。不会覆盖安装产物，也不会触发桌面端、CLI 或配置页的正式构建。第三方编辑器依赖沿用生产运行时的 CDN 加载方式。
+需要已安装桌面端与 `packages/mica-editor/runtime` 的开发依赖。第一次请求 `/editor/` 时调用共享 `packages/mica-editor/build.mjs`，输出到仓库的 `temp/notebook-workbench-runtime/`；后续运行时源码、共享菜单等控件或共享 Arco CSS 改动会使这份隔离产物失效，并在下次请求时重建。不会覆盖安装产物，也不会触发桌面端、CLI 或配置页的正式构建。第三方编辑器依赖沿用生产运行时的 CDN 加载方式。
 
 ## 数据与边界
 

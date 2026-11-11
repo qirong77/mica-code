@@ -176,6 +176,10 @@ export function createEditorBridge(options: {
     freeze(frozen: boolean) {
       send('freeze', { frozen });
     },
+    /** 顶栏两侧在宿主里占的宽度：编辑器把同一行工具栏的左右两端让出来。 */
+    layout(insets: { left: number; right: number; height: number }) {
+      send('layout', insets);
+    },
     theme(appearance: string, tokens: Record<string, string>) {
       send('theme', { appearance, tokens });
     },

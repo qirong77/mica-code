@@ -52,15 +52,15 @@
   min-height: 0;
   background: var(--color-canvas);
   border: 1px solid var(--color-line-soft);
-  border-radius: 10px;
+  border-radius: 8px;
   overflow: hidden;
 }
 .notebook-page.is-rail-open .notebook-rail {
   display: flex;
 }
 .notebook-rail-title {
-  min-height: 76px;
-  padding: 12px 12px 12px 16px;
+  min-height: 48px;
+  padding: 8px 8px 8px 14px;
   display: flex;
   align-items: center;
   gap: 9px;
@@ -71,68 +71,110 @@
   display: grid;
   place-items: center;
   flex: none;
-  width: 28px;
-  height: 30px;
+  width: 20px;
+  height: 24px;
   color: var(--color-fg-soft);
-  background: var(--color-panel);
-  border: 1px solid var(--color-line-soft);
-  border-radius: 5px 8px 8px 5px;
-}
-.notebook-rail-title > div {
-  display: grid;
-  gap: 2px;
-  flex: 1;
-  min-width: 0;
 }
 .notebook-rail-title strong {
+  flex: 1;
+  min-width: 0;
   font-size: 13px;
   font-weight: 600;
   color: var(--color-fg-strong);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-.notebook-rail-title small {
-  color: var(--color-fg-faint);
-  font-size: 10px;
-}
-.notebook-search {
-  margin: 0 12px 16px;
+/* 搜索与新建是一个复合控件，共用边界、等高、统一聚焦反馈。 */
+.notebook-rail-tools {
   display: flex;
   align-items: center;
-  position: relative;
-}
-.notebook-search > svg {
-  position: absolute;
-  z-index: 1;
-  left: 9px;
-  color: var(--color-fg-muted);
-  pointer-events: none;
-}
-.notebook-search .arco-input-wrapper {
+  gap: 2px;
+  flex: none;
+  min-height: 34px;
+  margin: 2px 12px 12px;
+  padding: 2px;
+  box-sizing: border-box;
   background: var(--color-panel);
   border: 1px solid var(--color-line-soft);
-  border-radius: 6px;
+  border-radius: 8px;
+  transition:
+    border-color 90ms ease,
+    box-shadow 90ms ease;
+}
+.notebook-rail-tools:hover {
+  border-color: var(--color-line-strong);
+}
+.notebook-rail-tools:has(input:focus-visible) {
+  border-color: color-mix(in srgb, var(--color-accent) 55%, var(--color-line));
+  box-shadow: 0 0 0 2px var(--color-accent-subtle);
+}
+.notebook-search {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  flex: 1;
+  min-width: 0;
+}
+.notebook-search .arco-input-inner-wrapper {
+  box-sizing: border-box;
   width: 100%;
+  height: 28px;
+  padding: 0 7px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  box-shadow: none;
+}
+.notebook-search .arco-input-group-prefix {
+  display: inline-flex;
+  align-items: center;
+  margin-right: 7px;
+  color: var(--color-fg-muted);
 }
 .notebook-search input.arco-input {
-  padding-left: 28px;
+  padding: 0;
+  height: 28px;
   font-size: 12px;
+  line-height: 28px;
+  background: transparent;
 }
-.notebook-rail-nav {
-  margin: 0 10px 22px;
+.notebook-search input.arco-input:focus-visible {
+  outline: none;
+  box-shadow: none;
 }
-.notebook-page .notebook-rail-nav .ui-button {
-  height: 32px;
-  font-size: 12px;
-  border-radius: 6px;
+.notebook-rail-add-anchor {
+  display: inline-flex;
+  flex: none;
+  position: relative;
+  padding-left: 3px;
 }
-.notebook-rail-nav .is-active {
-  background: var(--color-panel);
+.notebook-rail-add-anchor::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 6px;
+  bottom: 6px;
+  width: 1px;
+  background: var(--color-line-soft);
+}
+.notebook-page .notebook-rail-add {
+  width: 28px;
+  min-width: 28px;
+  height: 28px;
+  padding: 0;
+  color: var(--color-fg-soft);
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+}
+.notebook-page .notebook-rail-add:hover:not(:disabled) {
+  background: var(--color-active);
+}
+.notebook-page
+  :is(.notebook-rail-add, .notebook-menu-anchor .ui-button, .notebook-row-actions .ui-button)[aria-pressed='true'] {
   color: var(--color-fg-strong);
-  font-weight: 600;
-}
-.notebook-note-count {
-  margin-left: auto;
-  color: var(--color-fg-muted);
-  font-size: 10px;
+  background: var(--color-active);
 }
 .notebook-tree-heading {
   padding: 0 12px 6px 18px;
@@ -149,15 +191,6 @@
 }
 .notebook-tree-heading small {
   font-size: 10px;
-}
-.notebook-tree-heading > div {
-  display: flex;
-  gap: 2px;
-}
-.notebook-tree-heading .ui-button-icon-only {
-  width: 24px;
-  min-width: 24px;
-  height: 24px;
 }
 .notebook-tree {
   flex: 1;
@@ -181,15 +214,15 @@
 }
 .notebook-tree-entry.is-active {
   background: var(--color-accent-subtle);
-  border-color: color-mix(in srgb, var(--color-accent) 12%, var(--color-accent-subtle));
-  color: var(--color-accent);
+  color: var(--color-fg-strong);
+  font-weight: 500;
 }
 .notebook-tree-row {
   color: inherit;
   display: flex;
   align-items: center;
   gap: 7px;
-  padding: 7px 28px 7px calc(4px + var(--depth) * 14px);
+  padding: 6px 28px 6px calc(4px + var(--depth) * 14px);
   width: 100%;
   border: none;
   background: none;
@@ -205,7 +238,10 @@
   color: var(--color-fg-muted);
 }
 .notebook-tree-entry.is-active .notebook-tree-row > svg {
-  color: inherit;
+  color: var(--color-accent);
+}
+.notebook-tree-row[aria-expanded] {
+  font-weight: 500;
 }
 .notebook-tree-row > span:last-child {
   overflow: hidden;
@@ -226,15 +262,22 @@
 .notebook-page .notebook-row-actions {
   position: absolute;
   right: 3px;
+  display: flex;
   opacity: 0;
+}
+.notebook-page .notebook-row-actions .ui-button {
   height: 24px;
   width: 24px;
   min-width: 24px;
   padding: 0;
   color: var(--color-fg-muted);
 }
+.notebook-menu-anchor {
+  display: inline-flex;
+}
 .notebook-tree-entry:hover .notebook-row-actions,
-.notebook-tree-entry:focus-within .notebook-row-actions {
+.notebook-tree-entry:focus-within .notebook-row-actions,
+.notebook-row-actions:has([aria-pressed='true']) {
   opacity: 1;
 }
 .notebook-tree-empty {
@@ -245,20 +288,6 @@
   gap: 12px;
   flex-direction: column;
   align-items: center;
-}
-.notebook-rail-new {
-  padding: 10px 12px 12px;
-  flex: none;
-}
-.notebook-page .notebook-rail-new .ui-button {
-  border: 1px solid var(--color-line-soft);
-  border-radius: 6px;
-  background: var(--color-panel);
-  height: 32px;
-  font-size: 12px;
-}
-.notebook-page .notebook-rail-new .ui-button:hover:not(:disabled) {
-  background: var(--color-active);
 }
 .notebook-rail-footer {
   display: flex;
@@ -286,64 +315,62 @@
   display: flex;
   flex-direction: column;
 }
-.notebook-document-header {
+/* 文档栏与编辑器工具栏是同一行：两段浮在编辑器顶上，中间留给工具栏，
+   工具栏左右两端各按这两段的实测宽度让位（见 desktop.jsx 的 layout 消息）。 */
+.notebook-bar {
+  position: absolute;
+  inset: 0 0 auto;
+  z-index: 4;
+  display: flex;
+  align-items: stretch;
+  justify-content: space-between;
+  gap: 8px;
+  height: 44px;
+  pointer-events: none;
+}
+.notebook-bar-lead,
+.notebook-bar-actions {
   display: flex;
   align-items: center;
-  height: 40px;
-  min-height: 40px;
-  gap: 5px;
-  padding: 0 4px 4px;
+  gap: 2px;
+  min-width: 0;
+  padding: 0 8px 0 6px;
   box-sizing: border-box;
+  background: var(--color-canvas);
+  border-bottom: 1px solid var(--color-line-soft);
+  pointer-events: auto;
+}
+.notebook-bar-lead {
+  max-width: 40%;
+}
+.notebook-bar-actions {
+  margin-left: auto;
+  padding: 0 6px 0 8px;
+  gap: 3px;
 }
 .notebook-breadcrumb {
-  display: flex;
-  align-items: center;
-  gap: 8px;
+  min-width: 0;
+  padding-left: 2px;
   color: var(--color-fg-muted);
   font-size: 12px;
-  flex: 1;
-  min-width: 0;
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
 }
-.notebook-breadcrumb strong {
-  color: var(--color-fg-strong);
-  font-weight: 600;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.notebook-breadcrumb > svg {
-  flex: none;
-}
-.notebook-breadcrumb-parent {
-  flex: 0 1 auto;
-  max-width: 42%;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
 .notebook-save {
-  font-size: 10px;
+  font-size: 11px;
   color: var(--color-fg-muted);
   display: flex;
   gap: 4px;
   align-items: center;
   white-space: nowrap;
-  margin-inline: 5px;
+  margin-inline: 6px;
 }
 .notebook-save--saved svg {
   color: var(--color-success);
 }
 .notebook-save--error {
   color: var(--color-danger);
-}
-.notebook-header-divider {
-  width: 1px;
-  height: 14px;
-  background: var(--color-line);
-  margin-inline: 4px;
-  flex: none;
 }
 .notebook-document-body {
   display: flex;
@@ -359,8 +386,8 @@
   min-height: 0;
   position: relative;
   overflow: hidden;
-  border: 1px solid var(--color-line);
-  border-radius: 10px;
+  border: 1px solid var(--color-line-soft);
+  border-radius: 8px;
   background: var(--color-canvas);
 }
 .notebook-editor-frame {
@@ -379,7 +406,7 @@
   width: 200px;
   min-width: 200px;
   min-height: 0;
-  padding: 16px 3px 14px;
+  padding: 4px 0 14px;
   box-sizing: border-box;
   color: var(--color-fg-muted);
 }
@@ -388,57 +415,50 @@
   align-items: center;
   justify-content: space-between;
   flex: none;
-  padding: 0 2px 8px 8px;
+  height: 34px;
+  padding: 0 2px 0 10px;
   color: var(--color-fg-soft);
 }
 .notebook-outline > header strong {
   font-size: 12px;
   font-weight: 600;
 }
-.notebook-outline-summary {
-  flex: none;
-  padding: 0 8px 14px;
-  color: var(--color-fg-faint);
-  font-size: 10px;
+/* 收起/展开只看这颗眼睛：平时不占视线，鼠标移到大纲上才出现。 */
+.notebook-outline-eye {
+  opacity: 0;
+  transition: opacity 0.12s ease;
 }
-.notebook-outline-summary > div {
-  height: 3px;
-  overflow: hidden;
-  border-radius: 2px;
-  background: var(--color-active);
-  margin-top: 10px;
-}
-.notebook-outline-summary i {
-  display: block;
-  height: 100%;
-  border-radius: inherit;
-  background: var(--color-accent);
+.notebook-outline:hover .notebook-outline-eye,
+.notebook-outline:focus-within .notebook-outline-eye,
+.notebook-outline-rail:hover .notebook-outline-eye,
+.notebook-outline-rail:focus-within .notebook-outline-eye,
+.notebook-outline-eye:focus-visible {
+  opacity: 1;
 }
 .notebook-outline-list {
   flex: 1;
   min-height: 0;
   overflow: auto;
   overscroll-behavior: contain;
+  margin-top: 2px;
+  padding-left: 5px;
+  border-left: 1px solid var(--color-line-soft);
 }
 .notebook-page .notebook-outline-entry {
   display: flex;
   align-items: baseline;
-  gap: 8px;
-  min-height: 30px;
+  min-height: 28px;
   height: auto;
-  border-radius: 6px;
-  padding: 7px 8px 7px calc(8px + max(0, var(--heading-level) - 2) * 10px);
+  border-radius: 5px;
+  padding: 6px 8px 6px calc(8px + min(36px, (var(--heading-level) - 1) * 12px));
   color: var(--color-fg-muted);
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.6;
   text-align: left;
 }
-.notebook-outline-number {
-  flex: none;
-  width: 18px;
-  font-size: 9px;
-  color: var(--color-fg-faint);
-  font-variant-numeric: tabular-nums;
+.notebook-page .notebook-outline-entry:hover:not(:disabled) {
+  color: var(--color-fg-soft);
+  background: var(--color-active);
 }
 .notebook-outline-entry > span:last-child {
   white-space: normal;
@@ -447,14 +467,67 @@
 .notebook-page .notebook-outline-entry.is-active {
   background: var(--color-accent-subtle);
   color: var(--color-accent);
-}
-.notebook-outline-entry.is-active .notebook-outline-number {
-  color: inherit;
+  font-weight: 500;
 }
 .notebook-outline-empty {
   margin: 4px 8px;
   font-size: 12px;
   line-height: 1.9;
+}
+/* 收起态：右侧一列标题刻度，绿色是当前标题；点任意一格跳到那一节。 */
+.notebook-outline-rail {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  flex: none;
+  width: 24px;
+  min-width: 24px;
+  padding: 4px 0 12px;
+  box-sizing: border-box;
+}
+.notebook-page .notebook-outline-rail .notebook-outline-eye {
+  width: 22px;
+  min-width: 22px;
+  height: 22px;
+  padding: 0;
+  flex: none;
+  color: var(--color-fg-muted);
+}
+.notebook-outline-track {
+  position: relative;
+  flex: 1;
+  width: 100%;
+  min-height: 0;
+}
+.notebook-outline-mark {
+  position: absolute;
+  right: 2px;
+  transform: translateY(-50%);
+  height: 3px;
+  padding: 0;
+  border: 0;
+  border-radius: 2px;
+  background: var(--color-line-strong);
+  width: max(8px, calc(22px - (var(--heading-level) - 1) * 5px));
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+/* 刻度只有 3px 高，靠伪元素把可点区域撑大。 */
+.notebook-outline-mark::before {
+  content: '';
+  position: absolute;
+  inset: -6px -6px;
+}
+.notebook-outline-mark:hover:not(:disabled) {
+  background: var(--color-fg-muted);
+}
+.notebook-outline-mark.is-active,
+.notebook-outline-mark.is-active:hover {
+  background: var(--color-accent);
+}
+.notebook-outline-mark:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
 }
 .notebook-welcome {
   position: absolute;
@@ -591,10 +664,7 @@
   justify-content: flex-end;
   gap: 8px;
 }
-.notebook-action-list {
-  display: grid;
-  gap: 6px;
-}
+
 .notebook-page.is-focused .notebook-layout {
   padding: 12px 20px;
 }
@@ -616,7 +686,7 @@
     width: 224px;
     min-width: 0;
     max-width: calc(100% - 24px);
-    padding: 16px 8px;
+    padding: 6px 8px 14px;
     border: 1px solid var(--color-line);
     border-radius: 10px;
     background: var(--color-canvas);
@@ -657,22 +727,35 @@
     background: var(--color-mask-bg);
     border: 0;
   }
-  .notebook-document-header {
+  /* 窄屏放不下两段浮层：文档栏退回编辑器上方的一行，工具栏占满编辑器宽度。 */
+  .notebook-editor-area {
+    display: flex;
+    flex-direction: column;
+  }
+  .notebook-bar {
+    position: relative;
+    inset: auto;
     height: 48px;
-    min-height: 48px;
-    padding: 0 10px;
     gap: 2px;
+    flex: none;
+  }
+  .notebook-bar-lead,
+  .notebook-bar-actions {
+    border-bottom: 0;
+    padding: 0 4px;
+  }
+  .notebook-editor-frame {
+    flex: 1;
+    height: auto;
+    min-height: 0;
   }
   .notebook-breadcrumb {
-    gap: 4px;
     font-size: 11px;
+    padding-left: 0;
   }
   .notebook-save {
     font-size: 10px;
     margin-inline: 3px;
-  }
-  .notebook-header-divider {
-    display: none;
   }
   .notebook-document-body {
     gap: 0;

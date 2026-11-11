@@ -21,7 +21,7 @@ export default function Modal({onClose, children, title, closeOnClickOutside = f
   // Let Lexical own focus management, including restoration to the editor.
   // Two simultaneous focus traps (Arco + Lexical) fight over nested popups.
   const trap = useLexicalFocusTrapRef(true, 'firstFocusable', target =>
-    Boolean(target.closest('.dropdown, .arco-trigger-popup, .arco-select-popup')),
+    Boolean(target.closest('.mica-menu, .arco-trigger-popup, .arco-select-popup')),
   );
   const attachContainer = useCallback((element: HTMLDivElement | null) => {
     // Arco mounts its portal after the first commit. Register when its DOM

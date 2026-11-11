@@ -38,7 +38,6 @@ import {
 } from 'lexical';
 
 import {DEFAULT_FONT_SIZE} from '../../context/ToolbarContext';
-import {INSERT_INLINE_COMMAND} from '../CommentPlugin';
 import {
   $clearFormatting,
   $formatBulletList,
@@ -172,7 +171,6 @@ export const ShortcutsExtension = defineExtension({
       listen('CHECK_LIST', () => $formatCheckList($getBlockType())),
       listen('CODE_BLOCK', () => $formatCode($getBlockType())),
       listen('QUOTE', () => $formatQuote($getBlockType())),
-      listen('ADD_COMMENT', e => e.dispatchCommand(INSERT_INLINE_COMMAND)),
       listen('INCREASE_FONT_SIZE', () =>
         $updateFontSize(UpdateFontSizeType.increment, $getFontSizeInputValue()),
       ),

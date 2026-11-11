@@ -13,13 +13,11 @@ import {useSignalValue} from '@lexical/react/useExtensionSignalValue';
 import {CAN_USE_DOM, registerEventListener} from 'lexical';
 import {type JSX, useCallback, useEffect, useMemo, useState} from 'react';
 
-import {createWebsocketProvider} from './collaboration';
 import {useSettings} from './context/SettingsContext';
 import {useSynchronizeSettings} from './hooks/useSynchronizeSettings';
 import AutoEmbedPlugin from './plugins/AutoEmbedPlugin';
 import CodeActionMenuPlugin from './plugins/CodeActionMenuPlugin';
 import MermaidPreviewPlugin from './plugins/MermaidPreviewPlugin';
-import CommentPlugin from './plugins/CommentPlugin';
 import ComponentPickerPlugin from './plugins/ComponentPickerPlugin';
 import ContextMenuPlugin from './plugins/ContextMenuPlugin';
 import DraggableBlockPlugin from './plugins/DraggableBlockPlugin';
@@ -43,7 +41,6 @@ export default function Editor(): JSX.Element {
   const {
     settings: {
       isCollab,
-      useCollabV2,
       isCharLimit,
       hasFitNestedTables,
       isCharLimitUtf8,
@@ -127,11 +124,6 @@ export default function Editor(): JSX.Element {
         <EmojiPickerPlugin />
         <AutoEmbedPlugin />
         <MentionsPlugin />
-        {!(isCollab && useCollabV2) && (
-          <CommentPlugin
-            providerFactory={isCollab ? createWebsocketProvider : undefined}
-          />
-        )}
         {isRichText ? (
           <>
             <div className="editor-scroller">

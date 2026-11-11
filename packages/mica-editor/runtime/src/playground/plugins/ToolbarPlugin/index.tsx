@@ -63,7 +63,7 @@ import {
   type TextFormatType,
   UNDO_COMMAND,
 } from 'lexical';
-import {type Dispatch, type JSX, useCallback, useEffect, useState} from 'react';
+import {type Dispatch, Fragment, type JSX, type MouseEvent, type ReactNode, useCallback, useEffect, useState} from 'react';
 
 import {useSettings} from '../../context/SettingsContext';
 import {
@@ -72,12 +72,13 @@ import {
   useToolbarState,
 } from '../../context/ToolbarContext';
 import useModal from '../../hooks/useModal';
+import {MenuSeparator} from '../../../../../../mica-config-ui/web/components/ActionMenu';
+import ColorPicker from '../../ui/ColorPicker';
 import DropDown, {DropDownItem} from '../../ui/DropDown';
 import DropdownColorPicker from '../../ui/DropdownColorPicker';
 import {isKeyboardInput} from '../../utils/focusUtils';
 import {getSelectedNode} from '../../utils/getSelectedNode';
 import {INSERT_COLLAPSIBLE_COMMAND} from '../CollapsibleExtension';
-import {TOGGLE_COMMENTS_COMMAND} from '../CommentPlugin';
 import {INSERT_DATETIME_COMMAND} from '../DateTimeExtension';
 import {InsertEquationDialog} from '../EquationsExtension';
 import {INSERT_EXCALIDRAW_COMMAND} from '../ExcalidrawExtension';
@@ -87,6 +88,7 @@ import {$isRubyNode, $toggleRuby} from '../RubyExtension/RubyNode';
 import {shortcut} from '../ShortcutsExtension/shortcuts';
 import {InsertTableDialog} from '../TablePlugin';
 import FontSize, {parseFontSizeForToolbar} from './fontSize';
+import {type ToolbarGroup, useAdaptiveToolbar} from './useAdaptiveToolbar';
 import {
   clearFormatting,
   formatBulletList,
@@ -282,6 +284,14 @@ function BlockFormatDropDown({
       buttonIconClassName={'icon block-type ' + blockType}
       buttonLabel={BLOCK_TYPE_LABELS[blockType]}
       buttonAriaLabel="段落样式">
+      <BlockFormatItems editor={editor} blockType={blockType} />
+    </DropDown>
+  );
+}
+
+function BlockFormatItems({editor, blockType}: {editor: LexicalEditor; blockType: keyof typeof blockTypeToBlockName}) {
+  return (
+    <>
       <DropDownItem
         className={
           'item wide ' + dropDownActiveClass(blockType === 'paragraph')
@@ -365,12 +375,8 @@ function BlockFormatDropDown({
         </div>
         <span className="shortcut">{shortcut('CODE_BLOCK')}</span>
       </DropDownItem>
-    </DropDown>
+    </>
   );
-}
-
-function Divider(): JSX.Element {
-  return <div className="divider" />;
 }
 
 function FontDropDown({
@@ -444,6 +450,14 @@ function ElementFormatDropdown({
       buttonIconClassName={`icon ${isRTL ? formatOption.iconRTL : formatOption.icon}`}
       buttonClassName="toolbar-item spaced alignment"
       buttonAriaLabel="对齐与缩进">
+      <ElementFormatItems editor={editor} isRTL={isRTL} />
+    </DropDown>
+  );
+}
+
+function ElementFormatItems({editor, isRTL}: {editor: LexicalEditor; isRTL: boolean}) {
+  return (
+    <>
       <DropDownItem
         onClick={() => {
           editor.dispatchCommand(FORMAT_ELEMENT_COMMAND, 'left');
@@ -508,7 +522,7 @@ function ElementFormatDropdown({
         />
         <span className="text">末端对齐</span>
       </DropDownItem>
-      <Divider />
+      <MenuSeparator />
       <DropDownItem
         onClick={() => {
           editor.dispatchCommand(OUTDENT_CONTENT_COMMAND);
@@ -531,7 +545,7 @@ function ElementFormatDropdown({
         </div>
         <span className="shortcut">{shortcut('INDENT')}</span>
       </DropDownItem>
-    </DropDown>
+    </>
   );
 }
 
@@ -548,6 +562,112 @@ function $findTopLevelElement(node: LexicalNode) {
     topLevelElement = node.getTopLevelElementOrThrow();
   }
   return topLevelElement;
+}
+
+type ToolbarAction = {
+  id: string;
+  label: string;
+  icon: string;
+  active?: boolean;
+  disabled?: boolean;
+  keys?: string;
+  onClick: (event: MouseEvent<HTMLButtonElement>) => void;
+};
+
+function ActionIcon({icon}: {icon: string}) {
+  if (icon === 'undo' || icon === 'redo')
+    return (
+      <svg
+        className="format-icon"
+        width="16"
+        height="16"
+        viewBox="0 0 16 16"
+        fill="none"
+        aria-hidden="true">
+        <path
+          d={
+            icon === 'undo'
+              ? 'm5 3-3 3 3 3M2 6h7a4 4 0 0 1 0 8'
+              : 'm11 3 3 3-3 3M14 6H7a4 4 0 0 0 0 8'
+          }
+          stroke="currentColor"
+          strokeWidth="1.4"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </svg>
+    );
+  if (icon === 'quote')
+    return (
+      <svg
+        className="format-icon"
+        width="16"
+        height="16"
+        viewBox="0 0 16 16"
+        fill="none"
+        aria-hidden="true">
+        <path
+          d="M3 4h4v5H3V4Zm0 5c0 2 1 3 3 3M10 4h4v5h-4V4Zm0 5c0 2 1 3 3 3"
+          stroke="currentColor"
+          strokeWidth="1.3"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </svg>
+    );
+  if (icon === 'horizontal-rule')
+    return (
+      <svg
+        className="format-icon"
+        width="16"
+        height="16"
+        viewBox="0 0 16 16"
+        fill="none"
+        aria-hidden="true">
+        <path
+          d="M2 8h12"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          strokeLinecap="round"
+        />
+      </svg>
+    );
+  if (icon === 'italic')
+    return (
+      <svg
+        className="format-icon"
+        width="16"
+        height="16"
+        viewBox="0 0 16 16"
+        fill="none"
+        aria-hidden="true">
+        <path
+          d="M7 3h6M3 13h6M10 3 6 13"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          strokeLinecap="round"
+        />
+      </svg>
+    );
+  if (icon === 'clear')
+    return (
+      <svg
+        className="format-icon"
+        width="16"
+        height="16"
+        viewBox="0 0 16 16"
+        fill="none"
+        aria-hidden="true">
+        <path
+          d="m9.5 2.5 4 4a1 1 0 0 1 0 1.4L7.4 14H4.5l-2-2a1 1 0 0 1 0-1.4l7-8.1ZM6 6.5l5 5M7 14h7"
+          stroke="currentColor"
+          strokeWidth="1.3"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </svg>
+    );
+  return <i className={`icon ${icon}`} aria-hidden="true" />;
 }
 
 export default function ToolbarPlugin({
@@ -571,7 +691,71 @@ export default function ToolbarPlugin({
   const {toolbarState, updateToolbarState} = useToolbarState();
   const rovingRef = useLexicalRovingTabIndexRef();
   const focusManagerRef = useLexicalFocusManagerRef();
-  const toolbarRef = useMergeRefs([rovingRef, focusManagerRef]);
+  const [morePage, setMorePage] = useState<string | null>(null);
+  const {
+    settings: {isCodeHighlighted, isCodeShiki},
+  } = useSettings();
+  const showCodeOptions =
+    toolbarState.blockType === 'code' && isCodeHighlighted;
+  const groups: ToolbarGroup[] = [
+    ...(!toolbarState.isImageCaption
+      ? [{id: 'insert', section: 'insert'}]
+      : []),
+    {id: 'history', section: 'history', priority: 2},
+    {id: 'clear', section: 'history', priority: 9},
+    ...(toolbarState.blockType in blockTypeToBlockName &&
+    activeEditor === editor
+      ? [{id: 'paragraph', section: 'typography', priority: 1}]
+      : []),
+    ...(showCodeOptions
+      ? [{id: 'code-options', section: 'typography'}]
+      : [
+          {id: 'font-family', section: 'typography', priority: 7},
+          {id: 'font-size', section: 'typography', priority: 0},
+        ]),
+    {id: 'emphasis', section: 'format'},
+    {id: 'strikethrough', section: 'format', priority: 6},
+    {id: 'underline', section: 'format'},
+    ...(!toolbarState.isImageCaption
+      ? [{id: 'code', section: 'format', priority: 11}]
+      : []),
+    {id: 'colors', section: 'colors', priority: 3},
+    {id: 'alignment', section: 'structure', priority: 4},
+    ...(activeEditor === editor
+      ? [
+          {id: 'lists', section: 'structure', priority: 5},
+          {id: 'indent', section: 'structure', priority: 10},
+          {id: 'links', section: 'insert-shortcuts', priority: 8},
+          {id: 'blocks', section: 'insert-shortcuts', priority: 12},
+        ]
+      : []),
+    {id: 'more', section: 'more'},
+  ];
+  const {toolbarElementRef, overflowed} = useAdaptiveToolbar(
+    groups,
+    `${toolbarState.blockType}:${toolbarState.fontFamily}`,
+  );
+  const toolbarRef = useMergeRefs([
+    rovingRef,
+    focusManagerRef,
+    toolbarElementRef,
+  ]);
+  const groupProps = (id: string, label: string, className = '') => {
+    const index = groups.findIndex(group => group.id === id);
+    const previous = groups
+      .slice(0, index)
+      .filter(group => !overflowed.has(group.id))
+      .at(-1);
+    return {
+      className: `toolbar-group ${className}`.trim(),
+      role: 'group',
+      'aria-label': label,
+      'data-toolbar-group': id,
+      'data-overflowed': overflowed.has(id) || undefined,
+      'data-section-start':
+        (previous && previous.section !== groups[index]?.section) || undefined,
+    };
+  };
 
   const dispatchToolbarCommand = <T extends AnyLexicalCommand>(
     command: T,
@@ -608,10 +792,6 @@ export default function ToolbarPlugin({
     },
     [updateToolbarState],
   );
-
-  const {
-    settings: {isCodeHighlighted, isCodeShiki},
-  } = useSettings();
 
   const $handleCodeNode = useCallback(
     (element: LexicalNode) => {
@@ -917,7 +1097,332 @@ export default function ToolbarPlugin({
     },
     [activeEditor, selectedElementKey],
   );
-  const canViewerSeeInsertDropdown = !toolbarState.isImageCaption;
+  const textAction = (
+    id: TextFormatType,
+    label: string,
+    icon: string,
+    active: boolean,
+    keys?: string,
+  ): ToolbarAction => ({
+    id,
+    label,
+    icon,
+    active,
+    keys,
+    onClick: event => dispatchFormatTextCommand(id, isKeyboardInput(event)),
+  });
+  const actions = {
+    undo: {
+      id: 'undo',
+      label: '撤销',
+      icon: 'undo',
+      disabled: !toolbarState.canUndo,
+      keys: IS_APPLE ? '⌘Z' : 'Ctrl+Z',
+      onClick: (event: MouseEvent<HTMLButtonElement>) =>
+        dispatchToolbarCommand(UNDO_COMMAND, undefined, isKeyboardInput(event)),
+    },
+    redo: {
+      id: 'redo',
+      label: '重做',
+      icon: 'redo',
+      disabled: !toolbarState.canRedo,
+      keys: IS_APPLE ? '⇧⌘Z' : 'Ctrl+Y',
+      onClick: (event: MouseEvent<HTMLButtonElement>) =>
+        dispatchToolbarCommand(REDO_COMMAND, undefined, isKeyboardInput(event)),
+    },
+    clear: {
+      id: 'clear',
+      label: '清除格式',
+      icon: 'clear',
+      keys: shortcut('CLEAR_FORMATTING'),
+      onClick: (event: MouseEvent<HTMLButtonElement>) =>
+        clearFormatting(activeEditor, isKeyboardInput(event)),
+    },
+    bold: textAction(
+      'bold',
+      '加粗',
+      'bold',
+      toolbarState.isBold,
+      shortcut('BOLD'),
+    ),
+    italic: textAction(
+      'italic',
+      '斜体',
+      'italic',
+      toolbarState.isItalic,
+      shortcut('ITALIC'),
+    ),
+    strikethrough: textAction(
+      'strikethrough',
+      '删除线',
+      'strikethrough',
+      toolbarState.isStrikethrough,
+      shortcut('STRIKETHROUGH'),
+    ),
+    underline: textAction(
+      'underline',
+      '下划线',
+      'underline',
+      toolbarState.isUnderline,
+      shortcut('UNDERLINE'),
+    ),
+    code: textAction('code', '行内代码', 'code', toolbarState.isCode),
+    lowercase: textAction(
+      'lowercase',
+      '转为小写',
+      'lowercase',
+      toolbarState.isLowercase,
+      shortcut('LOWERCASE'),
+    ),
+    uppercase: textAction(
+      'uppercase',
+      '转为大写',
+      'uppercase',
+      toolbarState.isUppercase,
+      shortcut('UPPERCASE'),
+    ),
+    capitalize: textAction(
+      'capitalize',
+      '首字母大写',
+      'capitalize',
+      toolbarState.isCapitalize,
+      shortcut('CAPITALIZE'),
+    ),
+    subscript: textAction(
+      'subscript',
+      '下标',
+      'subscript',
+      toolbarState.isSubscript,
+      shortcut('SUBSCRIPT'),
+    ),
+    superscript: textAction(
+      'superscript',
+      '上标',
+      'superscript',
+      toolbarState.isSuperscript,
+      shortcut('SUPERSCRIPT'),
+    ),
+    highlight: textAction(
+      'highlight',
+      '高亮',
+      'highlight',
+      toolbarState.isHighlight,
+    ),
+    ruby: {id: 'ruby', label: '注音', icon: 'ruby', onClick: insertRuby},
+    bullet: {
+      id: 'bullet',
+      label: '无序列表',
+      icon: 'bullet-list',
+      active: toolbarState.blockType === 'bullet',
+      keys: shortcut('BULLET_LIST'),
+      onClick: () => formatBulletList(activeEditor, toolbarState.blockType),
+    },
+    number: {
+      id: 'number',
+      label: '有序列表',
+      icon: 'numbered-list',
+      active: toolbarState.blockType === 'number',
+      keys: shortcut('NUMBERED_LIST'),
+      onClick: () => formatNumberedList(activeEditor, toolbarState.blockType),
+    },
+    check: {
+      id: 'check',
+      label: '任务列表',
+      icon: 'check-list',
+      active: toolbarState.blockType === 'check',
+      keys: shortcut('CHECK_LIST'),
+      onClick: () => formatCheckList(activeEditor, toolbarState.blockType),
+    },
+    outdent: {
+      id: 'outdent',
+      label: '减少缩进',
+      icon: toolbarState.isRTL ? 'indent' : 'outdent',
+      keys: shortcut('OUTDENT'),
+      onClick: (event: MouseEvent<HTMLButtonElement>) =>
+        dispatchToolbarCommand(
+          OUTDENT_CONTENT_COMMAND,
+          undefined,
+          isKeyboardInput(event),
+        ),
+    },
+    indent: {
+      id: 'indent',
+      label: '增加缩进',
+      icon: toolbarState.isRTL ? 'outdent' : 'indent',
+      keys: shortcut('INDENT'),
+      onClick: (event: MouseEvent<HTMLButtonElement>) =>
+        dispatchToolbarCommand(
+          INDENT_CONTENT_COMMAND,
+          undefined,
+          isKeyboardInput(event),
+        ),
+    },
+    link: {
+      id: 'link',
+      label: '插入或编辑链接',
+      icon: 'link',
+      active: toolbarState.isLink,
+      keys: shortcut('INSERT_LINK'),
+      onClick: insertLink,
+    },
+    quote: {
+      id: 'quote',
+      label: '引用',
+      icon: 'quote',
+      active: toolbarState.blockType === 'quote',
+      keys: shortcut('QUOTE'),
+      onClick: () => formatQuote(activeEditor, toolbarState.blockType),
+    },
+    rule: {
+      id: 'rule',
+      label: '分隔线',
+      icon: 'horizontal-rule',
+      onClick: (event: MouseEvent<HTMLButtonElement>) =>
+        dispatchToolbarCommand(
+          INSERT_HORIZONTAL_RULE_COMMAND,
+          undefined,
+          isKeyboardInput(event),
+        ),
+    },
+  } satisfies Record<string, ToolbarAction>;
+  const actionButton = (action: ToolbarAction) => (
+    <button
+      key={action.id}
+      type="button"
+      className={`toolbar-item${action.active ? ' active' : ''}`}
+      disabled={!isEditable || action.disabled}
+      aria-label={action.label}
+      aria-pressed={action.active}
+      title={action.keys ? `${action.label} (${action.keys})` : action.label}
+      onClick={action.onClick}>
+      <ActionIcon icon={action.icon} />
+    </button>
+  );
+  const actionItem = (action: ToolbarAction) => (
+    <DropDownItem
+      key={action.id}
+      className={`item wide ${dropDownActiveClass(!!action.active)}`}
+      disabled={!isEditable || action.disabled}
+      onClick={action.onClick}>
+      <div className="icon-text-container">
+        <ActionIcon icon={action.icon} />
+        <span className="text">{action.label}</span>
+      </div>
+      {action.keys && <span className="shortcut">{action.keys}</span>}
+    </DropDownItem>
+  );
+  const pageItem = (page: string, label: string, icon: string) => (
+    <DropDownItem
+      key={page}
+      className="item wide"
+      onClick={event => {
+        event.preventDefault();
+        setMorePage(page);
+      }}>
+      <div className="icon-text-container">
+        <ActionIcon icon={icon} />
+        <span className="text">{label}</span>
+      </div>
+      <span className="toolbar-menu-forward" aria-hidden="true">
+        ›
+      </span>
+    </DropDownItem>
+  );
+  const overflowContent: Record<string, ReactNode> = {
+    history: (
+      <>
+        {actionItem(actions.undo)}
+        {actionItem(actions.redo)}
+      </>
+    ),
+    clear: actionItem(actions.clear),
+    paragraph: pageItem('paragraph', '段落样式', 'paragraph'),
+    'font-family': pageItem('font-family', '字体', 'font-family'),
+    'font-size': pageItem('font-size', '字号', 'font-family'),
+    strikethrough: actionItem(actions.strikethrough),
+    code: actionItem(actions.code),
+    colors: (
+      <>
+        {pageItem('font-color', '文字颜色', 'font-color')}
+        {pageItem('bg-color', '文字背景色', 'bg-color')}
+      </>
+    ),
+    alignment: pageItem('alignment', '对齐与缩进', 'left-align'),
+    lists: (
+      <>
+        {actionItem(actions.bullet)}
+        {actionItem(actions.number)}
+      </>
+    ),
+    indent: (
+      <>
+        {actionItem(actions.outdent)}
+        {actionItem(actions.indent)}
+      </>
+    ),
+    links: (
+      <>
+        {actionItem(actions.check)}
+        {actionItem(actions.link)}
+      </>
+    ),
+    blocks: (
+      <>
+        {actionItem(actions.quote)}
+        {actionItem(actions.rule)}
+      </>
+    ),
+  };
+  const collapsedGroups = groups.filter(group => overflowed.has(group.id));
+  const morePageLabels: Record<string, string> = {
+    paragraph: '段落样式',
+    'font-family': '字体',
+    'font-size': '字号',
+    'font-color': '文字颜色',
+    'bg-color': '文字背景色',
+    alignment: '对齐与缩进',
+  };
+  // Navigation replaces the current menu instead of stacking another popup.
+  useEffect(() => {
+    document
+      .querySelector<HTMLElement>(
+        '.editor-dropdown [data-toolbar-page] [role^="menuitem"]',
+      )
+      ?.focus({preventScroll: true});
+  }, [morePage]);
+  const morePageContent =
+    morePage === 'paragraph' ? (
+      <BlockFormatItems
+        editor={activeEditor}
+        blockType={toolbarState.blockType}
+      />
+    ) : morePage === 'alignment' ? (
+      <ElementFormatItems editor={activeEditor} isRTL={toolbarState.isRTL} />
+    ) : morePage === 'font-family' || morePage === 'font-size' ? (
+      (morePage === 'font-family'
+        ? FONT_FAMILY_OPTIONS
+        : FONT_SIZE_OPTIONS
+      ).map(([value, label]) => (
+        <DropDownItem
+          key={value}
+          className={`item ${dropDownActiveClass(value === (morePage === 'font-family' ? toolbarState.fontFamily : toolbarState.fontSize))}`}
+          onClick={() => applyStyleText({[morePage]: value})}>
+          <span className="text">{label}</span>
+        </DropDownItem>
+      ))
+    ) : morePage === 'font-color' || morePage === 'bg-color' ? (
+      <ColorPicker
+        compact
+        color={
+          morePage === 'font-color'
+            ? toolbarState.fontColor
+            : toolbarState.bgColor
+        }
+        onChange={
+          morePage === 'font-color' ? onFontColorSelect : onBgColorSelect
+        }
+      />
+    ) : null;
 
   return (
     <div
@@ -925,65 +1430,168 @@ export default function ToolbarPlugin({
       className="toolbar"
       role="toolbar"
       aria-label="编辑工具栏">
-      <div className="toolbar-primary">
-        <div className="toolbar-group" role="group" aria-label="编辑历史">
-          <button
-            disabled={!toolbarState.canUndo || !isEditable}
-            onClick={e =>
-              dispatchToolbarCommand(
-                UNDO_COMMAND,
-                undefined,
-                isKeyboardInput(e),
-              )
-            }
-            title={IS_APPLE ? '撤销 (⌘Z)' : '撤销 (Ctrl+Z)'}
-            type="button"
-            className="toolbar-item spaced"
-            aria-label="撤销">
-            <i className="format undo" />
-          </button>
-          <button
-            disabled={!toolbarState.canRedo || !isEditable}
-            onClick={e =>
-              dispatchToolbarCommand(
-                REDO_COMMAND,
-                undefined,
-                isKeyboardInput(e),
-              )
-            }
-            title={IS_APPLE ? '重做 (⇧⌘Z)' : '重做 (Ctrl+Y)'}
-            type="button"
-            className="toolbar-item"
-            aria-label="重做">
-            <i className="format redo" />
-          </button>
+      {!toolbarState.isImageCaption && (
+        <div {...groupProps('insert', '插入内容', 'toolbar-insert')}>
+          <DropDown
+            disabled={!isEditable}
+            buttonClassName="toolbar-item insert-menu"
+            hideChevron
+            buttonAriaLabel="插入内容"
+            buttonIconClassName="icon plus">
+            <DropDownItem
+              onClick={() => {
+                showModal('插入表格', onClose => (
+                  <InsertTableDialog
+                    activeEditor={activeEditor}
+                    onClose={onClose}
+                  />
+                ));
+              }}
+              className="item">
+              <i className="icon table" />
+              <span className="text">表格</span>
+            </DropDownItem>
+            <DropDownItem
+              onClick={() =>
+                dispatchToolbarCommand(INSERT_HORIZONTAL_RULE_COMMAND)
+              }
+              className="item">
+              <i className="icon horizontal-rule" />
+              <span className="text">分隔线</span>
+            </DropDownItem>
+
+            <DropDownItem
+              onClick={() => {
+                showModal('插入图片', onClose => (
+                  <InsertImageDialog
+                    activeEditor={activeEditor}
+                    onClose={onClose}
+                  />
+                ));
+              }}
+              className="item">
+              <i className="icon image" />
+              <span className="text">图片</span>
+            </DropDownItem>
+
+            <DropDownItem
+              onClick={() => dispatchToolbarCommand(INSERT_EXCALIDRAW_COMMAND)}
+              className="item">
+              <i className="icon diagram-2" />
+              <span className="text">绘图</span>
+            </DropDownItem>
+
+            <DropDownItem
+              onClick={() => {
+                showModal('插入分栏', onClose => (
+                  <InsertLayoutDialog
+                    activeEditor={activeEditor}
+                    onClose={onClose}
+                  />
+                ));
+              }}
+              className="item">
+              <i className="icon columns" />
+              <span className="text">分栏布局</span>
+            </DropDownItem>
+
+            <DropDownItem
+              onClick={() => {
+                showModal('插入公式', onClose => (
+                  <InsertEquationDialog
+                    activeEditor={activeEditor}
+                    onClose={onClose}
+                  />
+                ));
+              }}
+              className="item">
+              <i className="icon equation" />
+              <span className="text">公式</span>
+            </DropDownItem>
+
+            <DropDownItem
+              onClick={() => dispatchToolbarCommand(INSERT_COLLAPSIBLE_COMMAND)}
+              className="item">
+              <i className="icon caret-right" />
+              <span className="text">折叠区块</span>
+            </DropDownItem>
+            <DropDownItem
+              onClick={() => {
+                const dateTime = new Date();
+                dateTime.setHours(0, 0, 0, 0);
+                dispatchToolbarCommand(INSERT_DATETIME_COMMAND, {dateTime});
+              }}
+              className="item">
+              <i className="icon calendar" />
+              <span className="text">日期</span>
+            </DropDownItem>
+          </DropDown>
         </div>
-        {toolbarState.blockType in blockTypeToBlockName &&
-          activeEditor === editor && (
-            <div className="toolbar-group" role="group" aria-label="段落格式">
-              <BlockFormatDropDown
-                disabled={!isEditable}
-                blockType={toolbarState.blockType}
-                rootType={toolbarState.rootType}
-                editor={activeEditor}
-              />
-            </div>
+      )}
+      <div {...groupProps('history', '编辑历史')}>
+        {actionButton(actions.undo)}
+        {actionButton(actions.redo)}
+      </div>
+      <div {...groupProps('clear', '清除格式')}>
+        {actionButton(actions.clear)}
+      </div>
+      {toolbarState.blockType in blockTypeToBlockName &&
+        activeEditor === editor && (
+          <div {...groupProps('paragraph', '段落格式')}>
+            <BlockFormatDropDown
+              disabled={!isEditable}
+              blockType={toolbarState.blockType}
+              rootType={toolbarState.rootType}
+              editor={activeEditor}
+            />
+          </div>
+        )}
+      {showCodeOptions ? (
+        <div
+          {...groupProps('code-options', '代码选项', 'toolbar-code-options')}>
+          {!isCodeShiki && (
+            <DropDown
+              disabled={!isEditable}
+              buttonClassName="toolbar-item code-language"
+              buttonLabel={
+                toolbarState.codeLanguage
+                  ? (CODE_LANGUAGE_OPTIONS_PRISM.find(
+                      opt =>
+                        opt[0] ===
+                        normalizeCodeLanguagePrism(toolbarState.codeLanguage),
+                    ) || ['', ''])[1]
+                  : '无语言'
+              }
+              buttonAriaLabel="代码语言">
+              <DropDownItem
+                className={`item ${dropDownActiveClass(!toolbarState.codeLanguage)}`}
+                onClick={() => onCodeLanguageSelect(null)}
+                key="__no_language__">
+                <span className="text">无语言</span>
+              </DropDownItem>
+              {CODE_LANGUAGE_OPTIONS_PRISM.map(([value, name]) => {
+                return (
+                  <DropDownItem
+                    className={`item ${dropDownActiveClass(value === toolbarState.codeLanguage)}`}
+                    onClick={() => onCodeLanguageSelect(value)}
+                    key={value}>
+                    <span className="text">{name}</span>
+                  </DropDownItem>
+                );
+              })}
+            </DropDown>
           )}
-        {toolbarState.blockType === 'code' && isCodeHighlighted ? (
-          <div
-            className="toolbar-group toolbar-code-options"
-            role="group"
-            aria-label="代码选项">
-            {!isCodeShiki && (
+          {isCodeShiki && (
+            <>
               <DropDown
                 disabled={!isEditable}
                 buttonClassName="toolbar-item code-language"
                 buttonLabel={
                   toolbarState.codeLanguage
-                    ? (CODE_LANGUAGE_OPTIONS_PRISM.find(
+                    ? (CODE_LANGUAGE_OPTIONS_SHIKI.find(
                         opt =>
                           opt[0] ===
-                          normalizeCodeLanguagePrism(toolbarState.codeLanguage),
+                          normalizeCodeLanguageShiki(toolbarState.codeLanguage),
                       ) || ['', ''])[1]
                     : '无语言'
                 }
@@ -994,7 +1602,7 @@ export default function ToolbarPlugin({
                   key="__no_language__">
                   <span className="text">无语言</span>
                 </DropDownItem>
-                {CODE_LANGUAGE_OPTIONS_PRISM.map(([value, name]) => {
+                {CODE_LANGUAGE_OPTIONS_SHIKI.map(([value, name]) => {
                   return (
                     <DropDownItem
                       className={`item ${dropDownActiveClass(value === toolbarState.codeLanguage)}`}
@@ -1005,75 +1613,40 @@ export default function ToolbarPlugin({
                   );
                 })}
               </DropDown>
-            )}
-            {isCodeShiki && (
-              <>
-                <DropDown
-                  disabled={!isEditable}
-                  buttonClassName="toolbar-item code-language"
-                  buttonLabel={
-                    toolbarState.codeLanguage
-                      ? (CODE_LANGUAGE_OPTIONS_SHIKI.find(
-                          opt =>
-                            opt[0] ===
-                            normalizeCodeLanguageShiki(
-                              toolbarState.codeLanguage,
-                            ),
-                        ) || ['', ''])[1]
-                      : '无语言'
-                  }
-                  buttonAriaLabel="代码语言">
-                  <DropDownItem
-                    className={`item ${dropDownActiveClass(!toolbarState.codeLanguage)}`}
-                    onClick={() => onCodeLanguageSelect(null)}
-                    key="__no_language__">
-                    <span className="text">无语言</span>
-                  </DropDownItem>
-                  {CODE_LANGUAGE_OPTIONS_SHIKI.map(([value, name]) => {
-                    return (
-                      <DropDownItem
-                        className={`item ${dropDownActiveClass(value === toolbarState.codeLanguage)}`}
-                        onClick={() => onCodeLanguageSelect(value)}
-                        key={value}>
-                        <span className="text">{name}</span>
-                      </DropDownItem>
-                    );
-                  })}
-                </DropDown>
-                <DropDown
-                  disabled={!isEditable}
-                  buttonClassName="toolbar-item code-language"
-                  buttonLabel={
-                    (CODE_THEME_OPTIONS_SHIKI.find(
-                      opt => opt[0] === toolbarState.codeTheme,
-                    ) || ['', ''])[1]
-                  }
-                  buttonAriaLabel="代码主题">
-                  {CODE_THEME_OPTIONS_SHIKI.map(([value, name]) => {
-                    return (
-                      <DropDownItem
-                        className={`item ${dropDownActiveClass(value === toolbarState.codeTheme)}`}
-                        onClick={() => onCodeThemeSelect(value)}
-                        key={value}>
-                        <span className="text">{name}</span>
-                      </DropDownItem>
-                    );
-                  })}
-                </DropDown>
-              </>
-            )}
-          </div>
-        ) : (
-          <div
-            className="toolbar-group toolbar-typography"
-            role="group"
-            aria-label="字体与字号">
+              <DropDown
+                disabled={!isEditable}
+                buttonClassName="toolbar-item code-language"
+                buttonLabel={
+                  (CODE_THEME_OPTIONS_SHIKI.find(
+                    opt => opt[0] === toolbarState.codeTheme,
+                  ) || ['', ''])[1]
+                }
+                buttonAriaLabel="代码主题">
+                {CODE_THEME_OPTIONS_SHIKI.map(([value, name]) => {
+                  return (
+                    <DropDownItem
+                      className={`item ${dropDownActiveClass(value === toolbarState.codeTheme)}`}
+                      onClick={() => onCodeThemeSelect(value)}
+                      key={value}>
+                      <span className="text">{name}</span>
+                    </DropDownItem>
+                  );
+                })}
+              </DropDown>
+            </>
+          )}
+        </div>
+      ) : (
+        <>
+          <div {...groupProps('font-family', '字体')}>
             <FontDropDown
               disabled={!isEditable}
-              style={'font-family'}
+              style="font-family"
               value={toolbarState.fontFamily}
               editor={activeEditor}
             />
+          </div>
+          <div {...groupProps('font-size', '字号')}>
             <div className="toolbar-font-size" role="group" aria-label="字号">
               <FontSize
                 selectionFontSize={parseFontSizeForToolbar(
@@ -1084,362 +1657,126 @@ export default function ToolbarPlugin({
               />
             </div>
           </div>
-        )}
+        </>
+      )}
+      <div {...groupProps('emphasis', '加粗与斜体')}>
+        {actionButton(actions.bold)}
+        {actionButton(actions.italic)}
       </div>
-      <div className="toolbar-secondary">
-        <div className="toolbar-group" role="group" aria-label="常用文字格式">
-          <button
-            disabled={!isEditable}
-            onClick={e => dispatchFormatTextCommand('bold', isKeyboardInput(e))}
-            className={
-              'toolbar-item spaced ' + (toolbarState.isBold ? 'active' : '')
-            }
-            aria-pressed={toolbarState.isBold}
-            title={`加粗 (${shortcut('BOLD')})`}
-            type="button"
-            aria-label={`加粗，快捷键：${shortcut('BOLD')}`}>
-            <i className="format bold" />
-          </button>
-          <button
-            disabled={!isEditable}
-            onClick={e =>
-              dispatchFormatTextCommand('italic', isKeyboardInput(e))
-            }
-            className={
-              'toolbar-item spaced ' + (toolbarState.isItalic ? 'active' : '')
-            }
-            aria-pressed={toolbarState.isItalic}
-            title={`斜体 (${shortcut('ITALIC')})`}
-            type="button"
-            aria-label={`斜体，快捷键：${shortcut('ITALIC')}`}>
-            <svg className="format-icon" width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M7 3h6M3 13h6M10 3 6 13" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" /></svg>
-          </button>
-          <button
-            disabled={!isEditable}
-            onClick={e =>
-              dispatchFormatTextCommand('underline', isKeyboardInput(e))
-            }
-            className={
-              'toolbar-item spaced ' +
-              (toolbarState.isUnderline ? 'active' : '')
-            }
-            aria-pressed={toolbarState.isUnderline}
-            title={`下划线 (${shortcut('UNDERLINE')})`}
-            type="button"
-            aria-label={`下划线，快捷键：${shortcut('UNDERLINE')}`}>
-            <i className="format underline" />
-          </button>
-          <button
-            disabled={!isEditable}
-            onClick={insertLink}
-            className={
-              'toolbar-item spaced ' + (toolbarState.isLink ? 'active' : '')
-            }
-            aria-pressed={toolbarState.isLink}
-            aria-label="插入或编辑链接"
-            title={`插入或编辑链接 (${shortcut('INSERT_LINK')})`}
-            type="button">
-            <i className="format link" />
-          </button>
+      <div {...groupProps('strikethrough', '删除线')}>
+        {actionButton(actions.strikethrough)}
+      </div>
+      <div {...groupProps('underline', '下划线')}>
+        {actionButton(actions.underline)}
+      </div>
+      {!toolbarState.isImageCaption && (
+        <div {...groupProps('code', '行内代码')}>
+          {actionButton(actions.code)}
         </div>
-        <div
-          className="toolbar-group toolbar-colors"
-          role="group"
-          aria-label="文字颜色">
-          <DropdownColorPicker
-            disabled={!isEditable}
-            buttonClassName="toolbar-item color-picker"
-            buttonAriaLabel="文字颜色"
-            buttonIconClassName="icon font-color"
-            color={toolbarState.fontColor}
-            onChange={onFontColorSelect}
-            title="文字颜色"
-          />
-          <DropdownColorPicker
-            disabled={!isEditable}
-            buttonClassName="toolbar-item color-picker"
-            buttonAriaLabel="文字背景色"
-            buttonIconClassName="icon bg-color"
-            color={toolbarState.bgColor}
-            onChange={onBgColorSelect}
-            title="文字背景色"
-          />
-        </div>
-        <div
-          className="toolbar-group toolbar-structure"
-          role="group"
-          aria-label="段落操作">
-          <ElementFormatDropdown
-            disabled={!isEditable}
-            value={toolbarState.elementFormat}
-            editor={activeEditor}
-            isRTL={toolbarState.isRTL}
-          />
-        </div>
-        <div
-          className="toolbar-group toolbar-more"
-          role="group"
-          aria-label="其他文字格式">
-          <DropDown
-            disabled={!isEditable}
-            buttonClassName="toolbar-item"
-            hideChevron
-            buttonLabel=""
-            buttonAriaLabel="更多"
-            buttonIconClassName="icon toolbar-ellipsis">
-            {!toolbarState.isImageCaption && (
-              <DropDownItem
-                onClick={e =>
-                  dispatchFormatTextCommand('code', isKeyboardInput(e))
-                }
-                className={
-                  'item wide ' + dropDownActiveClass(toolbarState.isCode)
-                }>
-                <div className="icon-text-container">
-                  <i className="icon code" />
-                  <span className="text">行内代码</span>
-                </div>
-              </DropDownItem>
-            )}
-            <DropDownItem onClick={insertRuby} className="item wide">
-              <div className="icon-text-container">
-                <i className="icon ruby" />
-                <span className="text">注音</span>
-              </div>
-            </DropDownItem>
-            <DropDownItem
-              onClick={e =>
-                dispatchFormatTextCommand('lowercase', isKeyboardInput(e))
-              }
-              className={
-                'item wide ' + dropDownActiveClass(toolbarState.isLowercase)
-              }
-              title="转为小写"
-              aria-label="转为小写">
-              <div className="icon-text-container">
-                <i className="icon lowercase" />
-                <span className="text">转为小写</span>
-              </div>
-              <span className="shortcut">{shortcut('LOWERCASE')}</span>
-            </DropDownItem>
-            <DropDownItem
-              onClick={e =>
-                dispatchFormatTextCommand('uppercase', isKeyboardInput(e))
-              }
-              className={
-                'item wide ' + dropDownActiveClass(toolbarState.isUppercase)
-              }
-              title="转为大写"
-              aria-label="转为大写">
-              <div className="icon-text-container">
-                <i className="icon uppercase" />
-                <span className="text">转为大写</span>
-              </div>
-              <span className="shortcut">{shortcut('UPPERCASE')}</span>
-            </DropDownItem>
-            <DropDownItem
-              onClick={e =>
-                dispatchFormatTextCommand('capitalize', isKeyboardInput(e))
-              }
-              className={
-                'item wide ' + dropDownActiveClass(toolbarState.isCapitalize)
-              }
-              title="首字母大写"
-              aria-label="首字母大写">
-              <div className="icon-text-container">
-                <i className="icon capitalize" />
-                <span className="text">首字母大写</span>
-              </div>
-              <span className="shortcut">{shortcut('CAPITALIZE')}</span>
-            </DropDownItem>
-            <DropDownItem
-              onClick={e =>
-                dispatchFormatTextCommand('strikethrough', isKeyboardInput(e))
-              }
-              className={
-                'item wide ' + dropDownActiveClass(toolbarState.isStrikethrough)
-              }
-              title="删除线"
-              aria-label="删除线">
-              <div className="icon-text-container">
-                <i className="icon strikethrough" />
-                <span className="text">删除线</span>
-              </div>
-              <span className="shortcut">{shortcut('STRIKETHROUGH')}</span>
-            </DropDownItem>
-            <DropDownItem
-              onClick={e =>
-                dispatchFormatTextCommand('subscript', isKeyboardInput(e))
-              }
-              className={
-                'item wide ' + dropDownActiveClass(toolbarState.isSubscript)
-              }
-              title="下标"
-              aria-label="下标">
-              <div className="icon-text-container">
-                <i className="icon subscript" />
-                <span className="text">下标</span>
-              </div>
-              <span className="shortcut">{shortcut('SUBSCRIPT')}</span>
-            </DropDownItem>
-            <DropDownItem
-              onClick={e =>
-                dispatchFormatTextCommand('superscript', isKeyboardInput(e))
-              }
-              className={
-                'item wide ' + dropDownActiveClass(toolbarState.isSuperscript)
-              }
-              title="上标"
-              aria-label="上标">
-              <div className="icon-text-container">
-                <i className="icon superscript" />
-                <span className="text">上标</span>
-              </div>
-              <span className="shortcut">{shortcut('SUPERSCRIPT')}</span>
-            </DropDownItem>
-            <DropDownItem
-              onClick={e =>
-                dispatchFormatTextCommand('highlight', isKeyboardInput(e))
-              }
-              className={
-                'item wide ' + dropDownActiveClass(toolbarState.isHighlight)
-              }
-              title="高亮"
-              aria-label="高亮">
-              <div className="icon-text-container">
-                <i className="icon highlight" />
-                <span className="text">高亮</span>
-              </div>
-            </DropDownItem>
-            <DropDownItem
-              onClick={e => clearFormatting(activeEditor, isKeyboardInput(e))}
-              className="item wide"
-              title="清除格式"
-              aria-label="清除所有文字格式">
-              <div className="icon-text-container">
-                <i className="icon clear" />
-                <span className="text">清除格式</span>
-              </div>
-              <span className="shortcut">{shortcut('CLEAR_FORMATTING')}</span>
-            </DropDownItem>
-            <Divider />
-            <DropDownItem
-              onClick={() => editor.dispatchCommand(TOGGLE_COMMENTS_COMMAND)}
-              className="item wide">
-              <div className="icon-text-container">
-                <i className="icon add-comment" />
-                <span className="text">查看评论</span>
-              </div>
-            </DropDownItem>
-          </DropDown>
-        </div>
-        {canViewerSeeInsertDropdown && (
-          <div
-            className="toolbar-group toolbar-insert"
-            role="group"
-            aria-label="插入内容">
-            <DropDown
-              disabled={!isEditable}
-              buttonClassName="toolbar-item insert-menu"
-              buttonLabel="插入"
-              buttonAriaLabel="插入内容"
-              buttonIconClassName="icon plus">
-              <DropDownItem
-                onClick={() => {
-                  showModal('插入表格', onClose => (
-                    <InsertTableDialog
-                      activeEditor={activeEditor}
-                      onClose={onClose}
-                    />
-                  ));
-                }}
-                className="item">
-                <i className="icon table" />
-                <span className="text">表格</span>
-              </DropDownItem>
-              <DropDownItem
-                onClick={() =>
-                  dispatchToolbarCommand(INSERT_HORIZONTAL_RULE_COMMAND)
-                }
-                className="item">
-                <i className="icon horizontal-rule" />
-                <span className="text">分隔线</span>
-              </DropDownItem>
-
-              <DropDownItem
-                onClick={() => {
-                  showModal('插入图片', onClose => (
-                    <InsertImageDialog
-                      activeEditor={activeEditor}
-                      onClose={onClose}
-                    />
-                  ));
-                }}
-                className="item">
-                <i className="icon image" />
-                <span className="text">图片</span>
-              </DropDownItem>
-
-              <DropDownItem
-                onClick={() =>
-                  dispatchToolbarCommand(INSERT_EXCALIDRAW_COMMAND)
-                }
-                className="item">
-                <i className="icon diagram-2" />
-                <span className="text">绘图</span>
-              </DropDownItem>
-
-              <DropDownItem
-                onClick={() => {
-                  showModal('插入分栏', onClose => (
-                    <InsertLayoutDialog
-                      activeEditor={activeEditor}
-                      onClose={onClose}
-                    />
-                  ));
-                }}
-                className="item">
-                <i className="icon columns" />
-                <span className="text">分栏布局</span>
-              </DropDownItem>
-
-              <DropDownItem
-                onClick={() => {
-                  showModal('插入公式', onClose => (
-                    <InsertEquationDialog
-                      activeEditor={activeEditor}
-                      onClose={onClose}
-                    />
-                  ));
-                }}
-                className="item">
-                <i className="icon equation" />
-                <span className="text">公式</span>
-              </DropDownItem>
-
-              <DropDownItem
-                onClick={() =>
-                  dispatchToolbarCommand(INSERT_COLLAPSIBLE_COMMAND)
-                }
-                className="item">
-                <i className="icon caret-right" />
-                <span className="text">折叠区块</span>
-              </DropDownItem>
-              <DropDownItem
-                onClick={() => {
-                  const dateTime = new Date();
-                  dateTime.setHours(0, 0, 0, 0);
-                  dispatchToolbarCommand(INSERT_DATETIME_COMMAND, {dateTime});
-                }}
-                className="item">
-                <i className="icon calendar" />
-                <span className="text">日期</span>
-              </DropDownItem>
-            </DropDown>
+      )}
+      <div {...groupProps('colors', '文字颜色', 'toolbar-colors')}>
+        <DropdownColorPicker
+          disabled={!isEditable}
+          buttonClassName="toolbar-item color-picker"
+          buttonAriaLabel="文字颜色"
+          buttonIconClassName="icon font-color"
+          color={toolbarState.fontColor}
+          onChange={onFontColorSelect}
+          title="文字颜色"
+        />
+        <DropdownColorPicker
+          disabled={!isEditable}
+          buttonClassName="toolbar-item color-picker"
+          buttonAriaLabel="文字背景色"
+          buttonIconClassName="icon bg-color"
+          color={toolbarState.bgColor}
+          onChange={onBgColorSelect}
+          title="文字背景色"
+        />
+      </div>
+      <div {...groupProps('alignment', '对齐与缩进')}>
+        <ElementFormatDropdown
+          disabled={!isEditable}
+          value={toolbarState.elementFormat}
+          editor={activeEditor}
+          isRTL={toolbarState.isRTL}
+        />
+      </div>
+      {activeEditor === editor && (
+        <>
+          <div {...groupProps('lists', '列表')}>
+            {actionButton(actions.bullet)}
+            {actionButton(actions.number)}
           </div>
-        )}
+          <div {...groupProps('indent', '段落缩进')}>
+            {actionButton(actions.outdent)}
+            {actionButton(actions.indent)}
+          </div>
+          <div {...groupProps('links', '任务与链接')}>
+            {actionButton(actions.check)}
+            {actionButton(actions.link)}
+          </div>
+          <div {...groupProps('blocks', '引用与分隔线')}>
+            {actionButton(actions.quote)}
+            {actionButton(actions.rule)}
+          </div>
+        </>
+      )}
+      <div {...groupProps('more', '更多操作', 'toolbar-more')}>
+        <DropDown
+          disabled={!isEditable}
+          buttonClassName="toolbar-item"
+          hideChevron
+          buttonAriaLabel="更多"
+          buttonIconClassName="icon toolbar-ellipsis"
+          onOpen={() => setMorePage(null)}
+          stopCloseOnClickSelf={
+            morePage === 'font-color' || morePage === 'bg-color'
+          }>
+          <div data-toolbar-page={morePage || 'root'}>
+            {morePage ? (
+              <>
+                <DropDownItem
+                  className="item wide toolbar-menu-back"
+                  onClick={event => {
+                    event.preventDefault();
+                    setMorePage(null);
+                  }}>
+                  <span className="toolbar-menu-back-icon" aria-hidden="true">
+                    ‹
+                  </span>
+                  <span className="text">{morePageLabels[morePage]}</span>
+                </DropDownItem>
+                <MenuSeparator />
+                {morePageContent}
+              </>
+            ) : (
+              <>
+                {collapsedGroups.map((group, index) => (
+                  <Fragment key={group.id}>
+                    {index > 0 &&
+                      collapsedGroups[index - 1].section !== group.section && (
+                        <MenuSeparator />
+                      )}
+                    {overflowContent[group.id]}
+                  </Fragment>
+                ))}
+                {collapsedGroups.length > 0 && <MenuSeparator />}
+                {[
+                  actions.subscript,
+                  actions.superscript,
+                  actions.highlight,
+                  actions.ruby,
+                ].map(actionItem)}
+                <MenuSeparator />
+                {[actions.lowercase, actions.uppercase, actions.capitalize].map(
+                  actionItem,
+                )}
+              </>
+            )}
+          </div>
+        </DropDown>
       </div>
-
       {modal}
     </div>
   );
