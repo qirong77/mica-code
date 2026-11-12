@@ -3539,6 +3539,21 @@ html[data-appearance='light'] .chat-markdown code:not(pre code) {
   font-family: var(--chat-font);
 }
 
+.chat-todo-dock .chat-todo-toggle.arco-btn {
+  display: grid;
+  height: auto;
+  padding: 0;
+  font: inherit;
+  line-height: inherit;
+  color: inherit;
+}
+
+.chat-todo-toggle .chat-task-kind {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
 .chat-task-kind,
 .chat-task-status,
 .chat-task-runtime,

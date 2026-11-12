@@ -3,6 +3,7 @@ import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import {
   Markdown,
+  TodoDock,
   activityTurnIdForDisplay,
   canReuseVisualTranscript,
   chatUrlTransform,
@@ -24,6 +25,48 @@ import {
   todoSnapshotFromMessages,
   todoPanelForTurn
 } from './ChatView'
+
+describe('TODO dock', () => {
+  it('未完成时默认展开，标题提供可访问的折叠按钮与进度', () => {
+    const html = renderToStaticMarkup(createElement(TodoDock, {
+      panel: {
+        visible: true,
+        items: [
+          { id: 'done', content: '已确认边界', status: 'completed' },
+          { id: 'active', content: '添加折叠交互', status: 'in_progress' }
+        ]
+      }
+    }))
+    expect(html).toContain('<button')
+    expect(html).toContain('aria-label="收起 TODO"')
+    expect(html).toContain('aria-expanded="true"')
+    expect(html).toContain('1/2')
+    expect(html).toContain('1 remaining')
+    expect(html).toContain('motion-collapse is-expanded')
+    expect(html).toContain('添加折叠交互')
+  })
+
+  it('全部完成时默认收起但保留展开入口与进度', () => {
+    const html = renderToStaticMarkup(createElement(TodoDock, {
+      panel: {
+        visible: true,
+        items: [{ id: 'done', content: '已完成的计划内容', status: 'completed' }]
+      }
+    }))
+    expect(html).toContain('aria-label="展开 TODO"')
+    expect(html).toContain('aria-expanded="false"')
+    expect(html).toContain('1/1')
+    expect(html).toContain('all done')
+    expect(html).not.toContain('已完成的计划内容')
+    expect(html).not.toContain('chat-task-children')
+  })
+
+  it('面板不可见时不留空标题', () => {
+    expect(renderToStaticMarkup(createElement(TodoDock, {
+      panel: { visible: false, items: [] }
+    }))).toBe('')
+  })
+})
 
 describe('chat Markdown', () => {
   it('renders GFM tables, task lists, nested lists, and fenced code', () => {

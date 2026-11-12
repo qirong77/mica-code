@@ -2039,18 +2039,29 @@ export function restoredTodoInterrupted(meta, state) {
   return ['running', 'aborted', 'error'].includes(meta?.turnState)
 }
 
-function TodoDock({ panel }) {
+export function TodoDock({ panel }) {
+  const [expanded, setExpanded] = useState(null)
   if (!panel.visible) return null
 
   const items = panel.items
 
   const progress = summarizeTodoProgress(items)
   const status = progress.active ? 'running' : progress.remaining === 0 ? 'completed' : 'pending'
+  const open = expanded ?? (progress.remaining > 0)
 
   return (
     <section className="chat-task-dock chat-todo-dock" aria-label="当前运行计划">
-      <div className="chat-task-summary-row">
-        <span className="chat-task-kind">📝(todo)</span>
+      <ArcoAction
+        type="button"
+        className="chat-task-summary-row chat-todo-toggle mica-arco-row"
+        aria-label={open ? '收起 TODO' : '展开 TODO'}
+        aria-expanded={open}
+        onClick={() => setExpanded(!open)}
+      >
+        <span className="chat-task-kind">
+          <IconChevronRight size={12} className={`transition-transform${open ? ' rotate-90' : ''}`} aria-hidden="true" />
+          <span>📝(todo)</span>
+        </span>
         <span className={`chat-task-status chat-task-status-${status}`}>{status}</span>
         <span className="chat-task-runtime">
           {progress.completed}/{progress.total}
@@ -2058,9 +2069,9 @@ function TodoDock({ panel }) {
         <span className="chat-task-description">
           {progress.remaining === 0 ? 'all done' : `${progress.remaining} remaining`}
         </span>
-      </div>
-      {/* 全部完成时收成一行：计划留在屏幕上作为「这轮做了什么」的记录。 */}
-      {progress.remaining > 0 && (
+      </ArcoAction>
+      {/* 全部完成时默认收成一行，仍可手动展开回看。 */}
+      <Collapse open={open}>
         <div className="chat-task-children">
           {items.map((item) => (
             <div key={item.id} className={`chat-task-child chat-todo-${item.status}`}>
@@ -2078,7 +2089,7 @@ function TodoDock({ panel }) {
             </div>
           ))}
         </div>
-      )}
+      </Collapse>
     </section>
   )
 }
@@ -7595,7 +7606,7 @@ export function ChatView({
               </ArcoAction>
             </div>
           )}
-          <TodoDock panel={todoPanel} />
+          <TodoDock key={`${nodeId}:${activityTurnId}`} panel={todoPanel} />
           <SubagentStatusDock
             tasks={subagentTasks.filter((task) => keepsSubagentTaskRow(task))}
             now={taskNow}
