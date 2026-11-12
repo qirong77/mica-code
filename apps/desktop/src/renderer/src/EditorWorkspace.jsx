@@ -1,6 +1,6 @@
 import { forwardRef, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { IconGitBranch } from '@tabler/icons-react'
-import { ArcoAction } from '@mica-config-ui/web'
+import { StatusBarAction } from './StatusBarAction'
 import { FilesView } from './FilesView'
 import { BranchPicker } from './BranchPicker'
 import { CwdPicker } from './CwdPicker'
@@ -169,7 +169,7 @@ export const EditorWorkspace = forwardRef(function EditorWorkspace(
       <EditorTerminal ref={terminalRef} cwd={cwd} hidden={!visible || mobile} />
       <footer className="safe-bottom no-drag flex h-7 shrink-0 items-center justify-between gap-4 border-t border-line-soft bg-shade px-3 text-xs text-fg-soft">
         {branchLabel && (
-          <ArcoAction
+          <StatusBarAction
             ref={branchAnchorRef}
             type="button"
             className={`-ml-1.5 flex items-center gap-1.5 mica-arco-row text-left ${
@@ -184,9 +184,9 @@ export const EditorWorkspace = forwardRef(function EditorWorkspace(
           >
             <IconGitBranch size={13} className="shrink-0" />
             <span className="truncate">{branchLabel}</span>
-          </ArcoAction>
+          </StatusBarAction>
         )}
-        <ArcoAction
+        <StatusBarAction
           ref={cwdAnchorRef}
           type="button"
           className="ml-auto min-w-0 truncate text-right"
@@ -198,7 +198,7 @@ export const EditorWorkspace = forwardRef(function EditorWorkspace(
           onClick={openPathPicker}
         >
           {cwd || '选择目录…'}
-        </ArcoAction>
+        </StatusBarAction>
       </footer>
       {visible && picker === 'branch' && cwd && (
         <BranchPicker

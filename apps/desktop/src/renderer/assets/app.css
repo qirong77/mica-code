@@ -745,6 +745,12 @@ textarea:not([class*="arco-"]):focus-visible {
   background: var(--color-info);
 }
 
+.arco-btn.statusbar-text-action {
+  -webkit-user-select: text;
+  user-select: text;
+  cursor: text;
+}
+
 body.is-resizing {
   cursor: ew-resize;
   user-select: none;

@@ -45,6 +45,7 @@ import TerminalKeyBar from './TerminalKeyBar'
 import { readAppUrl, sessionShareUrl, urlWithState } from './app-url'
 import { TextPrompt } from './text-prompt'
 import { copyText } from './transport'
+import { StatusBarAction } from './StatusBarAction'
 
 // 启动必需的三块留在入口：侧栏（会话列表）、对话视图、分支选择。
 // 其余视图各自带着自己的重依赖（FilesView→monaco、TerminalHost→xterm），
@@ -3201,7 +3202,7 @@ export default function App() {
             }`}
           >
             {gitIsCurrent && git.status?.root ? (
-              <ArcoAction
+              <StatusBarAction
                 ref={branchButtonRef}
                 type="button"
                 title="切换或创建 Git 分支"
@@ -3215,10 +3216,10 @@ export default function App() {
               >
                 <IconGitBranch size={13} className="shrink-0" />
                 <span className="truncate">{git.status.branch || 'detached'}</span>
-              </ArcoAction>
+              </StatusBarAction>
             ) : null}
             {activeCwd && (
-              <ArcoAction
+              <StatusBarAction
                 ref={cwdButtonRef}
                 type="button"
                 title={
@@ -3234,7 +3235,7 @@ export default function App() {
                 }}
               >
                 {activeCwd}
-              </ArcoAction>
+              </StatusBarAction>
             )}
           </footer>
         </main>
