@@ -184,6 +184,10 @@ body:has(.link-editor:not([hidden])) .image-toolbar {
 .image-toolbar .arco-btn:hover:not(:disabled) {
   background: var(--color-active);
 }
+.editor-dropdown .mica-menu-item:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: -2px;
+}
 .image-delete-item .icon-text-container {
   color: var(--color-danger);
 }
@@ -255,6 +259,27 @@ body:has(.link-editor:not([hidden])) .image-toolbar {
   height: auto;
   min-height: 170px;
 }
+.image-settings-popover {
+  z-index: 70;
+  width: min(286px, calc(100vw - 20px));
+  box-sizing: border-box;
+  padding: 12px;
+  border: 1px solid var(--color-line);
+  border-radius: 10px;
+  background: var(--color-panel);
+  color: var(--color-fg-soft);
+  box-shadow:
+    0 8px 24px var(--color-overlay-strong),
+    0 2px 6px var(--color-overlay);
+  font: 12px/1.6 var(--font-family);
+}
+.image-settings-popover-title {
+  margin-bottom: 10px;
+  color: var(--color-fg-strong);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.4;
+}
 .image-size-fields {
   display: flex;
   align-items: flex-end;
@@ -302,6 +327,17 @@ body:has(.link-editor:not([hidden])) .image-toolbar {
   margin-top: 18px;
   color: var(--color-fg-soft);
   font-size: 12px;
+}
+.image-settings-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--color-line-soft);
+}
+.image-settings-actions .arco-btn {
+  min-width: 52px;
 }
 .image-preview-modal .editor-modal-body {
   height: auto;

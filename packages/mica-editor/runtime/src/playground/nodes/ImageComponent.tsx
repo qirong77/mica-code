@@ -46,9 +46,9 @@ import ImageResizer from '../ui/ImageResizer';
 import {
   type ImageAction,
   type ImageAlignment,
-  ImageDescriptionDialog,
+  ImageDescriptionPopover,
   ImagePreviewDialog,
-  ImageSizeDialog,
+  ImageSizePopover,
   ImageToolbar,
 } from '../ui/ImageTools';
 import {imageContentWidth} from '../ui/imageResize';
@@ -138,6 +138,7 @@ function ImageEditor({
   const buttonRef = useRef<HTMLButtonElement>(null);
   const mounted = useRef(false);
   const previousDialog = useRef(dialog);
+  const shouldRestoreFocus = useRef(true);
   useEffect(() => {
     mounted.current = true;
     return () => {
@@ -153,14 +154,15 @@ function ImageEditor({
   useEffect(() => {
     const closed = previousDialog.current !== null && dialog === null;
     previousDialog.current = dialog;
-    if (closed) {
-      // Modal releases its focus trap during unmount. Focus after that release,
-      // including when the menu item that opened it no longer exists.
+    if (closed && shouldRestoreFocus.current) {
+      // Restore editor focus after a menu, popover or modal unmounts, including
+      // when the control that opened it no longer exists.
       queueMicrotask(() => {
         if (mounted.current && editor.isEditable())
           editor.getRootElement()?.focus({preventScroll: true});
       });
     }
+    if (closed) shouldRestoreFocus.current = true;
   }, [dialog, editor]);
 
   const natural = status.error
@@ -193,9 +195,10 @@ function ImageEditor({
       node.setWidthAndHeight(Math.round(nextWidth), Math.round(nextHeight));
       $selectImage(node);
     });
-  const restoreFocus = () => {
+  const restoreFocus = useCallback((restore = true) => {
+    shouldRestoreFocus.current = restore;
     setDialog(null);
-  };
+  }, []);
   const dismiss = useCallback(() => {
     editor.update(() => {
       const node = $getNodeByKey(nodeKey);
@@ -438,7 +441,9 @@ function ImageEditor({
               lockAspectRatio
               showSideHandles={false}
               onResizeStart={() => setIsResizing(true)}
-              onResizeCancel={() => {if (mounted.current) setIsResizing(false);}}
+              onResizeCancel={() => {
+                if (mounted.current) setIsResizing(false);
+              }}
               onResizeEnd={(nextWidth, nextHeight) => {
                 frameRef.current?.style.removeProperty('height');
                 if (typeof nextWidth === 'number' && typeof nextHeight === 'number')
@@ -500,7 +505,8 @@ function ImageEditor({
         <ImagePreviewDialog src={src} altText={altText} onClose={restoreFocus} />
       )}
       {isEditable && dialog === 'size' && (
-        <ImageSizeDialog
+        <ImageSizePopover
+          anchor={frameRef}
           {...imageSize()}
           maxWidth={availableWidth()}
           onApply={setSize}
@@ -508,7 +514,8 @@ function ImageEditor({
         />
       )}
       {isEditable && dialog === 'description' && (
-        <ImageDescriptionDialog
+        <ImageDescriptionPopover
+          anchor={frameRef}
           altText={altText}
           showCaption={showCaption}
           captionsEnabled={captionsEnabled}

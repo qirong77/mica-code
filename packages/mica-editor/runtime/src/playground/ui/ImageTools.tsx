@@ -19,11 +19,10 @@ import {
   IconUnlock,
 } from '@arco-design/web-react/icon';
 import {autoUpdate, flip, hide, offset, shift, useFloating} from '@floating-ui/react';
-import {type RefObject, useEffect, useId, useState} from 'react';
+import {type RefObject, useEffect, useId, useRef, useState} from 'react';
 import {createPortal} from 'react-dom';
 
 import {MenuSeparator} from '../../../../../mica-config-ui/web/components/ActionMenu';
-import {DialogActions} from './Dialog';
 import DropDown, {DropDownItem} from './DropDown';
 import Modal from './Modal';
 import TextInput from './TextInput';
@@ -196,18 +195,95 @@ export function ImageToolbar({
   );
 }
 
-export function ImageSizeDialog({
+function ImagePopover({
+  anchor,
+  title,
+  onClose,
+  children,
+}: {
+  anchor: RefObject<HTMLElement | null>;
+  title: string;
+  onClose: (restoreFocus?: boolean) => void;
+  children: React.ReactNode;
+}) {
+  const panelRef = useRef<HTMLDivElement>(null);
+  const {refs, floatingStyles, middlewareData} = useFloating({
+    placement: 'top-start',
+    strategy: 'fixed',
+    middleware: [
+      offset(12),
+      flip({padding: {top: 50, bottom: 12, left: 10, right: 10}}),
+      shift({padding: 10}),
+      hide(),
+    ],
+    whileElementsMounted: autoUpdate,
+  });
+  useEffect(() => {
+    refs.setReference(anchor.current);
+  }, [anchor, refs]);
+  useEffect(() => {
+    const doc = anchor.current?.ownerDocument;
+    if (!doc) return;
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target;
+      if (target instanceof Node && panelRef.current?.contains(target)) return;
+      onClose(false);
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        event.stopPropagation();
+        onClose();
+      }
+    };
+    doc.addEventListener('pointerdown', onPointerDown, true);
+    doc.addEventListener('keydown', onKeyDown, true);
+    const onBlur = () => onClose(false);
+    doc.defaultView?.addEventListener('blur', onBlur);
+    panelRef.current?.querySelector<HTMLElement>('input, button:not(:disabled)')?.focus();
+    return () => {
+      doc.removeEventListener('pointerdown', onPointerDown, true);
+      doc.removeEventListener('keydown', onKeyDown, true);
+      doc.defaultView?.removeEventListener('blur', onBlur);
+    };
+  }, [anchor, onClose]);
+  const ownerDocument = anchor.current?.ownerDocument;
+  if (!ownerDocument) return null;
+  return createPortal(
+    <div
+      ref={node => {
+        panelRef.current = node;
+        refs.setFloating(node);
+      }}
+      style={{
+        ...floatingStyles,
+        visibility: middlewareData.hide?.referenceHidden ? 'hidden' : undefined,
+      }}
+      className="image-settings-popover"
+      role="dialog"
+      aria-label={title}
+      onMouseDown={event => event.stopPropagation()}>
+      <div className="image-settings-popover-title">{title}</div>
+      {children}
+    </div>,
+    ownerDocument.body,
+  );
+}
+
+export function ImageSizePopover({
+  anchor,
   width,
   height,
   maxWidth,
   onApply,
   onClose,
 }: {
+  anchor: RefObject<HTMLElement | null>;
   width: number;
   height: number;
   maxWidth: number;
   onApply: (width: number, height: number) => void;
-  onClose: () => void;
+  onClose: (restoreFocus?: boolean) => void;
 }) {
   const [size, setSize] = useState({width: Math.round(width), height: Math.round(height)});
   const [locked, setLocked] = useState(true);
@@ -233,7 +309,7 @@ export function ImageSizeDialog({
     }
   };
   return (
-    <Modal title="图片宽高" onClose={onClose} className="image-settings-modal">
+    <ImagePopover anchor={anchor} title="图片宽高" onClose={onClose}>
       <div
         onKeyDown={event => {
           // The editor's sandbox blocks native form submissions, including submit events.
@@ -307,29 +383,31 @@ export function ImageSizeDialog({
             适应正文
           </Button>
         </div>
-        <DialogActions>
-          <Button onClick={onClose}>取消</Button>
+        <div className="image-settings-actions">
+          <Button onClick={() => onClose()}>取消</Button>
           <Button type="primary" disabled={!valid} onClick={apply}>
             应用
           </Button>
-        </DialogActions>
+        </div>
       </div>
-    </Modal>
+    </ImagePopover>
   );
 }
 
-export function ImageDescriptionDialog({
+export function ImageDescriptionPopover({
+  anchor,
   altText,
   showCaption,
   captionsEnabled,
   onApply,
   onClose,
 }: {
+  anchor: RefObject<HTMLElement | null>;
   altText: string;
   showCaption: boolean;
   captionsEnabled: boolean;
   onApply: (altText: string, showCaption: boolean) => void;
-  onClose: () => void;
+  onClose: (restoreFocus?: boolean) => void;
 }) {
   const [description, setDescription] = useState(altText);
   const [caption, setCaption] = useState(showCaption);
@@ -339,7 +417,7 @@ export function ImageDescriptionDialog({
     onClose();
   };
   return (
-    <Modal title="图片描述" onClose={onClose} className="image-settings-modal">
+    <ImagePopover anchor={anchor} title="图片描述" onClose={onClose}>
       <div
         onKeyDown={event => {
           if (
@@ -370,14 +448,14 @@ export function ImageDescriptionDialog({
           </div>
         )}
         <p className="image-settings-hint">图注在图片下方编辑；关闭图注会保留已有文字。</p>
-        <DialogActions>
-          <Button onClick={onClose}>取消</Button>
+        <div className="image-settings-actions">
+          <Button onClick={() => onClose()}>取消</Button>
           <Button type="primary" onClick={apply}>
             应用
           </Button>
-        </DialogActions>
+        </div>
       </div>
-    </Modal>
+    </ImagePopover>
   );
 }
 

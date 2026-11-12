@@ -67,6 +67,14 @@ const emptyOutline = () => ({
   activeKey: null,
 });
 
+/** The index controller may replay this operation after a CAS conflict or uncertain write. */
+export function createDefaultNote({ id, now, parentId }) {
+  return (latest) =>
+    latest.nodes.some((node) => node.id === id)
+      ? latest
+      : createNode(latest, { id, now, kind: 'note', title: '未命名笔记', parentId });
+}
+
 function download(value, name) {
   const url = URL.createObjectURL(new Blob([JSON.stringify(value, null, 2)], { type: 'application/json' }));
   const link = document.createElement('a');
@@ -96,7 +104,7 @@ function MenuRow({ action, label, Icon, variant = 'ghost', onSelect }) {
  *
  * ArcoPopover 负责定位与点外关闭；菜单行、键盘导航与 Esc 交给共享菜单。
  */
-function PopoverMenu({ open, onOpen, onClose, label, position = 'br', trigger, children }) {
+function PopoverMenu({ open, onOpen, onClose, label, position = 'br', trigger, children, form }) {
   const anchor = useRef(null);
   return (
     <ArcoPopover
@@ -108,16 +116,18 @@ function PopoverMenu({ open, onOpen, onClose, label, position = 'br', trigger, c
       onVisibleChange={(visible) => (visible ? onOpen() : onClose())}
       triggerProps={{ showArrow: false }}
       content={
-        <MenuList
-          aria-label={label}
-          autoFocus
-          onClose={() => {
-            onClose();
-            anchor.current?.querySelector('button')?.focus({ preventScroll: true });
-          }}
-        >
-          {children}
-        </MenuList>
+        form || (
+          <MenuList
+            aria-label={label}
+            autoFocus
+            onClose={() => {
+              onClose();
+              anchor.current?.querySelector('button')?.focus({ preventScroll: true });
+            }}
+          >
+            {children}
+          </MenuList>
+        )
       }
     >
       {cloneElement(trigger, { ref: anchor })}
@@ -125,7 +135,7 @@ function PopoverMenu({ open, onOpen, onClose, label, position = 'br', trigger, c
   );
 }
 
-function NoteMenu({ node, open, onOpen, onClose, onAction, extraRows, trigger, position = 'br' }) {
+function NoteMenu({ node, open, onOpen, onClose, onAction, extraRows, trigger, position = 'br', form }) {
   return (
     <PopoverMenu
       open={open}
@@ -134,6 +144,7 @@ function NoteMenu({ node, open, onOpen, onClose, onAction, extraRows, trigger, p
       label={`${node.title} 的操作`}
       position={position}
       trigger={trigger}
+      form={form}
     >
       {extraRows && (
         <>
@@ -192,6 +203,7 @@ export default function NotebookPage({ api }) {
   const loadedNote = useRef(null);
   const tree = useRef(null);
   const actions = useRef({});
+  const creating = useRef(false);
   const token = useMemo(() => createNodeId(), [frameKey]);
   const controller = useMemo(() => createNotebookController({ host: api, onIndex: setIndex }), [api]);
   const writer = useMemo(() => createNotebookWriter(controller), [controller]);
@@ -500,6 +512,7 @@ export default function NotebookPage({ api }) {
     const closeMenus = () => {
       setMenu(null);
       setNewMenu(false);
+      setDialog((value) => (value?.type === 'rename' ? null : value));
     };
     window.addEventListener('blur', closeMenus);
     return () => window.removeEventListener('blur', closeMenus);
@@ -584,16 +597,38 @@ export default function NotebookPage({ api }) {
       setBusy(false);
     }
   };
-  const create = (kind) =>
-    setDialog({
-      type: 'create',
-      id: createNodeId(),
-      now: new Date().toISOString(),
-      kind,
-      title: kind === 'folder' ? '新建文件夹' : '新建笔记',
-      name: '',
-      parentId: parentForNew,
-    });
+  const create = async (kind) => {
+    if (busy || creating.current || lifecycle.closing || lifecycle.switching) return;
+    if (kind === 'folder') {
+      setDialog({
+        type: 'create',
+        id: createNodeId(),
+        now: new Date().toISOString(),
+        kind,
+        title: '新建文件夹',
+        name: '',
+        parentId: parentForNew,
+      });
+      return;
+    }
+    creating.current = true;
+    setBusy(true);
+    try {
+      const id = createNodeId();
+      const now = new Date().toISOString();
+      const parentId = parentForNew;
+      if (!(await flush()) || lifecycle.closing) return;
+      const result = await mutate(createDefaultNote({ id, now, parentId }));
+      if (!result || lifecycle.closing) return;
+      if (parentId) setExpanded((previous) => new Set([...previous, parentId]));
+      setTrash(false);
+      setQuery('');
+      await openNote(id);
+    } finally {
+      creating.current = false;
+      setBusy(false);
+    }
+  };
   const edit = (node) => setDialog({ type: 'rename', node, title: '重命名', name: node.title });
   const downloadActive = async () => {
     setMenu(null);
@@ -610,10 +645,14 @@ export default function NotebookPage({ api }) {
     if (current.current) download(current.current.document, note.title);
   };
   const runAction = (node, action) => {
-    setMenu(null);
     if (action === 'rename') edit(node);
-    else if (action === 'move') setDialog({ type: 'move', title: '移动到', node, parentId: node.parentId || '' });
-    else setDialog({ type: 'delete', title: '移到最近删除', node });
+    else if (action === 'move') {
+      setMenu(null);
+      setDialog({ type: 'move', title: '移动到', node, parentId: node.parentId || '' });
+    } else {
+      setMenu(null);
+      setDialog({ type: 'delete', title: '移到最近删除', node });
+    }
   };
   const submitDialog = async () => {
     const value = dialog;
@@ -651,19 +690,16 @@ export default function NotebookPage({ api }) {
       );
       if (!result || lifecycle.closing) return;
       if (value.parentId) setExpanded((previous) => new Set([...previous, value.parentId]));
-      if (value.kind === 'folder') {
-        setSelectedId(id);
-        setExpanded((previous) => new Set([...previous, id]));
-      } else {
-        await openNote(id);
-      }
+      setSelectedId(id);
+      setExpanded((previous) => new Set([...previous, id]));
       setTrash(false);
     }
     setDialog(null);
+    setMenu(null);
   };
 
   const selectRow = (node) => {
-    if (lifecycle.closing) return;
+    if (lifecycle.closing || busy || creating.current) return;
     setSelectedId(node.id);
     if (trash) return;
     if (node.kind === 'folder') toggleFolder(node.id);
@@ -672,10 +708,15 @@ export default function NotebookPage({ api }) {
   const navigateTree = (event) => {
     if (!['ArrowDown', 'ArrowUp', 'Home', 'End', 'ArrowRight', 'ArrowLeft', 'Enter', 'F2'].includes(event.key)) return;
     if (event.target.closest('input')) return;
+    if (busy || creating.current) return;
     const position = visible.findIndex(({ node }) => node.id === selectedId);
-    const row = visible[position];
+    const row =
+      visible[position] ??
+      visible.find(({ node }) => node.id === event.target.closest('[data-node-id]')?.dataset.nodeId);
     if (event.key === 'F2' && row && !trash) {
       event.preventDefault();
+      setNewMenu(false);
+      setMenu({ id: row.node.id, source: 'row' });
       edit(row.node);
       return;
     }
@@ -715,6 +756,52 @@ export default function NotebookPage({ api }) {
   for (let i = 0; i < folders.length; i++)
     for (const folder of folders) if (forbidden.has(folder.parentId)) forbidden.add(folder.id);
 
+  const localForm =
+    dialog?.type === 'rename' ? (
+      <div
+        className="notebook-dialog"
+        style={{ width: 'min(240px, 75vw)' }}
+        role="dialog"
+        aria-label={dialog.title}
+        onKeyDown={(event) => {
+          event.stopPropagation();
+          if (event.key === 'Escape' && !busy) {
+            event.preventDefault();
+            setDialog(null);
+            setMenu(null);
+          }
+        }}
+      >
+        <label>
+          名称
+          <Input
+            autoFocus
+            value={dialog.name}
+            maxLength={100}
+            aria-label="名称"
+            onChange={(name) => setDialog({ ...dialog, name })}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' && !event.nativeEvent.isComposing && dialog.name.trim()) void submitDialog();
+            }}
+          />
+        </label>
+        <footer>
+          <Button
+            onClick={() => {
+              setDialog(null);
+              setMenu(null);
+            }}
+            disabled={busy}
+          >
+            取消
+          </Button>
+          <Button variant="accent" disabled={busy || !dialog.name.trim()} onClick={() => void submitDialog()}>
+            {busy ? '处理中' : '确定'}
+          </Button>
+        </footer>
+      </div>
+    ) : null;
+
   return (
     <div ref={pageRoot} className={`notebook-page ${railOpen ? 'is-rail-open' : ''} ${focused ? 'is-focused' : ''}`}>
       <div className="notebook-layout">
@@ -747,7 +834,9 @@ export default function NotebookPage({ api }) {
             <PopoverMenu
               open={newMenu}
               onOpen={() => {
+                if (busy || creating.current) return;
                 setMenu(null);
+                setDialog(null);
                 setNewMenu(true);
               }}
               onClose={() => setNewMenu(false)}
@@ -867,12 +956,20 @@ export default function NotebookPage({ api }) {
                       node={node}
                       open={menu?.id === node.id && menu.source === 'row'}
                       onOpen={() => {
+                        if (busy || creating.current) return;
                         setNewMenu(false);
+                        setDialog(null);
                         setSelectedId(node.id);
                         setMenu({ id: node.id, source: 'row' });
                       }}
-                      onClose={() => setMenu(null)}
+                      onClose={() => {
+                        if (!busy) {
+                          setMenu(null);
+                          setDialog(null);
+                        }
+                      }}
                       onAction={(action) => runAction(node, action)}
+                      form={menu?.id === node.id && menu.source === 'row' ? localForm : null}
                       trigger={
                         <span className="notebook-row-actions">
                           <Button
@@ -1027,11 +1124,19 @@ export default function NotebookPage({ api }) {
                       node={active}
                       open={menu?.id === active.id && menu.source === 'header'}
                       onOpen={() => {
+                        if (busy || creating.current) return;
                         setNewMenu(false);
+                        setDialog(null);
                         setMenu({ id: active.id, source: 'header' });
                       }}
-                      onClose={() => setMenu(null)}
+                      onClose={() => {
+                        if (!busy) {
+                          setMenu(null);
+                          setDialog(null);
+                        }
+                      }}
                       onAction={(action) => runAction(active, action)}
+                      form={menu?.id === active.id && menu.source === 'header' ? localForm : null}
                       position="bl"
                       extraRows={
                         <>
@@ -1213,7 +1318,7 @@ export default function NotebookPage({ api }) {
           </div>
         </main>
       </div>
-      {dialog && (
+      {dialog && dialog.type !== 'rename' && (
         <Modal title={dialog.title} onClose={() => !busy && setDialog(null)} portal>
           <div className="notebook-dialog">
             {dialog.type === 'reload' ? (
@@ -1261,7 +1366,7 @@ export default function NotebookPage({ api }) {
               </Button>
               <Button
                 variant={dialog.type === 'delete' ? 'danger' : 'accent'}
-                disabled={busy || (['create', 'rename'].includes(dialog.type) && !dialog.name.trim())}
+                disabled={busy || (dialog.type === 'create' && !dialog.name.trim())}
                 onClick={() => void submitDialog()}
               >
                 {busy

@@ -31,8 +31,8 @@ export type CapabilityItem = {
  * 与会话开关的数据源不同。之前各写一套，于是页签形态、列宽、能否点开详情全对不上。
  * 数据与落点由宿主决定，这里只管形态。
  *
- * 工具按目录给的 `group` 分块：组头是同一个滑块加组名与 `启用/总数`，点它就是整组开关
- * （`onToggleGroup`）；组内只展示工具信息，统一由组开关控制。技能与 MCP 服务器没有分组，照旧平铺。
+ * 多项工具按目录给的 `group` 分块：组头是整组开关（`onToggleGroup`），组内只展示工具信息。
+ * 只有一项的组直接平铺，和没有分组的技能、MCP 服务器一样显示名称、描述和开关。
  *
  * 只有滑块改启用状态；整行点击留给「打开详情」，避免点名字误关工具。
  */
@@ -127,7 +127,7 @@ export function CapabilityList({
       <ul className="capability-list">
         {items.length === 0 ? <li className="capability-empty">暂无可用项</li> : null}
         {sections.map((section) => {
-          if (section.key === null) {
+          if (section.key === null || section.items.length === 1) {
             const item = section.items[0];
             return item ? renderRow(item) : null;
           }
