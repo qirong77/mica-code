@@ -46,7 +46,7 @@
       "default": "600",
       "min": 100,
       "max": 2000,
-      "description": "展示的摘要最大字符数。"
+      "description": "摘要默认展示的最大字符数，超出部分可展开查看。"
     },
     {
       "key": "prompt",

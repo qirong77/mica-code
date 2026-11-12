@@ -69,6 +69,7 @@ export function createHeadlessRuntimeServices(options: HeadlessRuntimeServicesOp
         {
           role: 'notice',
           content: text,
+          ...(noticeOptions.displayContent !== undefined ? { displayContent: noticeOptions.displayContent } : {}),
           variant: noticeOptions.variant,
           command: noticeOptions.command,
           status: noticeOptions.status,

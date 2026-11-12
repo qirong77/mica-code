@@ -352,7 +352,10 @@ export function codexNotificationToEvent(notification) {
         type: 'notice',
         timestamp,
         sessionID,
-        text: params.notice?.content || '',
+        text: params.notice?.displayContent ?? params.notice?.content ?? '',
+        ...(typeof params.notice?.displayContent === 'string' && typeof params.notice?.content === 'string' && params.notice.displayContent !== params.notice.content
+          ? { fullText: params.notice.content }
+          : {}),
         variant: params.notice?.variant,
         command: params.notice?.command,
         status: params.notice?.status,

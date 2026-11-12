@@ -102,7 +102,7 @@ const SessionDetailModal = lazyView(
 )
 import { applyTurnTimingEvent, createTurnTimingState, summarizeTurnTiming } from './turn-timing'
 import { CodeView } from './CodeView'
-import { DigestNotice } from './DigestNotice'
+import { DigestNotice, DigestNoticeContent } from './DigestNotice'
 import { restoreChatNotices, upsertChatNotice } from './chat-notices'
 import { newlyAnsweredBtwEntries } from './btw-thread'
 import { canCollapseMessage, measureChatCollapse } from './chat-collapse'
@@ -2869,14 +2869,19 @@ function MessageRowView({
     if (message.variant === 'digest') {
       return (
         <DigestNotice status={message.status}>
-          <Markdown text={message.text || ''} onOpenFile={onOpenFile} />
+          <DigestNoticeContent
+            text={message.text || ''}
+            fullText={message.fullText}
+            renderMarkdown={(text) => <Markdown text={text} onOpenFile={onOpenFile} />}
+          />
         </DigestNotice>
       )
     }
     const title =
       message.command ||
       (message.variant === 'compact' ? '/compact' : message.variant === 'error' ? '/error' : '')
-    const noticeLines = String(message.text || '').split('\n')
+    const noticeText = message.fullText ?? message.text
+    const noticeLines = String(noticeText || '').split('\n')
     return (
       <div className={`chat-notice chat-notice-${message.variant || 'info'}`}>
         <span>▌</span>
@@ -2896,7 +2901,7 @@ function MessageRowView({
             </>
           ) : (
             <span className="chat-notice-text">
-              <PathText text={message.text} />
+              <PathText text={noticeText} />
             </span>
           )}
         </div>
@@ -3110,6 +3115,7 @@ export function historyMessages(rows, key) {
             : 'message',
     role: row.role,
     text: row.text || '',
+    ...(typeof row.fullText === 'string' ? { fullText: row.fullText } : {}),
     ...(row.kind === 'compact' ? { compact: row.compact ?? {} } : {}),
     ...(row.kind === 'reasoning' ? {
       turnId: `interrupted-${key}`, resumableThinking: true,
@@ -3923,12 +3929,12 @@ export function ChatView({
   )
 
   const appendNotice = useCallback(
-    (text, variant = 'info', status = '') => {
+    (text, variant = 'info', status = '', fullText) => {
       if (!text) return null
       const id = uid('notice')
       updateMessages((previous) => [
         ...previous,
-        { id, kind: 'notice', role: 'notice', text, variant, status }
+        { id, kind: 'notice', role: 'notice', text, variant, status, ...(typeof fullText === 'string' ? { fullText } : {}) }
       ])
       return id
     },
@@ -3938,10 +3944,11 @@ export function ChatView({
   // 复用同一条 notice（按 command 认领上一次的位置）：重试每次都刷新同一条，
   // 而不是往会话里堆 5 条。
   const upsertNotice = useCallback(
-    (text, variant = 'info', command = '', status = '', replace = false, noticeIndex) => {
+    (text, variant = 'info', command = '', status = '', replace = false, noticeIndex, fullText) => {
       if (!text) return null
       updateMessages((previous) => upsertChatNotice(previous, {
-        id: uid('notice'), kind: 'notice', role: 'notice', text, variant, command, status, noticeIndex
+        id: uid('notice'), kind: 'notice', role: 'notice', text, variant, command, status, noticeIndex,
+        fullText: typeof fullText === 'string' ? fullText : undefined
       }, { replace }))
     },
     [updateMessages]
@@ -4923,8 +4930,8 @@ export function ChatView({
           // 插件进度与非致命提示都不改变正文流或 turn 状态。
           if (event.text) {
             if (event.command || Number.isInteger(event.noticeIndex)) {
-              upsertNotice(event.text, event.variant || 'info', event.command, event.status || '', event.replace, event.noticeIndex)
-            } else appendNotice(event.text, event.variant || 'info', event.status || '')
+              upsertNotice(event.text, event.variant || 'info', event.command, event.status || '', event.replace, event.noticeIndex, event.fullText)
+            } else appendNotice(event.text, event.variant || 'info', event.status || '', event.fullText)
           }
           break
         case 'usage':

@@ -81,6 +81,20 @@ describe('reply-digest plugin', () => {
     expect(harness.health.report).toHaveBeenCalledWith({ level: 'ok', message: '长回复摘要已生成' });
   });
 
+  it('retains the full summary and sends a separate bounded preview when it exceeds the configured limit', async () => {
+    const harness = createHarness();
+    const fullSummary = '要点：' + '内容'.repeat(400);
+    harness.query.mockResolvedValueOnce(result(fullSummary));
+    await harness.emitAfter();
+    await flush();
+    expect(harness.visible()).toEqual([
+      {
+        content: fullSummary,
+        options: expect.objectContaining({ status: 'info', displayContent: `${fullSummary.slice(0, 599)}…` }),
+      },
+    ]);
+  });
+
   it('does not summarize aborted, failed or one-shot turns', async () => {
     const harness = createHarness();
     await harness.emitAfter(longMessages, 'aborted');

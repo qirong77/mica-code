@@ -39,6 +39,12 @@ function record(sequence, type, text, sessionID = 's1') {
 }
 
 describe('chat event buffering', () => {
+  it('projects a notice preview and full text together', () => {
+    expect(codexNotificationToEvent({
+      method: 'mica/notice/updated',
+      params: { notice: { role: 'notice', content: '完整摘要', displayContent: '短摘要…', variant: 'digest' } }
+    })).toMatchObject({ text: '短摘要…', fullText: '完整摘要' })
+  })
   it('projects saved notice progress updates without replacing history or losing replay data', () => {
     const events = []
     const emitted = []

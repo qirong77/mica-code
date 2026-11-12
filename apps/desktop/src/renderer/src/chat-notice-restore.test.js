@@ -8,7 +8,7 @@ describe('persisted notice restoration', () => {
       [
         { role: 'user', text: 'question' },
         { role: 'assistant', text: 'long reply' },
-        { role: 'notice', text: 'summary', variant: 'digest', command: 'digest:1', status: 'info' }
+        { role: 'notice', text: 'summary', fullText: 'complete summary', variant: 'digest', command: 'digest:1', status: 'info' }
       ],
       's'
     )
@@ -16,6 +16,7 @@ describe('persisted notice restoration', () => {
     const restored = restoreChatNotices(replayed, rows)
     expect(restored.map((row) => row.text)).toEqual(['question', 'long reply', 'summary'])
     expect(restored[2].noticeIndex).toBe(0)
+    expect(restored[2].fullText).toBe('complete summary')
     expect(restoreChatNotices(restored, rows)).toEqual(restored)
   })
 
@@ -23,6 +24,7 @@ describe('persisted notice restoration', () => {
     const update = {
       type: 'notice',
       text: 'summary',
+      fullText: 'complete summary',
       noticeIndex: 0,
       status: 'info',
       command: 'digest:1'
@@ -38,6 +40,6 @@ describe('persisted notice restoration', () => {
     )
     const restored = restoreChatNotices(rows, rows, merged)
     expect(restored).toHaveLength(1)
-    expect(restored[0]).toMatchObject({ text: 'summary', status: 'info', noticeIndex: 0 })
+    expect(restored[0]).toMatchObject({ text: 'summary', fullText: 'complete summary', status: 'info', noticeIndex: 0 })
   })
 })

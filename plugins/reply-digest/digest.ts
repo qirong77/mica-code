@@ -35,16 +35,20 @@ export function digestInput(text: string, limit: number): string {
   return `${text.slice(0, Math.max(0, limit - 1)).trimEnd()}…`;
 }
 
-export function cleanSummary(raw: unknown, limit: number): string {
+export function cleanSummary(raw: unknown): string {
   if (typeof raw !== 'string') return '';
   const text = raw
-    .replace(/```[a-zA-Z0-9_-]*\s*/g, '')
-    .replace(/```/g, '')
     .replace(/^\s*(?:摘要|简短摘要|summary)\s*[:：]\s*/i, '')
     .trim();
-  if (!text) return '';
-  if (text.length <= limit) return text;
-  return `${text.slice(0, Math.max(0, limit - 1)).trimEnd()}…`;
+  return text;
+}
+
+export function summaryPreview(text: string, limit: number): string | undefined {
+  if (text.length <= limit) return undefined;
+  let end = Math.max(0, limit - 1);
+  // Avoid splitting a UTF-16 surrogate pair at the preview boundary.
+  if (end > 0 && /[\uD800-\uDBFF]/.test(text[end - 1]!) && /[\uDC00-\uDFFF]/.test(text[end]!)) end -= 1;
+  return `${text.slice(0, end).trimEnd()}…`;
 }
 
 export function messageText(content: string | MicaUiContentBlockParam[]): string {

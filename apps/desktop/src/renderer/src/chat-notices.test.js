@@ -12,6 +12,14 @@ const notice = (id, status, command = 'digest:1') => ({
 })
 
 describe('upsertChatNotice', () => {
+  test('clears an old full text when a replayed update contains only a short result', () => {
+    const old = { ...notice('saved', 'info'), text: '短版…', fullText: '之前的全文', noticeIndex: 0 }
+    const result = restoreChatNotices([old], [], [{
+      type: 'notice', noticeIndex: 0, text: '新结果', command: 'digest:1', status: 'info'
+    }])
+    expect(result[0].text).toBe('新结果')
+    expect(result[0].fullText).toBeUndefined()
+  })
   test('inserts progress immediately and finishes in place without touching a live reply', () => {
     const answer = { id: 'answer', kind: 'message', text: 'original', done: false }
     const running = upsertChatNotice([answer], notice('n1', 'running'))
@@ -126,13 +134,14 @@ describe('upsertChatNotice', () => {
     const update = {
       type: 'notice',
       text: 'summary',
+      fullText: 'complete summary',
       variant: 'digest',
       command: 'digest:1',
       status: 'info',
       noticeIndex: 0
     }
     const next = restoreChatNotices([answer], [answer, running], [update])
-    expect(next).toEqual([answer, { ...running, status: 'info', text: 'summary' }])
+    expect(next).toEqual([answer, { ...running, status: 'info', text: 'summary', fullText: 'complete summary' }])
     expect(restoreChatNotices(next, [answer, running], [update])).toEqual(next)
     expect(restoreChatNotices([answer], [answer, { ...running, status: 'info' }])).toHaveLength(2)
   })

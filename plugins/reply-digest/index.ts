@@ -10,6 +10,7 @@ import {
   lastAssistantText,
   parseSetting,
   shouldDigest,
+  summaryPreview,
 } from './digest.js';
 
 const DEFAULT_PROMPT = [
@@ -105,12 +106,12 @@ export default function setup(ctx: PluginContext): void {
         command: `${ctx.pluginId}:${event.input.id}`,
         variant: 'digest' as const,
       };
-      const finish = (content: string, status: 'info' | 'warning') => {
+      const finish = (content: string, status: 'info' | 'warning', displayContent?: string) => {
         if (states.get(info.id) !== state) return;
         states.delete(info.id);
         // owner 可能已被 resume 到另一条会话，迟到结果不能写到新会话。
         if (session.describe(event.owner)?.id !== info.id) return;
-        ui.notice(content, { ...noticeOptions, status });
+        ui.notice(content, { ...noticeOptions, status, ...(displayContent ? { displayContent } : {}) });
       };
       const state: DigestState = {
         inputId: event.input.id,
@@ -121,10 +122,10 @@ export default function setup(ctx: PluginContext): void {
       };
       states.set(info.id, state);
       ui.notice('正在整理这次长回复的重点，请稍候…', { ...noticeOptions, status: 'running' });
-      void summarize(ctx, event, digestInput(reply, limits.inputLimit), limits.summaryLimit, controller.signal)
+      void summarize(ctx, event, digestInput(reply, limits.inputLimit), controller.signal)
         .then((summary) => {
           if (controller.signal.aborted || disposed || states.get(info.id) !== state) return;
-          finish(summary, 'info');
+          finish(summary, 'info', summaryPreview(summary, limits.summaryLimit));
           ctx.health.report({ level: 'ok', message: '长回复摘要已生成' });
         })
         .catch((error) => {
@@ -153,7 +154,6 @@ async function summarize(
   ctx: PluginContext,
   event: RuntimeTurnAfterHookEvent,
   reply: string,
-  summaryLimit: number,
   signal: AbortSignal,
 ): Promise<string> {
   const result = await ctx.llm!.request({
@@ -164,7 +164,7 @@ async function summarize(
     signal,
     owner: event.owner,
   });
-  const summary = cleanSummary(result.text, summaryLimit);
+  const summary = cleanSummary(result.text);
   if (!summary || signal.aborted) throw new Error('摘要模型返回了空内容');
   return summary;
 }

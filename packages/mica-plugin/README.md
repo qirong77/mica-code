@@ -171,6 +171,8 @@ context.onDispose(() => registration.dispose());
 `ctx.ui.notice(content, { command, replace: true })`——同一个 command 只保留最新一条（见
 `plugins/README.md` 的「notice 槽」）。
 
+`ctx.ui.notice(content, { displayContent })` 可为 notice 指定短展示文本，完整正文仍保存在 `content`；摘要卡可让用户展开完整内容。
+
 要在压缩结果旁边一并落盘的写入（`context.ui.notice`）放在 `compactIdleHistory({ afterApply })`
 里：宿主在**落盘之前**调它，所以压缩与提示是同一次写。等 `await` 返回之后再写就晚了——那时文件
 已经写过，提示要等下一轮才带下去，而用户可能已经关掉页面了。

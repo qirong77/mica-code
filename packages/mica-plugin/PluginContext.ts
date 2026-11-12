@@ -94,6 +94,8 @@ export type PluginSessionInfo = {
  * 不要用 `ui.showMessage`（那是一条几秒后消失的提示条）代替。
  */
 export type PluginNoticeOptions = {
+  /** 桌面摘要卡的可选短展示文本；content 保存完整正文，TUI 直接显示正文。 */
+  displayContent?: string;
   /** 归到哪条命令下；同一个 `command` 的 running notice 会被下一条替换。 */
   command?: string;
   status?: 'running' | 'success' | 'warning' | 'error' | 'info';

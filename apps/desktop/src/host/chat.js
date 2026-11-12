@@ -377,6 +377,9 @@ function readHistory(sessionId) {
     return messages.map((message) => ({
       role: message.role,
       text: messageText(message.displayContent ?? message.content),
+      ...(message.role === 'notice' && message.displayContent != null && messageText(message.displayContent) !== messageText(message.content)
+        ? { fullText: messageText(message.content) }
+        : {}),
       variant: message.variant ?? null,
       command: message.command ?? null,
       status: message.status ?? null,

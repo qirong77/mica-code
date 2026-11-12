@@ -20,6 +20,18 @@ function mount(onNotice?: HeadlessRuntimeServicesOptions['onNotice']) {
 }
 
 describe('headless notice updates', () => {
+  it('saves and emits both the full notice and its display preview', () => {
+    const onNotice = vi.fn();
+    const { services, log, saveCurrent } = mount(onNotice);
+    services.showNotice('完整摘要', undefined, { variant: 'digest', displayContent: '短摘要…', status: 'info' });
+    const notice = expect.objectContaining({ content: '完整摘要', displayContent: '短摘要…' });
+    expect(log.compose()).toEqual([notice]);
+    expect(saveCurrent.mock.lastCall?.[0].conversationMessages).toEqual([notice]);
+    expect(onNotice).toHaveBeenCalledWith(notice, expect.anything());
+    const restored = mount().log;
+    restored.restore(log.compose());
+    expect(restored.compose()).toEqual([notice]);
+  });
   it('pushes running and success after each save, preserving the running slot and replace intent', () => {
     const order: string[] = [];
     const onNotice = vi.fn((notice: TurnNotice, options: { replace?: boolean; noticeIndex: number }): void => {

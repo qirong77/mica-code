@@ -13,6 +13,8 @@ function projectSession(raw) {
   let history = []
   try { history = Array.isArray(messages) ? messages.map((message) => ({
     role: message.role, text: text(message.displayContent ?? message.content),
+    ...(message.role === 'notice' && message.displayContent != null && text(message.displayContent) !== text(message.content)
+      ? { fullText: text(message.content) } : {}),
     variant: message.variant ?? null, command: message.command ?? null,
     status: message.status ?? null, usage: message.usage ?? null,
     stop_reason: message.stop_reason ?? null

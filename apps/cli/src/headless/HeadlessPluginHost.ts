@@ -442,6 +442,7 @@ export function createHeadlessPluginHost(options: HeadlessPluginHostOptions): He
       showMessage() {},
       notice(content, noticeOptions = {}) {
         runtimeServices.showNotice(content, undefined, {
+          ...(noticeOptions.displayContent !== undefined ? { displayContent: noticeOptions.displayContent } : {}),
           ...(noticeOptions.variant ? { variant: noticeOptions.variant } : {}),
           ...(noticeOptions.command ? { command: noticeOptions.command } : {}),
           ...(noticeOptions.surface ? { surface: noticeOptions.surface } : {}),

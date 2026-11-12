@@ -74,6 +74,7 @@ export function restoreChatNotices(messages, restored, updates = []) {
         kind: 'notice',
         role: 'notice',
         text: event.text,
+        fullText: typeof event.fullText === 'string' ? event.fullText : undefined,
         variant: event.variant,
         command: event.command,
         status: event.status,

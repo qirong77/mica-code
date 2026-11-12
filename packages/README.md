@@ -11,6 +11,8 @@
 `mica-plugin` 的 `createPluginStatus()` 纯函数生成装配快照，`ctx.pluginStatus?.()` 读取当前 manager
 的本地装配结论；共享 `plugin-status.json` 只用于展示最近宿主状态，不用于运行归因。
 
+`ctx.ui.notice` 可用 `displayContent` 指定正文的短展示版本；完整正文仍随 notice 保存，桌面端可展开查看。
+
 `mica-plugin` 的 `PluginDesktopLauncher` 与 `PluginLauncherContext` 描述随包系统启动器：
 清单声明全局快捷键，桌面运行时按插件承载独立浮窗与 `launcher.js` 后端，不依赖聊天会话。
 后端可读插件设置并读写版本化插件数据；停用时回收。完整约定见 [插件文档](../plugins/README.md)。

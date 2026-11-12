@@ -7,6 +7,20 @@ import { execFileSync } from 'node:child_process'
 import { createSessionReader, filterCurrentThinking } from './session-reader'
 
 describe('session reader', () => {
+  it('restores notice previews and complete text from the session', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'session-reader-notice-'))
+    const file = join(dir, 'session.json')
+    try {
+      writeFileSync(file, JSON.stringify({ snapshot: { conversationMessages: [
+        { role: 'notice', content: '完整摘要', displayContent: '短摘要…', variant: 'digest' }
+      ] } }))
+      expect((await createSessionReader()(file)).history[0]).toMatchObject({
+        role: 'notice', text: '短摘要…', fullText: '完整摘要', variant: 'digest'
+      })
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
   it('filters checkpoints from a previous endpoint or protocol', () => {
     const history = [
       { role: 'user', text: 'question' },

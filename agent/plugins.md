@@ -81,7 +81,7 @@ setup 必须先登记独立动作再按能力装配会话工具；动作宿主�
 - 输入框上方的会话摘要用 `PluginPanelView.cards`（每插件最多 3 张，`id/title/summary/detail/tone/revision/actions/impressionAction`），由宿主复用主题和共享控件；清单 `dynamicShortcuts: true` 使快捷区获取视图。动作带版本 key，插件拒绝旧内容点击。`impressionAction` 只记录实际可见展示，不能在 `view()` 中记录曝光或执行副作用。
 - 插件行为埋点用 `createPluginExperience(ctx)`（`PluginExperience.ts`），事件 `plugin:experience`、schemaVersion 1；仅固定动作与结果等元数据，禁放正文、路径、命令与服务地址。`telemetry` 开关即时停记，日志沿用现有轮转。导出：`bun scripts/plugin-experience-report.ts`，口径见 `docs/plugin-experience.md`。
 
-- 命令结果给用户看走 `ctx.ui.notice(content, { command, status, surface, variant })`：`surface: 'command_panel'` 是输入框上方的运行中面板（被同一 `command` 的下一条 notice 收尾），默认进对话的 notice；headless 宿主直接落进 turn notice 日志。
+- 命令结果给用户看走 `ctx.ui.notice(content, { command, status, surface, variant })`：`surface: 'command_panel'` 是输入框上方的运行中面板（被同一 `command` 的下一条 notice 收尾），默认进对话的 notice；headless 宿主直接落进 turn notice 日志。可选 `displayContent` 为桌面摘要卡指定短展示文本，完整正文仍保存在 `content` 并可展开；TUI 直接显示正文。
 - 用户可见故障（缺配置、外部服务拒绝、请求失败）必须 `ctx.health.report({ level, message, hint })`，不能只写日志。记录带上是哪一版插件写的（`createPluginHealthStore` 的 `version`），读的一方传 `version` 就只认这一版：升级之后上一版留下的「连不上 X」不该继续挂在页面上。装配失败（setup 抛错、入口加载不了）不属于健康状态——那条走 `plugin-status.json`，卡片上写「加载失败」；健康状态 `error` 写「运行出错」。
 - `ctx.logger` 按 pluginId 注入，同时写 `resolveLogDir()/plugin-<id>-<day>[-n].jsonl`（macOS `~/Library/Logs/mica`，2 MB 分片、7 天清理、`MICA_PLUGIN_LOG=0` 关闭）。排查插件问题先看它。 配置页日志入口取实际存在的最新日期及数字分片；无日志时返回真实日志目录，不使用下一次写入路径。
 

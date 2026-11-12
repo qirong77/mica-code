@@ -329,6 +329,7 @@ checkpoint 摘要（工具过程不进摘要输入）。它只在能独占写会
 命令结果给用户看走 `ctx.ui.notice(content, { command, status, surface })`：`surface: 'command_panel'`
 是输入框上方的运行中面板（被同一个 `command` 的下一条 notice 收尾），默认写进对话的 notice；
 headless 宿主把同一条 notice 落进 turn 的日志。插件不用自己画面板，也不往会话里塞假消息。
+可选的 `displayContent` 为桌面摘要卡指定短展示文本，完整正文仍保存为 `content`，可展开查看；TUI 直接显示正文。
 
 notice 分两种，用 `replace` 区分：**事件**（命令输出、提交结果、失败原因）逐条留痕，默认就是
 这个行为；**状态**（「压缩到了多大」「同步到第几页」「当前连的是哪台机器」）加 `replace: true`，

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { MicaUiContentBlockParam, MicaUiConversationMessage } from '@packages/mica-ui/index.js';
-import { cleanSummary, digestInput, lastAssistantText, shouldDigest } from './digest.js';
+import { cleanSummary, digestInput, lastAssistantText, shouldDigest, summaryPreview } from './digest.js';
 
 const assistant = (content: string | MicaUiContentBlockParam[]): MicaUiConversationMessage => ({
   role: 'assistant',
@@ -50,7 +50,11 @@ describe('reply digest helpers', () => {
 
   it('bounds model input and cleans the model label', () => {
     expect(digestInput('abcdef', 4)).toBe('abc…');
-    expect(cleanSummary('摘要：\n- 已完成测试\n- 未发现问题', 600)).toBe('- 已完成测试\n- 未发现问题');
-    expect(cleanSummary('x'.repeat(10), 5)).toBe('xxxx…');
+    expect(cleanSummary('摘要：\n- 已完成测试\n- 未发现问题')).toBe('- 已完成测试\n- 未发现问题');
+    expect(cleanSummary('x'.repeat(10))).toBe('x'.repeat(10));
+    expect(summaryPreview('x'.repeat(10), 5)).toBe('xxxx…');
+    expect(summaryPreview('短摘要', 5)).toBeUndefined();
+    expect(summaryPreview('abc😀more', 5)).toBe('abc…');
+    expect(cleanSummary('摘要：\n```js\nconst x = 1\n```')).toBe('```js\nconst x = 1\n```');
   });
 });

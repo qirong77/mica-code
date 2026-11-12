@@ -2,8 +2,8 @@ import { describe, expect, test } from 'bun:test'
 import { readFileSync } from 'node:fs'
 import { createElement } from '../../../../../node_modules/react/index.js'
 import { renderToStaticMarkup } from '../../../../../node_modules/react-dom/server.node.js'
-import { CollapsiblePanel } from '@mica-config-ui/web'
-import { DigestNotice } from './DigestNotice'
+import { Button, CollapsiblePanel } from '@mica-config-ui/web'
+import { DigestNotice, DigestNoticeContentView } from './DigestNotice'
 
 const source = (path) => readFileSync(new URL(path, import.meta.url), 'utf8')
 
@@ -60,13 +60,43 @@ describe('DigestNotice', () => {
 
   test('keeps the original Markdown renderer in the existing notice branch', () => {
     const chat = source('./ChatView.jsx')
-    expect(chat).toContain("import { DigestNotice } from './DigestNotice'")
-    expect(chat).toMatch(
-      /if \(message\.kind === 'notice'\) \{\s*if \(message\.variant === 'digest'\) \{\s*return \(\s*<DigestNotice status=\{message\.status\}>\s*<Markdown text=\{message\.text \|\| ''\} onOpenFile=\{onOpenFile\} \/>\s*<\/DigestNotice>/
-    )
+    expect(chat).toContain("import { DigestNotice, DigestNoticeContent } from './DigestNotice'")
+    expect(chat).toMatch(/<DigestNotice status=\{message\.status\}>\s*<DigestNoticeContent/)
+    expect(chat).toContain('fullText={message.fullText}')
+    expect(chat).toContain('renderMarkdown={(text) => <Markdown text={text} onOpenFile={onOpenFile} />}')
     expect(chat).not.toContain('function DigestNotice(')
-    const component = source('./DigestNotice.jsx')
-    expect(component).not.toMatch(/ReactMarkdown|message\.|onOpenFile|useState/)
+  })
+
+  test('shows the short version initially and toggles the shared full-text button', () => {
+    let expanded = false
+    const props = {
+      text: 'Short…', fullText: 'Full **summary**',
+      renderMarkdown: (text) => createElement('div', { className: 'chat-markdown' }, text),
+      onToggle: () => { expanded = !expanded }
+    }
+    expect(source('./DigestNotice.jsx')).toContain('useState(false)')
+    const initial = renderToStaticMarkup(DigestNoticeContentView({ ...props, expanded }))
+    expect(initial).toContain('Short…')
+    expect(initial).toContain('展开全文')
+    expect(initial).not.toContain('Full **summary**')
+    let view = DigestNoticeContentView({ ...props, expanded })
+    expect(view.props.children[1].type).toBe(Button)
+    view.props.children[1].props.onClick()
+    view = DigestNoticeContentView({ ...props, expanded })
+    expect(renderToStaticMarkup(view)).toContain('Full **summary**')
+    expect(renderToStaticMarkup(view)).toContain('收起')
+    view.props.children[1].props.onClick()
+    expect(renderToStaticMarkup(DigestNoticeContentView({ ...props, expanded }))).toContain('Short…')
+  })
+
+  test('does not offer expansion for a missing or identical full text', () => {
+    for (const fullText of [undefined, 'Same']) {
+      const html = renderToStaticMarkup(DigestNoticeContentView({
+        text: 'Same', fullText, expanded: false, renderMarkdown: (text) => createElement('div', null, text)
+      }))
+      expect(html).toContain('Same')
+      expect(html).not.toContain('展开全文')
+    }
   })
 
   test('shows a busy card immediately without rendering a placeholder as summary Markdown', () => {
