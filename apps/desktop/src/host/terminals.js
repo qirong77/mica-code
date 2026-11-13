@@ -12,6 +12,7 @@ import { browserOwnerEnv } from './browser-control'
 import { terminalOwnerEnv } from './terminal-control'
 
 const sessions = new Map()
+let terminalSequence = 0
 const VSCODE_APP_PATH = '/Applications/Visual Studio Code.app'
 // 每条开着的终端每 500ms 跑两次 `ps`：三个标签页就是每秒 12 个进程，全天不停。
 // 有输出时按 1s 跟，闲置 8s 后降到 4s——「运行中」只是关闭前的提示点，真正关窗/关标签
@@ -351,20 +352,24 @@ function createPty(id, sender, options = {}) {
   startProcessActivityMonitor(session)
 
   term.onData((data) => {
+    if (sessions.get(id) !== session) return
     session.lastOutputAt = Date.now()
     updateSessionCwdFromOutput(session, data)
     session.tail = appendReplayTail(session.tail, data)
+    session.seq = ++terminalSequence
     if (!sender.isDestroyed()) {
-      sender.send('terminal:data', { id, data })
+      sender.send('terminal:data', { id, data, seq: session.seq })
     }
   })
 
   term.onExit(({ exitCode, signal }) => {
+    if (sessions.get(id) !== session) return
     stopProcessActivityMonitor(session)
     sessions.delete(id)
     notifyServer?.clear(id)
+    const seq = ++terminalSequence
     if (!sender.isDestroyed()) {
-      sender.send('terminal:exit', { id, exitCode, signal })
+      sender.send('terminal:exit', { id, exitCode, signal, seq })
     }
   })
 
@@ -392,6 +397,11 @@ export function registerTerminalIpc() {
       return { id, reused: true, replay: session?.tail || '' }
     }
     return createPty(id, event.sender, payload)
+  })
+
+  ipcMain.handle('terminal:snapshot', (_event, { id } = {}) => {
+    const session = sessions.get(id)
+    return { exists: !!session, replay: session?.tail || '', seq: terminalSequence }
   })
 
   ipcMain.handle('terminal:write', (_event, { id, data }) => {
@@ -482,6 +492,7 @@ export function registerTerminalIpc() {
     }
     stopProcessActivityMonitor(session)
     sessions.delete(id)
+    ++terminalSequence
     notifyServer?.clear(id)
     return true
   })
@@ -495,6 +506,7 @@ export function registerTerminalIpc() {
       }
       stopProcessActivityMonitor(session)
       sessions.delete(id)
+      ++terminalSequence
       notifyServer?.clear(id)
     }
     return true

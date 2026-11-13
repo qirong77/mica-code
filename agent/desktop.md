@@ -34,6 +34,8 @@
 - Settings 的 Capabilities 使用 `SettingsView.capabilityTarget` 绑定当前 nodeId / sessionId / cwd，由可选 `capabilitiesRuntime` 适配器读取会话宿主；工具开关写会话，提示词控制经配置 API 写全局文件。两种作用范围在界面明确区分，独立 config-web 没有当前会话适配器。
 
 - 运行时只有一份 workspace / drafts / layout / rightTerms / terminalOpenByChat / cwd / Git 偏好，落盘 `userData/ui-state.json`；语义在 `mica-web-shared/ui-state.ts`。老版本单独存的 `workspace.json` 只在 ui-state 还不存在时导入一次、落盘后删除；ui-state 已存在就不再读它（否则用户清空过的工作区会被搬回来）。
+- Web 事件流没有断线补放：页面从隐藏恢复、SSE 重连或桥报告事件缺口时，`transport.js` 发 `mica:transport-resync`，聊天视图重读历史和运行态并合并读取期间的事件，`ui-state.js` 重读共享状态并保护本地待写与并发广播。恢复请求可合并，不能用旧快照覆盖恢复期间的新事件。
+- 普通终端恢复用 `terminal:snapshot` 只读现存 PTY 的输出尾部和全局序号，不创建新进程；`terminal:data` / `terminal:exit` 带序号，渲染层回放快照并合并快照之后的事件。尾部长度有限，不是完整屏幕快照，恢复不主动调整 PTY 尺寸。
 - 条目补丁用 `setUiStateEntries`，null 表示删除；回声在 store 的 `applyRemote` 认领一次，组件不得各自认领。By The Way 抽屉开关按会话以独立 `btwOpen:<sessionId>` 键保存，多窗口共享，关闭时删除键；线程内容仍由自身落盘，空线程不持久化。
 - 同一 session 在所有页面是同一 node、run、终端；`dedupeSessionNodes` 合并重复页签。
 - 默认 `0.0.0.0:8787`，没有账号体系，只有一道可选的口令；README 保留风险说明。非回环（且不在 `MICA_DESKTOP_TRUSTED_CLIENTS` 里）的连接**只公开别人手上那条分享链接**：`/share?session=<存在的会话>`，其余页面、`/remote/*`、`/mcp/*` 回 404 或登录页，**`/api/*` 没有凭据也回 404/401**（它等于整台机器）。唯一例外是探活指纹 `GET /api/health`（只回 `{ ok, app, access }`）：侧栏 Connections 连另一台机器必须先探通它，`access` 说明对方要不要口令，没开时由卡片直接给出可操作的提示而不是打开一个 404 窗口。路径分类唯一实现在 `host/access-core.js` 的 `classifyRemotePath`，放行判定在 `host/remote-access-core.js` 的 `remoteAccessDecision`，不要另写第二份白名单。

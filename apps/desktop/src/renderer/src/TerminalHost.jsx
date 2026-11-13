@@ -17,6 +17,7 @@ import { softKeyboardFallbackKey } from './terminal-keys'
 import { useLatest } from './hooks'
 import { currentThemeName, subscribeTheme } from './theme'
 import { terminalThemeFor } from './terminal-theme'
+import { createTerminalResync } from './terminal-resync'
 
 /* xterm 6's core only ships the DOM renderer (rows are spans inside .xterm-rows;
    the single real <canvas> is the overview ruler), and it takes colors from this
@@ -289,6 +290,7 @@ export const TerminalHost = forwardRef(function TerminalHost(
           entry.fit.fit()
           dimensions = { cols: entry.term.cols, rows: entry.term.rows }
         }
+        const exitVersion = entry.exitVersion || 0
         entry.creating = window.mica.terminal.create({
           id: ptyId,
           ...(pane === PANE_MICA ? { command: commandForRef.current(sessionId) || 'mica' } : {}),
@@ -299,7 +301,7 @@ export const TerminalHost = forwardRef(function TerminalHost(
         })
         try {
           const result = await entry.creating
-          entry.ready = true
+          entry.ready = (entry.exitVersion || 0) === exitVersion
           clearFailure(ptyId)
           entry.lastPtySize =
             !result?.reused && dimensions ? `${dimensions.cols}x${dimensions.rows}` : null
@@ -320,6 +322,35 @@ export const TerminalHost = forwardRef(function TerminalHost(
     (ptyId, entry) => {
       if (entry) {
         entries.current.set(ptyId, entry)
+        entry.resync = createTerminalResync({
+          snapshot: async () => {
+            if (entry.creating) await entry.creating
+            return window.mica.terminal.snapshot(ptyId)
+          },
+          isCurrent: () => entries.current.get(ptyId) === entry && !entry.disposing,
+          reset: (replay) => new Promise((resolve) => {
+            // Wait for xterm's queued writes before resetting its parser and screen.
+            entry.term.write('', () => {
+              if (entries.current.get(ptyId) === entry && !entry.disposing) {
+                entry.term.reset()
+                if (replay) entry.term.write(replay)
+                entry.ready = true
+              }
+              resolve()
+            })
+          }),
+          data: ({ data }) => entry.term.write(data),
+          exit: () => {
+            if (!entry.ready && !entry.creating) return
+            entry.exitVersion = (entry.exitVersion || 0) + 1
+            entry.ready = false
+            entry.lastPtySize = null
+            const { sessionId, pane } = parsePtyId(ptyId)
+            if (pane === PANE_MICA) {
+              if (!entry.disposing) onMicaExitRef.current?.(sessionId)
+            } else entry.term.writeln('\r\n[process exited]')
+          }
+        })
         const { sessionId, pane: entryPane } = parsePtyId(ptyId)
         if (activeRef.current === sessionId && activePane() === entryPane) {
           activate(sessionId, entryPane).catch((error) => {
@@ -329,7 +360,7 @@ export const TerminalHost = forwardRef(function TerminalHost(
         }
       } else entries.current.delete(ptyId)
     },
-    [activate, activePane, activeRef, reportFailure]
+    [activate, activePane, activeRef, onMicaExitRef, reportFailure]
   )
 
   const retry = useCallback(
@@ -454,22 +485,23 @@ export const TerminalHost = forwardRef(function TerminalHost(
   }, [scheduleFit, sidebarCollapsed])
 
   useEffect(() => {
-    const offData = window.mica.terminal.onData(({ id, data }) =>
-      entries.current.get(id)?.term.write(data)
+    const offData = window.mica.terminal.onData((event) =>
+      entries.current.get(event.id)?.resync.receive({ ...event, type: 'data' })
     )
-    const offExit = window.mica.terminal.onExit(({ id }) => {
-      const entry = entries.current.get(id)
-      if (!entry) return
-      entry.ready = false
-      entry.lastPtySize = null
-      const { sessionId, pane } = parsePtyId(id)
-      if (pane === PANE_MICA) {
-        if (!entry.disposing) onMicaExitRef.current?.(sessionId)
-      } else entry.term.writeln('\r\n[process exited]')
-    })
+    const offExit = window.mica.terminal.onExit((event) =>
+      entries.current.get(event.id)?.resync.receive({ ...event, type: 'exit' })
+    )
+    const resync = () => {
+      for (const entry of entries.current.values()) {
+        if (!entry.ready && !entry.creating) continue
+        entry.resync.resync().catch((error) => console.error('resync terminal failed', error))
+      }
+    }
+    window.addEventListener('mica:transport-resync', resync)
     return () => {
       offData?.()
       offExit?.()
+      window.removeEventListener('mica:transport-resync', resync)
     }
   }, [onMicaExitRef])
 

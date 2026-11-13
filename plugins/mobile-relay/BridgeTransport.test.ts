@@ -11,7 +11,7 @@ function bridgeHarness() {
     .replace(
       'void main()',
       `globalThis.bridge = {
-      tick, runCommand, resultsForPoll, rememberResult,
+      tick, runCommand, resultsForPoll, rememberResult, subscribeLocalEvents,
       pending: () => pendingResults,
       active: () => activeCommands.size,
       limit: MAX_ACTIVE_COMMANDS,
@@ -57,6 +57,7 @@ function bridgeHarness() {
     setImmediate: schedule,
     bridge: {} as {
       tick(): Promise<void>;
+      subscribeLocalEvents(): Promise<void>;
       pending(): Array<Record<string, unknown>>;
       active(): number;
       limit: number;
@@ -516,6 +517,74 @@ describe('bridge transport', () => {
       eventBatchId: push.mock.calls[0]?.[0].eventBatchId,
       events: [{ channel: 'terminal:data', payload: { data: 'a' } }],
     });
+  });
+
+  it.each(['closed', 'failed'])('requests resync when the local SSE stream is %s', async (ending) => {
+    const { bridge, fetcher } = bridgeHarness();
+    const push = vi.fn().mockResolvedValue({ status: 200 });
+    bridge.wanted(true);
+    bridge.push(push);
+    if (ending === 'closed') {
+      fetcher.mockResolvedValueOnce(new Response(new ReadableStream({ start(controller) { controller.close(); } })));
+    } else {
+      fetcher.mockRejectedValueOnce(new Error('connection reset'));
+    }
+    fetcher.mockImplementationOnce(() => new Promise<Response>(() => {}));
+    void bridge.subscribeLocalEvents();
+    await vi.waitFor(() => expect(push).toHaveBeenCalledTimes(1));
+    expect(push.mock.calls[0]?.[0]).toMatchObject({ events: [{ channel: 'transport:resync', payload: {} }] });
+  });
+
+  it('requests another resync when the local SSE stream reconnects after an outage', async () => {
+    const { bridge, fetcher } = bridgeHarness();
+    const push = vi.fn().mockResolvedValue({ status: 200 });
+    bridge.wanted(true);
+    bridge.push(push);
+    fetcher.mockRejectedValueOnce(new Error('connection reset'));
+    let reconnect!: (response: Response) => void;
+    fetcher.mockImplementationOnce(() => new Promise<Response>((resolve) => { reconnect = resolve; }));
+    void bridge.subscribeLocalEvents();
+    await vi.waitFor(() => expect(push).toHaveBeenCalledTimes(1));
+    reconnect(new Response(new ReadableStream({ start() {} })));
+    await vi.waitFor(() => expect(push).toHaveBeenCalledTimes(2));
+    expect(push.mock.calls[1]?.[0].events).toEqual([{ channel: 'transport:resync', payload: {} }]);
+  });
+
+  it('keeps a resync after buffer overflow and retries the same batch after a lost acknowledgement', async () => {
+    const { bridge } = bridgeHarness();
+    bridge.wanted(true);
+    const push = vi.fn().mockRejectedValue(new Error('lost acknowledgement'));
+    const poll = vi.fn().mockRejectedValueOnce(new Error('offline')).mockResolvedValue({ intervalMs: 0, wanted: true });
+    bridge.push(push);
+    bridge.poll(poll);
+    for (let index = 0; index < 4100; index++) bridge.pushEvent({ channel: 'terminal:data', payload: index });
+    await vi.waitFor(() => expect(push).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() => expect(bridge.pushing()).toBe(false));
+    const sent = push.mock.calls[0]?.[0];
+    expect(sent.events).toHaveLength(4001);
+    expect(sent.events.at(-1)).toEqual({ channel: 'transport:resync', payload: {} });
+    await bridge.tick();
+    await bridge.tick();
+    for (const [body] of poll.mock.calls) {
+      expect(body.eventBatchId).toBe(sent.eventBatchId);
+      expect(body.events).toBe(sent.events);
+    }
+  });
+
+  it('does not request resync while nobody is watching', async () => {
+    const { bridge, fetcher } = bridgeHarness();
+    const push = vi.fn().mockResolvedValue({ status: 200 });
+    bridge.push(push);
+    fetcher.mockRejectedValueOnce(new Error('connection reset'));
+    fetcher.mockImplementationOnce(() => new Promise<Response>(() => {}));
+    void bridge.subscribeLocalEvents();
+    await vi.waitFor(() => expect(fetcher).toHaveBeenCalledTimes(2));
+    expect(push).not.toHaveBeenCalled();
+    const poll = vi.fn().mockResolvedValue({ intervalMs: 0, wanted: true });
+    bridge.poll(poll);
+    await bridge.tick();
+    expect(poll.mock.calls[0]?.[0].events).toEqual([]);
+    expect(push).not.toHaveBeenCalled();
   });
 
   it('does not let a poll or a newer event overtake an in-flight push', async () => {

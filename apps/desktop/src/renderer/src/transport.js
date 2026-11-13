@@ -116,21 +116,46 @@ export async function copyText(text) {
 function connectEvents() {
   let source = null
   let reconnectTimer = null
+  let wasHidden = document.hidden
+  let resyncDeferred = false
+
+  const resync = () => {
+    if (document.hidden) {
+      resyncDeferred = true
+      return
+    }
+    resyncDeferred = false
+    window.dispatchEvent(new CustomEvent('mica:transport-resync'))
+  }
+
+  document.addEventListener('visibilitychange', () => {
+    const hidden = document.hidden
+    if (!hidden && (wasHidden || resyncDeferred)) resync()
+    wasHidden = hidden
+  })
 
   const open = () => {
-    source = new EventSource('/api/events')
-    source.onmessage = (event) => {
+    reconnectTimer = null
+    const current = new EventSource('/api/events')
+    source = current
+    current.onopen = () => {
+      if (source !== current) return
+      // 初次建立连接也可能晚于页面快照，必须补齐订阅前的变化。
+      resync()
+    }
+    current.onmessage = (event) => {
+      if (source !== current) return
       try {
         const frame = JSON.parse(event.data)
-        if (frame?.channel) emit(frame.channel, frame.payload)
+        if (frame?.channel === 'transport:resync') resync()
+        else if (frame?.channel) emit(frame.channel, frame.payload)
       } catch {
         // 心跳等非 JSON 帧忽略
       }
     }
-    source.onerror = () => {
+    current.onerror = () => {
       // EventSource 自带重连，但连接彻底关闭（服务端重启）时需要重建
-      if (source && source.readyState === EventSource.CLOSED) {
-        clearTimeout(reconnectTimer)
+      if (source === current && current.readyState === EventSource.CLOSED && !reconnectTimer) {
         reconnectTimer = setTimeout(open, 1500)
       }
     }
@@ -184,6 +209,7 @@ function createWebApi(env) {
 
     terminal: {
       create: (payload) => invoke('terminal:create', payload),
+      snapshot: (id) => invoke('terminal:snapshot', { id }),
       write: (id, data) => invoke('terminal:write', { id, data }),
       resize: (id, cols, rows) => invoke('terminal:resize', { id, cols, rows }),
       clear: (id) => invoke('terminal:clear', { id }),

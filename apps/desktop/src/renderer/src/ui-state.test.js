@@ -12,12 +12,14 @@ import { describe, expect, it } from 'bun:test'
  */
 
 const listeners = []
+const windowListeners = new Map()
+let getSnapshot = async () => ({})
 
 globalThis.window = {
-  addEventListener: () => {},
+  addEventListener: (name, handler) => windowListeners.set(name, handler),
   mica: {
     uiState: {
-      get: async () => ({}),
+      get: () => getSnapshot(),
       patch: async (patch) => ({ ok: true, changed: patch }),
       onChanged: (handler) => {
         listeners.push(handler)
@@ -74,5 +76,36 @@ describe('ui-state 回声认领', () => {
     // 计数已被消耗：再一次同样的广播就是真的外部改动了
     broadcast({ drafts: { a: 'b' } })
     expect(uiStateKeys().drafts).toEqual({ a: 'b' })
+  })
+})
+
+describe('ui-state 恢复同步', () => {
+  it('读取遗漏的变化，同时保留待写值和读取期间收到的广播', async () => {
+    await ensureUiState()
+    let resolveSnapshot
+    getSnapshot = () => new Promise((resolve) => { resolveSnapshot = resolve })
+    setUiState('resync-pending', 'local')
+    windowListeners.get('mica:transport-resync')()
+    await Promise.resolve()
+    broadcast({ 'resync-event': 'new' })
+    resolveSnapshot({ 'resync-pending': 'old', 'resync-event': 'old', 'resync-other': 'remote' })
+    await Promise.resolve()
+    expect(uiStateKeys()['resync-pending']).toBe('local')
+    expect(uiStateKeys()['resync-event']).toBe('new')
+    expect(uiStateKeys()['resync-other']).toBe('remote')
+    await flushUiState()
+  })
+
+  it('并发恢复只应用最后一次快照', async () => {
+    const requests = []
+    getSnapshot = () => new Promise((resolve) => requests.push(resolve))
+    windowListeners.get('mica:transport-resync')()
+    windowListeners.get('mica:transport-resync')()
+    await Promise.resolve()
+    requests[1]({ 'resync-order': 'new' })
+    await Promise.resolve()
+    requests[0]({ 'resync-order': 'old' })
+    await Promise.resolve()
+    expect(uiStateKeys()['resync-order']).toBe('new')
   })
 })

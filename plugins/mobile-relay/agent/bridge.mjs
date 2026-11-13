@@ -225,6 +225,8 @@ const MAX_EVENT_BYTES = 1_500_000
 
 let eventBuffer = []
 let eventBytes = 0
+// 独立于有界事件缓冲，直到进入一个可重试的事件批次才消费。
+let resyncPending = false
 const eventBatchPrefix = randomBytes(12).toString('hex')
 let eventBatchSeq = 0
 let pendingEventBatch = null
@@ -322,6 +324,7 @@ async function readLocalEnv() {
 }
 
 async function subscribeLocalEvents() {
+  let interrupted = false
   while (!stopping) {
     try {
       const res = await fetch(`${settings.localUrl}/api/events`, {
@@ -330,6 +333,9 @@ async function subscribeLocalEvents() {
       })
       if (!res.ok || !res.body) throw new Error(`SSE HTTP ${res.status}`)
       log('[events] connected')
+      // 断线后的刷新可能发生在流恢复之前，重新连接后再刷新一次以覆盖整个空窗。
+      if (interrupted) requestResync()
+      interrupted = false
 
       const decoder = new TextDecoder()
       let buffer = ''
@@ -354,6 +360,9 @@ async function subscribeLocalEvents() {
       if (stopping) return
       log('[events] reconnect:', String(error?.message || error))
     }
+    // 无论流正常结束还是报错，断开期间都可能错过本机事件。
+    interrupted = true
+    requestResync()
     await sleep(1500)
   }
 }
@@ -368,9 +377,16 @@ function pushEvent(frame) {
     const dropped = eventBuffer.shift()
     if (!dropped) break
     eventBytes -= Buffer.byteLength(JSON.stringify(dropped))
+    resyncPending = true
   }
   // 任何上行事件都该尽快送到手机：终端回显、文件树、Git 状态都不是 chat:event，
   // 让它们等下一轮轮询就是把延迟押在那次挂起超时上。
+  schedulePush()
+}
+
+function requestResync() {
+  if (stopping || !wanted) return
+  resyncPending = true
   schedulePush()
 }
 
@@ -418,12 +434,12 @@ async function flushPush() {
 }
 
 function canPushEvents() {
-  return !eventBatchFlight && !eventBatchPollOnly && (pendingEventBatch || eventBuffer.length)
+  return wanted && !eventBatchFlight && !eventBatchPollOnly && (pendingEventBatch || eventBuffer.length || resyncPending)
 }
 
 function claimEventBatch(transport) {
-  if (eventBatchFlight || (transport === 'push' && eventBatchPollOnly)) return null
-  if (!pendingEventBatch && eventBuffer.length) {
+  if (!wanted || eventBatchFlight || (transport === 'push' && eventBatchPollOnly)) return null
+  if (!pendingEventBatch && (eventBuffer.length || resyncPending)) {
     pendingEventBatch = Object.freeze({
       id: `${eventBatchPrefix}-${++eventBatchSeq}`,
       events: Object.freeze(takeEvents())
@@ -437,16 +453,17 @@ function claimEventBatch(transport) {
 function finishEventBatch(flight, acknowledged) {
   if (!flight || eventBatchFlight !== flight) return
   eventBatchFlight = null
-  if (acknowledged) pendingEventBatch = null
-  eventBatchPollOnly = !acknowledged
+  if (acknowledged || !wanted) pendingEventBatch = null
+  eventBatchPollOnly = !acknowledged && wanted
 }
 
 function takeEvents() {
-  if (!eventBuffer.length) return []
   const frames = eventBuffer
   const size = eventBytes
   eventBuffer = []
   eventBytes = 0
+  if (resyncPending) frames.push({ channel: 'transport:resync', payload: {} })
+  resyncPending = false
   if (settings.debug) {
     const histogram = new Map()
     for (const frame of frames) {
@@ -581,6 +598,7 @@ async function tick() {
     clearResultCache(resultHashes)
     eventBuffer = []
     eventBytes = 0
+    resyncPending = false
     pendingEventBatch = null
     eventBatchFlight = null
     eventBatchPollOnly = false
@@ -642,6 +660,11 @@ async function tick() {
     if (!wanted) {
       eventBuffer = []
       eventBytes = 0
+      resyncPending = false
+      if (!eventBatchFlight) {
+        pendingEventBatch = null
+        eventBatchPollOnly = false
+      }
     }
 
     log(

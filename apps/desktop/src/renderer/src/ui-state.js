@@ -19,6 +19,9 @@ const listeners = new Set()
 let booted = null
 let pending = {}
 let flushTimer = null
+const keyVersions = new Map()
+const inFlight = new Map()
+let snapshotGeneration = 0
 const outbound = new Map() // key -> Map<值的序列化, 尚未认领的回声数>
 // 每个键最后一次写入的时刻：广播丢失时（页面重载、运行时重启、连接断开那一瞬），
 // 未认领的计数就永远留在这里。键里含会话 id 与输入框草稿文本，切会话越多留得越多。
@@ -62,6 +65,10 @@ function applyLocal(patch) {
   keys = next
   emit()
   return true
+}
+
+function markChanged(key) {
+  keyVersions.set(key, (keyVersions.get(key) || 0) + 1)
 }
 
 function rememberOutbound(key, value) {
@@ -121,6 +128,7 @@ function applyRemote(patch) {
   const external = {}
   for (const [key, value] of Object.entries(patch)) {
     if (claimUiStateEcho(key, value)) continue
+    markChanged(key)
     external[key] = value
   }
   applyLocal(external)
@@ -134,9 +142,18 @@ function sendPending() {
   const patch = pending
   pending = {}
   if (Object.keys(patch).length === 0) return Promise.resolve()
-  for (const [key, value] of Object.entries(patch)) rememberOutbound(key, value)
+  for (const [key, value] of Object.entries(patch)) {
+    rememberOutbound(key, value)
+    inFlight.set(key, (inFlight.get(key) || 0) + 1)
+  }
   return Promise.resolve(window.mica.uiState.patch(patch)).catch((error) => {
     console.error('[mica] 保存界面状态失败', error)
+  }).finally(() => {
+    for (const key of Object.keys(patch)) {
+      const count = inFlight.get(key) - 1
+      if (count) inFlight.set(key, count)
+      else inFlight.delete(key)
+    }
   })
 }
 
@@ -147,6 +164,7 @@ export function flushUiState() {
 
 export function setUiState(key, value) {
   if (uiStateValuesEqual(keys[key], value)) return
+  markChanged(key)
   applyLocal({ [key]: value })
   pending = { ...pending, [key]: value }
   if (flushTimer) return
@@ -181,14 +199,31 @@ export function useUiStateValue(key, fallback) {
   return value === undefined ? fallback : value
 }
 
+async function refreshUiState() {
+  const generation = ++snapshotGeneration
+  const versions = new Map(keyVersions)
+  const writing = new Set([...Object.keys(pending), ...inFlight.keys()])
+  const snapshot = await window.mica.uiState.get()
+  if (generation !== snapshotGeneration || !snapshot || typeof snapshot !== 'object' || Array.isArray(snapshot)) return
+  const patch = {}
+  for (const key of new Set([...Object.keys(keys), ...Object.keys(snapshot)])) {
+    if (writing.has(key) || Object.hasOwn(pending, key) || inFlight.has(key)) continue
+    if ((versions.get(key) || 0) !== (keyVersions.get(key) || 0)) continue
+    patch[key] = Object.hasOwn(snapshot, key) ? snapshot[key] : null
+  }
+  applyLocal(patch)
+}
+
 /** 挂载前先把运行时的界面状态取回来，页面第一帧就是正确的值（避免闪一下再对齐）。 */
 export async function ensureUiState() {
   if (booted) return booted
   booted = (async () => {
-    const initial = await window.mica.uiState.get()
-    applyLocal(initial || {})
-    // 先取回快照再订阅：反过来的话，订阅与取回之间发生的变更会被更旧的回包覆盖掉。
     window.mica.uiState.onChanged((payload) => applyRemote(payload?.keys || {}))
+    window.addEventListener('mica:transport-resync', () => {
+      // 初始快照必须先落地，才能让 ensureUiState 结束并挂载输入框。
+      void booted.then(() => refreshUiState()).catch((error) => console.error('[mica] 同步界面状态失败', error))
+    })
+    await refreshUiState()
   })()
   return booted
 }

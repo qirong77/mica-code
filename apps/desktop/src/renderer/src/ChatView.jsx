@@ -62,6 +62,7 @@ import { ChatLink, ChatPathContext, PathText, PathToken } from './PathToken'
 import { ChatFind } from './ChatFind'
 import { readRestoreTranscript, takeCachedTranscript, writeCachedTranscript } from './chat-cache'
 import { createReadQueue } from './read-queue'
+import { createChatResyncQueue } from './chat-resync'
 import { usePageVisible } from './use-page-visible'
 import { transcriptMessagesForDisplay, updateStreamMessage } from './chat-stream'
 export { resetTranscriptCache } from './chat-cache'
@@ -3500,6 +3501,8 @@ export function ChatView({
   const restoringRef = useRef(false)
   const restoreGenerationRef = useRef(0)
   const pendingEventsRef = useRef([])
+  const liveStateVersionRef = useRef({ ask: 0, queue: 0 })
+  const requestChatResyncRef = useRef(null)
   const pendingExitRef = useRef(null)
   const loadedNodeRef = useRef(null)
   // 未发送的草稿与运行时同源（ui-state 的 `drafts` 键）：切走、刷新、换个窗口打开都在，
@@ -5122,11 +5125,13 @@ export function ChatView({
     // （别人答了 / 超时 / 这一轮被中止），卡片要跟着消失而不是停在最后那个选项上。
     const offAsk = window.mica.chat.onAsk((payload) => {
       if (payload.id !== currentRunKey()) return
+      liveStateVersionRef.current.ask += 1
       setPendingAsk(payload.ask || null)
       setAskSubmitting(false)
     })
     const offExit = window.mica.chat.onExit((payload) => {
       if (payload.id !== currentRunKey()) return
+      liveStateVersionRef.current.ask += 1
       // 这一轮结束了（跑完 / 中止 / 宿主退出），那道题已经没有人等：宿主崩掉时它来不及
       // 推 `ask: null`，卡片若留着，用户点下去只会拿到一句「没有人在等回答」。
       setPendingAsk(null)
@@ -5136,6 +5141,7 @@ export function ChatView({
     })
     const offQueueState = window.mica.chat.onQueueState((payload) => {
       if (payload.id !== currentRunKey()) return
+      liveStateVersionRef.current.queue += 1
       const items = Array.isArray(payload.queuedItems) ? payload.queuedItems : []
       setQueuedItems(items)
       // 同步消息的排队标记：host 的 after_iteration 排队（mica/queue/queued
@@ -5182,7 +5188,10 @@ export function ChatView({
       // 恢复过程中先丢弃：restore() 自己会按 chat:is-running 的 prompt 补这一行，
       // 而且它要等磁盘历史读完才能确定位置（定时任务每轮文本相同，末尾那条用户行
       // 未必是本轮的）。
-      if (restoringRef.current) return
+      if (restoringRef.current) {
+        requestChatResyncRef.current?.()
+        return
+      }
       updateMessages((previous) => appendRunStartedMessage(previous, payload))
     })
     return () => {
@@ -5314,8 +5323,7 @@ export function ChatView({
     turnRef.current = null
     finishedRef.current = true
     historyCursorRef.current = -1
-    const sessionId = sessionIdRef.current
-
+    let restoreQueueVersion = liveStateVersionRef.current.queue
     const restoreFinalSession = async (finalSessionId, fallbackRows) => {
       if (!sessionIdRef.current) {
         sessionIdRef.current = finalSessionId
@@ -5350,13 +5358,14 @@ export function ChatView({
       }
       setHistoryLoaded(true)
       setRunning(false)
-      setQueuedItems([])
+      if (restoreQueueVersion === liveStateVersionRef.current.queue) setQueuedItems([])
       setStopping(false)
       setPhase('idle')
       finishedRef.current = true
       // history 读取与实时通知可能交错；已保存行先恢复，再用期间到达的状态覆盖。
       updateMessages((previous) => restoreChatNotices(previous, finalMessages,
         pendingEventsRef.current.map((record) => record.event || record)))
+      if (pendingEventsRef.current.length || pendingExitRef.current) requestChatResyncRef.current?.()
       pendingEventsRef.current = []
       restoringRef.current = false
       if (pendingExitRef.current) {
@@ -5366,14 +5375,21 @@ export function ChatView({
       return true
     }
 
-    const restore = async () => {
+    const restore = async (resync = false) => {
+      const sessionId = sessionIdRef.current
+      const liveStateVersion = { ...liveStateVersionRef.current }
+      restoreQueueVersion = liveStateVersion.queue
       const [rows, sessionMeta] = await Promise.all([
-        sessionId ? window.mica.chat.history(sessionId).catch(() => []) : [],
+        sessionId ? (resync ? window.mica.chat.history(sessionId) : window.mica.chat.history(sessionId).catch(() => [])) : [],
         sessionId
           ? window.mica.chat.meta(sessionId).catch(() => null)
           : window.mica.chat.meta(null).catch(() => null)
       ])
       if (generation !== restoreGenerationRef.current || nodeIdRef.current !== nodeId) return
+      const stateRequest = window.mica.chat.isRunning(nodeId, sessionId || sessionIdRef.current || null)
+      const state = await (resync ? stateRequest : stateRequest.catch(() => null))
+      if (generation !== restoreGenerationRef.current || nodeIdRef.current !== nodeId) return
+      if (resync && !state) throw new Error('Chat state unavailable during resync')
       const selectedModel = overridesRef.current.get(nodeId)?.model
       const restored = thinkingForSelectedModel(
         historyMessages(rows, sessionId || nodeId), selectedModel, sessionMeta?.model, sessionMeta?.providerId
@@ -5383,17 +5399,23 @@ export function ChatView({
       setMeta(sessionMeta)
       setHistoryLoaded(true)
 
-      const state = await window.mica.chat
-        .isRunning(nodeId, sessionId || sessionIdRef.current || null)
-        .catch(() => null)
-      if (generation !== restoreGenerationRef.current || nodeIdRef.current !== nodeId) return
+      if (resync) {
+        streamRef.current = { id: null, kind: null, turnId: null }
+        turnRef.current = null
+        finishedRef.current = true
+        setRunning(false)
+        setStopping(false)
+        setPhase('idle')
+      }
       setRemoteRunning(Boolean(state?.remoteRunning))
       const interrupted = restoredTodoInterrupted(sessionMeta, state)
       todoInterruptedRef.current.set(nodeId, interrupted)
       setTodoInterrupted(interrupted)
-      setQueuedItems(Array.isArray(state?.queuedItems) ? state.queuedItems : [])
+      if (liveStateVersion.queue === liveStateVersionRef.current.queue) {
+        setQueuedItems(Array.isArray(state?.queuedItems) ? state.queuedItems : [])
+      }
       // 中途附着上来的页面同样要看到那道还没答的选择题（它不进事件缓冲）。
-      setPendingAsk(state?.ask || null)
+      if (liveStateVersion.ask === liveStateVersionRef.current.ask) setPendingAsk(state?.ask || null)
       // host 的任务快照（后台 shell 任务 / 运行中 subagent）刻意不进事件缓冲，而是随
       // is-running 单独回传：重放前先补上，中途附着上来的窗口才不会漏掉这一轮已经推过
       // 的那次快照（dock 一直空着）。
@@ -5521,7 +5543,18 @@ export function ChatView({
         pendingExitRef.current = null
       }
     }
-    void restore().then(() => {
+    let initialRestore = true
+    const queue = createChatResyncQueue(async () => {
+      const resync = !initialRestore
+      initialRestore = false
+      if (resync) {
+        cachedEntry = { messages: messagesRef.current, meta: metaRef.current }
+        cachedTranscript = cachedEntry.messages
+        restoringRef.current = true
+        pendingEventsRef.current = []
+        pendingExitRef.current = null
+      }
+      await restore(resync)
       // The mounted view now owns the restored rows. Release the previous full snapshot,
       // but leave it available while restore is pending or its effect is being retried.
       if (generation === restoreGenerationRef.current && nodeIdRef.current === nodeId) {
@@ -5529,8 +5562,23 @@ export function ChatView({
       }
       cachedEntry = null
       cachedTranscript = null
+    }, () => {
+      if (generation !== restoreGenerationRef.current || nodeIdRef.current !== nodeId) return
+      const pending = pendingEventsRef.current
+      pendingEventsRef.current = []
+      restoringRef.current = false
+      for (const record of pending) applyEventRef.current(record.event || record)
+      if (pendingExitRef.current) processExitRef.current(pendingExitRef.current)
+      pendingExitRef.current = null
     })
+    const onTransportResync = () => queue.request()
+    requestChatResyncRef.current = onTransportResync
+    window.addEventListener('mica:transport-resync', onTransportResync)
+    queue.request()
     return () => {
+      window.removeEventListener('mica:transport-resync', onTransportResync)
+      if (requestChatResyncRef.current === onTransportResync) requestChatResyncRef.current = null
+      queue.dispose()
       if (generation === restoreGenerationRef.current) restoreGenerationRef.current += 1
     }
   }, [
