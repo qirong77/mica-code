@@ -26,11 +26,16 @@ describe('messagesToTranscript', () => {
 });
 
 describe('buildBtwSystemPrompt', () => {
-  it('declares btw mode, carries the transcript, and tells the agent to ignore the main flow', () => {
+  it('declares btw mode, carries the transcript, and allows direct implementation', () => {
     const prompt = buildBtwSystemPrompt('用户：你好');
     expect(prompt).toContain('btw');
     expect(prompt).toContain('用户：你好');
-    expect(prompt).toContain('你不需要考虑或帮助主流程的实现');
+    expect(prompt).toContain('读写工作区文件、修改代码、运行命令和测试');
+    expect(prompt).toContain('不要操作主流程的会话控制、消息队列、历史记录或状态');
+    expect(prompt).toContain('根据当前 btw 请求决定是否处理其中相关的任务');
+    expect(prompt).toContain('保留已有改动');
+    expect(prompt).not.toContain('你不需要考虑或帮助主流程的实现');
+    expect(prompt).not.toContain('不要据此展开或帮忙实现主流程的任务');
   });
 
   it('embeds the main session role name and its full prompt', () => {

@@ -4,10 +4,36 @@ import {
   SCROLL_CACHE_LIMIT,
   readScrollEntry,
   resolveScrollRestore,
+  turnLogScrollOffset,
   writeScrollEntry
 } from './chat-scroll.js'
 
 const fresh = () => new Map()
+
+describe('turnLogScrollOffset', () => {
+  it('补偿日志展开时实际挤掉的对话高度', () => {
+    expect(
+      turnLogScrollOffset(
+        { viewportHeight: 500, logHeight: 22 },
+        { viewportHeight: 400, logHeight: 122 }
+      )
+    ).toBe(100)
+    expect(
+      turnLogScrollOffset(
+        { viewportHeight: 500, logHeight: 22 },
+        { viewportHeight: 470, logHeight: 122 }
+      )
+    ).toBe(30)
+  })
+
+  it('日志收起、其它区域变化或隐藏时不补偿', () => {
+    const previous = { viewportHeight: 500, logHeight: 100 }
+    expect(turnLogScrollOffset(previous, { viewportHeight: 550, logHeight: 50 })).toBe(0)
+    expect(turnLogScrollOffset(previous, { viewportHeight: 450, logHeight: 100 })).toBe(0)
+    expect(turnLogScrollOffset(previous, { viewportHeight: 0, logHeight: 150 })).toBe(0)
+    expect(turnLogScrollOffset(null, { viewportHeight: 400, logHeight: 150 })).toBe(0)
+  })
+})
 
 describe('writeScrollEntry', () => {
   it('按节点存起来，读得到', () => {

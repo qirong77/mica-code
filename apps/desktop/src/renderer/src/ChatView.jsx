@@ -182,7 +182,12 @@ import {
 } from './chat-task-detail'
 import { longPressHandlers, useLatest } from './hooks'
 import { canGoToPreviousConversation, conversationNavTarget } from './chat-conversation-nav'
-import { readScrollEntry, resolveScrollRestore, writeScrollEntry } from './chat-scroll'
+import {
+  readScrollEntry,
+  resolveScrollRestore,
+  turnLogScrollOffset,
+  writeScrollEntry
+} from './chat-scroll'
 import { turnLogVisible } from './chat-process-layout'
 import { mergeRecalledDraft, resolveQueueRecall } from './chat-recall'
 import { uid } from './workspace'
@@ -5640,15 +5645,26 @@ export function ChatView({
     const composerDock = composerDockRef.current
     const list = listRef.current
     if ((!transcript && !composerDock) || typeof ResizeObserver === 'undefined') return undefined
+    let previousLayout = null
     const observer = new ResizeObserver(() => {
-      if (!stickToBottomRef.current) return
       const target = listRef.current
-      if (target) target.scrollTop = target.scrollHeight
+      if (!target) return
+      const viewportHeight = target.getBoundingClientRect().height
+      if (viewportHeight <= 0) {
+        previousLayout = null
+        return
+      }
+      const log = target.parentElement?.querySelector(':scope > .chat-turn-log')
+      const layout = { viewportHeight, logHeight: log?.getBoundingClientRect().height ?? 0 }
+      const offset = turnLogScrollOffset(previousLayout, layout)
+      previousLayout = layout
+      if (stickToBottomRef.current) target.scrollTop = target.scrollHeight
+      else if (offset > 0) target.scrollTop += offset
     })
     if (transcript) observer.observe(transcript)
     if (composerDock) observer.observe(composerDock)
-    // 视野本身也会变：回合日志出现 / 收起 / 拖动都会挤压滚动区，那时读者的「还在底部」
-    // 必须跟着重新对齐，否则一开跑就被顶上去、跳转按钮莫名其妙地亮起来。
+    // 日志展开或长高会挤压视口：贴底时跟到底，否则只补偿日志挤掉的高度，
+    // 把视口底部的文字向上推；收起日志或其它区域改变大小不挪动历史阅读位置。
     if (list) observer.observe(list)
     return () => observer.disconnect()
   }, [nodeId])

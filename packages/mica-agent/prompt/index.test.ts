@@ -42,6 +42,7 @@ it('always keeps the built-in system section even if a caller passes the removed
 it('omits blank role additions and keeps the system prefix stable across roles', () => {
   const options = { projectInstructions: null, skills: [], now: new Date(2026, 0, 1), shell: 'sh' };
   const base = buildSystemPrompt(options);
+  expect(base).not.toContain('<role>');
   expect(buildSystemPrompt({ ...options, rolePrompt: ' \n ' })).toBe(base);
   for (const rolePrompt of ['Review carefully.', 'Translate clearly.']) {
     const prompt = buildSystemPrompt({ ...options, rolePrompt });

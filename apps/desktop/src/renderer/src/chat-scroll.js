@@ -16,6 +16,18 @@
 /** 最多记多少个会话的滚动位置（与组件缓存同量级即可）。 */
 export const SCROLL_CACHE_LIMIT = 8
 
+/** 回合日志长高挤占对话视口时，保持原视口底部附近的文字可见。 */
+export function turnLogScrollOffset(previous, current) {
+  if (!previous || !current || previous.viewportHeight <= 0 || current.viewportHeight <= 0) return 0
+  return Math.max(
+    0,
+    Math.min(
+      previous.viewportHeight - current.viewportHeight,
+      current.logHeight - previous.logHeight
+    )
+  )
+}
+
 /**
  * 记下某个会话的滚动位置，并把最久没用过的裁掉。
  * 原地更新传入的 Map（它是模块级的，当作 store 用），返回同一个 Map 方便链式使用。
