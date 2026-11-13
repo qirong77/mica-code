@@ -4,6 +4,8 @@
 
 ## 主要能力
 
+`mica/capabilities/get` 在原能力目录之外提供 `MicaRuntimeCapabilityInspection`：当前插件装配及贡献、MCP 工具的完整 schema、按来源分段的下一轮提示词预览和最近发送存档。提示词控制通过全局配置 API 持久化，不改写历史存档或轮中请求。
+
 - 定义 runtime controller 接口。
 - 定义用户输入、提交结果、终止结果和运行状态。
 - `RuntimeInput` 可携带 `displayText`，用于让 UI 展示更友好的输入摘要，同时保留完整 `text` 发送给 agent。

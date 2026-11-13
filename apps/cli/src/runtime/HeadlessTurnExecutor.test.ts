@@ -10,6 +10,7 @@ import type { MicaUiConversationMessage } from '@packages/mica-ui/index.js';
 import { micaPlugin } from '@packages/mica-plugin/index.js';
 import type { RuntimeInput } from '@packages/mica-runtime/index.js';
 import { micaSession } from '@packages/mica-session/index.js';
+import * as promptControlStore from '@packages/mica-config/promptControls.js';
 
 class MockAgent {
   readonly events = mitt();
@@ -659,6 +660,27 @@ describe('HeadlessTurnExecutor', () => {
     const retrying = events.find((event) => event.type === 'turn:retrying');
     expect(retrying).toMatchObject({ type: 'turn:retrying', attempt: 1 });
     expect(events.find((event) => event.type === 'turn:finish')).toMatchObject({ status: 'completed' });
+  });
+
+  it('keeps prompt controls fixed across turn retries and refreshes them for the next turn', async () => {
+    const captured = { version: 1 as const, disabledPlugins: ['notes'], sections: {} };
+    const later = { version: 1 as const, disabledPlugins: [], sections: { context: { content: 'Updated' } } };
+    const read = vi.spyOn(promptControlStore, 'readPromptControls').mockReturnValueOnce(captured).mockReturnValue(later);
+    try {
+      const { agent, executor, getIdleCount } = createHarness();
+      agent.nextErrors.push(Object.assign(new Error('busy'), { status: 503 }));
+      await executor.start(input('retry with captured controls'));
+      await vi.waitFor(() => expect(getIdleCount()).toBe(1));
+      expect(read).toHaveBeenCalledTimes(1);
+      expect(agent.runCalls).toHaveLength(2);
+      expect(agent.runCalls.map((call) => (call.options as { promptControls: unknown }).promptControls)).toEqual([captured, captured]);
+      await executor.start(input('next turn with new controls'));
+      await vi.waitFor(() => expect(getIdleCount()).toBe(2));
+      expect(read).toHaveBeenCalledTimes(2);
+      expect((agent.runCalls[2]!.options as { promptControls: unknown }).promptControls).toEqual(later);
+    } finally {
+      read.mockRestore();
+    }
   });
 
   it('keeps unconsumed replay inputs when a retry fails before replaying them all', async () => {

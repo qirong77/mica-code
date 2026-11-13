@@ -11,6 +11,7 @@
 | `client-context/` | HTTPS 严格 CSP / fetch 失败时的原生客户端数据与 Local 返回原窗口回归                |
 | `config-ui/`      | 会话设置弹窗的「插件」一节；`config-ui-shim.tsx` 替身 `@mica-config-ui/web`         |
 | `config-buttons/` | 真实 ConfigPage + 示例配置，复现桌面 Tailwind 与 Arco 图标按钮的层叠布局            |
+| `capabilities/`   | 真实 Capabilities 页面：插件贡献、工具参数、提示词开关与编辑，仅内存示例             |
 | `arco-light/`     | 浅色 Arco 一致性预览：真实配置页、控件状态、主题切换与确认/输入弹窗，仅内存示例     |
 | `global-search/`  | 全局搜索启动器的真实共享 Arco 输入框、结果列表与焦点样式；`#probe-out` 打出计算样式 |
 | `reply-digest/`   | 长回复摘要插件的产出：真实对话行 + `digest` notice 卡，右侧按 `digest.ts` 实时判定  |
@@ -27,6 +28,7 @@ cd apps/desktop
 npx vite --config .probe/global-search/vite.config.mjs   # http://127.0.0.1:5231
 npx vite --config .probe/config-ui/vite.config.mjs       # http://127.0.0.1:5199
 npx vite --config .probe/config-buttons/vite.config.mjs  # http://127.0.0.1:5235
+npx vite --config .probe/capabilities/vite.config.mjs    # http://127.0.0.1:15973
 npx vite --config .probe/arco-light/vite.config.mjs      # http://127.0.0.1:5236
 npx vite --config .probe/reply-digest/vite.config.mjs    # http://127.0.0.1:5232
 npx vite --config .probe/stats-design/vite.config.mjs    # http://127.0.0.1:5233

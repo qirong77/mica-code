@@ -39,6 +39,8 @@ export function createDesktopConfigWebClient() {
 
     readCapabilityDefaults: () => invoke('readCapabilityDefaults'),
     writeCapabilityDefaults: (input) => invoke('writeCapabilityDefaults', input),
+    readPromptControls: () => invoke('readPromptControls'),
+    writePromptControls: (controls) => invoke('writePromptControls', { controls }),
 
     readSkillsDetails: () => invoke('readSkillsDetails'),
     createSkill: (name, content = '') => invoke('createSkill', { name, content }),

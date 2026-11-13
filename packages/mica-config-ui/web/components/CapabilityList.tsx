@@ -22,6 +22,8 @@ export type CapabilityItem = {
   readOnly?: boolean;
   /** 工具入参；skills / MCP server 没有。 */
   parameters?: CapabilityParameter[];
+  sourceLabel?: string;
+  inputSchema?: unknown;
 };
 
 /**
@@ -49,6 +51,7 @@ export function CapabilityList({
   onToggle,
   onToggleGroup = null,
   onOpenDetail = null,
+  showTabs = true,
 }: {
   groups: CapabilityGroupDef[];
   group: string;
@@ -66,6 +69,7 @@ export function CapabilityList({
   /** 整组开关：`names` 是组内全部成员。不给时组头只显示，不可点。 */
   onToggleGroup?: ((names: string[], enabled: boolean) => void) | null;
   onOpenDetail?: ((item: CapabilityItem) => void) | null;
+  showTabs?: boolean;
 }) {
   const sections = buildCapabilitySections(items, isEnabled);
 
@@ -89,6 +93,7 @@ export function CapabilityList({
       </span>
       <span className="capability-name" title={item.name}>
         {item.name}
+        {item.sourceLabel ? <small className="capability-source">{item.sourceLabel}</small> : null}
       </span>
       <span
         className={`capability-description${item.description ? '' : ' capability-description-empty'}`}
@@ -101,21 +106,23 @@ export function CapabilityList({
 
   return (
     <div className="capability-list-block">
-      <div className="session-tabs" role="tablist" aria-label="能力分类">
-        {groups.map((entry) => (
-          <button
-            key={entry.key}
-            type="button"
-            role="tab"
-            aria-selected={group === entry.key}
-            className={`session-tab${group === entry.key ? ' session-tab-active' : ''}`}
-            onClick={() => onGroupChange(entry.key)}
-          >
-            {entry.label}
-            <span className="capability-tab-count">{counts[entry.key]}</span>
-          </button>
-        ))}
-      </div>
+      {showTabs ? (
+        <div className="session-tabs" role="tablist" aria-label="能力分类">
+          {groups.map((entry) => (
+            <button
+              key={entry.key}
+              type="button"
+              role="tab"
+              aria-selected={group === entry.key}
+              className={`session-tab${group === entry.key ? ' session-tab-active' : ''}`}
+              onClick={() => onGroupChange(entry.key)}
+            >
+              {entry.label}
+              <span className="capability-tab-count">{counts[entry.key]}</span>
+            </button>
+          ))}
+        </div>
+      ) : null}
 
       <div className="capability-toolbar">
         <span className="capability-count">

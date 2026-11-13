@@ -258,6 +258,10 @@ async function resolveApiCall(
       // 整份 mcpServers 一起写：卡片列表的改名 / 删除都落成同一份内容。
       if (method === 'PUT') return get('writeMcpServers', { content: body.content });
       return METHOD_NOT_ALLOWED;
+    case '/api/details/prompt-controls':
+      if (method === 'GET') return get('readPromptControls');
+      if (method === 'PUT') return get('writePromptControls', { controls: body.controls });
+      return METHOD_NOT_ALLOWED;
     case '/api/details/capabilities':
       if (method === 'GET') return get('readCapabilityDefaults');
       if (method === 'PUT')

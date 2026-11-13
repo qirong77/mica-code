@@ -1,241 +1,543 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { PromptControls } from '@packages/mica-common/promptControls.js';
 import { PageFrame } from '../components/PageFrame.js';
-import { Alert, Button } from '../components/Ui.js';
-import { CapabilityList, CapabilityParameters } from '../components/CapabilityList.js';
+import { Alert, Button, Empty, SaveStatus, Segmented, SettingsGroup, Switch, Tag } from '../components/Ui.js';
+import { Input } from '../components/ArcoSettings.js';
+import { CapabilityList, CapabilityParameters, type CapabilityItem } from '../components/CapabilityList.js';
+import { PromptControlsPanel } from '../components/PromptControlsPanel.js';
+import { JsonEditor } from '../components/JsonEditor.js';
 import { applyGroupEnabled, capabilityToggleNames } from '../capabilityGroups.js';
 import { Modal } from '../components/Modal.js';
-import { readCapabilityDefaults, writeCapabilityDefaults } from '../api.js';
+import { readCapabilityDefaults, writeCapabilityDefaults, readPromptControls, writePromptControls } from '../api.js';
+import { CAPABILITY_LABELS as L, pluginLoadStatusLabel, pluginSourceLabel, mcpStatusLabel } from '../labels.js';
+import { setPluginPromptEnabled } from '../promptControlDraft.js';
+import {
+  capabilityDraftCache,
+  promptDraftCache,
+  readStableCapabilityState,
+  serializeCapabilityWrite,
+  type CapabilityDraft,
+} from '../capabilityDrafts.js';
+import { useAutoSave } from '../useAutoSave.js';
 import { appIcons } from '../icons.js';
-import type { ConfigWebCapabilityDefaults } from '../../src/shared/types.js';
+import type {
+  ConfigWebCapabilitiesRuntime,
+  ConfigWebCapabilityDefaults,
+  ConfigWebRuntimeCapabilities,
+  ConfigWebCapabilityTool,
+} from '../../src/shared/types.js';
 
+type Scope = 'runtime' | 'defaults';
 type Group = 'skills' | 'tools' | 'mcpServers';
+type Tab = Group | 'plugins' | 'prompts';
+type Draft = { disabledSkills: string[]; disabledTools: string[]; disabledMcpServers: string[] };
+type Item = CapabilityItem & { mcpTools?: ConfigWebCapabilityTool[] };
+const TABS: Tab[] = ['tools', 'skills', 'mcpServers', 'plugins', 'prompts'];
+const EMPTY: Draft = { disabledSkills: [], disabledTools: [], disabledMcpServers: [] };
+const EMPTY_CONTROLS: PromptControls = { version: 1, disabledPlugins: [], sections: {} };
 
-type Draft = {
-  disabledSkills: string[];
-  disabledTools: string[];
-  disabledMcpServers: string[];
-};
-
-type Item = {
-  name: string;
-  description: string;
-  /** 所属工具分组；技能与 MCP 服务器没有。 */
-  group?: { key: string; label: string } | null;
-  /** 工具是否只读；skills / MCP server 没有这一项。 */
-  readOnly?: boolean;
-  parameters?: Array<{ name: string; type: string; required: boolean; description: string }>;
-};
-
-const GROUP_LABEL: Record<Group, string> = {
-  tools: 'Tools',
-  skills: 'Skills',
-  mcpServers: 'MCP servers',
-};
-
-/** 页签顺序：工具最常用，MCP 最少调整。 */
-const GROUPS: Group[] = ['tools', 'skills', 'mcpServers'];
-
-const EMPTY_DRAFT: Draft = { disabledSkills: [], disabledTools: [], disabledMcpServers: [] };
-
-/**
- * 新会话默认能力。只写入 config.json 的 `capabilityDefaults`，所以改这里不会动到已经在
- * 会话里单独调整过开关的对话。会话内的开关在 `/capabilities`（CLI）或输入框旁的能力面板
- * （桌面端）。
- *
- * 与其他设置页不同，这里没有「保存」按钮：拨一下就直接落盘。写盘串行化，连点时攒成
- * 「最后一次选择」再发一轮请求，不丢点击也不让两个请求互相覆盖。
- */
-export function CapabilitiesPage() {
+/** 默认配置与当前会话共用页面，真实目录始终由会话宿主提供。 */
+export function CapabilitiesPage({ runtime }: { runtime?: ConfigWebCapabilitiesRuntime }) {
   const [details, setDetails] = useState<ConfigWebCapabilityDefaults | null>(null);
-  const [draft, setDraft] = useState<Draft>(EMPTY_DRAFT);
-  const [group, setGroup] = useState<Group>('tools');
+  const [live, setLive] = useState<ConfigWebRuntimeCapabilities | null>(null);
+  const [scope, setScope] = useState<Scope>(runtime ? 'runtime' : 'defaults');
+  const [drafts, setDrafts] = useState<Record<Scope, Draft>>({ runtime: EMPTY, defaults: EMPTY });
+  const draftsRef = useRef(drafts);
+  const [controls, setControls] = useState<PromptControls | null>(null);
+  const [tab, setTab] = useState<Tab>('tools');
+  const [query, setQuery] = useState('');
   const [detail, setDetail] = useState<Item | null>(null);
+  const [promptId, setPromptId] = useState('preview');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [status, setStatus] = useState<SaveStatus>(null);
-  // 保存标志的同步副本：连着拨两下时要立刻判重，不能等 setState 触发重渲染。
-  const savingRef = useRef(false);
-  // 本地最新选择（不依赖尚未重渲染的 state）、服务端已确认的选择、待发的下一轮请求。
-  const draftRef = useRef<Draft>(EMPTY_DRAFT);
-  const confirmedRef = useRef<Draft>(EMPTY_DRAFT);
-  const pendingSaveRef = useRef<Draft | null>(null);
-  const savedTimerRef = useRef<number | null>(null);
+  const [draftError, setDraftError] = useState<string | null>(null);
+  const loadVersion = useRef(0);
   const RefreshIcon = appIcons.refresh;
 
-  const applyDetails = useCallback((next: ConfigWebCapabilityDefaults) => {
-    const applied = toDraft(next);
-    setDetails(next);
-    draftRef.current = applied;
-    confirmedRef.current = applied;
-    setDraft(applied);
-  }, []);
+  const capabilitySave = useAutoSave<CapabilityDraft, unknown>({
+    save: async (next) => {
+      try {
+        if (next.scope === 'runtime') {
+          if (!next.target) throw new Error('当前没有可用的会话宿主');
+          return await serializeCapabilityWrite(next.key, () =>
+            next.target!.setSelection({ version: 1, ...next.selection }),
+          );
+        }
+        return await serializeCapabilityWrite(next.key, () => writeCapabilityDefaults(next.selection));
+      } catch (cause) {
+        capabilityDraftCache.fail(next.key, next, formatError(cause));
+        throw cause;
+      }
+    },
+    onSaved: (_result, saved) => {
+      capabilityDraftCache.confirm(saved.key, saved);
+      clearRecoveredDraftError();
+    },
+  });
+  const promptSave = useAutoSave<PromptControls, PromptControls>({
+    save: async (next) => {
+      try {
+        return await serializeCapabilityWrite('prompt-controls', () => writePromptControls(next));
+      } catch (cause) {
+        promptDraftCache.fail('global', next, formatError(cause));
+        throw cause;
+      }
+    },
+    onSaved: (_result, saved) => {
+      promptDraftCache.confirm('global', saved);
+      clearRecoveredDraftError();
+    },
+  });
+
+  function clearRecoveredDraftError() {
+    if (
+      !promptDraftCache.read('global') &&
+      !capabilityDraftCache.read('defaults') &&
+      !capabilityDraftCache.read(`runtime:${runtime?.key ?? 'current'}`)
+    )
+      setDraftError(null);
+  }
 
   const load = useCallback(async () => {
+    const version = ++loadVersion.current;
     setLoading(true);
     setError(null);
-    try {
-      applyDetails(await readCapabilityDefaults());
-      setStatus(null);
-    } catch (loadError) {
-      setError(formatError(loadError));
-    } finally {
-      setLoading(false);
+    const results = await readStableCapabilityState(() =>
+      Promise.allSettled([
+        readCapabilityDefaults(),
+        readPromptControls(),
+        runtime?.read() ?? Promise.resolve(null),
+      ]),
+    );
+    if (version !== loadVersion.current) return;
+    const [defaultsResult, controlsResult, liveResult] = results;
+    const failures: string[] = [];
+    const nextDrafts = { ...draftsRef.current };
+    if (defaultsResult.status === 'fulfilled') {
+      setDetails(defaultsResult.value);
+      nextDrafts.defaults = toDraft(defaultsResult.value);
+    } else failures.push(formatError(defaultsResult.reason));
+    if (controlsResult.status === 'fulfilled') {
+      setControls(controlsResult.value);
+    } else failures.push(formatError(controlsResult.reason));
+    if (liveResult.status === 'fulfilled') {
+      setLive(liveResult.value);
+      if (liveResult.value) nextDrafts.runtime = toDraft(liveResult.value.selection);
+    } else {
+      setLive(null);
+      failures.push(`会话能力：${formatError(liveResult.reason)}`);
     }
-  }, [applyDetails]);
+    const restored: string[] = [];
+    for (const key of ['defaults', `runtime:${runtime?.key ?? 'current'}`]) {
+      const cached = capabilityDraftCache.read(key);
+      if (!cached) continue;
+      nextDrafts[cached.value.scope] = cached.value.selection;
+      const message = cached.error ?? '有尚未保存的能力选择，请重试保存。';
+      restored.push(message);
+    }
+    const promptDraft = promptDraftCache.read('global');
+    if (promptDraft) {
+      setControls(promptDraft.value);
+      restored.push(promptDraft.error ?? '有尚未保存的提示词草稿，请重试保存。');
+    }
+    setDraftError(restored.length ? restored.join('\n') : null);
+    draftsRef.current = nextDrafts;
+    setDrafts(nextDrafts);
+    setError(failures.length ? failures.join('\n') : null);
+    setLoading(false);
+  }, [runtime]);
 
   useEffect(() => {
     void load();
+    return () => {
+      loadVersion.current += 1;
+    };
   }, [load]);
 
-  useEffect(() => () => clearSavedTimer(savedTimerRef), []);
-
-  const flushSave = useCallback(async () => {
-    if (savingRef.current) return;
-    const next = pendingSaveRef.current;
-    if (!next) return;
-    pendingSaveRef.current = null;
-    savingRef.current = true;
-    clearSavedTimer(savedTimerRef);
-    setStatus('saving');
-    setError(null);
-    try {
-      const saved = await writeCapabilityDefaults(next);
-      const applied = toDraft(saved);
-      confirmedRef.current = applied;
-      setDetails(saved);
-      // 请求期间又拨了几下时本地已有更新的选择，不用这次的响应盖回去。
-      if (!pendingSaveRef.current) {
-        draftRef.current = applied;
-        setDraft(applied);
-        setStatus('saved');
-        savedTimerRef.current = window.setTimeout(() => {
-          savedTimerRef.current = null;
-          setStatus((current) => (current === 'saved' ? null : current));
-        }, 1600);
-      }
-    } catch (saveError) {
-      pendingSaveRef.current = null;
-      const confirmed = confirmedRef.current;
-      draftRef.current = confirmed;
-      setDraft(confirmed);
-      setStatus(null);
-      setError(formatError(saveError));
-    } finally {
-      savingRef.current = false;
-      if (pendingSaveRef.current) void flushSave();
+  async function flush() {
+    await Promise.all([capabilitySave.flush(), promptSave.flush()]);
+    const keys = ['defaults', `runtime:${runtime?.key ?? 'current'}`];
+    for (const key of keys) {
+      const cached = capabilityDraftCache.read(key);
+      if (!cached) continue;
+      capabilitySave.schedule(cached.value);
+      await capabilitySave.flush();
     }
-  }, []);
-
-  const commit = useCallback(
-    (next: Draft) => {
-      draftRef.current = next;
-      setDraft(next);
-      pendingSaveRef.current = next;
-      void flushSave();
-    },
-    [flushSave],
-  );
-
-  const items = useMemo(() => {
-    if (!details) return [];
-    if (group === 'skills')
-      return details.skills.map((skill) => ({ name: skill.name, description: skill.description }));
-    if (group === 'tools')
-      return details.tools.map((tool) => ({
-        name: tool.name,
-        description: tool.description,
-        group: tool.group,
-        readOnly: tool.readOnly,
-        parameters: tool.parameters,
-      }));
-    return details.mcpServers.map((name) => ({ name, description: '' }));
-  }, [details, group]);
-
-  const disabled = draft[disabledKey(group)];
-  const enabledCount = items.filter((item) => !disabled.includes(item.name)).length;
-
-  function toggle(name: string, enabled: boolean) {
-    const key = disabledKey(group);
-    commit({
-      ...draftRef.current,
-      [key]: applyGroupEnabled(draftRef.current[key], capabilityToggleNames(items, name), enabled),
-    });
+    const promptDraft = promptDraftCache.read('global');
+    if (promptDraft) {
+      promptSave.schedule(promptDraft.value);
+      await promptSave.flush();
+    }
+    const remaining = [...keys.map((key) => capabilityDraftCache.read(key)), promptDraftCache.read('global')].filter(
+      Boolean,
+    );
+    if (remaining.length)
+      throw new Error(remaining.map((entry) => entry?.error ?? '草稿尚未保存，请重试。').join('\n'));
   }
 
-  // 整组开关：一次改写组内全部成员，落到同一个禁用名单里（能力校验按工具名逐条判定）。
-  function toggleGroup(names: string[], enabled: boolean) {
-    const key = disabledKey(group);
-    commit({ ...draftRef.current, [key]: applyGroupEnabled(draftRef.current[key], names, enabled) });
+  async function refresh() {
+    try {
+      await flush();
+      await load();
+    } catch (cause) {
+      setError(formatError(cause));
+    }
+  }
+
+  async function changeScope(next: string) {
+    try {
+      await flush();
+      await load();
+      setScope(next as Scope);
+      setDetail(null);
+    } catch (cause) {
+      setError(formatError(cause));
+    }
+  }
+
+  function commit(next: Draft) {
+    const nextDrafts = { ...draftsRef.current, [scope]: next };
+    draftsRef.current = nextDrafts;
+    setDrafts(nextDrafts);
+    const value: CapabilityDraft = {
+      scope,
+      key: scope === 'defaults' ? 'defaults' : `runtime:${runtime?.key ?? 'current'}`,
+      selection: next,
+      target: scope === 'runtime' ? runtime : undefined,
+    };
+    capabilityDraftCache.remember(value.key, value);
+    capabilitySave.schedule(value);
+  }
+
+  function commitControls(next: PromptControls) {
+    setControls(next);
+    promptDraftCache.remember('global', next);
+    promptSave.schedule(next);
+  }
+
+  const tools = useMemo(
+    () =>
+      scope === 'runtime'
+        ? (live?.tools ?? [])
+        : mergeNamed(
+            details?.tools ?? [],
+            (live?.tools ?? []).filter((tool) => tool.group?.key.startsWith('plugin:')),
+          ),
+    [details, live, scope],
+  );
+  const skills = scope === 'runtime' ? (live?.skills ?? []) : (details?.skills ?? []);
+  const servers =
+    scope === 'runtime' ? (live?.mcpServers.map((server) => server.name) ?? []) : (details?.mcpServers ?? []);
+  const draft = drafts[scope];
+  const plugins = useMemo(() => {
+    const byId = new Map((details?.plugins ?? []).map((plugin) => [plugin.id, plugin]));
+    for (const plugin of live?.plugins ?? []) {
+      if (!byId.has(plugin.id))
+        byId.set(plugin.id, {
+          id: plugin.id,
+          name: plugin.name,
+          source: plugin.id.startsWith('user.') ? 'user' : 'official',
+          state: 'enabled',
+        });
+    }
+    return [...byId.values()].sort((a, b) => a.name.localeCompare(b.name));
+  }, [details, live]);
+
+  const items: Item[] = (
+    tab === 'tools'
+      ? tools.map((tool) => ({
+          ...tool,
+          sourceLabel: tool.pluginId
+            ? `插件 ${tool.pluginId}`
+            : tool.group?.key.startsWith('plugin:')
+              ? `插件 ${tool.group.key.slice(7)}`
+              : '内置',
+        }))
+      : tab === 'skills'
+        ? skills.map((skill) => ({
+            ...skill,
+            sourceLabel: skill.pluginId ? `插件 ${skill.pluginId}` : '磁盘技能',
+          }))
+        : tab === 'mcpServers'
+          ? servers.map((name) => {
+              const server = live?.mcpServers.find((entry) => entry.name === name);
+              const mcpTools = (live?.mcpTools ?? []).filter(
+                (tool) =>
+                  tool.group?.key === `mcp:${name}` ||
+                  (tool as ConfigWebCapabilityTool & { mcpServer?: string }).mcpServer === name,
+              );
+              return {
+                name,
+                description:
+                  scope === 'runtime'
+                    ? `${mcpStatusLabel(server?.status)} · ${mcpTools.length} 个工具${server?.error ? ` · ${server.error}` : ''}`
+                    : 'config.json',
+                mcpTools,
+              };
+            })
+          : []
+  ).filter((item) =>
+    `${item.name} ${item.description} ${'sourceLabel' in item ? item.sourceLabel : ''} ${'group' in item ? (item.group?.label ?? '') : ''}`
+      .toLowerCase()
+      .includes(query.toLowerCase()),
+  );
+
+  const count = (group: Group) => {
+    const names =
+      group === 'tools'
+        ? tools.map((tool) => tool.name)
+        : group === 'skills'
+          ? skills.map((skill) => skill.name)
+          : servers;
+    return `${names.filter((name) => !draft[disabledKey(group)].includes(name)).length}/${names.length}`;
+  };
+  const counts: Record<Tab, string> = {
+    tools: count('tools'),
+    skills: count('skills'),
+    mcpServers: count('mcpServers'),
+    plugins: String(plugins.length),
+    prompts: live?.prompt ? String(live.prompt.sections.length) : '',
+  };
+  const activeGroup: Group = tab === 'tools' || tab === 'skills' || tab === 'mcpServers' ? tab : 'tools';
+  const disabled = draft[disabledKey(activeGroup)];
+  const ready = scope === 'runtime' ? Boolean(live) : Boolean(details);
+  const saving = capabilitySave.saving || promptSave.saving;
+
+  function toggleNames(names: string[], enabled: boolean) {
+    const key = disabledKey(activeGroup);
+    commit({ ...draftsRef.current[scope], [key]: applyGroupEnabled(draftsRef.current[scope][key], names, enabled) });
   }
 
   return (
     <PageFrame
       title="Capabilities"
-      description="新会话默认开放的工具、skills 与 MCP server；单个会话可以在对话里单独调整"
-      path="config.json · capabilityDefaults"
+      description={L.description}
+      path={
+        tab === 'prompts' || tab === 'plugins'
+          ? 'prompt-controls.json'
+          : scope === 'runtime'
+            ? live?.prompt?.cwd
+            : 'config.json · capabilityDefaults'
+      }
       actions={
         <div className="toolbar">
-          <Button variant="default" icon={<RefreshIcon size={15} />} onClick={() => void load()} loading={loading}>
+          <SaveStatus saving={saving} saved={capabilitySave.status === 'saved' || promptSave.status === 'saved'} />
+          <Button icon={<RefreshIcon size={15} />} onClick={() => void refresh()} loading={loading} disabled={saving}>
             刷新
           </Button>
         </div>
       }
     >
       <div className="capability-page">
-        <p className="capability-note">
-          这里决定<strong>新会话</strong>
-          的默认能力：没有在会话里单独调过开关的会话跟着这里走，调过的会话保留自己的选择。需要时在会话里用
-          <code>/capabilities</code>
-          （终端）或输入框旁的能力面板（桌面端）改动。
-        </p>
+        <div className="capability-scope-bar">
+          {runtime ? (
+            <Segmented
+              value={scope}
+              options={[
+                { value: 'runtime', label: L.currentSession },
+                { value: 'defaults', label: L.defaults },
+              ]}
+              onChange={(next) => void changeScope(next)}
+              ariaLabel="能力范围"
+              disabled={loading || saving}
+            />
+          ) : (
+            <Tag>{L.defaults}</Tag>
+          )}
+          {scope === 'runtime' && live?.prompt ? (
+            <span className="capability-scope-fact">
+              {live.prompt.role}
+              {live.prompt.running ? ' · 正在运行' : ' · 空闲'}
+            </span>
+          ) : null}
+        </div>
+        <p className="capability-note">{scope === 'runtime' ? L.runtimeNote : L.defaultsNote}</p>
         {error ? <Alert message={error} /> : null}
-        {loading && !details ? (
-          <div className="page-loading">正在加载默认能力…</div>
-        ) : (
-          <section className="simple-card capability-card">
-            {/* 与会话弹窗（桌面端输入框旁的「会话能力」）是同一个列表组件 */}
+        {capabilitySave.error || promptSave.error || draftError ? (
+          <div className="capability-save-error">
+            <Alert message={capabilitySave.error ?? promptSave.error ?? draftError ?? ''} />
+            <Button variant="ghost" onClick={() => void refresh()}>
+              重试保存
+            </Button>
+          </div>
+        ) : null}
+        <section className="simple-card capability-card">
+          <div className="session-tabs" role="tablist" aria-label="能力分类">
+            {TABS.map((key) => (
+              <button
+                key={key}
+                type="button"
+                role="tab"
+                aria-selected={tab === key}
+                className={`session-tab${tab === key ? ' session-tab-active' : ''}`}
+                onClick={() => {
+                  setTab(key);
+                  setDetail(null);
+                }}
+              >
+                {L[key]}
+                <span className="capability-tab-count">{counts[key]}</span>
+              </button>
+            ))}
+          </div>
+          <div className="capability-search">
+            <Input allowClear value={query} placeholder={L.search} aria-label="搜索能力" onChange={setQuery} />
+          </div>
+          {loading && !details && !live ? (
+            <div className="page-loading">正在读取能力…</div>
+          ) : tab === 'plugins' ? (
+            <SettingsGroup title="插件贡献" description={L.promptScope}>
+              {plugins
+                .filter((plugin) =>
+                  `${plugin.id} ${plugin.name} ${plugin.description ?? ''}`.toLowerCase().includes(query.toLowerCase()),
+                )
+                .map((plugin) => {
+                  const actual = live?.plugins.find((entry) => entry.id === plugin.id);
+                  const pluginSections =
+                    live?.prompt?.sections.filter((section) => section.pluginId === plugin.id) ?? [];
+                  return (
+                    <div key={plugin.id} className="capability-plugin-row">
+                      <div className="capability-plugin-copy">
+                        <div>
+                          <strong>{plugin.name}</strong>
+                          <Tag>{pluginSourceLabel(plugin.source)}</Tag>
+                          <Tag>
+                            {plugin.state === 'disabled'
+                              ? '已停用'
+                              : actual
+                                ? pluginLoadStatusLabel(actual.status)
+                                : pluginLoadStatusLabel(plugin.loadStatus)}
+                          </Tag>
+                        </div>
+                        <code title={plugin.id}>{plugin.id}</code>
+                        <p title={plugin.description}>{plugin.description || plugin.error || '未提供描述'}</p>
+                        {actual ? (
+                          <div className="capability-plugin-contributions">
+                            <Button
+                              size="compact"
+                              variant="ghost"
+                              disabled={!actual.toolNames.length}
+                              onClick={() => {
+                                if (scope !== 'runtime') void changeScope('runtime');
+                                setTab('tools');
+                                setQuery(plugin.id);
+                              }}
+                            >
+                              {actual.toolNames.length} 个工具
+                            </Button>
+                            <Button
+                              size="compact"
+                              variant="ghost"
+                              disabled={!actual.skillNames.length}
+                              onClick={() => {
+                                if (scope !== 'runtime') void changeScope('runtime');
+                                setTab('skills');
+                                setQuery(plugin.id);
+                              }}
+                            >
+                              {actual.skillNames.length} 个技能
+                            </Button>
+                            <span>{pluginSections.length} 段提示词</span>
+                          </div>
+                        ) : (
+                          <span>打开当前会话后查看实际贡献</span>
+                        )}
+                        {actual?.error ? <span>{actual.error}</span> : null}
+                      </div>
+                      <div className="capability-plugin-actions">
+                        {pluginSections.length ? (
+                          <Button
+                            size="compact"
+                            variant="ghost"
+                            onClick={() => {
+                              setPromptId(pluginSections[0]!.id);
+                              setTab('prompts');
+                              setQuery('');
+                            }}
+                          >
+                            查看提示词
+                          </Button>
+                        ) : null}
+                        <span>{L.injection}</span>
+                        <Switch
+                          label={`${plugin.name} 提示词注入`}
+                          checked={plugin.state !== 'disabled' && !controls?.disabledPlugins.includes(plugin.id)}
+                          disabled={!controls || loading || plugin.state === 'disabled'}
+                          onChange={(enabled) =>
+                            commitControls(setPluginPromptEnabled(controls ?? EMPTY_CONTROLS, plugin.id, enabled))
+                          }
+                        />
+                      </div>
+                    </div>
+                  );
+                })}
+              {!plugins.length ? <Empty description="尚未发现插件" /> : null}
+            </SettingsGroup>
+          ) : tab === 'prompts' ? (
+            controls ? (
+              <PromptControlsPanel
+                inspection={live?.prompt ?? null}
+                controls={controls}
+                onChange={commitControls}
+                disabled={loading}
+                query={query}
+                selectedId={promptId}
+                onSelect={setPromptId}
+              />
+            ) : (
+              <Empty description="提示词控制配置尚未读取成功，请刷新后重试。" />
+            )
+          ) : !ready ? (
+            <Empty description="未能读取能力目录，请刷新重试。" />
+          ) : (
             <CapabilityList
-              groups={GROUPS.map((key) => ({ key, label: GROUP_LABEL[key], disabledKey }))}
-              group={group}
-              onGroupChange={(key) => {
-                setGroup(key as Group);
-                setDetail(null);
-              }}
-              counts={Object.fromEntries(GROUPS.map((key) => [key, capabilityCount(details, draft, key)]))}
+              groups={[]}
+              showTabs={false}
+              group={tab}
+              onGroupChange={() => {}}
+              counts={counts}
               items={items}
-              countLabel={`${enabledCount} / ${items.length} 默认启用`}
-              status={status === 'saving' ? '· 保存中…' : status === 'saved' ? '· 已保存' : null}
+              countLabel={`${items.filter((item) => !disabled.includes(item.name)).length} / ${items.length} ${scope === 'defaults' ? '默认启用' : '启用'}${scope === 'runtime' && live?.prompt?.running ? ' · 本轮运行中，结束后可调整' : ''}`}
+              disabled={loading || (scope === 'runtime' && Boolean(live?.prompt?.running))}
               isEnabled={(name) => !disabled.includes(name)}
-              onToggle={(name, checked) => toggle(name, checked)}
-              onToggleGroup={group === 'tools' ? toggleGroup : null}
+              onToggle={(name, enabled) => toggleNames(capabilityToggleNames(items, name), enabled)}
+              onToggleGroup={tab === 'tools' ? toggleNames : null}
               onOpenDetail={(item) => setDetail(item)}
             />
-          </section>
-        )}
+          )}
+        </section>
         {detail ? (
-          <Modal
-            title={
-              <span className="capability-detail-title">
-                <code>{detail.name}</code>
-              </span>
-            }
-            onClose={() => setDetail(null)}
-            wide
-          >
+          <Modal title={<code>{detail.name}</code>} onClose={() => setDetail(null)} wide>
             <div className="capability-detail">
-              {detail.readOnly == null ? null : (
+              {detail.sourceLabel ? <p className="capability-note">{detail.sourceLabel}</p> : null}
+              {detail.readOnly === undefined ? null : (
                 <div className="capability-detail-fact">
                   <span className="capability-detail-label">读写</span>
-                  <span className="capability-detail-value">
-                    {detail.readOnly ? '只读 · 不会改动工作区' : '非只读 · 不进只读批量并发，也不会随 turn 自动重试'}
-                  </span>
+                  <span>{detail.readOnly ? '只读' : '可执行写入或其他操作'}</span>
                 </div>
               )}
-              <div className="capability-detail-fact is-block">
-                <span className="capability-detail-label">说明</span>
-                <p className="capability-detail-text">{detail.description || '没有提供描述。'}</p>
-              </div>
+              <p className="capability-detail-text">{detail.description || '没有提供描述。'}</p>
               <CapabilityParameters parameters={detail.parameters} />
+              {detail.inputSchema ? (
+                <div className="editor-host capability-schema-host">
+                  <JsonEditor
+                    language="json"
+                    value={JSON.stringify(detail.inputSchema, null, 2)}
+                    readOnly
+                    onChange={() => {}}
+                  />
+                </div>
+              ) : null}
+              {detail.mcpTools?.map((tool) => (
+                <Button
+                  key={tool.name}
+                  fullWidth
+                  variant="ghost"
+                  onClick={() => setDetail({ ...tool, sourceLabel: `MCP · ${detail.name}` })}
+                >
+                  {tool.name}
+                </Button>
+              ))}
             </div>
           </Modal>
         ) : null}
@@ -245,39 +547,20 @@ export function CapabilitiesPage() {
 }
 
 function disabledKey(group: Group): keyof Draft {
-  if (group === 'skills') return 'disabledSkills';
-  if (group === 'tools') return 'disabledTools';
-  return 'disabledMcpServers';
+  return group === 'skills' ? 'disabledSkills' : group === 'tools' ? 'disabledTools' : 'disabledMcpServers';
 }
-
-function capabilityCount(details: ConfigWebCapabilityDefaults | null, draft: Draft, group: Group): string {
-  if (!details) return '';
-  const names =
-    group === 'skills'
-      ? details.skills.map((item) => item.name)
-      : group === 'tools'
-        ? details.tools.map((item) => item.name)
-        : details.mcpServers;
-  const disabled = draft[disabledKey(group)];
-  return `${names.filter((name) => !disabled.includes(name)).length}/${names.length}`;
-}
-
-type SaveStatus = 'saving' | 'saved' | null;
-
-function toDraft(details: ConfigWebCapabilityDefaults): Draft {
+function toDraft(value: Draft): Draft {
   return {
-    disabledSkills: details.disabledSkills,
-    disabledTools: details.disabledTools,
-    disabledMcpServers: details.disabledMcpServers,
+    disabledSkills: value.disabledSkills,
+    disabledTools: value.disabledTools,
+    disabledMcpServers: value.disabledMcpServers,
   };
 }
-
-function clearSavedTimer(ref: { current: number | null }): void {
-  if (ref.current === null) return;
-  window.clearTimeout(ref.current);
-  ref.current = null;
+function mergeNamed<T extends { name: string }>(defaults: T[], extra: T[]): T[] {
+  return [...new Map([...defaults, ...extra].map((entry) => [entry.name, entry])).values()].sort((a, b) =>
+    a.name.localeCompare(b.name),
+  );
 }
-
-function formatError(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
+function formatError(cause: unknown): string {
+  return cause instanceof Error ? cause.message : String(cause);
 }

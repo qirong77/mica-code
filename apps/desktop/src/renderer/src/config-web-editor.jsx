@@ -17,9 +17,11 @@ export function LocalJsonEditor({
   const editorRef = useRef(null)
   const onChangeRef = useRef(onChange)
   const valueRef = useRef(value)
+  const readOnlyRef = useRef(readOnly)
   const revealRef = useRef(reveal)
   onChangeRef.current = onChange
   valueRef.current = value
+  readOnlyRef.current = readOnly
   revealRef.current = reveal
 
   useEffect(() => {
@@ -33,6 +35,7 @@ export function LocalJsonEditor({
       // 不传 theme：跟随 monaco-runtime 按当前主题设置的全局主题，设置页也能跟着主题切换。
       editor = monaco.editor.create(hostRef.current, {
         model,
+        readOnly: readOnlyRef.current,
         minimap: { enabled: false },
         fontSize: 13,
         lineHeight: 21,

@@ -1,5 +1,10 @@
 import type { Disposable } from '@packages/mica-common/index.js';
 import { wrapPromptXml } from '@packages/mica-common/promptXml.js';
+import {
+  promptSectionKey,
+  type PromptControls,
+  type PromptSectionSnapshot,
+} from '@packages/mica-common/promptControls.js';
 
 /**
  * 插件向 system prompt 贡献的一段文字。
@@ -50,26 +55,40 @@ export class PluginPromptSections {
     };
   }
 
-  /** 按 order、注册顺序拼成一段，空段落跳过。 */
-  render(): string {
+  /** 每段正文只求值一次；空段落也保留，便于检查动态注入与编辑覆盖。 */
+  inspect(controls?: PromptControls): PromptSectionSnapshot[] {
     const ordered = [...this.sections].sort(
       (a, b) => (a.section.order ?? 0) - (b.section.order ?? 0) || a.sequence - b.sequence,
     );
-    const parts: string[] = [];
-    for (const item of ordered) {
+    return ordered.map((item) => {
       const text = item.section.render();
-      const trimmed = typeof text === 'string' ? text.trim() : '';
-      if (trimmed) {
-        parts.push(
-          wrapPromptXml('injection', trimmed, {
-            source: 'plugin',
-            plugin: item.pluginId,
-            section: item.section.id,
-          }),
-        );
-      }
-    }
-    return parts.join('\n\n');
+      const originalContent = typeof text === 'string' ? text.trim() : '';
+      const id = promptSectionKey(item.pluginId, item.section.id);
+      const override = controls?.sections[id];
+      return {
+        id,
+        label: item.section.id,
+        pluginId: item.pluginId,
+        sectionId: item.section.id,
+        originalContent,
+        content: (override?.content ?? originalContent).trim(),
+        enabled: !controls?.disabledPlugins.includes(item.pluginId) && override?.enabled !== false,
+        editable: true,
+      };
+    });
+  }
+
+  /** 按与 inspect 相同的快照拼装，空段落与禁用段落跳过。 */
+  render(controls?: PromptControls): string {
+    return renderPluginPromptSections(this.inspect(controls));
+  }
+
+  getPluginIds(): string[] {
+    return [...new Set(this.sections.map((item) => item.pluginId))];
+  }
+
+  getSectionIds(pluginId: string): string[] {
+    return this.sections.filter((item) => item.pluginId === pluginId).map((item) => item.section.id);
   }
 
   clear(): void {
@@ -79,4 +98,18 @@ export class PluginPromptSections {
   get size(): number {
     return this.sections.length;
   }
+}
+
+/** Reuse an inspected snapshot without evaluating dynamic plugin callbacks twice. */
+export function renderPluginPromptSections(sections: PromptSectionSnapshot[]): string {
+  return sections
+    .filter((section) => section.enabled && section.content.trim())
+    .map((section) =>
+      wrapPromptXml('injection', section.content, {
+        source: 'plugin',
+        plugin: section.pluginId!,
+        section: section.sectionId!,
+      }),
+    )
+    .join('\n\n');
 }

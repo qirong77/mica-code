@@ -14,6 +14,8 @@
  * methods get a JSON-RPC method-not-found error so clients can negotiate.
  */
 
+import type { RuntimePromptInspection } from '@packages/mica-common/promptControls.js';
+
 export type CodexRequestId = number | string;
 
 export type CodexJsonRpcMessage =
@@ -362,6 +364,36 @@ export type MicaCapabilitiesSnapshot = {
   disabledSkills: string[];
   disabledTools: string[];
   disabledMcpServers: string[];
+};
+
+/** Plugin attribution from this session host's live registries and setup report. */
+export type MicaRuntimePluginCapability = {
+  id: string;
+  name: string;
+  status: string;
+  error?: string;
+  toolNames: string[];
+  skillNames: string[];
+  promptSectionIds: string[];
+};
+
+export type MicaRuntimeToolCapability = {
+  name: string;
+  description: string;
+  readOnly: boolean;
+  source: string;
+  pluginId?: string;
+  mcpServer?: string;
+  parameters: { name: string; type: string; required: boolean; description: string }[];
+  group: { key: string; label: string } | null;
+  inputSchema: unknown;
+};
+
+/** Additional fields on the existing `mica/capabilities/get` response. */
+export type MicaRuntimeCapabilityInspection = {
+  prompt: RuntimePromptInspection;
+  plugins: MicaRuntimePluginCapability[];
+  mcpTools: MicaRuntimeToolCapability[];
 };
 
 /** `MICA_TURN_NOTIFICATIONS.retrying` payload. */

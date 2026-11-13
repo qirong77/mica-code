@@ -166,6 +166,8 @@ const result = data.documents.write('page-1', { text: '正文' }, {
 
 插件统一通过 `context.prompt.section()` 贡献段落，清单声明 `requires: ["prompt"]`。每次组装 system prompt 时同步渲染，空串不贡献内容；不再使用 `system-prompt:build` pipeline。
 
+`PluginPromptSections.inspect(controls?)` 返回按实际顺序排列的来源快照（空动态段也列出），`render(controls?)` 使用同样的开关与正文覆盖。全局控制的段键是 `plugin:<pluginId>/<sectionId>`；Capabilities 可关闭整插件注入或单段、编辑正文与恢复原文，这些操作不会卸载插件工具。无覆盖时顺序与 XML 包装不变。
+
 ```ts
 const registration = context.prompt!.section({
   id: 'guidance',

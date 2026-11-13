@@ -7,6 +7,7 @@
 ## 主要能力
 
 - 获取当前已加载 skills：`micaSkills.getLoaded()`。
+- 获取带插件归属的生效目录：`micaSkills.getCatalog()`，在原 Skill 字段上增加可选 `pluginId`。归属来自实际 runtime 注册对象，磁盘同名覆盖与插件卸载后不会保留过期归属。
 - 重新扫描并加载 skills：`micaSkills.reload()`。
 - 解析 `SKILL.md` frontmatter。
 - 为工具系统的 `Skill` 工具提供可用 skill 列表。

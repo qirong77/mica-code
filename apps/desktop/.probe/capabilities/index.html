@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="darcula" data-appearance="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Capabilities · 交互预览</title>
+    <style>
+      html, body, #root { height: 100%; margin: 0; }
+      .preview-root > .arco-settings { display: flex; flex-direction: column; height: 100%; }
+      .preview-header { display: flex; flex: none; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; padding: 10px 24px; border-bottom: 1px solid var(--line); color: var(--text-soft); font-size: 12px; }
+      .preview-header > div { display: flex; align-items: center; gap: 12px; }
+      .preview-main { display: flex; flex: 1; min-height: 0; padding: 12px 24px; }
+      .preview-main > .page-frame { flex: 1; min-width: 0; }
+      @media (max-width: 600px) { .preview-main { padding: 8px; } .preview-header { padding: 10px 12px; } }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/main.tsx"></script>
+  </body>
+</html>

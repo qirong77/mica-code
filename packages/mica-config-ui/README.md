@@ -49,6 +49,14 @@ render(<ConfigWebApp />)
 - 浏览器宿主用 `apps/config-web/web/src/http-client.ts`（`fetch('/api/*')`）+ CDN 版 monaco（`monaco-editor.tsx`）。
 - 桌面宿主用 `apps/desktop/src/renderer/src/config-web.js`（`config-web:invoke`）+ 应用自带的本地 monaco（`config-web-editor.jsx`）。
 
+## Capabilities 与提示词控制
+
+`ConfigWebApp.capabilitiesRuntime` 是可选的会话适配器（`read()` / `setSelection()`）：桌面宿主绑定当前会话的 `mica/capabilities/get|set`，页面显示真实工具、完整入参 schema、技能归属、插件贡献及完整系统提示词。默认配置目录还会合并静态插件清单、清单技能与已发布索引；未运行的任意动态插件工具需要在当前会话加载后查看。
+
+Tools / Skills / MCP 的开关根据所选范围写会话或 `config.capabilityDefaults`。Plugins 与提示词控制页签的开关、正文覆盖写全局 `prompt-controls.json`，下一轮生效；默认 system 只读，其他基础段落与插件段落可按来源关闭、编辑、查看原文或恢复原文。正文自动保存，失败草稿在当前页面内存中跨设置导航保留并可重试；会话草稿绑定编辑时的目标，跨组件写入按目标串行。
+
+`ConfigWebClient.readPromptControls()` / `writePromptControls(controls)` 由两宿主调用同一存储实现；HTTP 为 `GET/PUT /api/details/prompt-controls`，PUT 参数 `{ controls }`。提示词面板分别显示下一轮预览与最近实际发送的只读存档，预览不改写会话记录。独立 config-web 没有当前会话适配器时，插件级注入开关仍可用，动态正文明确显示不可用。
+
 ## 只在桌面宿主出现的章节
 
 `web/App.tsx` 的 section 白名单与 `web/layout/Sidebar.tsx` 的条目按宿主能力区分：浏览器宿主（`apps/config-web`）没有 Electron 主进程提供的受控浏览器与终端控制数据，这两页的入口照旧显示、内容说明未开启。插件页（含插件自己声明的设置）由两个宿主共用，不受能力门控。

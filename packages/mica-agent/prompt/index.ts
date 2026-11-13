@@ -1,4 +1,5 @@
 import { escapePromptXml, wrapPromptXml } from '@packages/mica-common/promptXml.js';
+import type { PromptControls, PromptSectionSnapshot } from '@packages/mica-common/promptControls.js';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { micaSkills, type Skill } from '@packages/mica-skills/index.js';
@@ -21,51 +22,72 @@ export type BuildSystemPromptOptions = {
   shell?: string;
   projectInstructions?: string | null;
   skills?: Skill[];
+  promptControls?: PromptControls;
 };
 
 class SystemPromptBuilder {
-  private prompt = '';
+  readonly sections: PromptSectionSnapshot[] = [];
 
   constructor(options: BuildSystemPromptOptions = {}) {
-    this.prompt = wrapSection('system', applyBrandTemplate(DEFAULT_SYSTEM_PROMPT));
-    if (options.rolePrompt?.trim()) {
-      this.append('role', applyBrandTemplate(options.rolePrompt));
-    }
+    this.append('system', applyBrandTemplate(DEFAULT_SYSTEM_PROMPT), options.promptControls);
+    this.append(
+      'role',
+      options.rolePrompt?.trim() ? applyBrandTemplate(options.rolePrompt) : '',
+      options.promptControls,
+    );
 
     const projectInstructions =
       options.projectInstructions === undefined
         ? readProjectInstructions(options.cwd ?? process.cwd())
         : (options.projectInstructions ?? undefined);
-    if (projectInstructions) {
-      this.append('project-instructions', projectInstructions);
-    }
+    this.append('project-instructions', projectInstructions ?? '', options.promptControls);
 
     const skills = options.skills ?? micaSkills.getLoaded();
-    if (skills.length > 0) {
-      const listing = formatSkillsIndex(skills);
-      this.append(
-        'skills',
-        `可用 skills 索引如下。这里只是索引；需要使用时通过 \`skill\` 工具读取完整说明。\n\n${listing}`,
-      );
-    }
+    this.append(
+      'skills',
+      skills.length > 0
+        ? `可用 skills 索引如下。这里只是索引；需要使用时通过 \`skill\` 工具读取完整说明。\n\n${formatSkillsIndex(skills)}`
+        : '',
+      options.promptControls,
+    );
 
-    this.append('context', buildContextBlock(options));
+    this.append('context', buildContextBlock(options), options.promptControls);
   }
 
-  append(section: PromptSection, content: string) {
-    const trimmed = content.trim();
-    if (!trimmed) return this;
-    this.prompt += `\n\n${wrapSection(section, trimmed)}`;
+  append(section: PromptSection, content: string, controls?: PromptControls) {
+    const originalContent = content.trim();
+    const editable = section !== 'system';
+    const override = editable ? controls?.sections[section] : undefined;
+    this.sections.push({
+      id: section,
+      label: section,
+      originalContent,
+      content: (override?.content ?? originalContent).trim(),
+      enabled: !editable || override?.enabled !== false,
+      editable,
+    });
     return this;
   }
 
   get value() {
-    return this.prompt;
+    return this.sections
+      .filter((section) => section.enabled && section.content)
+      .map((section) => wrapSection(section.id as PromptSection, section.content))
+      .join('\n\n');
   }
 }
 
 export function buildSystemPrompt(options: BuildSystemPromptOptions = {}): string {
-  return new SystemPromptBuilder(options).value;
+  return inspectSystemPrompt(options).prompt;
+}
+
+/** Build the preview and its source sections in a single pass. */
+export function inspectSystemPrompt(options: BuildSystemPromptOptions = {}): {
+  prompt: string;
+  sections: PromptSectionSnapshot[];
+} {
+  const builder = new SystemPromptBuilder(options);
+  return { prompt: builder.value, sections: builder.sections };
 }
 
 /**

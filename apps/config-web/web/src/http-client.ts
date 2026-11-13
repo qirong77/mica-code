@@ -1,4 +1,5 @@
 import type { ConfigWebClient } from '@packages/mica-config-ui/web/index.js';
+import type { PromptControls } from '@packages/mica-common/promptControls.js';
 import type {
   ConfigWebCapabilityDefaults,
   ConfigWebContextAnalysis,
@@ -33,6 +34,9 @@ export function createHttpConfigWebClient(): ConfigWebClient {
       request<ConfigWebMcpDetails>('/api/details/mcp', { method: 'PUT', body: { content } }),
 
     readCapabilityDefaults: () => request<ConfigWebCapabilityDefaults>('/api/details/capabilities'),
+    readPromptControls: () => request<PromptControls>('/api/details/prompt-controls'),
+    writePromptControls: (controls) =>
+      request<PromptControls>('/api/details/prompt-controls', { method: 'PUT', body: { controls } }),
     writeCapabilityDefaults: (input) =>
       request<ConfigWebCapabilityDefaults>('/api/details/capabilities', { method: 'PUT', body: input }),
 

@@ -1,3 +1,4 @@
+import type { PromptControls } from '@packages/mica-common/promptControls.js';
 import type {
   ConfigWebCapabilityDefaults,
   ConfigWebBrowserControlDetails,
@@ -59,6 +60,8 @@ export type ConfigWebClient = {
   deleteRole(name: string): Promise<ConfigWebRolesDetails>;
 
   readCapabilityDefaults(): Promise<ConfigWebCapabilityDefaults>;
+  readPromptControls(): Promise<PromptControls>;
+  writePromptControls(controls: PromptControls): Promise<PromptControls>;
   writeCapabilityDefaults(input: {
     disabledSkills: string[];
     disabledTools: string[];
@@ -213,6 +216,14 @@ export function writeMcpServers(content: string): Promise<ConfigWebMcpDetails> {
 
 export function readCapabilityDefaults(): Promise<ConfigWebCapabilityDefaults> {
   return requireClient().readCapabilityDefaults();
+}
+
+export function readPromptControls(): Promise<PromptControls> {
+  return requireClient().readPromptControls();
+}
+
+export function writePromptControls(controls: PromptControls): Promise<PromptControls> {
+  return requireClient().writePromptControls(controls);
 }
 
 export function writeCapabilityDefaults(input: {

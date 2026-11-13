@@ -31,6 +31,7 @@
 ## 共享状态与路由
 
 - 设置页插件动作的工作区来自当前会话 `activeChatCwd`，经 `SettingsView.actionCwd` → `ConfigWebApp` → 动作请求 → CLI 传入；不回退到设置服务的进程 cwd，无会话时省略。
+- Settings 的 Capabilities 使用 `SettingsView.capabilityTarget` 绑定当前 nodeId / sessionId / cwd，由可选 `capabilitiesRuntime` 适配器读取会话宿主；工具开关写会话，提示词控制经配置 API 写全局文件。两种作用范围在界面明确区分，独立 config-web 没有当前会话适配器。
 
 - 运行时只有一份 workspace / drafts / layout / rightTerms / terminalOpenByChat / cwd / Git 偏好，落盘 `userData/ui-state.json`；语义在 `mica-web-shared/ui-state.ts`。老版本单独存的 `workspace.json` 只在 ui-state 还不存在时导入一次、落盘后删除；ui-state 已存在就不再读它（否则用户清空过的工作区会被搬回来）。
 - 条目补丁用 `setUiStateEntries`，null 表示删除；回声在 store 的 `applyRemote` 认领一次，组件不得各自认领。By The Way 抽屉开关按会话以独立 `btwOpen:<sessionId>` 键保存，多窗口共享，关闭时删除键；线程内容仍由自身落盘，空线程不持久化。

@@ -1,6 +1,7 @@
 import type { AgentQueryContent } from '@packages/mica-agent/index.js';
 import { micaAgent } from '@packages/mica-agent/index.js';
 import { runtimeEnv } from '@packages/mica-config/runtimeEnv.js';
+import { readPromptControls } from '@packages/mica-config/promptControls.js';
 import type { SessionTurnLease } from '@packages/mica-session/index.js';
 import { micaTools } from '@packages/mica-tools/index.js';
 import { micaUi, type MicaUiConversationMessage } from '@packages/mica-ui/index.js';
@@ -609,6 +610,7 @@ export class LocalRuntimeController implements RuntimeController {
       // provider 层重试 notice：每个 turn 只占一个槽位，后续重试在原消息上原地更新，
       // 避免多次请求 × 每次最多 5 次重试刷屏。
       let providerRetryNoticeIndex = -1;
+      const promptControls = readPromptControls();
       for (let attempt = 0; attempt <= MAX_TURN_RETRIES; attempt++) {
         const attemptSystemInputs: RuntimeInput[] = [];
         const attemptRunId = attempt === 0 ? reservedRunId : agent.reserveRunId();
@@ -616,6 +618,7 @@ export class LocalRuntimeController implements RuntimeController {
           agent.events.emit('thinkingTurnAttemptStart', undefined);
           const result = await agent.run(runContent, {
             reservedRunId: attemptRunId,
+            promptControls,
             onIterationComplete: () => {
               this.saveIterationCheckpoint(agent, sessionController);
               return this.takeQueuedIterationInput(agent, attemptSystemInputs);

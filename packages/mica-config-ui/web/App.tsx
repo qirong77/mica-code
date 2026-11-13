@@ -14,7 +14,7 @@ import { SkillsPage } from './pages/SkillsPage.js';
 import { TerminalControlPage } from './pages/TerminalControlPage.js';
 import { PerformancePage } from './pages/PerformancePage.js';
 import { connectHeartbeat } from './api.js';
-import type { ConfigWebPluginNewSession } from '../src/shared/types.js';
+import type { ConfigWebCapabilitiesRuntime, ConfigWebPluginNewSession } from '../src/shared/types.js';
 
 export type ConfigWebAppProps = {
   /**
@@ -26,6 +26,8 @@ export type ConfigWebAppProps = {
   initialPluginId?: string | null;
   /** 当前工作区，作为插件动作上下文；独立配置页不传。 */
   actionCwd?: string;
+  /** 当前会话的真实能力与提示词，由会话宿主提供。 */
+  capabilitiesRuntime?: ConfigWebCapabilitiesRuntime;
   /** 回到应用：由宿主提供时导航栏顶部出现「返回应用」，浏览器宿主不传。 */
   onClose?(): void;
   closeLabel?: string;
@@ -46,6 +48,7 @@ export function App({
   initialSection,
   initialPluginId = null,
   actionCwd,
+  capabilitiesRuntime,
   onClose,
   closeLabel,
   onNewSession,
@@ -97,7 +100,9 @@ export function App({
             {section === 'roles' ? <RolesPage /> : null}
             {section === 'mcp' ? <McpPage /> : null}
             {section === 'skills' ? <SkillsPage /> : null}
-            {section === 'capabilities' ? <CapabilitiesPage /> : null}
+            {section === 'capabilities' ? (
+              <CapabilitiesPage key={capabilitiesRuntime?.key ?? 'defaults'} runtime={capabilitiesRuntime} />
+            ) : null}
             {section === 'plugins' ? (
               <PluginsPage
                 pluginId={pluginId}

@@ -61,6 +61,7 @@
 - 每次提示词注入都有 XML 边界：项目文件各用 `<document source="…">`，插件只通过 `ctx.prompt.section()` 注入，由宿主生成 `<injection source="plugin" plugin="…" section="…">`；`system-prompt:build` 不再支持。正文允许语义 XML，动态数据必须转义；外层标签由宿主保留。子代理规则、角色与插件独立模型请求也分别包装，来源属性保持稳定，不含轮次随机值。
 - 段落会**每轮重渲染**，所以「随环境变化」的事实要自己控制代价与位置：没有内容就返回空串（`session-autonomy` 的 `concurrency` 段落在没有同 cwd 并发会话时是空的，平时不占 token），变化内容放 order 大的那一端，别把随进程/会话起落的内容塞进前缀，否则前面稳定的段落跟着一起让 prompt cache 失效。**并发这类事实必须由宿主主动注入，不能只留一个工具等着模型「怀疑了才查」**：真实事故里主会话全程确信那些改动是自己的子代理写的，一次都没调用过 `session_peers`。
 - `AgentRuntime.setCapabilities()` 保存会话开关；prompt、工具定义与执行校验读同一份状态。未定制的会话跟随 `config.capabilityDefaults`，`resetCapabilitiesToDefaults()` 回到跟随默认。
+- `AgentRuntime.inspectPrompt()` 通过单次来源渲染返回分段、完整预览与 `lastSent`，不修改真实发送存档。全局提示词控制由 `mica-config/promptControls.ts` 读取，每轮开始捕获并固定到该轮结束；空闲预览立即反映磁盘控制，工具迭代与请求重试不受轮中修改影响。无覆盖时提示词顺序和文本保持原样。
 
 ### 模型档位（effort）与上下文
 

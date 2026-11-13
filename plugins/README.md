@@ -1047,6 +1047,8 @@ const child = spawn(micaExecutable, ['app-server', '--dir', cwd, '--parent', thi
 
 通过 `ctx.prompt.section({ id, order, render })` 贡献提示词，并在清单 `requires` 声明 `prompt`。宿主为每个非空段落生成 `<injection source="plugin" plugin="插件 ID" section="段落 ID">`；插件正文可使用语义 XML 标签组织规则、状态与上下文，动态文本需转义。`injection` 为宿主保留标签。按 `order` 与注册顺序排列，不用随机 ID，空段落不输出。`system-prompt:build` 形态不再支持。
 
+Capabilities 会显示当前会话各插件的工具、技能与提示词来源。用户可在 Plugins 页签开关整个插件的提示词注入，或在提示词控制中逐段开关、覆盖正文与恢复原文；插件的工具保持注册。控制存全局 `prompt-controls.json`，下一轮开始生效。覆盖正文后该段使用固定内容，恢复原文后继续由 `render()` 动态生成；完整预览与最近实际发送的存档分开。
+
 ### Web 基础控件
 
 插件界面从 `@mica-config-ui/web` 复用 Arco Design React 基础控件：`Button`、`Switch`、`Checkbox`、`SelectMenu`、`DateField`、`Tag`、`Input`、`InputNumber` 等。普通输入的 `onChange` 接收值，不是 DOM event；完整 App 的 `ArcoProvider` 与 `body.mica-arco-theme` 为基础控件及 Portal 提供统一主题；内嵌设置布局才套 `.mica-config-ui is-embed`。普通工具栏动作可用 `ArcoAction`（原生事件与 ref 透传，纯图标传 `iconOnly`），富内容悬浮卡片使用共享 `ArcoPopover`，不要用旧皮肤覆盖 Arco。不要在插件中自绘第二份基础控件；业务布局、专用编辑器与拖拽交互保持原有实现。模型通过 quick-buttons 建立的按钮默认使用主题强调色；其它插件的普通静态入口仍用中性色。

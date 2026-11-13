@@ -14,6 +14,10 @@ import {
 import type { MicaUiConversationMessage } from '@packages/mica-ui/index.js';
 import type { EffortOption, ProviderProtocol } from '@packages/mica-config/index.js';
 import { micaConfig } from '@packages/mica-config/index.js';
+import { normalizePromptControls, readPromptControls } from '@packages/mica-config/promptControls.js';
+import { inspectSystemPrompt } from '@packages/mica-agent/prompt/index.js';
+import type { PromptControls, RuntimePromptInspection } from '@packages/mica-common/promptControls.js';
+import { renderPluginPromptSections } from '@packages/mica-plugin/PluginPrompt.js';
 import { PI_MESSAGE_FORMAT, PI_MESSAGE_FORMAT_ERROR } from '@packages/mica-common/messageFormat.js';
 import { micaCommon, cloneCapabilitySelection, normalizeCapabilitySelection } from '@packages/mica-common/index.js';
 import type { CapabilitySelection } from '@packages/mica-common/index.js';
@@ -147,6 +151,8 @@ type AgentRunOptions = {
   onRetry?: (info: { attempt: number; error: unknown; delayMs: number }) => void;
   maxTurns?: number;
   reservedRunId?: number;
+  /** Hosts may share one snapshot across whole-turn retry attempts. */
+  promptControls?: PromptControls;
 };
 
 type ObservationPayload = AgentObservationEvent extends infer Event
@@ -331,6 +337,7 @@ export class AgentRuntime {
    * 随快照落盘后界面就能回答「这次请求到底带了什么」。
    */
   private lastSystemPrompt: string | undefined;
+  private activePromptControls: { runId: number; controls: PromptControls } | undefined;
   private lastStatusKey: string | null = null;
   private activeRunStartedAt: number | null = null;
   private activeStatusModuleStartedAt: number | null = null;
@@ -778,15 +785,40 @@ export class AgentRuntime {
   }
 
   buildSystemPrompt(): string {
+    const controls = this.isRunning && this.activePromptControls?.runId === this.runId
+      ? this.activePromptControls.controls
+      : readPromptControls();
+    return this.renderSystemPrompt(controls).prompt;
+  }
+
+  /** A next-turn preview; inspecting must never overwrite the last transmitted prompt. */
+  inspectPrompt(): RuntimePromptInspection {
+    const rendered = this.renderSystemPrompt(readPromptControls());
+    return {
+      cwd: process.cwd(),
+      role: this.role,
+      running: this.isRunning,
+      preview: rendered.prompt,
+      lastSent: this.systemPrompt ?? null,
+      sections: rendered.sections,
+    };
+  }
+
+  private renderSystemPrompt(controls: PromptControls) {
     const role = this.resolveCurrentRole();
-    const prompt = micaAgent.buildSystemPrompt({
+    const base = inspectSystemPrompt({
       rolePrompt: role.name === DEFAULT_ROLE_NAME ? undefined : role.prompt,
       skills: this.availableSkills(),
+      promptControls: controls,
     });
     // 插件段落固定追加在最末：它们才是「每轮可能变」的内容（会话笔记、循环说明），
     // 放在最后才不会让前面稳定的 system / AGENT.md / skills / context 跟着一起失效。
-    const pluginSections = this.promptSections.render();
-    return pluginSections ? `${prompt}\n\n${pluginSections}` : prompt;
+    const sections = this.promptSections.inspect(controls);
+    const pluginPrompt = renderPluginPromptSections(sections);
+    return {
+      prompt: pluginPrompt ? `${base.prompt}\n\n${pluginPrompt}` : base.prompt,
+      sections: [...base.sections, ...sections],
+    };
   }
 
   setRole(roleName: string): void {
@@ -1111,6 +1143,12 @@ export class AgentRuntime {
         const message = '未配置模型，运行 /model 命令选择模型后再尝试';
         throw new Error(message);
       }
+      // Global edits are visible in previews immediately, but cannot change an
+      // in-flight turn between tool iterations or provider retries.
+      this.activePromptControls = {
+        runId,
+        controls: options.promptControls ? normalizePromptControls(options.promptControls) : readPromptControls(),
+      };
       abortController = new AbortController();
       this.activeAbortController = abortController;
       this.activeTurn = { runId, input: cloneJson(question), committed: false };
@@ -1269,6 +1307,7 @@ export class AgentRuntime {
       if (this.activeTurn?.runId === runId) this.activeTurn = undefined;
       if (abortController && this.activeAbortController === abortController) {
         this.activeAbortController = null;
+        this.activePromptControls = undefined;
         this.rollbackTracking = false;
         this.rollbackCheck = undefined;
       }

@@ -1,3 +1,4 @@
+import { readPromptControls, writePromptControls } from '@packages/mica-config/promptControls.js';
 import { readConfigWebFile, writeConfigWebFile } from './configFiles.js';
 import { runPluginAction as runPluginActionProcess } from './pluginAction.js';
 import {
@@ -69,6 +70,11 @@ export const configWebActions = {
   deleteRole: (input: ConfigWebActionInput) => deleteRole(text(input, 'name')),
 
   readCapabilityDefaults: (_input: ConfigWebActionInput) => getCapabilityDefaultsDetails(),
+  readPromptControls: (_input: ConfigWebActionInput) => readPromptControls(),
+  writePromptControls: (input: ConfigWebActionInput) => {
+    if (!isRecord(input.controls)) throw new Error('controls must be object');
+    return writePromptControls(input.controls);
+  },
   writeCapabilityDefaults: (input: ConfigWebActionInput) =>
     writeCapabilityDefaults({
       disabledSkills: input.disabledSkills,

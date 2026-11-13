@@ -1,6 +1,7 @@
 // 编辑器（应用自带的 monaco）与数据源都在渲染层入口（main.jsx）注册过一次：会话详情、
 // 插件卡片也会在设置页之外打开，跟着设置页懒加载会晚一拍。
 import { ConfigWebApp } from '@mica-config-ui/web'
+import { useMemo } from 'react'
 
 /**
  * 设置 / 插件页：整页打开的配置页。
@@ -19,10 +20,38 @@ export function SettingsView({
   section = 'config',
   pluginId = null,
   actionCwd,
+  capabilityTarget,
   onClose,
   onNewSession,
   onOpenPluginPage
 }) {
+  const targetId = capabilityTarget?.id
+  const targetSessionId = capabilityTarget?.sessionId
+  const capabilitiesRuntime = useMemo(
+    () =>
+      targetId
+        ? {
+            key: `${targetId}:${targetSessionId ?? ''}:${actionCwd ?? ''}`,
+            read: async () => {
+              const result = await window.mica.chat.capabilities(targetId, {
+                sessionId: targetSessionId,
+                cwd: actionCwd
+              })
+              if (!result?.ok) throw new Error(result?.error || '读取会话能力失败')
+              return result
+            },
+            setSelection: async (selection) => {
+              const result = await window.mica.chat.setCapabilities(targetId, selection, {
+                sessionId: targetSessionId,
+                cwd: actionCwd
+              })
+              if (!result?.ok) throw new Error(result?.error || '更新会话能力失败')
+              return result
+            }
+          }
+        : undefined,
+    [targetId, targetSessionId, actionCwd]
+  )
   return (
     <section className="mica-config-shell" aria-label="Mica 设置">
       <ConfigWebApp
@@ -30,6 +59,7 @@ export function SettingsView({
         initialSection={section}
         initialPluginId={pluginId}
         actionCwd={actionCwd}
+        capabilitiesRuntime={capabilitiesRuntime}
         onClose={onClose}
         closeLabel="返回对话"
         onNewSession={onNewSession}

@@ -35,6 +35,7 @@ import { summarizeSessionFile } from '@mica-config-ui/session-head'
 import defaultSystemPromptTemplate from '@packages/mica-agent/prompt/system.md?raw'
 import { applyBrandTemplate } from '@packages/mica-agent/prompt/brandTemplate.js'
 import { wrapPromptXml } from '@packages/mica-common/promptXml.js'
+import { readPromptControls, writePromptControls } from '@packages/mica-config/promptControls.js'
 import { readBrowserControlDetails as readBrowserControlDetailsFromHost } from './browser-control.js'
 import { readTerminalControlDetails as readTerminalControlDetailsFromHost } from './terminal-control.js'
 import {
@@ -537,6 +538,8 @@ export const configWebActions = {
   deleteSkill: (input) => deleteSkill(text(input, 'name')),
 
   readCapabilityDefaults: () => getCapabilityDefaultsDetails(),
+  readPromptControls: () => readPromptControls(),
+  writePromptControls: (input) => writePromptControls(input?.controls),
   writeCapabilityDefaults: (input) =>
     writeCapabilityDefaults({
       disabledSkills: input?.disabledSkills,

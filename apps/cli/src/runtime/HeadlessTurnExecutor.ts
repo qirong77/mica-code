@@ -13,6 +13,7 @@ import { uncommittedResponseText } from './conversationHistory.js';
 import { TurnNoticeLog, createRetryNotice, createTurnErrorNotice, mergeInFlightUserMessage } from './turnNotices.js';
 import { compactIdleSessionHistory } from '../agent/agentCompaction.js';
 import type { PluginTurnPrepareEvent } from '@packages/mica-plugin/index.js';
+import { readPromptControls } from '@packages/mica-config/promptControls.js';
 
 export type HeadlessTurnStatus = 'completed' | 'aborted' | 'error';
 
@@ -488,6 +489,7 @@ export class HeadlessTurnExecutor {
         // swallows a queued user input.
         const replayInputs: AgentQueryContent[] = [];
         const retryDelayMs = this.options.retryDelayMs ?? TURN_RETRY_DELAY_MS;
+        const promptControls = readPromptControls();
         for (let attempt = 0; attempt <= maxRetries; attempt++) {
           const attemptInputs: AgentQueryContent[] = [];
           const attemptRunId = attempt === 0 ? reservedRunId : agent.reserveRunId();
@@ -495,6 +497,7 @@ export class HeadlessTurnExecutor {
             agent.events.emit('thinkingTurnAttemptStart', undefined);
             runResult = await agent.run(runContent, {
               reservedRunId: attemptRunId,
+              promptControls,
               maxTurns: this.options.maxTurns,
               onIterationComplete: () => {
                 this.saveCurrent({ allowEmpty: true, turnState: 'running' });

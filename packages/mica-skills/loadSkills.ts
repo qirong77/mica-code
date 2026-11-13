@@ -223,6 +223,15 @@ export function getLoadedSkills(): Skill[] {
   return composedSkills;
 }
 
+/** 生效目录保留注册归属；被同名磁盘技能遮蔽的插件条目不会获得归属。 */
+export function getSkillCatalog(): Array<Skill & { pluginId?: string }> {
+  const owners = new Map<Skill, string>();
+  for (const [owner, skills] of runtimeSkills) {
+    for (const skill of skills) owners.set(skill, owner);
+  }
+  return getLoadedSkills().map((skill) => ({ ...skill, pluginId: owners.get(skill) }));
+}
+
 export function reloadSkills(): Skill[] {
   diskSkills = null;
   composedSkills = null;

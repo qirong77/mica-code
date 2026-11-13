@@ -45,6 +45,8 @@ setup 必须先登记独立动作再按能力装配会话工具；动作宿主�
 
 ### skills
 
+Capabilities 可按插件查看实际工具、技能和提示词贡献。工具归属来自注册时的 `group`，技能归属由 `micaSkills.getCatalog()` 保留当前生效条目的 owner，提示词归属来自 `PluginPromptSections.inspect()`；不使用其它进程写下的状态来冒充当前会话。用户可以在不卸载插件的情况下关掉整插件或单段注入、覆盖或恢复正文，全局控制格式见 `storage.md`。
+
 - 内置 skill 用 `ctx.skills.register()`：正文随包用 `import … with { type: 'text' }` 内嵌，元数据由 `micaSkills.parseMarkdown(SKILL.md)` 解析（frontmatter 是唯一来源），注册后与磁盘 skill 同权（prompt 索引 / `skill` 工具 / 会话能力开关）。磁盘上的同名 skill 优先，被遮蔽的条目从返回值 `skipped` 读出来并 `ctx.health.report()`。`baseDir` 必须是真能读到的目录——单二进制没有插件目录，所以随包资源要先落盘到 `$MICA_HOME/<插件目录>` 再注册（`plugins/computer-use` 是完整示例，源码内嵌由 `scripts/generate-computer-use-sources.mjs` 生成，改 `runtime/**` 必须重跑）；**正文不落盘（`baseDir/SKILL.md` 不存在）的 skill 不会进补全列表**，因为补全插入的就是这条路径。
 - 注册成功的内置 skill 由插件系统顺带发布到 `$MICA_HOME/plugin-skills/<pluginId>.json`（`PluginSkills.ts`，一个插件一份、整份重写）：不 setup 插件的宿主（桌面运行时给 `/` 补全、配置页）靠这份索引列出内置 skill，不必为两个名字冷启动会话进程。索引不主动清理（多进程会互相踩），读的时候按 `plugins-state.json` 的停用名单与 `SKILL.md` 是否还在过滤——所以停用插件、卸掉插件之后它立刻从列表消失。
 - 插件整块按会话角色门控时（段落、工具、技能一起只对某个角色出现），技能也要声明角色：`ctx.skills.register(skill, { roles: ['需求开发'] })`（空数组＝所有角色）。角色随条目写进索引（`version: 2`，缺 `roles` 的旧索引直接当没有），由读索引的一方按会话角色过滤——索引是全局一份、注册只发生在跑插件的那个进程里，判定只能留在读取侧。

@@ -51,6 +51,7 @@ const agent = micaAgent.createModelClient({
 - pi-ai 固定版本为 `1.5.2`，Node 运行时要求 `>=22.19.0`。真实 API 冒烟用显式开关 `MICA_PI_LIVE=1 MICA_PI_SOURCE_HOME=/path/to/.mica MICA_PI_PROVIDER=<id> bunx vitest run --project unit packages/mica-agent/providers/piLive.test.ts`；默认跳过，不读取真实凭据。每种选中协议最多三次模型请求，验证工具循环与序列化后重放。
 - prompt 构建集中放在 `prompt/`，避免散落在运行时流程中。
 - `<system>` 始终保留内置默认正文；磁盘与插件的非默认 role 都经 `rolePrompt` 追加成紧接其后的 `<role>` 段，两段同属 system prompt，`default` 不重复追加。`AgentRole` 不再包含 `append` 标志；project instructions、skills 索引和环境 context 仍由 prompt builder 注入。
+- `prompt/index.ts` 的 `inspectSystemPrompt(options)` 同次返回 `{ prompt, sections }`；`BuildSystemPromptOptions.promptControls` 支持 role / project-instructions / skills / context 的开关与正文覆盖，固定 system 始终只读。`buildSystemPrompt()` 复用这份实现，无覆盖时输出不变。
 - UI/Ink 相关的日志 item 工厂放在 `packages/mica-ui`，本包只暴露 provider 与 agent 类型。
 
 ## 目录说明

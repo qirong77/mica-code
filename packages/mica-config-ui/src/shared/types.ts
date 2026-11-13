@@ -1,4 +1,5 @@
 import type { TurnTimingRecord } from '@packages/mica-common/turnTiming.js';
+import type { RuntimePromptInspection } from '@packages/mica-common/promptControls.js';
 import type { ProviderProtocol } from '@packages/mica-config/providerProtocol.js';
 
 export type ConfigWebSection =
@@ -228,9 +229,19 @@ export type ConfigWebSkillsDetails = {
  * 「以后新建会话时哪些默认打开」，不会改写已经存在的会话。
  */
 export type ConfigWebCapabilityDefaults = {
-  skills: Array<{ name: string; description: string }>;
+  skills: Array<{ name: string; description: string; pluginId?: string; path?: string }>;
   tools: ConfigWebCapabilityTool[];
   mcpServers: string[];
+  /** 静态安装目录与上次装配记录；不代表某一会话当前实际加载的插件。 */
+  plugins: Array<{
+    id: string;
+    name: string;
+    description?: string;
+    state: 'enabled' | 'disabled' | 'failed';
+    source: 'official' | 'user';
+    loadStatus?: string;
+    error?: string;
+  }>;
   disabledSkills: string[];
   disabledTools: string[];
   disabledMcpServers: string[];
@@ -251,6 +262,43 @@ export type ConfigWebCapabilityTool = {
   parameters: ConfigWebCapabilityToolParameter[];
   /** 工具族：`null` 表示独立工具；有值时面板按组展示与按组开关。 */
   group: { key: string; label: string } | null;
+  pluginId?: string;
+  source?: string;
+  inputSchema?: Record<string, unknown>;
+};
+
+/** 由当前会话宿主提供；与新会话默认目录分开，包含真实的工具与提示词快照。 */
+export type ConfigWebRuntimeCapabilities = {
+  ok?: boolean;
+  error?: string;
+  selection: {
+    version: 1;
+    disabledSkills: string[];
+    disabledTools: string[];
+    disabledMcpServers: string[];
+  };
+  skills: Array<{ name: string; description: string; pluginId?: string; path?: string }>;
+  tools: ConfigWebCapabilityTool[];
+  mcpServers: Array<{ name: string; status?: string; error?: string; tools?: unknown[] }>;
+  mcpTools?: ConfigWebCapabilityTool[];
+  prompt: RuntimePromptInspection;
+  plugins: Array<{
+    id: string;
+    name: string;
+    status: string;
+    error?: string;
+    toolNames: string[];
+    skillNames: string[];
+    promptSectionIds: string[];
+  }>;
+};
+
+/** App 把会话级连接作为适配器传入共享配置页；此处只声明纯数据契约。 */
+export type ConfigWebCapabilitiesRuntime = {
+  /** 同一宿主内稳定的会话身份，供未保存草稿和组件生命周期隔离。 */
+  key?: string;
+  read(): Promise<ConfigWebRuntimeCapabilities>;
+  setSelection(selection: ConfigWebRuntimeCapabilities['selection']): Promise<unknown>;
 };
 
 export type ConfigWebPluginSource = 'official' | 'user';

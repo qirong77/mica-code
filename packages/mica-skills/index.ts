@@ -1,6 +1,7 @@
 import {
   clearRuntimeSkills,
   getLoadedSkills,
+  getSkillCatalog,
   loadSkillFromDir,
   parseSkillMarkdown,
   registerRuntimeSkills,
@@ -10,6 +11,8 @@ import {
 export const micaSkills = {
   /** 返回当前已加载的 skills 列表。 */
   getLoaded: getLoadedSkills,
+  /** 当前生效目录，保留插件注册的来源信息。 */
+  getCatalog: getSkillCatalog,
   /** 重新扫描磁盘上的 skills，用于用户新增或修改 skill 后刷新运行时状态。 */
   reload: reloadSkills,
   /**

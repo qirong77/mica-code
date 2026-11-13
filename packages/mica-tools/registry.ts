@@ -39,6 +39,8 @@ export type RuntimeToolRegistrationOptions = {
 export type ToolCatalogEntry = {
   name: string;
   description: string;
+  /** 注册工具发送给模型的完整入参结构；静态目录占位项可能没有。 */
+  inputSchema?: MicaTool['input_schema'];
   source: ToolSource;
   /** Original MCP server name for `source: 'mcp'` entries. */
   mcpServer?: string;
@@ -241,6 +243,7 @@ export function getToolCatalog(): ToolCatalogEntry[] {
   const entries: ToolCatalogEntry[] = tools.map((tool) => ({
     name: tool.name,
     description: tool.description,
+    inputSchema: tool.input_schema,
     source: tool.source === 'mcp' ? 'mcp' : 'builtin',
     mcpServer: tool.mcpServer,
     readOnly: tool.readOnly,

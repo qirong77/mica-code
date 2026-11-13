@@ -117,7 +117,7 @@ describe('loadSkills', () => {
     );
 
     vi.resetModules();
-    const { getLoadedSkills, registerRuntimeSkills } =
+    const { getLoadedSkills, getSkillCatalog, registerRuntimeSkills } =
       (await import('./loadSkills.js')) as typeof import('./loadSkills.js');
 
     const registration = registerRuntimeSkills('test.plugin', [
@@ -131,9 +131,12 @@ describe('loadSkills', () => {
     const skills = getLoadedSkills();
     expect(skills.find((skill) => skill.name === 'builtin-skill')?.description).toBe('From plugin');
     expect(skills.find((skill) => skill.name === 'clash-skill')?.description).toBe('From disk');
+    expect(getSkillCatalog().find((skill) => skill.name === 'builtin-skill')?.pluginId).toBe('test.plugin');
+    expect(getSkillCatalog().find((skill) => skill.name === 'clash-skill')?.pluginId).toBeUndefined();
 
     registration.dispose();
     expect(getLoadedSkills().some((skill) => skill.name === 'builtin-skill')).toBe(false);
+    expect(getSkillCatalog().some((skill) => skill.pluginId === 'test.plugin')).toBe(false);
     rmSync(skillDir, { recursive: true, force: true });
   });
 });

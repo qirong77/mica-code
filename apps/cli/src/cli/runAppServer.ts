@@ -1,7 +1,7 @@
 import { createInterface } from 'node:readline';
 import { readFile, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { resolve } from 'node:path';
+import { join, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import setupModelEffortContext from '@packages/mica-builtin-commands/startup/model-effort-context/index.js';
 import { micaConfig } from '@packages/mica-config/index.js';
@@ -57,6 +57,7 @@ import {
   type MicaWaitTaskItem,
 } from '@packages/mica-runtime/index.js';
 import { micaRuntime } from '@packages/mica-runtime/index.js';
+import type { MicaRuntimePluginCapability } from '@packages/mica-runtime/codexProtocol.js';
 import {
   cleanBackgroundTaskOutput,
   killBackgroundTask as killBackgroundTaskById,
@@ -1865,24 +1866,65 @@ async function handleCodexRequest(
       // 但它从不写进用户配置：漏掉它，界面上既看不到也关不掉。
       const sessionMcp = ctx.mcpConfigPath ? await micaMcp.readConfig(ctx.mcpConfigPath).catch(() => ({})) : {};
       const statusByName = new Map(micaMcp.servers.get().map((server) => [server.name, server]));
+      const prompt = ctx.agent.inspectPrompt();
+      const tools = micaTools.getCatalog().map((tool) => ({
+        name: tool.name,
+        description: tool.description,
+        readOnly: tool.readOnly,
+        parameters: tool.parameters,
+        group: tool.group,
+        source: tool.source,
+        ...(tool.mcpServer ? { mcpServer: tool.mcpServer } : {}),
+        ...(tool.group?.key.startsWith('plugin:') ? { pluginId: tool.group.key.slice('plugin:'.length) } : {}),
+        inputSchema: tool.inputSchema ?? null,
+      })).sort((a, b) => a.name.localeCompare(b.name));
+      const skills = micaSkills.getCatalog().map((skill) => ({
+        name: skill.name,
+        description: skill.description,
+        path: join(skill.baseDir, 'SKILL.md'),
+        ...(skill.pluginId ? { pluginId: skill.pluginId } : {}),
+      })).sort((a, b) => a.name.localeCompare(b.name));
+      const report = ctx.plugins?.setupReport();
+      const plugins = new Map<string, MicaRuntimePluginCapability>();
+      for (const plugin of ctx.plugins?.list() ?? []) {
+        const failed = report?.failed.find((entry) => entry.pluginId === plugin.id);
+        const skipped = report?.skipped.find((entry) => entry.pluginId === plugin.id);
+        plugins.set(plugin.id, {
+          id: plugin.id,
+          name: plugin.manifest?.name ?? plugin.id,
+          status: failed ? 'failed' : skipped ? 'skipped' : report?.loaded.includes(plugin.id) ? 'loaded' : 'registered',
+          ...(failed ? { error: failed.error instanceof Error ? failed.error.message : String(failed.error) } : {}),
+          ...(skipped ? { error: `Missing host capabilities: ${skipped.missing.join(', ')}` } : {}),
+          toolNames: [],
+          skillNames: [],
+          promptSectionIds: [],
+        });
+      }
+      const capabilityPlugin = (id: string, name = id): MicaRuntimePluginCapability => {
+        let plugin = plugins.get(id);
+        if (!plugin) {
+          plugin = { id, name, status: 'loaded', toolNames: [], skillNames: [], promptSectionIds: [] };
+          plugins.set(id, plugin);
+        }
+        return plugin;
+      };
+      for (const tool of tools) {
+        if (tool.pluginId) capabilityPlugin(tool.pluginId, tool.group?.label).toolNames.push(tool.name);
+      }
+      for (const skill of skills) {
+        if (skill.pluginId) capabilityPlugin(skill.pluginId).skillNames.push(skill.name);
+      }
+      for (const section of prompt.sections) {
+        if (section.pluginId && section.sectionId) capabilityPlugin(section.pluginId).promptSectionIds.push(section.id);
+      }
       ctx.writeResponse({
         ok: true,
         selection,
-        skills: micaSkills
-          .getLoaded()
-          .map((skill) => ({ name: skill.name, description: skill.description }))
-          .sort((a, b) => a.name.localeCompare(b.name)),
-        tools: micaTools
-          .getCatalog()
-          .filter((tool) => tool.source !== 'mcp')
-          .map((tool) => ({
-            name: tool.name,
-            description: tool.description,
-            readOnly: tool.readOnly,
-            parameters: tool.parameters,
-            group: tool.group,
-          }))
-          .sort((a, b) => a.name.localeCompare(b.name)),
+        prompt,
+        plugins: [...plugins.values()].sort((a, b) => a.name.localeCompare(b.name)),
+        skills,
+        tools: tools.filter((tool) => tool.source !== 'mcp'),
+        mcpTools: tools.filter((tool) => tool.source === 'mcp'),
         mcpServers: micaMcp.catalog({
           configured: configuredMcp,
           extra: sessionMcp,

@@ -47,6 +47,7 @@ import { prepareImageForApi } from '@packages/mica-common/index.js';
 - `promptText.ts`：消息文本归一化（剥掉媒体占位符再折叠空白）与 `comparableText` 系列，编辑重发、回退点按文本定位用户消息时共用。
 - `chatQuote.ts`：「引用对话」文本约定的唯一实现（格式化、解析、插入草稿、移除、标题派生时剥离前导引用块），CLI 与桌面端按子路径 `@packages/mica-common/chatQuote.js` 引入。
 - `capabilities.ts`：会话级能力选择（只保存被关掉的 skills / tools / MCP server），归一化与比较规则两端共用。
+- `promptControls.ts`：浏览器安全的全局 `PromptControls`、来源快照与运行时提示词检查类型，以及插件段键 `promptSectionKey(pluginId, sectionId)`。
 - `toolNames.ts`：工具名规范（snake_case 全小写）与历史大驼峰名的 `normalizeToolName` 映射。
 - `loopArgs.ts`：`/loop` 参数解析与间隔上下限，CLI 与桌面端斜杠命令共用同一套写法。
 - `todoState.ts`：待办解析归一化与展示投影的唯一实现，TUI 面板与 desktop 计划 dock 共用；宿主只渲染，不改写模型给的状态。

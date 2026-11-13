@@ -95,3 +95,5 @@ bunx tsc --noEmit
 系统提示词按注入来源组织 XML：`mica-common` 导出 `escapePromptXml` / `wrapPromptXml`，`mica-agent` 包装基础段落与项目文档。`buildSystemPrompt()` 固定使用内置只读的 `<system>` 默认正文；`BuildSystemPromptOptions.baseSystemPrompt` 覆盖入口已移除，这个形态不再支持。磁盘与插件的非默认 Role 统一经 `rolePrompt` 追加为紧接其后的 `<role>` 段，两者同属 system prompt，`default` 不重复追加，`AgentRole` 不再包含 `append` 标志。`mica-plugin` 的 `ctx.prompt.section()` 为插件正文统一生成带 `plugin`、`section` 属性的 `injection`。`system-prompt:build` 形态不再支持。插件线程和独立模型请求由 CLI 宿主包装其系统提示词。
 
 插件工具通过 `ctx.tools.register()` 注册时，由 PluginManager 自动注入 `group: { key, label }`（插件 id 与清单名称），宿主传给工具 registry。会话能力与默认能力列表按插件归组，只提供整组开关；工具详情的开关同样作用于整组。
+
+Capabilities 的真实会话目录使用 `micaSkills.getCatalog()` 保留技能 `pluginId`，工具目录包含完整 `inputSchema`。全局提示词控制纯类型在 `mica-common/promptControls.ts`，读写在 `mica-config/promptControls.ts`；`PluginPromptSections.inspect(controls?)` 与 `mica-agent/prompt/index.ts` 的 `inspectSystemPrompt(options)` 提供来源快照，宿主将其与最近发送存档分开展示。`ConfigWebApp.capabilitiesRuntime` 可选适配当前会话的读取与能力选择，独立配置宿主不冒充实际运行时。
