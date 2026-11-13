@@ -59,3 +59,26 @@ it('expands brand placeholders in appended roles without changing unknown placeh
   expect(prompt).not.toContain('{{ MICA_APP_NAME }}');
   expect(prompt).toContain('{{ UNKNOWN_ROLE_VALUE }}');
 });
+
+it('applies the user order to the assembled prompt and keeps the system section first', () => {
+  const options = {
+    rolePrompt: 'Role body.',
+    projectInstructions: 'Project body.',
+    skills: [],
+    now: new Date(2026, 0, 1),
+    shell: 'sh',
+  };
+  const promptControls = {
+    version: 1 as const,
+    disabledPlugins: [],
+    sections: {},
+    order: ['context', 'project-instructions', 'role'],
+  };
+  const prompt = buildSystemPrompt({ ...options, promptControls });
+  expect(prompt.startsWith(defaultSection)).toBe(true);
+  expect(prompt.indexOf('<context>')).toBeLessThan(prompt.indexOf('<project-instructions>'));
+  expect(prompt.indexOf('<project-instructions>')).toBeLessThan(prompt.indexOf('<role>'));
+  // 不使用自定义顺序时排列不变，避免改功能本身给提示词前缀带来无意义的抖动。
+  const plain = buildSystemPrompt(options);
+  expect(plain.indexOf('<role>')).toBeLessThan(plain.indexOf('<project-instructions>'));
+});

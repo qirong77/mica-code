@@ -20,7 +20,7 @@
 - effort 档位与 wire 参数的唯一入口：`getModelEffortOptions` / `normalizeModelEffort` / `resolveEffortParams`。
 - 档位与上下文跟着「谁在服务这个模型」走：`getModelRule` / `ensureModelRule` 接受 provider 作用域（`{ id, api_base }`），缓存键带上 provider。同一模型名在网关与厂商原生条目下的档位可以不同（OpenRouter 的 `moonshotai/kimi-k3` 多一个 `none`），只按模型名查会用错那一份；服务商在 models.dev 收录了该模型就以它为准（先认 `id`，再认 `api_base` 主机名），否则按模型厂商的条目。`micaConfig.providerForModel(model)` 解出归属。
 - 读写新会话默认能力：`readCapabilityDefaults` / `updateCapabilityDefaults`，对应 `config.json` 的 `capabilityDefaults`，配置页 Capabilities 页签用它。
-- `promptControls.ts` 提供 `readPromptControls()` / `writePromptControls(value)` / `normalizePromptControls(value)`：全局提示词开关和正文覆盖存 `$MICA_HOME/prompt-controls.json`（version 1，0600 原子写入）。缺文件为无覆盖，损坏或非法写入报错；固定 system 只读，单段上限 200000 字符、整份上限 1 MiB。会话在每轮开始捕获控制，轮中修改下一轮生效。
+- `promptControls.ts` 提供 `readPromptControls()` / `writePromptControls(value)` / `normalizePromptControls(value)`：全局提示词开关、正文覆盖与段落顺序（`order`，只允许可编辑段落，写 `system` 报错，空数组不落盘）存 `$MICA_HOME/prompt-controls.json`（version 1，0600 原子写入）。缺文件为无覆盖，损坏或非法写入报错；固定 system 只读，单段上限 200000 字符、整份上限 1 MiB。会话在每轮开始捕获控制，轮中修改下一轮生效。
 
 ## 使用入口
 

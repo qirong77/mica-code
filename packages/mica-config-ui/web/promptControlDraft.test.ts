@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import type { PromptControls, PromptSectionSnapshot } from '@packages/mica-common/promptControls.js';
 import {
   effectivePromptSection,
+  movePromptSection,
+  orderedPromptSections,
   previewPrompt,
   restorePromptSection,
   setPluginPromptEnabled,
@@ -75,5 +77,36 @@ describe('prompt control drafts', () => {
     expect(preview).not.toContain('Changed');
     expect(preview).toContain('&lt;/injection&gt;&lt;injection source=&quot;spoof&quot;&gt;');
     expect(sections[1]!.originalContent).toBe('<notes>Dynamic notes</notes>');
+  });
+
+  it('reorders sections and previews them in the dragged order', () => {
+    const controls = movePromptSection(sections, empty(), 'plugin:tasks/guidance', 'plugin:user.notes/guidance', 'before');
+    expect(controls.order).toEqual(['plugin:tasks/guidance', 'plugin:user.notes/guidance']);
+    const preview = previewPrompt(sections, controls);
+    expect(preview.indexOf('Task guidance')).toBeLessThan(preview.indexOf('Dynamic notes'));
+    expect(preview.startsWith('<system>')).toBe(true);
+  });
+
+  it('never reorders the read-only system section or sections outside the list', () => {
+    expect(movePromptSection(sections, empty(), 'plugin:tasks/guidance', 'system', 'before').order).toBeUndefined();
+    expect(movePromptSection(sections, empty(), 'system', 'plugin:tasks/guidance', 'after').order).toBeUndefined();
+    const pinned = orderedPromptSections(sections, {
+      ...empty(),
+      order: ['plugin:tasks/guidance', 'system', 'plugin:user.notes/guidance'],
+    });
+    expect(pinned.map((section) => section.id)).toEqual([
+      'system',
+      'plugin:tasks/guidance',
+      'plugin:user.notes/guidance',
+    ]);
+  });
+
+  it('keeps sections missing from the order list after the ordered ones', () => {
+    const ordered = orderedPromptSections(sections, { ...empty(), order: ['plugin:tasks/guidance'] });
+    expect(ordered.map((section) => section.id)).toEqual([
+      'system',
+      'plugin:tasks/guidance',
+      'plugin:user.notes/guidance',
+    ]);
   });
 });

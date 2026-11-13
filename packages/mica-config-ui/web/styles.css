@@ -5735,21 +5735,13 @@ html[data-theme='tokyo-night-light'] .mica-config-ui {
   overflow: hidden;
 }
 
-.capability-scope-bar,
 .capability-plugin-actions,
-.capability-prompt-heading,
-.capability-prompt-actions,
 .capability-save-error {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
   min-width: 0;
-}
-
-.capability-scope-fact {
-  color: var(--text-soft);
-  font-size: var(--text-aux);
 }
 
 .capability-card > .session-tabs {
@@ -5760,11 +5752,6 @@ html[data-theme='tokyo-night-light'] .mica-config-ui {
 .capability-card .session-tab {
   flex: none;
   white-space: nowrap;
-}
-
-.capability-search {
-  padding: 10px 16px;
-  border-bottom: 1px solid var(--line-soft);
 }
 
 .capability-source {
@@ -5840,143 +5827,179 @@ html[data-theme='tokyo-night-light'] .mica-config-ui {
   border-radius: 0;
 }
 
-.capability-prompt-panel {
+.prompt-control-list {
   display: grid;
-  gap: 12px;
+  align-content: start;
+  gap: 6px;
   padding: 14px;
 }
 
-.capability-prompt-panel > .split-view {
-  height: 570px;
-  min-height: 360px;
-}
-
-.capability-prompt-panel .split-rail {
-  display: block;
-  overflow-y: auto;
-  padding: 6px;
-}
-
-.capability-prompt-panel .split-main {
-  display: block;
-  min-width: 0;
+.prompt-control-row {
+  position: relative;
   overflow: hidden;
-}
-
-.capability-prompt-summary {
-  display: grid;
-  gap: 4px;
-  padding: 8px;
-  color: var(--text-soft);
-  font-size: 12px;
-}
-
-.capability-prompt-summary > span:last-child {
-  overflow: hidden;
-  color: var(--text-faint);
-  font-size: 11px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.capability-prompt-section-label {
-  margin: 12px 8px 6px;
-  color: var(--text-faint);
-  font-size: 11px;
-}
-
-.capability-prompt-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 8px;
-  padding: 2px 8px;
-  border: 1px solid transparent;
+  border: 1px solid var(--line-soft);
   border-radius: var(--radius-md);
+  background: var(--panel);
 }
 
-.capability-prompt-row:hover,
-.capability-prompt-row.is-active {
-  background: var(--panel-muted);
-}
-
-.capability-prompt-row.is-active {
+.prompt-control-row:hover {
   border-color: var(--line);
 }
 
-.capability-prompt-source {
+.prompt-control-row.is-open {
+  border-color: var(--line);
+}
+
+.prompt-control-row.is-off .prompt-control-title {
+  color: var(--text-soft);
+}
+
+.prompt-control-row.is-dragging {
+  opacity: 0.45;
+}
+
+.prompt-control-row.is-drop-before::before,
+.prompt-control-row.is-drop-after::after {
+  content: '';
+  position: absolute;
+  z-index: 1;
+  right: 0;
+  left: 0;
+  height: 2px;
+  background: var(--accent);
+}
+
+.prompt-control-row.is-drop-before::before {
+  top: 0;
+}
+
+.prompt-control-row.is-drop-after::after {
+  bottom: 0;
+}
+
+.prompt-control-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 44px;
+  padding: 0 12px 0 6px;
+}
+
+.prompt-control-grip {
   display: grid;
-  gap: 3px;
+  flex: none;
+  place-items: center;
+  width: 20px;
+  height: 26px;
+  border-radius: var(--radius-sm);
+  color: var(--text-faint);
+  cursor: grab;
+}
+
+.prompt-control-grip:hover {
+  background: var(--panel-muted);
+  color: var(--text-soft);
+}
+
+.prompt-control-grip:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.prompt-control-grip.is-static {
+  cursor: default;
+}
+
+.prompt-control-grip.is-static:hover {
+  background: transparent;
+}
+
+.prompt-control-toggle {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 8px;
   min-width: 0;
-  padding: 7px 0;
+  padding: 10px 2px;
   border: 0;
   background: transparent;
   color: var(--text);
-  font-size: 12px;
+  font: inherit;
   text-align: left;
   cursor: pointer;
 }
 
-.capability-prompt-source > span,
-.capability-prompt-row small {
+.prompt-control-title {
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.capability-prompt-row small {
-  color: var(--text-faint);
-  font-size: 10px;
-}
-
-.capability-prompt-editor {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
   min-width: 0;
-  min-height: 0;
-}
-
-.capability-prompt-heading,
-.capability-prompt-actions {
-  flex: none;
-  flex-wrap: wrap;
-  padding: 10px 12px;
-  border-bottom: 1px solid var(--line-soft);
-}
-
-.capability-prompt-heading > div:first-child {
-  display: grid;
-  gap: 4px;
-  min-width: 0;
-}
-
-.capability-prompt-heading strong {
   font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition: color 120ms ease;
 }
 
-.capability-prompt-heading span,
-.capability-prompt-actions > span {
-  overflow: hidden;
-  color: var(--text-soft);
+.prompt-control-source {
+  flex: none;
+  color: var(--text-faint);
   font-size: 11px;
-  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.capability-prompt-editor-host {
-  flex: 1 1 auto;
-  min-height: 140px;
+.prompt-control-chevron {
+  flex: none;
+  margin-left: auto;
+  color: var(--text-faint);
+  transition: transform 140ms ease;
 }
 
-.capability-prompt-footnote {
-  flex: none;
-  margin: 0;
-  padding: 10px 12px;
-  border-top: 1px solid var(--line-soft);
+.prompt-control-row.is-open .prompt-control-chevron {
+  transform: rotate(90deg);
+}
+
+/* 展开/收起走一条高度过渡：0fr → 1fr 不用量高度，收起后编辑器才卸载。
+   时长与 PromptControlsPanel 的 BODY_ANIMATION_MS 对齐。 */
+.prompt-control-body-wrap {
+  display: grid;
+  grid-template-rows: 0fr;
+  overflow: hidden;
+  transition: grid-template-rows 160ms ease;
+}
+
+.prompt-control-body-wrap.is-open {
+  grid-template-rows: 1fr;
+}
+
+.prompt-control-body {
+  display: grid;
+  gap: 8px;
+  min-height: 0;
+  padding: 0 12px 12px 28px;
+}
+
+.prompt-control-editor {
+  height: 280px;
+  min-height: 160px;
+}
+
+.prompt-control-editor.is-empty {
+  height: 96px;
+  min-height: 96px;
+}
+
+.prompt-control-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
   color: var(--text-faint);
   font-size: 11px;
-  line-height: 1.6;
+}
+
+.prompt-control-actions > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .capability-schema-host {
@@ -5994,16 +6017,24 @@ html[data-theme='tokyo-night-light'] .mica-config-ui {
     justify-content: flex-end;
   }
 
-  .capability-prompt-panel > .split-view {
-    height: auto;
-    grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: auto minmax(420px, 1fr);
+  .prompt-control-list {
+    padding: 10px;
   }
 
-  .capability-prompt-panel .split-rail {
-    max-height: 240px;
-    border-right: 0;
-    border-bottom: 1px solid var(--line);
+  .prompt-control-body {
+    padding: 0 10px 10px;
+  }
+
+  .prompt-control-editor {
+    height: 220px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .prompt-control-body-wrap,
+  .prompt-control-chevron,
+  .prompt-control-title {
+    transition: none;
   }
 }
 

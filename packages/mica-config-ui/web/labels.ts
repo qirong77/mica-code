@@ -24,27 +24,16 @@ export const ROLE_LABELS = {
 
 export const CAPABILITY_LABELS = {
   description: '查看 Agent 的工具、技能、插件与完整提示词，按来源控制提示词注入',
-  currentSession: '当前会话',
-  defaults: '默认配置',
   plugins: 'Plugins',
   prompts: '提示词控制',
   tools: 'Tools',
   skills: 'Skills',
   mcpServers: 'MCP servers',
   promptScope: '提示词开关与正文覆盖对所有会话生效，从下一轮开始应用；关闭注入后，插件的工具仍可使用。',
-  runtimeNote: '目录来自当前会话的实际注册表；工具与技能开关只影响这条会话。',
-  defaultsNote: '这里调整默认能力；未单独定制的会话会跟随默认值。插件的实际工具与动态提示词可在“当前会话”中查看。',
-  noRuntime: '在桌面端打开一条会话后，可在这里查看实时工具目录、分段提示词和完整预览。',
-  preview: '下一轮预览',
-  lastSent: '最近实际发送',
-  noLastSent: '这条会话还没有记录实际发送的系统提示词。',
+  defaultsNote: '这里调整默认能力；未单独定制的会话会跟随默认值。插件贡献的工具、技能与动态提示词都在这一页查看和开关。',
+  noRuntime: '在桌面端打开一条会话后，可在这里查看这一轮实际拼装的提示词与每段的来源。',
   restore: '恢复原文',
-  original: '原文',
-  overridden: '已覆盖',
   injection: '提示词注入',
-  copy: '复制正文',
-  copied: '已复制',
-  search: '搜索名称、说明或插件…',
 };
 
 export function promptSectionLabel(id: string, fallback: string): string {

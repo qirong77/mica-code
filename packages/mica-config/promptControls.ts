@@ -45,7 +45,7 @@ function validId(value: unknown): value is string {
 export function normalizePromptControls(value: unknown): PromptControls {
   if (!isRecord(value)) fail('expected an object');
   if (value.version !== 1) fail('version must be 1');
-  if (Object.keys(value).some((key) => !['version', 'disabledPlugins', 'sections'].includes(key))) {
+  if (Object.keys(value).some((key) => !['version', 'disabledPlugins', 'sections', 'order'].includes(key))) {
     fail('unknown field');
   }
   if (!Array.isArray(value.disabledPlugins) || value.disabledPlugins.length > MAX_ENTRIES) {
@@ -71,9 +71,24 @@ export function normalizePromptControls(value: unknown): PromptControls {
       ...(typeof section.content === 'string' ? { content: section.content } : {}),
     };
   }
-  const controls: PromptControls = { version: 1, disabledPlugins: [...new Set(value.disabledPlugins)], sections };
+  const order = normalizeOrder(value.order);
+  const controls: PromptControls = {
+    version: 1,
+    disabledPlugins: [...new Set(value.disabledPlugins)],
+    sections,
+    ...(order.length ? { order } : {}),
+  };
   if (Buffer.byteLength(JSON.stringify(controls), 'utf8') > MAX_FILE_BYTES) fail('document exceeds 1 MB');
   return controls;
+}
+
+/** 顺序表只记录可编辑段落；`system` 固定在最前，写进来也没有意义。 */
+function normalizeOrder(value: unknown): string[] {
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || value.length > MAX_ENTRIES) fail('order must be an array with at most 1000 entries');
+  if (!value.every(validId)) fail('order must contain valid section ids');
+  if (value.includes('system')) fail('system cannot be reordered');
+  return [...new Set(value)];
 }
 
 export function readPromptControls(): PromptControls {

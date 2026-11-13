@@ -1,7 +1,7 @@
 # 配置、会话与存储
 
 - `MICA_HOME` 覆盖全部用户路径，默认 `~/.mica`；品牌目录经 `brand.ts` 解析。
-- `$MICA_HOME/prompt-controls.json` 是全局提示词控制（version 1）：`disabledPlugins` 关闭整插件注入，`sections[id]` 保存可选 `enabled` / `content`，插件段键为 `plugin:<pluginId>/<sectionId>`，基础段键为 role / project-instructions / skills / context。缺文件等于无覆盖，损坏内容显式报错，写入先校验整份再以 0600 原子替换；每段最多 200000 字符、整份最多 1 MiB。固定 system 不接受覆盖。它不进入会话快照，不随 resume/fork/rewind 复制或回滚。
+- `$MICA_HOME/prompt-controls.json` 是全局提示词控制（version 1）：`disabledPlugins` 关闭整插件注入，`sections[id]` 保存可选 `enabled` / `content`，插件段键为 `plugin:<pluginId>/<sectionId>`，基础段键为 role / project-instructions / skills / context；可选的 `order` 是用户拖拽出来的段落顺序，只装可编辑段落（写 `system` 直接报错），不含它时提示词排列保持原样，空数组不落盘。缺文件等于无覆盖，损坏内容显式报错，写入先校验整份再以 0600 原子替换；每段最多 200000 字符、整份最多 1 MiB。固定 system 不接受覆盖。它不进入会话快照，不随 resume/fork/rewind 复制或回滚。
 - `PersistedMicaConfig` 只存静态字段；运行时用 `stripRuntimeFields` 去除 provider/model/effort/contextWindowSize。新会话默认值唯一来自 `config.json.defaultModel: { provider, model, effort? }`；未配置取 `providers[0].models[0]`，未填 effort 用模型默认档位；`providers[].models` 是纯手填数据，没有任何运行时拉取或缓存。`micaConfig.resetSessionModelDefaults()` 重读默认值，TUI `/new`、`/clear` 同样调用；恢复会话与显式选择保留自己的值。`storage.json` 不再读写目录模型偏好。
 - 旧版本写在 `config.json` 的 `searxngUrl` 在启动时迁进 `plugin-settings/web-search.json`（已有值不覆盖）并删掉原键；搜索改成插件后只有插件设置生效。
 - 配置迁移与语义校验统一在 `startup/validate-config.js`，配置页保存复用它。

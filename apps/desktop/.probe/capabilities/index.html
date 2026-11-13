@@ -6,10 +6,12 @@
     <title>Capabilities · 交互预览</title>
     <style>
       html, body, #root { height: 100%; margin: 0; }
-      .preview-root > .arco-settings { display: flex; flex-direction: column; height: 100%; }
+      /* 页头放在 .arco-settings 外面：应用样式表给后者设了 grid，页头挤进去会压在页面标题上。 */
+      .preview-root { display: grid; grid-template-rows: auto minmax(0, 1fr); height: 100%; }
+      .preview-root > .arco-settings { display: block; min-height: 0; overflow: auto; }
       .preview-header { display: flex; flex: none; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; padding: 10px 24px; border-bottom: 1px solid var(--line); color: var(--text-soft); font-size: 12px; }
       .preview-header > div { display: flex; align-items: center; gap: 12px; }
-      .preview-main { display: flex; flex: 1; min-height: 0; padding: 12px 24px; }
+      .preview-main { display: flex; min-height: 0; padding: 12px 24px; }
       .preview-main > .page-frame { flex: 1; min-width: 0; }
       @media (max-width: 600px) { .preview-main { padding: 8px; } .preview-header { padding: 10px 12px; } }
     </style>

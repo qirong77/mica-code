@@ -60,6 +60,25 @@ describe('PluginPromptSections', () => {
     );
   });
 
+  it('follows the user order and keeps unlisted sections after it', () => {
+    const registry = new PluginPromptSections();
+    registry.add('a', { id: 'one', render: () => 'one' });
+    registry.add('b', { id: 'two', render: () => 'two' });
+    registry.add('c', { id: 'three', render: () => 'three' });
+    const controls: PromptControls = {
+      version: 1,
+      disabledPlugins: [],
+      sections: {},
+      order: ['plugin:b/two', 'plugin:a/one'],
+    };
+    expect(registry.inspect(controls).map((section) => section.id)).toEqual([
+      'plugin:b/two',
+      'plugin:a/one',
+      'plugin:c/three',
+    ]);
+    expect(registry.render(controls).indexOf('two')).toBeLessThan(registry.render(controls).indexOf('one'));
+  });
+
   it('escapes attributes and preserves plugin XML without allowing reserved boundaries', () => {
     const registry = new PluginPromptSections();
     registry.add(`a&<>"'`, {

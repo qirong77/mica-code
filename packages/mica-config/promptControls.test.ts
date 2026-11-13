@@ -55,6 +55,9 @@ describe('prompt controls storage', () => {
     { version: 1, disabledPlugins: [], sections: { system: { content: 'replace base' } } },
     { version: 1, disabledPlugins: [], sections: { system: { enabled: false } } },
     { version: 1, disabledPlugins: [], sections: { unknown: {} } },
+    { version: 1, disabledPlugins: [], sections: {}, order: 'role' },
+    { version: 1, disabledPlugins: [], sections: {}, order: [false] },
+    { version: 1, disabledPlugins: [], sections: {}, order: ['system'] },
   ])('rejects malformed writes without replacing the saved document (%j)', (input) => {
     writePromptControls({ ...empty(), disabledPlugins: ['keep'] });
     const path = join(directory, 'prompt-controls.json');
@@ -84,5 +87,17 @@ describe('prompt controls storage', () => {
     expect(() => readPromptControls()).toThrow(/Cannot read/);
     writeFileSync(path, JSON.stringify({ ...empty(), version: 2 }));
     expect(() => readPromptControls()).toThrow(/version must be 1/);
+  });
+
+  it('stores the drag order, dedupes it and keeps an untouched document free of one', () => {
+    const saved = writePromptControls({
+      ...empty(),
+      order: ['plugin:notes/rules', 'context', 'plugin:notes/rules'],
+    });
+    expect(saved.order).toEqual(['plugin:notes/rules', 'context']);
+    expect(readPromptControls().order).toEqual(['plugin:notes/rules', 'context']);
+    // 没有拖动过就不写这个字段：旧文档读出来仍然没有 order，提示词排列不受影响。
+    expect(writePromptControls({ ...empty(), order: [] }).order).toBeUndefined();
+    expect(readPromptControls().order).toBeUndefined();
   });
 });

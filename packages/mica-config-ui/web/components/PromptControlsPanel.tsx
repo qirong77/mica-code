@@ -1,179 +1,252 @@
-import { useMemo, useState } from 'react';
-import type { PromptControls, RuntimePromptInspection } from '@packages/mica-common/promptControls.js';
+import { useEffect, useRef, useState } from 'react';
+import type { PromptControls, PromptSectionSnapshot, RuntimePromptInspection } from '@packages/mica-common/promptControls.js';
+import { Button, Empty, Switch } from './Ui.js';
 import { JsonEditor } from './JsonEditor.js';
-import { Button, Empty, SplitView, Switch, Tag } from './Ui.js';
 import { CAPABILITY_LABELS as L, promptSectionLabel } from '../labels.js';
 import {
   effectivePromptSection,
-  previewPrompt,
+  movePromptSection,
+  orderedPromptSections,
   restorePromptSection,
   setPluginPromptEnabled,
   setPromptSection,
 } from '../promptControlDraft.js';
+import { appIcons } from '../icons.js';
 
+type DropTarget = { id: string; position: 'before' | 'after' };
+
+/**
+ * 提示词控制：一行就是 Agent 提示词里的一段。
+ *
+ * 顺序、开关、正文各自独立存储，但都落在同一份 `PromptControls` 里；界面显示的排列
+ * 就是下一轮拼装的排列，拖动只调整可编辑段落，`system` 固定在首位。
+ */
 export function PromptControlsPanel({
   inspection,
   controls,
   onChange,
-  query,
-  selectedId,
-  onSelect,
+  focusId,
+  onFocus,
+  pluginNames,
   disabled = false,
 }: {
   inspection: RuntimePromptInspection | null;
   controls: PromptControls;
   onChange(controls: PromptControls): void;
-  query: string;
-  selectedId: string;
-  onSelect(id: string): void;
+  focusId: string;
+  onFocus(id: string): void;
+  pluginNames?: Record<string, string>;
   disabled?: boolean;
 }) {
-  const [showOriginal, setShowOriginal] = useState(false);
-  const [copied, setCopied] = useState(false);
-  const [copyError, setCopyError] = useState<string | null>(null);
-  const sections = inspection?.sections ?? [];
-  const selected = sections.find((section) => section.id === selectedId);
-  const effective = selected ? effectivePromptSection(selected, controls) : null;
-  const preview = useMemo(() => previewPrompt(sections, controls), [sections, controls]);
-  const isSent = selectedId === 'sent';
-  const isFull = !selected;
-  const text = isFull
-    ? isSent
-      ? (inspection?.lastSent ?? '')
-      : preview
-    : showOriginal
-      ? selected.originalContent
-      : (effective?.content ?? '');
-  const overridden = selected ? controls.sections[selected.id]?.content !== undefined : false;
-  const title = isFull ? (isSent ? L.lastSent : L.preview) : promptSectionLabel(selected.id, selected.label);
-  const matching = sections.filter((section) =>
-    `${promptSectionLabel(section.id, section.label)} ${section.id} ${section.originalContent}`
-      .toLowerCase()
-      .includes(query.toLowerCase()),
-  );
+  const sections = inspection ? orderedPromptSections(inspection.sections, controls) : [];
+  const [openIds, setOpenIds] = useState<string[]>([]);
+  const [draggingId, setDraggingId] = useState<string | null>(null);
+  const [dropTarget, setDropTarget] = useState<DropTarget | null>(null);
+  const rowRefs = useRef<Record<string, HTMLDivElement | null>>({});
 
-  function select(id: string) {
-    onSelect(id);
-    setShowOriginal(false);
-    setCopied(false);
-    setCopyError(null);
+  useEffect(() => {
+    const ids = new Set(sections.map((section) => section.id));
+    setOpenIds((current) => current.filter((id) => ids.has(id)));
+  }, [inspection]);
+
+  useEffect(() => {
+    if (!focusId || !sections.some((section) => section.id === focusId)) return;
+    setOpenIds((current) => (current.includes(focusId) ? current : [...current, focusId]));
+    requestAnimationFrame(() => rowRefs.current[focusId]?.scrollIntoView({ block: 'nearest' }));
+  }, [focusId, sections]);
+
+  function setOpen(id: string, open: boolean) {
+    onFocus(id);
+    setOpenIds((current) => (open ? [...new Set([...current, id])] : current.filter((entry) => entry !== id)));
   }
 
-  async function copy() {
-    try {
-      if (!navigator.clipboard?.writeText) throw new Error('当前环境不支持自动复制，请在编辑器中选择正文复制。');
-      await navigator.clipboard.writeText(text);
-      setCopied(true);
-      setCopyError(null);
-    } catch (cause) {
-      setCopyError(cause instanceof Error ? cause.message : String(cause));
-    }
+  function drop(target: DropTarget) {
+    if (draggingId) onChange(movePromptSection(sections, controls, draggingId, target.id, target.position));
+    setDraggingId(null);
+    setDropTarget(null);
+  }
+
+  /** 键盘替代：把手聚焦后用 ↑/↓ 上移下移一位。 */
+  function nudge(id: string, delta: -1 | 1) {
+    const editable = sections.filter((section) => section.editable).map((section) => section.id);
+    const index = editable.indexOf(id);
+    const neighbour = editable[index + delta];
+    if (index < 0 || !neighbour) return;
+    onChange(movePromptSection(sections, controls, id, neighbour, delta < 0 ? 'before' : 'after'));
   }
 
   if (!inspection) return <Empty description={L.noRuntime} />;
 
   return (
-    <div className="capability-prompt-panel">
-      <p className="capability-note">{L.promptScope}</p>
-      <SplitView
-        rail={
-          <>
-            <div className="capability-prompt-summary">
-              <span>{inspection.role}</span>
-              <span title={inspection.cwd}>{inspection.cwd}</span>
-            </div>
-            {[
-              { id: 'preview', label: L.preview },
-              { id: 'sent', label: L.lastSent },
-            ].map((entry) => (
-              <button
-                key={entry.id}
-                type="button"
-                className={`split-item${selectedId === entry.id ? ' is-active' : ''}`}
-                onClick={() => select(entry.id)}
-              >
-                <span className="split-item-title">{entry.label}</span>
-              </button>
-            ))}
-            <div className="capability-prompt-section-label">按来源控制</div>
-            {matching.map((section) => {
-              const resolved = effectivePromptSection(section, controls);
-              return (
-                <div
-                  key={section.id}
-                  className={`capability-prompt-row${selectedId === section.id ? ' is-active' : ''}`}
-                >
-                  <button
-                    type="button"
-                    className="capability-prompt-source"
-                    onClick={() => select(section.id)}
-                    title={section.id}
-                  >
-                    <span>{promptSectionLabel(section.id, section.label)}</span>
-                    <small>
-                      {section.pluginId ?? 'Agent'} · {resolved.content.length.toLocaleString()} 字符
-                      {controls.sections[section.id]?.content !== undefined ? ' · 已覆盖' : ''}
-                    </small>
-                  </button>
-                  <Switch
-                    label={`${section.label} 提示词`}
-                    checked={resolved.enabled}
-                    disabled={
-                      disabled ||
-                      !section.editable ||
-                      Boolean(section.pluginId && controls.disabledPlugins.includes(section.pluginId))
-                    }
-                    onChange={(enabled) => onChange(setPromptSection(controls, section.id, { enabled }))}
-                  />
-                </div>
-              );
-            })}
-            {!matching.length ? <div className="capability-empty">没有匹配的提示词段落</div> : null}
-          </>
-        }
+    <div className="prompt-control-list">
+      {sections.map((section) => (
+        <PromptSectionRow
+          key={section.id}
+          section={section}
+          controls={controls}
+          open={openIds.includes(section.id)}
+          disabled={disabled}
+          pluginName={section.pluginId ? (pluginNames?.[section.pluginId] ?? section.pluginId) : null}
+          dragging={draggingId === section.id}
+          dropPosition={dropTarget?.id === section.id ? dropTarget.position : null}
+          rowRef={(element) => {
+            rowRefs.current[section.id] = element;
+          }}
+          onToggleOpen={(open) => setOpen(section.id, open)}
+          onDragStart={() => setDraggingId(section.id)}
+          onDragOver={(position) => {
+            if (draggingId && draggingId !== section.id) setDropTarget({ id: section.id, position });
+          }}
+          onDrop={(position) => drop({ id: section.id, position })}
+          onDragEnd={() => {
+            setDraggingId(null);
+            setDropTarget(null);
+          }}
+          onNudge={(delta) => nudge(section.id, delta)}
+          onChange={onChange}
+        />
+      ))}
+      {!sections.length ? <Empty description="当前会话没有可查看的提示词" /> : null}
+    </div>
+  );
+}
+
+const PromptSectionRow = ({
+  section,
+  controls,
+  open,
+  disabled,
+  pluginName,
+  dragging,
+  dropPosition,
+  rowRef,
+  onToggleOpen,
+  onDragStart,
+  onDragOver,
+  onDrop,
+  onDragEnd,
+  onNudge,
+  onChange,
+}: {
+  section: PromptSectionSnapshot;
+  controls: PromptControls;
+  open: boolean;
+  disabled: boolean;
+  pluginName: string | null;
+  dragging: boolean;
+  dropPosition: 'before' | 'after' | null;
+  rowRef(element: HTMLDivElement | null): void;
+  onToggleOpen(open: boolean): void;
+  onDragStart(): void;
+  onDragOver(position: 'before' | 'after'): void;
+  onDrop(position: 'before' | 'after'): void;
+  onDragEnd(): void;
+  onNudge(delta: -1 | 1): void;
+  onChange(controls: PromptControls): void;
+}) => {
+  const [showOriginal, setShowOriginal] = useState(false);
+  const body = useBodyAnimation(open);
+  const effective = effectivePromptSection(section, controls);
+  const overridden = controls.sections[section.id]?.content !== undefined;
+  const text = showOriginal ? section.originalContent : effective.content;
+  const title = promptSectionLabel(section.id, section.label);
+  const draggable = section.editable && !disabled;
+  const ChevronIcon = appIcons.chevronRight;
+  const GripIcon = appIcons.grip;
+
+  return (
+    <div
+      ref={rowRef}
+      className={[
+        'prompt-control-row',
+        open ? 'is-open' : '',
+        dragging ? 'is-dragging' : '',
+        dropPosition === 'before' ? 'is-drop-before' : '',
+        dropPosition === 'after' ? 'is-drop-after' : '',
+        effective.enabled ? '' : 'is-off',
+      ]
+        .filter(Boolean)
+        .join(' ')}
+    >
+      <div
+        className="prompt-control-head"
+        onDragOver={(event) => {
+          if (!draggable) return;
+          event.preventDefault();
+          const rect = event.currentTarget.getBoundingClientRect();
+          onDragOver(event.clientY > rect.top + rect.height / 2 ? 'after' : 'before');
+        }}
+        onDrop={(event) => {
+          if (!draggable) return;
+          event.preventDefault();
+          const rect = event.currentTarget.getBoundingClientRect();
+          onDrop(event.clientY > rect.top + rect.height / 2 ? 'after' : 'before');
+        }}
       >
-        <div className="capability-prompt-editor">
-          <div className="capability-prompt-heading">
-            <div>
-              <strong>{title}</strong>
-              <span>
-                {text.length.toLocaleString()} 字符 · ≈{Math.ceil(text.length / 4).toLocaleString()} tokens（估算）
-              </span>
+        {draggable ? (
+          <span
+            className="prompt-control-grip"
+            role="button"
+            tabIndex={0}
+            draggable
+            aria-label={`调整${title}的顺序`}
+            title="拖动调整顺序"
+            onDragStart={(event) => {
+              event.dataTransfer.effectAllowed = 'move';
+              onDragStart();
+            }}
+            onDragEnd={onDragEnd}
+            onKeyDown={(event) => {
+              if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return;
+              event.preventDefault();
+              onNudge(event.key === 'ArrowUp' ? -1 : 1);
+            }}
+          >
+            <GripIcon size={14} aria-hidden="true" />
+          </span>
+        ) : (
+          <span className="prompt-control-grip is-static" aria-hidden="true" />
+        )}
+        <button type="button" className="prompt-control-toggle" aria-expanded={open} onClick={() => onToggleOpen(!open)}>
+          <span className="prompt-control-title">{title}</span>
+          {pluginName ? <span className="prompt-control-source">{pluginName}</span> : null}
+          {!section.editable ? <span className="prompt-control-source">只读</span> : null}
+          <ChevronIcon className="prompt-control-chevron" size={15} aria-hidden="true" />
+        </button>
+        <Switch
+          label={`${title} 提示词`}
+          checked={effective.enabled}
+          disabled={disabled || !section.editable}
+          onChange={(enabled) => onPromptEnabled(section, enabled, controls, onChange, disabled)}
+        />
+      </div>
+      {body.mounted ? (
+        <div className={`prompt-control-body-wrap${body.expanded ? ' is-open' : ''}`}>
+          <div className="prompt-control-body">
+            <div className={`editor-host prompt-control-editor${effective.content.trim() ? '' : ' is-empty'}`}>
+              <JsonEditor
+                key={`${section.id}:${showOriginal}`}
+                language="markdown"
+                value={text}
+                readOnly={disabled || !section.editable || showOriginal}
+                onChange={(content) => {
+                  if (!disabled && section.editable && !showOriginal) {
+                    onChange(setPromptSection(controls, section.id, { content }));
+                  }
+                }}
+              />
             </div>
-            <div className="toolbar">
-              {selected && !selected.editable ? <Tag>只读</Tag> : null}
-              {selected && overridden ? <Tag tone="blue">{L.overridden}</Tag> : null}
-              {selected && !effective?.enabled ? <Tag>未注入</Tag> : null}
-              {selected && effective?.enabled && !effective.content.trim() ? <Tag>暂无内容</Tag> : null}
-              <Button size="compact" variant="ghost" onClick={() => void copy()}>
-                {copied ? L.copied : L.copy}
-              </Button>
-            </div>
-          </div>
-          {selected ? (
-            <div className="capability-prompt-actions">
-              <span className="muted-text" title={selected.id}>
-                {selected.pluginId ? `插件 ${selected.pluginId} / ${selected.sectionId}` : selected.id}
-              </span>
+            <div className="prompt-control-actions">
+              {!effective.content.trim() ? <span>当前为空，不会注入</span> : <span />}
               <div className="toolbar">
-                {selected.pluginId && controls.disabledPlugins.includes(selected.pluginId) ? (
-                  <Button
-                    size="compact"
-                    variant="ghost"
-                    disabled={disabled}
-                    onClick={() => onChange(setPluginPromptEnabled(controls, selected.pluginId!, true))}
-                  >
-                    开启插件注入
-                  </Button>
-                ) : null}
-                {selected.editable ? (
+                {section.editable ? (
                   <Button
                     size="compact"
                     variant="ghost"
                     pressed={showOriginal}
-                    onClick={() => setShowOriginal(!showOriginal)}
+                    onClick={() => setShowOriginal((current) => !current)}
                   >
-                    {showOriginal ? '返回编辑' : '查看原文'}
+                    {showOriginal ? '返回编辑' : '原文'}
                   </Button>
                 ) : null}
                 {overridden ? (
@@ -183,7 +256,7 @@ export function PromptControlsPanel({
                     disabled={disabled}
                     onClick={() => {
                       setShowOriginal(false);
-                      onChange(restorePromptSection(controls, selected.id));
+                      onChange(restorePromptSection(controls, section.id));
                     }}
                   >
                     {L.restore}
@@ -191,44 +264,56 @@ export function PromptControlsPanel({
                 ) : null}
               </div>
             </div>
-          ) : null}
-          {copyError ? (
-            <p role="alert" className="capability-note">
-              {copyError}
-            </p>
-          ) : null}
-          {isSent && !inspection.lastSent ? (
-            <Empty description={L.noLastSent} />
-          ) : (
-            <div className="editor-host capability-prompt-editor-host">
-              <JsonEditor
-                key={`${selectedId}:${showOriginal}`}
-                language="markdown"
-                value={text}
-                readOnly={disabled || isFull || !selected?.editable || showOriginal}
-                onChange={(content) => {
-                  if (!disabled && selected?.editable && !showOriginal) {
-                    setCopied(false);
-                    onChange(setPromptSection(controls, selected.id, { content }));
-                  }
-                }}
-              />
-            </div>
-          )}
-          <p className="capability-prompt-footnote">
-            {isSent
-              ? '存档只读：保留最近一次实际请求的完整系统提示词。'
-              : isFull
-                ? '预览使用当前来源正文与控制草稿；动态段落在实际请求时会重新生成。工具定义在 Tools / MCP 页签单独查看。'
-                : showOriginal
-                  ? '这里是来源生成的原文；恢复原文后，动态段落会继续随插件状态更新。'
-                  : selected?.editable
-                    ? '停手后自动保存为正文覆盖；“恢复原文”可重新使用来源生成的内容。'
-                    : '默认系统提示词始终保留。'}
-            {inspection.running && !isSent ? ' 当前有轮次正在运行，修改将在下一轮生效。' : ''}
-          </p>
+          </div>
         </div>
-      </SplitView>
+      ) : null}
     </div>
   );
+};
+
+function onPromptEnabled(
+  section: PromptSectionSnapshot,
+  enabled: boolean,
+  controls: PromptControls,
+  onChange: (controls: PromptControls) => void,
+  disabled: boolean,
+) {
+  if (disabled || !section.editable) return;
+  let next = setPromptSection(controls, section.id, { enabled });
+  if (section.pluginId && enabled && controls.disabledPlugins.includes(section.pluginId)) {
+    next = setPluginPromptEnabled(next, section.pluginId, true);
+  }
+  onChange(next);
+}
+
+/** 与 styles.css 里 `.prompt-control-body-wrap` 的过渡时长保持一致。 */
+const BODY_ANIMATION_MS = 160;
+
+/**
+ * 展开时先挂载再放开高度，收起时先收高度再卸载：编辑器不进 DOM 就不会拖慢长列表，
+ * 但收起仍然有过渡而不是瞬间消失。
+ */
+function useBodyAnimation(open: boolean) {
+  const [mounted, setMounted] = useState(open);
+  const [expanded, setExpanded] = useState(open);
+
+  useEffect(() => {
+    if (open) {
+      setMounted(true);
+      // 两帧：先让折叠（0fr）那一版真正画出来，再放开高度，过渡才会跑。
+      let inner = 0;
+      const outer = requestAnimationFrame(() => {
+        inner = requestAnimationFrame(() => setExpanded(true));
+      });
+      return () => {
+        cancelAnimationFrame(outer);
+        cancelAnimationFrame(inner);
+      };
+    }
+    setExpanded(false);
+    const timer = window.setTimeout(() => setMounted(false), BODY_ANIMATION_MS);
+    return () => window.clearTimeout(timer);
+  }, [open]);
+
+  return { mounted, expanded };
 }

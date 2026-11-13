@@ -1,6 +1,7 @@
 import type { Disposable } from '@packages/mica-common/index.js';
 import { wrapPromptXml } from '@packages/mica-common/promptXml.js';
 import {
+  orderPromptSections,
   promptSectionKey,
   type PromptControls,
   type PromptSectionSnapshot,
@@ -60,7 +61,7 @@ export class PluginPromptSections {
     const ordered = [...this.sections].sort(
       (a, b) => (a.section.order ?? 0) - (b.section.order ?? 0) || a.sequence - b.sequence,
     );
-    return ordered.map((item) => {
+    const snapshots = ordered.map((item) => {
       const text = item.section.render();
       const originalContent = typeof text === 'string' ? text.trim() : '';
       const id = promptSectionKey(item.pluginId, item.section.id);
@@ -76,6 +77,8 @@ export class PluginPromptSections {
         editable: true,
       };
     });
+    // 注册顺序之后才是用户拖拽出来的顺序：前者是插件的默认，后者是人的决定。
+    return orderPromptSections(snapshots, controls?.order);
   }
 
   /** 按与 inspect 相同的快照拼装，空段落与禁用段落跳过。 */

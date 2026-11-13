@@ -93,14 +93,14 @@ function Preview() {
   const [theme, setTheme] = useState('darcula');
   return (
     <div className="mica-config-ui preview-root">
-      <ArcoSettings>
-        <div className="preview-header">
-          <div><Tag tone="blue">交互预览</Tag><span>示例插件与提示词 · 修改仅保存在此页面</span></div>
-          <div>
-            <Segmented value={theme} options={[{ value: 'darcula', label: '深色' }, { value: 'light', label: '浅色' }]} ariaLabel="预览主题" size="compact" onChange={(next) => { setTheme(next); document.documentElement.dataset.theme = next; document.documentElement.dataset.appearance = next === 'light' ? 'light' : 'dark'; }} />
-            <Button size="compact" variant="ghost" onClick={() => location.reload()}>重置示例</Button>
-          </div>
+      <div className="preview-header">
+        <div><Tag tone="blue">交互预览</Tag><span>示例插件与提示词 · 修改仅保存在此页面</span></div>
+        <div>
+          <Segmented value={theme} options={[{ value: 'darcula', label: '深色' }, { value: 'light', label: '浅色' }]} ariaLabel="预览主题" size="compact" onChange={(next) => { setTheme(next); document.documentElement.dataset.theme = next; document.documentElement.dataset.appearance = next === 'light' ? 'light' : 'dark'; }} />
+          <Button size="compact" variant="ghost" onClick={() => location.reload()}>重置示例</Button>
         </div>
+      </div>
+      <ArcoSettings>
         <div className="preview-main"><CapabilitiesPage runtime={runtime} /></div>
       </ArcoSettings>
     </div>

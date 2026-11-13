@@ -1,5 +1,5 @@
 import { escapePromptXml, wrapPromptXml } from '@packages/mica-common/promptXml.js';
-import type { PromptControls, PromptSectionSnapshot } from '@packages/mica-common/promptControls.js';
+import { orderPromptSections, type PromptControls, type PromptSectionSnapshot } from '@packages/mica-common/promptControls.js';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { micaSkills, type Skill } from '@packages/mica-skills/index.js';
@@ -27,8 +27,10 @@ export type BuildSystemPromptOptions = {
 
 class SystemPromptBuilder {
   readonly sections: PromptSectionSnapshot[] = [];
+  private readonly order: string[] | undefined;
 
   constructor(options: BuildSystemPromptOptions = {}) {
+    this.order = options.promptControls?.order;
     this.append('system', applyBrandTemplate(DEFAULT_SYSTEM_PROMPT), options.promptControls);
     this.append(
       'role',
@@ -70,7 +72,7 @@ class SystemPromptBuilder {
   }
 
   get value() {
-    return this.sections
+    return orderPromptSections(this.sections, this.order)
       .filter((section) => section.enabled && section.content)
       .map((section) => wrapSection(section.id as PromptSection, section.content))
       .join('\n\n');
@@ -87,7 +89,8 @@ export function inspectSystemPrompt(options: BuildSystemPromptOptions = {}): {
   sections: PromptSectionSnapshot[];
 } {
   const builder = new SystemPromptBuilder(options);
-  return { prompt: builder.value, sections: builder.sections };
+  // 对外暴露的快照与拼装结果同序，界面上的排列就是这一轮真正的排列。
+  return { prompt: builder.value, sections: orderPromptSections(builder.sections, options.promptControls?.order) };
 }
 
 /**

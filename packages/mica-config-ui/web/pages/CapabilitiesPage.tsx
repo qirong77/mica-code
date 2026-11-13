@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { PromptControls } from '@packages/mica-common/promptControls.js';
 import { PageFrame } from '../components/PageFrame.js';
-import { Alert, Button, Empty, SaveStatus, Segmented, SettingsGroup, Switch, Tag } from '../components/Ui.js';
-import { Input } from '../components/ArcoSettings.js';
+import { Alert, Button, Empty, SaveStatus, SettingsGroup, Switch, Tag } from '../components/Ui.js';
 import { CapabilityList, CapabilityParameters, type CapabilityItem } from '../components/CapabilityList.js';
 import { PromptControlsPanel } from '../components/PromptControlsPanel.js';
 import { JsonEditor } from '../components/JsonEditor.js';
@@ -27,12 +26,11 @@ import type {
   ConfigWebCapabilityTool,
 } from '../../src/shared/types.js';
 
-type Scope = 'runtime' | 'defaults';
 type Group = 'skills' | 'tools' | 'mcpServers';
 type Tab = Group | 'plugins' | 'prompts';
 type Draft = { disabledSkills: string[]; disabledTools: string[]; disabledMcpServers: string[] };
 type Item = CapabilityItem & { mcpTools?: ConfigWebCapabilityTool[] };
-const TABS: Tab[] = ['tools', 'skills', 'mcpServers', 'plugins', 'prompts'];
+const TABS: Tab[] = ['prompts', 'tools', 'skills', 'mcpServers', 'plugins'];
 const EMPTY: Draft = { disabledSkills: [], disabledTools: [], disabledMcpServers: [] };
 const EMPTY_CONTROLS: PromptControls = { version: 1, disabledPlugins: [], sections: {} };
 
@@ -40,14 +38,12 @@ const EMPTY_CONTROLS: PromptControls = { version: 1, disabledPlugins: [], sectio
 export function CapabilitiesPage({ runtime }: { runtime?: ConfigWebCapabilitiesRuntime }) {
   const [details, setDetails] = useState<ConfigWebCapabilityDefaults | null>(null);
   const [live, setLive] = useState<ConfigWebRuntimeCapabilities | null>(null);
-  const [scope, setScope] = useState<Scope>(runtime ? 'runtime' : 'defaults');
-  const [drafts, setDrafts] = useState<Record<Scope, Draft>>({ runtime: EMPTY, defaults: EMPTY });
-  const draftsRef = useRef(drafts);
+  const [draft, setDraft] = useState<Draft>(EMPTY);
+  const draftsRef = useRef(draft);
   const [controls, setControls] = useState<PromptControls | null>(null);
-  const [tab, setTab] = useState<Tab>('tools');
-  const [query, setQuery] = useState('');
+  const [tab, setTab] = useState<Tab>('prompts');
   const [detail, setDetail] = useState<Item | null>(null);
-  const [promptId, setPromptId] = useState('preview');
+  const [promptFocusId, setPromptFocusId] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [draftError, setDraftError] = useState<string | null>(null);
@@ -112,26 +108,25 @@ export function CapabilitiesPage({ runtime }: { runtime?: ConfigWebCapabilitiesR
     if (version !== loadVersion.current) return;
     const [defaultsResult, controlsResult, liveResult] = results;
     const failures: string[] = [];
-    const nextDrafts = { ...draftsRef.current };
+    let nextDraft = draftsRef.current;
     if (defaultsResult.status === 'fulfilled') {
       setDetails(defaultsResult.value);
-      nextDrafts.defaults = toDraft(defaultsResult.value);
+      nextDraft = toDraft(defaultsResult.value);
     } else failures.push(formatError(defaultsResult.reason));
     if (controlsResult.status === 'fulfilled') {
       setControls(controlsResult.value);
     } else failures.push(formatError(controlsResult.reason));
     if (liveResult.status === 'fulfilled') {
       setLive(liveResult.value);
-      if (liveResult.value) nextDrafts.runtime = toDraft(liveResult.value.selection);
     } else {
       setLive(null);
       failures.push(`会话能力：${formatError(liveResult.reason)}`);
     }
     const restored: string[] = [];
-    for (const key of ['defaults', `runtime:${runtime?.key ?? 'current'}`]) {
+    for (const key of ['defaults']) {
       const cached = capabilityDraftCache.read(key);
       if (!cached) continue;
-      nextDrafts[cached.value.scope] = cached.value.selection;
+      if (cached.value.scope === 'defaults') nextDraft = cached.value.selection;
       const message = cached.error ?? '有尚未保存的能力选择，请重试保存。';
       restored.push(message);
     }
@@ -141,8 +136,8 @@ export function CapabilitiesPage({ runtime }: { runtime?: ConfigWebCapabilitiesR
       restored.push(promptDraft.error ?? '有尚未保存的提示词草稿，请重试保存。');
     }
     setDraftError(restored.length ? restored.join('\n') : null);
-    draftsRef.current = nextDrafts;
-    setDrafts(nextDrafts);
+    draftsRef.current = nextDraft;
+    setDraft(nextDraft);
     setError(failures.length ? failures.join('\n') : null);
     setLoading(false);
   }, [runtime]);
@@ -156,7 +151,7 @@ export function CapabilitiesPage({ runtime }: { runtime?: ConfigWebCapabilitiesR
 
   async function flush() {
     await Promise.all([capabilitySave.flush(), promptSave.flush()]);
-    const keys = ['defaults', `runtime:${runtime?.key ?? 'current'}`];
+    const keys = ['defaults'];
     for (const key of keys) {
       const cached = capabilityDraftCache.read(key);
       if (!cached) continue;
@@ -184,26 +179,13 @@ export function CapabilitiesPage({ runtime }: { runtime?: ConfigWebCapabilitiesR
     }
   }
 
-  async function changeScope(next: string) {
-    try {
-      await flush();
-      await load();
-      setScope(next as Scope);
-      setDetail(null);
-    } catch (cause) {
-      setError(formatError(cause));
-    }
-  }
-
   function commit(next: Draft) {
-    const nextDrafts = { ...draftsRef.current, [scope]: next };
-    draftsRef.current = nextDrafts;
-    setDrafts(nextDrafts);
+    draftsRef.current = next;
+    setDraft(next);
     const value: CapabilityDraft = {
-      scope,
-      key: scope === 'defaults' ? 'defaults' : `runtime:${runtime?.key ?? 'current'}`,
+      scope: 'defaults',
+      key: 'defaults',
       selection: next,
-      target: scope === 'runtime' ? runtime : undefined,
     };
     capabilityDraftCache.remember(value.key, value);
     capabilitySave.schedule(value);
@@ -217,18 +199,14 @@ export function CapabilitiesPage({ runtime }: { runtime?: ConfigWebCapabilitiesR
 
   const tools = useMemo(
     () =>
-      scope === 'runtime'
-        ? (live?.tools ?? [])
-        : mergeNamed(
-            details?.tools ?? [],
-            (live?.tools ?? []).filter((tool) => tool.group?.key.startsWith('plugin:')),
-          ),
-    [details, live, scope],
+      mergeNamed(
+        details?.tools ?? [],
+        (live?.tools ?? []).filter((tool) => tool.group?.key.startsWith('plugin:')),
+      ),
+    [details, live],
   );
-  const skills = scope === 'runtime' ? (live?.skills ?? []) : (details?.skills ?? []);
-  const servers =
-    scope === 'runtime' ? (live?.mcpServers.map((server) => server.name) ?? []) : (details?.mcpServers ?? []);
-  const draft = drafts[scope];
+  const skills = details?.skills ?? [];
+  const servers = details?.mcpServers ?? [];
   const plugins = useMemo(() => {
     const byId = new Map((details?.plugins ?? []).map((plugin) => [plugin.id, plugin]));
     for (const plugin of live?.plugins ?? []) {
@@ -242,6 +220,10 @@ export function CapabilitiesPage({ runtime }: { runtime?: ConfigWebCapabilitiesR
     }
     return [...byId.values()].sort((a, b) => a.name.localeCompare(b.name));
   }, [details, live]);
+  const pluginNames = useMemo(
+    () => Object.fromEntries(plugins.map((plugin) => [plugin.id, plugin.name])),
+    [plugins],
+  );
 
   const items: Item[] = (
     tab === 'tools'
@@ -268,18 +250,11 @@ export function CapabilitiesPage({ runtime }: { runtime?: ConfigWebCapabilitiesR
               );
               return {
                 name,
-                description:
-                  scope === 'runtime'
-                    ? `${mcpStatusLabel(server?.status)} · ${mcpTools.length} 个工具${server?.error ? ` · ${server.error}` : ''}`
-                    : 'config.json',
+                description: `${mcpStatusLabel(server?.status)} · ${mcpTools.length} 个工具${server?.error ? ` · ${server.error}` : ''}`,
                 mcpTools,
               };
             })
           : []
-  ).filter((item) =>
-    `${item.name} ${item.description} ${'sourceLabel' in item ? item.sourceLabel : ''} ${'group' in item ? (item.group?.label ?? '') : ''}`
-      .toLowerCase()
-      .includes(query.toLowerCase()),
   );
 
   const count = (group: Group) => {
@@ -300,12 +275,12 @@ export function CapabilitiesPage({ runtime }: { runtime?: ConfigWebCapabilitiesR
   };
   const activeGroup: Group = tab === 'tools' || tab === 'skills' || tab === 'mcpServers' ? tab : 'tools';
   const disabled = draft[disabledKey(activeGroup)];
-  const ready = scope === 'runtime' ? Boolean(live) : Boolean(details);
+  const ready = Boolean(details);
   const saving = capabilitySave.saving || promptSave.saving;
 
   function toggleNames(names: string[], enabled: boolean) {
     const key = disabledKey(activeGroup);
-    commit({ ...draftsRef.current[scope], [key]: applyGroupEnabled(draftsRef.current[scope][key], names, enabled) });
+    commit({ ...draftsRef.current, [key]: applyGroupEnabled(draftsRef.current[key], names, enabled) });
   }
 
   return (
@@ -315,9 +290,7 @@ export function CapabilitiesPage({ runtime }: { runtime?: ConfigWebCapabilitiesR
       path={
         tab === 'prompts' || tab === 'plugins'
           ? 'prompt-controls.json'
-          : scope === 'runtime'
-            ? live?.prompt?.cwd
-            : 'config.json · capabilityDefaults'
+          : 'config.json · capabilityDefaults'
       }
       actions={
         <div className="toolbar">
@@ -329,29 +302,7 @@ export function CapabilitiesPage({ runtime }: { runtime?: ConfigWebCapabilitiesR
       }
     >
       <div className="capability-page">
-        <div className="capability-scope-bar">
-          {runtime ? (
-            <Segmented
-              value={scope}
-              options={[
-                { value: 'runtime', label: L.currentSession },
-                { value: 'defaults', label: L.defaults },
-              ]}
-              onChange={(next) => void changeScope(next)}
-              ariaLabel="能力范围"
-              disabled={loading || saving}
-            />
-          ) : (
-            <Tag>{L.defaults}</Tag>
-          )}
-          {scope === 'runtime' && live?.prompt ? (
-            <span className="capability-scope-fact">
-              {live.prompt.role}
-              {live.prompt.running ? ' · 正在运行' : ' · 空闲'}
-            </span>
-          ) : null}
-        </div>
-        <p className="capability-note">{scope === 'runtime' ? L.runtimeNote : L.defaultsNote}</p>
+        <p className="capability-note">{L.defaultsNote}</p>
         {error ? <Alert message={error} /> : null}
         {capabilitySave.error || promptSave.error || draftError ? (
           <div className="capability-save-error">
@@ -380,18 +331,11 @@ export function CapabilitiesPage({ runtime }: { runtime?: ConfigWebCapabilitiesR
               </button>
             ))}
           </div>
-          <div className="capability-search">
-            <Input allowClear value={query} placeholder={L.search} aria-label="搜索能力" onChange={setQuery} />
-          </div>
           {loading && !details && !live ? (
             <div className="page-loading">正在读取能力…</div>
           ) : tab === 'plugins' ? (
             <SettingsGroup title="插件贡献" description={L.promptScope}>
-              {plugins
-                .filter((plugin) =>
-                  `${plugin.id} ${plugin.name} ${plugin.description ?? ''}`.toLowerCase().includes(query.toLowerCase()),
-                )
-                .map((plugin) => {
+              {plugins.map((plugin) => {
                   const actual = live?.plugins.find((entry) => entry.id === plugin.id);
                   const pluginSections =
                     live?.prompt?.sections.filter((section) => section.pluginId === plugin.id) ?? [];
@@ -418,9 +362,7 @@ export function CapabilitiesPage({ runtime }: { runtime?: ConfigWebCapabilitiesR
                               variant="ghost"
                               disabled={!actual.toolNames.length}
                               onClick={() => {
-                                if (scope !== 'runtime') void changeScope('runtime');
                                 setTab('tools');
-                                setQuery(plugin.id);
                               }}
                             >
                               {actual.toolNames.length} 个工具
@@ -430,9 +372,7 @@ export function CapabilitiesPage({ runtime }: { runtime?: ConfigWebCapabilitiesR
                               variant="ghost"
                               disabled={!actual.skillNames.length}
                               onClick={() => {
-                                if (scope !== 'runtime') void changeScope('runtime');
                                 setTab('skills');
-                                setQuery(plugin.id);
                               }}
                             >
                               {actual.skillNames.length} 个技能
@@ -450,9 +390,8 @@ export function CapabilitiesPage({ runtime }: { runtime?: ConfigWebCapabilitiesR
                             size="compact"
                             variant="ghost"
                             onClick={() => {
-                              setPromptId(pluginSections[0]!.id);
+                              setPromptFocusId(pluginSections[0]!.id);
                               setTab('prompts');
-                              setQuery('');
                             }}
                           >
                             查看提示词
@@ -480,9 +419,9 @@ export function CapabilitiesPage({ runtime }: { runtime?: ConfigWebCapabilitiesR
                 controls={controls}
                 onChange={commitControls}
                 disabled={loading}
-                query={query}
-                selectedId={promptId}
-                onSelect={setPromptId}
+                focusId={promptFocusId}
+                onFocus={setPromptFocusId}
+                pluginNames={pluginNames}
               />
             ) : (
               <Empty description="提示词控制配置尚未读取成功，请刷新后重试。" />
@@ -497,8 +436,8 @@ export function CapabilitiesPage({ runtime }: { runtime?: ConfigWebCapabilitiesR
               onGroupChange={() => {}}
               counts={counts}
               items={items}
-              countLabel={`${items.filter((item) => !disabled.includes(item.name)).length} / ${items.length} ${scope === 'defaults' ? '默认启用' : '启用'}${scope === 'runtime' && live?.prompt?.running ? ' · 本轮运行中，结束后可调整' : ''}`}
-              disabled={loading || (scope === 'runtime' && Boolean(live?.prompt?.running))}
+              countLabel={`${items.filter((item) => !disabled.includes(item.name)).length} / ${items.length} 默认启用`}
+              disabled={loading}
               isEnabled={(name) => !disabled.includes(name)}
               onToggle={(name, enabled) => toggleNames(capabilityToggleNames(items, name), enabled)}
               onToggleGroup={tab === 'tools' ? toggleNames : null}
