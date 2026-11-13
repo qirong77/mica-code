@@ -66,6 +66,8 @@ export type PluginManifest = {
   author?: string;
   /** 入口文件，相对插件目录。 */
   main: string;
+  /** 随包独立 MCP 模块 mcp.ts，挂载到应用现有端口的 /plugin/<id>/mcp。 */
+  mcp?: boolean;
   /** 除入口与清单外随插件一起分发的资源文件，相对插件目录。 */
   assets: string[];
   /** 必须在之前 setup 的插件 id。 */
@@ -192,6 +194,7 @@ export const PLUGIN_REQUIREMENTS = [
   'ask',
   'background',
   'commands',
+  'data',
   'desktop',
   'events',
   'git',
@@ -268,6 +271,10 @@ export function parsePluginManifest(input: unknown): PluginManifestParseResult {
     }
   }
 
+  if (input.mcp !== undefined && typeof input.mcp !== 'boolean') {
+    return { ok: false, error: 'mcp 必须是布尔值' };
+  }
+
   const dependencies = readStringList(input.dependencies, 'dependencies');
   if (!dependencies.ok) return dependencies;
 
@@ -319,6 +326,7 @@ export function parsePluginManifest(input: unknown): PluginManifestParseResult {
       icon,
       author,
       main,
+      mcp: input.mcp === true,
       assets: assets.value,
       dependencies: dependencies.value,
       required: input.required === true,

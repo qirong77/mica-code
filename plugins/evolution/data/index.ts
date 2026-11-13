@@ -3,6 +3,7 @@ import { configModelDiscovery } from './config.js';
 import { harnessReviewAssessments } from './harness-review.js';
 import { memoryScopes } from './memory.js';
 import { notebookComments } from './notebook-comments.js';
+import { notebookMcpData } from './notebook-mcp.js';
 import { pluginStartupHealth } from './plugin-health.js';
 import { sessionTagSlots } from './session-tags.js';
 import { subagentTaskFiles } from './subagent-tasks.js';
@@ -20,4 +21,5 @@ export const DATA_MIGRATIONS: DataMigration[] = [
   pluginStartupHealth,
   subagentTaskFiles,
   notebookComments,
+  notebookMcpData,
 ];

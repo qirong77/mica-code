@@ -1,5 +1,5 @@
 /**
- * 把受控能力注册成 MCP server：生成每个会话自己的 `--mcp-config` 文件。
+ * 把受控能力与独立插件 MCP 注册成 server：生成每个会话自己的 `--mcp-config` 文件。
  *
  * 为什么必须按会话生成：MCP server 的 `x-mica-owner` 头决定窗口/终端归属到哪条会话
  * （终端写操作还靠它挡串台），而 owner 是进程级信息、`mcpServers` 配置里又没有变量展开。
@@ -80,11 +80,12 @@ export function writeControlMcpConfig({
   origin,
   owner = '',
   kinds = [],
+  extraServers = {},
   separator = '/'
 }) {
   const path = controlMcpConfigPath(homeDir, owner, separator)
   if (!path) return null
-  const servers = buildControlMcpServers({ origin, owner, kinds })
+  const servers = { ...buildControlMcpServers({ origin, owner, kinds }), ...extraServers }
   if (Object.keys(servers).length === 0) return null
   try {
     mkdirSync(join(homeDir, 'desktop', 'mcp'), { recursive: true })

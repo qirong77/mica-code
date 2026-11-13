@@ -9,6 +9,7 @@ import {
   controlMcpUrl
 } from './control-mcp-config.js'
 import { readCachedMcpResult } from './mcp-probe.js'
+import { pluginMcpCandidates } from './plugin-mcp-config.js'
 
 /**
  * 输入框 `/` 浮层里的 MCP server 候选（纯扫描，IPC 装配层在 mcp-candidates.js）。
@@ -64,7 +65,7 @@ export function builtinMcpCandidates(env = process.env) {
 
 /** 按名字排序的候选；配置文件缺失或损坏时返回空数组，不让输入框报错。 */
 export function listMcpCandidates() {
-  const builtin = builtinMcpCandidates()
+  const builtin = [...builtinMcpCandidates(), ...pluginMcpCandidates(process.env[CONTROL_ORIGIN_ENV])]
   const builtinNames = new Set(builtin.map((server) => server.name))
   const path = mcpConfigPath()
   if (!existsSync(path)) return builtin.sort(byName)

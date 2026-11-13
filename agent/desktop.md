@@ -37,7 +37,8 @@
 - 同一 session 在所有页面是同一 node、run、终端；`dedupeSessionNodes` 合并重复页签。
 - 默认 `0.0.0.0:8787`，没有账号体系，只有一道可选的口令；README 保留风险说明。非回环（且不在 `MICA_DESKTOP_TRUSTED_CLIENTS` 里）的连接**只公开别人手上那条分享链接**：`/share?session=<存在的会话>`，其余页面、`/remote/*`、`/mcp/*` 回 404 或登录页，**`/api/*` 没有凭据也回 404/401**（它等于整台机器）。唯一例外是探活指纹 `GET /api/health`（只回 `{ ok, app, access }`）：侧栏 Connections 连另一台机器必须先探通它，`access` 说明对方要不要口令，没开时由卡片直接给出可操作的提示而不是打开一个 404 窗口。路径分类唯一实现在 `host/access-core.js` 的 `classifyRemotePath`，放行判定在 `host/remote-access-core.js` 的 `remoteAccessDecision`，不要另写第二份白名单。
 - 端口常量唯一出口 `mica-web-shared/runtime-port.js`；页面路径约定唯一出口 `app-paths.ts`。
-- 单端口路由：`/`、`/mica-web`、`/share`、`/terminal-control`、`/mcp/browser`、`/mcp/terminal`、`/api/*`、`/remote/control/*`、`/remote/terminal/*`。编辑器与评审都是主应用里的视图，不占额外页面。
+- 单端口路由：`/`、`/mica-web`、`/share`、`/terminal-control`、`/mcp/browser`、`/mcp/terminal`、`/plugin/<id>/mcp`、`/api/*`、`/remote/control/*`、`/remote/terminal/*`。编辑器与评审都是主应用里的视图，不占额外页面。
+- 独立插件 MCP 的声明与契约见 `plugins.md` 的「MCP 与 Skills」。`server/index.js` 只扫描随包 `plugins/*/mcp.ts` 并装配通用 runtime/route；端点在 remoteGate 后再过 Host/Origin，`/plugin/*` 未命中一律 404。运行时发布实际可用目录给会话配置与 `/` 补全，纯 Web 无受控 socket 时插件 MCP 仍可独立工作；启停名单按文件监听缓存，不为每次工具调用重新扫描目录或起子进程。
 - 受控浏览器与终端服务走 `userData` 下的 Unix socket；`apps/config-web` 是独立宿主（默认 13987）。
 - `shareView` 只影响呈现，不是权限边界；`access-core.js` 校验 Origin / Host 防跨站与 DNS rebinding。
 - 分享地址用 `access:info.shareBaseUrl`，不以本机 `location.origin` 兜底；链接形如 `/share?session=<id>`。

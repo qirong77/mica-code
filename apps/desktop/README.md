@@ -91,7 +91,7 @@ npm run start:web -- --host 127.0.0.1 --port 8787 --no-share
 
 桌面插件通过清单声明入口、整页、输入控件、面板或会话菜单。随包插件的页面来自各自 `desktop.jsx`，宿主不按具体插件 id 分派产品逻辑。插件 API、版本化文档保存、关闭前保存钩子与原生启动器见 [插件开发文档](../../plugins/README.md)。
 
-Notebook 的树与正文存储归插件，共享编辑器运行在 sandbox iframe 中；第三方编辑器依赖首次从 CDN 加载。文件视图的 Markdown、配置页 Role/Skill 与 Notebook 共享编辑能力，说明见 [mica-editor](../../packages/mica-editor/README.md) 和 [Notebook](../../plugins/notebook/README.md)。
+Notebook 的树与正文存储归插件，共享编辑器运行在 sandbox iframe 中；第三方编辑器依赖首次从 CDN 加载。AI 接口使用同端口 `/plugin/notebook/mcp`（标准 Streamable HTTP），桌面/Web 会话宿主启动时自动接入，外部客户端可配置同一 URL，不再分发 Notebook skill。接口不依赖打开页面或聊天会话，继承应用访问守卫，分享 cookie 不开放独立 MCP。文件视图的 Markdown、配置页 Role/Skill 与 Notebook 共享编辑能力，说明见 [mica-editor](../../packages/mica-editor/README.md) 和 [Notebook](../../plugins/notebook/README.md)。
 
 会话压缩由 [Session Compact](../../plugins/session-compact/README.md) 提供。快速压缩聚合较早工具过程并移除思考/媒体载荷，保留用户和助手正文；模型压缩保存摘要加最近几轮，界面同步显示当前持久化记录。切换服务商/模型后，插件在下一次发送前快速压缩；没有按占用阈值或空闲时间自动生成摘要的设置。
 

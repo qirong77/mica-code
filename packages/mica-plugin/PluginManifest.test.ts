@@ -881,6 +881,20 @@ describe('parsePluginManifest desktop session menu', () => {
   });
 });
 
+describe('parsePluginManifest MCP', () => {
+  it('only opts into a standalone MCP module when explicitly enabled', () => {
+    for (const [input, enabled] of [[{}, false], [{ mcp: false }, false], [{ mcp: true }, true]] as const) {
+      const result = parsePluginManifest(base(input));
+      expect(result.ok).toBe(true);
+      if (result.ok) expect(result.manifest.mcp).toBe(enabled);
+    }
+  });
+
+  it.each([null, 'mcp.ts', 1, {}, []].map((mcp) => ({ mcp })))('rejects a nonboolean declaration: %j', ({ mcp }) => {
+    expect(parsePluginManifest(base({ mcp }))).toEqual({ ok: false, error: 'mcp 必须是布尔值' });
+  });
+});
+
 describe('parsePluginManifest skills', () => {
   it('reads relative skill directories in declaration order and drops repeats', () => {
     const result = parsePluginManifest(base({ skills: ['skills', 'skills', 'skills/solo'] }));

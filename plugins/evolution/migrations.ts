@@ -287,6 +287,33 @@ export const piMessagesV1: Migration = {
   apply: migratePiMessages,
 };
 
+/** 接口改为 MCP 后，保留用户停用笔记工具的选择，不重新开放写权限。 */
+export const notebookMcp: Migration = {
+  id: 'notebook-mcp',
+  description: '将旧 Notebook 工具停用项迁为 MCP 停用项，移除已撤下的 notebook skill 选择',
+  apply(document) {
+    const snapshot = isRecord(document.snapshot) ? document.snapshot : undefined;
+    const selections = [snapshot?.capabilitySelection, document.capabilityDefaults];
+    let changed = 0;
+    for (const selection of selections) {
+      if (!isRecord(selection) || (selection.version !== undefined && selection.version !== 1)) continue;
+      const oldTools = selection.disabledTools;
+      if (Array.isArray(oldTools) && oldTools.some((name) => name === 'notebook_read' || name === 'notebook_write')) {
+        // 畸形新字段不覆盖，留给配置/会话校验报错。
+        if (selection.disabledMcpServers !== undefined && !Array.isArray(selection.disabledMcpServers)) continue;
+        selection.disabledMcpServers = [...new Set([...((selection.disabledMcpServers ?? []) as unknown[]), 'mica-plugin-notebook'])];
+        selection.disabledTools = oldTools.filter((name) => name !== 'notebook_read' && name !== 'notebook_write');
+        changed += 1;
+      }
+      if (Array.isArray(selection.disabledSkills) && selection.disabledSkills.includes('notebook')) {
+        selection.disabledSkills = selection.disabledSkills.filter((name) => name !== 'notebook');
+        changed += 1;
+      }
+    }
+    return changed;
+  },
+};
+
 export const MIGRATIONS: Migration[] = [
   usageOccurredAt,
   sessionCompactRename,
@@ -295,4 +322,5 @@ export const MIGRATIONS: Migration[] = [
   generationTimingV2,
   quickButtonsAccentColor,
   piMessagesV1,
+  notebookMcp,
 ];

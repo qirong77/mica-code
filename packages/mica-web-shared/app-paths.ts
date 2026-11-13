@@ -12,6 +12,7 @@
  *   见 apps/desktop/src/host/browser-control-proxy.js）
  * - `/mcp/browser`、`/mcp/terminal` —— 两个受控能力给 agent 的 MCP 端点（单 tool，见
  *   apps/desktop/src/host/control-mcp.js）
+ * - `/plugin/<id>/mcp` —— 随包插件独立 MCP（命名 helpers 在 mica-plugin/PluginMcp.ts）
  * - `/api/*` —— 运行时能力（invoke / events / env / image）
  *
  * 放在 mica-web-shared 里是因为**两侧都要用同一份判断**：运行时据此路由，渲染器据此决定

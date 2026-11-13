@@ -9,6 +9,7 @@
 ## 装配
 
 - `HeadlessPluginHost` 是 exec / app-server 共用的插件装配层；MCP 显式初始化，不注册输入框与命令 UI。用户插件（`$MICA_HOME/plugins`）只在常驻宿主装：`createHeadlessPluginHost({ loadUserPlugins: true })` 交出「重新扫描用户插件」的加载器（app-server 传 true、exec 不传），面板与桌面入口都靠它；加载与 `plugin-status.json` 的写入都由 manager 按 `pluginStateSync` 完成，启停走同一条路。
+- 应用独立托管的插件 MCP 不由 `HeadlessPluginHost` 再注册工具；桌面/Web 启动会话宿主时经 `--mcp-config` 传入同端口 `/plugin/<id>/mcp`，按普通 MCP 连接。TUI / exec 不自动启动应用服务，可显式配置已有 URL。
 - `attachPluginLayer()` 同步替换 executor queue，避免插件写入与 loop 读取不同实例。
 - `mica/turn/input`（`MICA_TURN_NOTIFICATIONS.input`）在插件发起的轮次启动**之前**发出，带展示文本；晚于 `turn/started` 会让页面把上一轮的文本当成本轮用户消息。
 

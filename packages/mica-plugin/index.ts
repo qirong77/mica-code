@@ -1,5 +1,6 @@
 import { Plugin } from './Plugin.js';
 import { PluginManager } from './PluginManager.js';
+import { createPluginDataApi, readPluginData, writePluginData } from './PluginData.js';
 import { HookRegistry } from './HookRegistry.js';
 import { ServiceContainer } from './ServiceContainer.js';
 import { createServiceToken } from './ServiceToken.js';
@@ -88,6 +89,9 @@ import {
 
 export const micaPlugin = {
   Plugin,
+  createPluginDataApi,
+  readPluginData,
+  writePluginData,
   PLUGIN_DATA_DIR,
   SESSION_ANNOTATIONS_FILE,
   SESSION_ANNOTATIONS_VERSION,
@@ -169,6 +173,26 @@ export const micaPlugin = {
 
 export type { Plugin } from './Plugin.js';
 export type { MicaPlugin } from './Plugin.js';
+export {
+  PLUGIN_DATA_MAX_BYTES,
+  PLUGIN_DOCUMENT_MAX_BYTES,
+  PLUGIN_DATA_FILE,
+  isValidPluginId,
+  isValidPluginDocumentKey,
+  pluginDataPath,
+  encodePluginData,
+  decodePluginData,
+  createPluginDataApi,
+  readPluginData,
+  writePluginData,
+} from './PluginData.js';
+export type {
+  PluginDataApi,
+  PluginDataOptions,
+  PluginDataReadResult,
+  PluginDataWriteOptions,
+  PluginDataWriteResult,
+} from './PluginData.js';
 export {
   PluginPanelRegistry,
   normalizePluginPanelAction,
@@ -267,6 +291,8 @@ export {
 export type { PublishedPluginRole } from './PluginRoles.js';
 export type { PluginContext } from './PluginContext.js';
 export type { PluginLauncherContext, PluginLauncherHandler } from './PluginLauncher.js';
+export type { PluginMcpContext, PluginMcpHandler, PluginMcpTool } from './PluginMcp.js';
+export { PLUGIN_MCP_PREFIX, pluginMcpId, pluginMcpPath, pluginMcpServerName } from './PluginMcp.js';
 export type {
   PluginFileMentionItem,
   PluginFileMentionProvider,

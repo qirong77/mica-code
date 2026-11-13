@@ -71,6 +71,7 @@ import {
   availableControlKinds,
   writeControlMcpConfig
 } from './control-mcp-config'
+import { buildPluginMcpServers } from './plugin-mcp-config.js'
 
 /**
  * Mica chat service: one resident `mica app-server` process per chat node
@@ -991,13 +992,14 @@ function spawnChatHost(id, sender, payload) {
 
   // 这个进程是谁：绑定会话后就是会话 id，草稿态用页签 id。
   const owner = sessionId || id
-  // 受控浏览器 / 终端以 MCP 接入，owner 写进配置的请求头 —— 端口和可用能力都是
+  // 受控能力与插件 MCP 共用接入配置，owner 只写进受控能力的请求头。端口和可用能力都是
   // 运行时的状态，所以只能在这一刻生成（`--mcp-config` 与用户配置合并）。
   const mcpConfigPath = writeControlMcpConfig({
     homeDir: resolveMicaHome(),
     origin: process.env[CONTROL_ORIGIN_ENV] || '',
     owner,
     kinds: availableControlKinds(),
+    extraServers: buildPluginMcpServers({ origin: process.env[CONTROL_ORIGIN_ENV] || '' }),
     separator: process.platform === 'win32' ? '\\' : '/'
   })
 

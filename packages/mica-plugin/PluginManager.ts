@@ -24,6 +24,7 @@ import { loadManifestRoles, publishPluginRoles } from './PluginRoles.js';
 import { createPluginHealthStore, writePluginHealth } from './PluginHealth.js';
 import { createPluginLogger } from './PluginLog.js';
 import { createPluginSettingsStore } from './PluginSettings.js';
+import { createPluginDataApi, pluginDataPath } from './PluginData.js';
 import { PluginActionRegistry, type PluginActionInput, type PluginActionResult } from './PluginActions.js';
 import { PLUGIN_STATE_FILE, readPluginState, resolvePluginStatePath } from './PluginState.js';
 import { createPluginStatus, writePluginStatus, type PluginHostKind } from './PluginStatus.js';
@@ -87,6 +88,7 @@ export type PluginStateSyncOptions = {
  * - `pluginId` / `onDispose`：生命周期绑定，只由 PluginManager 决定；
  * - `logger`：包装成带插件 id 的文件日志，写进 `resolveLogDir()`（与运行时日志同目录）；
  * - `settings`：按插件清单里的 `settings` 声明读取，路径跟着 `paths.config` 走；
+ * - `data`：绑定当前 pluginId 的跨宿主自有数据，宿主不能注入另一插件的句柄；
  * - `health`：插件自报状态，落到 `$MICA_HOME/plugin-health/<id>.json`；
  * - `prompt`：包一层只写自己段落的入口。
  * - `skills`：进程级 skill 注册表，按 pluginId 归属，卸载时一起摘掉。
@@ -95,7 +97,7 @@ export type PluginStateSyncOptions = {
  */
 export type PluginBaseContext = Omit<
   PluginContext,
-  'pluginId' | 'pluginStatus' | 'onDispose' | 'logger' | 'settings' | 'sessionSettings' | 'health' | 'skills' | 'models'
+  'pluginId' | 'pluginStatus' | 'onDispose' | 'logger' | 'settings' | 'sessionSettings' | 'health' | 'skills' | 'models' | 'data'
 > & {
   logger?: PluginContext['logger'];
   /**
@@ -381,6 +383,9 @@ export class PluginManager {
       },
       onDispose: (dispose) => localDisposables.push({ dispose }),
     };
+    // Ignore even untyped host-injected handles: only this manager binds plugin-owned data.
+    delete ctx.data;
+    if (configDir && pluginDataPath(configDir, plugin.id)) ctx.data = createPluginDataApi(configDir, plugin.id);
     // 常驻任务由 manager 自己调度，不依赖宿主接线：它是纯定时逻辑，任何宿主都能给。
     // 插件没手动 dispose 的循环随 localDisposables 一起回收，所以停用插件 = 循环停止。
     const background = createPluginBackgroundScheduler({

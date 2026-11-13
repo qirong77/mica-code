@@ -147,7 +147,8 @@ describe('classifyRemotePath', () => {
       '/index.html',
       '/remote/control',
       '/remote/terminal/sessions',
-      '/mcp/terminal'
+      '/mcp/terminal',
+      '/plugin/notebook/mcp'
     ]) {
       expect(classifyRemotePath(pathname)).toBe('other')
     }

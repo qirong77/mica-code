@@ -16,6 +16,7 @@ import type {
 import type { PluginBackgroundApi } from './PluginBackground.js';
 import type { PluginPromptSection } from './PluginPrompt.js';
 import type { PluginSessionStateApi } from './PluginSessionState.js';
+import type { PluginDataApi } from './PluginData.js';
 import type { PluginSessionSettingsApi } from './PluginSessionSettings.js';
 import type { PluginSubagentApi } from './PluginSubagents.js';
 import type { PluginModelsApi } from './PluginModels.js';
@@ -170,6 +171,12 @@ export type PluginContext = {
    * 之外（例如协议方法里）改动，需要调用方自己触发保存。
    */
   sessionState?: PluginSessionStateApi;
+  /**
+   * 本插件自有的跨宿主共享 JSON 数据，绑定当前 pluginId，由 paths.config 提供存储目录。
+   * 页面、launcher 与 headless 共用数据、版本和跨进程锁；不是 sessionState，
+   * 不随新会话清空或随 fork/rewind 复制。缺少存储路径的宿主不提供此能力。
+   */
+  data?: PluginDataApi;
   /**
    * 本插件的设置值，含**当前会话**的覆盖。
    *

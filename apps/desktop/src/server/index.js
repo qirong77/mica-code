@@ -1,5 +1,5 @@
 import { createServer } from 'node:http'
-import { createReadStream, existsSync, statSync } from 'node:fs'
+import { createReadStream, existsSync, statSync, unwatchFile, watchFile } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import { extname, join, normalize, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -72,6 +72,12 @@ import {
 import { CONTROL_MCP_PREFIX, createControlMcpHandler } from '../host/control-mcp.js'
 import { requestJson } from '../host/control-client.js'
 import { CONTROL_ORIGIN_ENV, removeLegacyControlSkills } from '../host/control-mcp-config.js'
+import { createPluginMcpRuntime } from '../host/plugin-mcp-runtime.js'
+import { createPluginMcpHandler } from '../host/plugin-mcp.js'
+import { setPluginMcpCatalog } from '../host/plugin-mcp-config.js'
+import { createPluginMcpRoute } from './plugin-mcp-route.js'
+import { officialPluginManifests } from '@packages/mica-official-plugins/manifests.js'
+import { readDisabledPluginIds } from '@packages/mica-plugin/PluginState.js'
 import { resolveMicaHome } from '@packages/mica-config/index.js'
 import {
   DEFAULT_RUNTIME_PORT,
@@ -824,9 +830,36 @@ export async function startDesktopServer(options = {}) {
     terminalSocket: process.env[TERMINAL_SOCKET_ENV]
   })
 
+  // 插件独立后端与 launcher 一样由应用托管，不借用任何会话 app-server。
+  const pluginMcpLoaders = new Map()
+  for (const [file, load] of Object.entries(import.meta.glob('../../../../plugins/*/mcp.ts'))) {
+    const match = /\/([^/]+)\/mcp\.ts$/.exec(file)
+    if (match) pluginMcpLoaders.set(match[1], load)
+  }
+  const home = resolveMicaHome()
+  const pluginStatePath = join(home, 'plugins-state.json')
+  let disabledPlugins = readDisabledPluginIds({ path: pluginStatePath })
+  const pluginMcpRuntime = createPluginMcpRuntime({
+    manifests: officialPluginManifests,
+    loaders: pluginMcpLoaders,
+    home,
+    readDisabled: () => disabledPlugins
+  })
+  const syncPluginMcp = () => {
+    disabledPlugins = readDisabledPluginIds({ path: pluginStatePath })
+    void pluginMcpRuntime.sync().catch((error) => runtimeLog.error('plugin-mcp:sync-failed', { error }))
+  }
+  watchFile(pluginStatePath, { interval: 400, persistent: false }, syncPluginMcp)
+  setPluginMcpCatalog(() => officialPluginManifests.filter((manifest) => pluginMcpRuntime.has(manifest.id)))
+  const pluginMcpRoute = createPluginMcpRoute({
+    runtime: pluginMcpRuntime,
+    handle: createPluginMcpHandler({ runtime: pluginMcpRuntime }),
+    verifyOrigin: verifyRequestOrigin
+  })
+
   const sharing = options.sharing !== false
   const server = createServer(
-    createRequestHandler({ rendererRoot, sharing, browserProxy, terminalProxy, controlMcp })
+    createRequestHandler({ rendererRoot, sharing, browserProxy, terminalProxy, controlMcp, pluginMcpRoute })
   )
   const host = options.host || '0.0.0.0'
   const port = await listenWithFallback(server, host, options.port || DEFAULT_RUNTIME_PORT, {
@@ -878,6 +911,9 @@ export async function startDesktopServer(options = {}) {
     stopBrowserControl()
     stopTerminalControl()
     stopNotifyBridge()
+    unwatchFile(pluginStatePath, syncPluginMcp)
+    setPluginMcpCatalog()
+    await pluginMcpRuntime.close()
     await disposePluginHost()
     // 攒在防抖里的界面状态是用户最后那次输入/拖动，必须在退出前落盘
     flushUiState()
@@ -948,7 +984,8 @@ function createRequestHandler({
   sharing = true,
   browserProxy = null,
   terminalProxy = null,
-  controlMcp = {}
+  controlMcp = {},
+  pluginMcpRoute = null
 }) {
   return (req, res) => {
     void (async () => {
@@ -995,6 +1032,9 @@ function createRequestHandler({
         if (isSharePath(url.pathname) && !sharing) {
           return sendJson(res, 404, { ok: false, error: '分享视图已关闭' })
         }
+
+        // 独立插件 MCP：沿用前面的远程访问门禁，并由通用路由做 Host/Origin 校验。
+        if (pluginMcpRoute && await pluginMcpRoute(req, res, pathname)) return
 
         // 受控能力的 MCP 端点（/mcp/browser、/mcp/terminal）：agent 的唯一入口。
         // 和 /api 同一套来源校验；MCP 用 POST/GET/DELETE，不能落到下面「只允许 GET」的兜底上。

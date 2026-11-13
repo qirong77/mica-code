@@ -36,6 +36,9 @@ lease 并应用配置后、保存用户输入前执行，可通过事件上的 `
 - 插件健康：`ctx.health.report()` 原子写入 `$MICA_HOME/plugin-health/<id>.json`，配置页据此显示「正常 / 待配置 / 运行出错」。只有插件运行状态写这里；缺宿主能力与装配失败分别由 manager 记入 `setupReport()` / `plugin-status.json` 的 `skipped` 与 `failed`，不进健康文件。成功装配不清除已有运行故障，恢复由插件自己上报。记录（含钩子失败）带当前插件版本，读的一方传 `version` 就只认这一版写的（升级后旧结论自动失效）。
 - 提示词贡献：`ctx.prompt.section()` 追加一段 system prompt，随插件启停一起出现 / 消失。
 - 会话状态：`ctx.sessionState` 按插件 id 存进会话快照，resume / fork / rewind 跟着走。
+- 插件自有数据：`ctx.data` 绑定当前 pluginId，页面、系统启动器与 headless 共用同一份 JSON、
+  CAS 版本、跨进程锁与原子写；与会话无关，不随新会话清空或随 fork / rewind 复制。
+  清单声明 `requires: ["data"]`，缺少 `paths.config` 的宿主整插件跳过；宿主不能直接注入 data 句柄。
 - 会话标注：`sessionAnnotations.ts` 按 session 存插件自己的标注（标签色点等），供 `session-tags` 插件与桌面端会话列表共用。
 - 模型请求重写：`ctx.agent.onIterationRewrite()` 在两次模型请求之间改写要发送的历史（自动压缩用它）；`ctx.agent.mode` 回答宿主形态（`session` / `one-shot`），一次性运行里不该跑会额外花钱的后台策略。
 - 插件模型请求与主会话共用 pi-ai 适配器；`PluginModelProtocol` 使用主配置的 `ProviderProtocol`，支持 OpenAI Chat/Responses、Anthropic Messages 和 Google Generative AI。历史重写接收 pi 消息，厂商专属思考签名仅由模型适配层解释。
@@ -106,6 +109,58 @@ export default function setup(context: PluginContext) {
 
 `micaPlugin.Plugin` 这个基类只用于宿主进程内直接装配的内置插件（例如 TUI 的
 `BuiltInCommandsPlugin`）；文件插件不需要、也不会被包成 class。
+
+### 独立插件 MCP
+
+清单 `mcp: true` 声明随包 `mcp.ts` 的独立接口，由应用运行时挂在同一端口的
+`/plugin/<id>/mcp`，server 名 `mica-plugin-<id>`。它与会话 `setup(ctx)` 分开装配，
+不依赖会话或页面，不为具体插件在宿主写路由分支。当前仅支持随包模块。
+
+- `PluginMcpContext`：`pluginId`、绑定当前插件的 `data: PluginDataApi`、只读 `settings.get()`。
+- `PluginMcpHandler`：`instructions?`、`tools: PluginMcpTool[]`、可选 `dispose()`。
+- `PluginMcpTool`：标准 MCP Tool 定义加 `execute(input, { signal })`；返回 JSON 值/文本，失败抛错。
+- `PLUGIN_MCP_PREFIX` / `pluginMcpPath(id)` / `pluginMcpId(pathname)` / `pluginMcpServerName(id)`：
+  端点和 server 命名的共同约定。
+
+应用宿主实施 Streamable HTTP、schema 校验、启停/退出释放与访问守卫；桌面/Web 的会话宿主
+启动时自动合并实际可用的端点，不写用户 `config.json`，输入补全只读清单而不初始化模块。
+用法与完整边界见 [独立 MCP](../../plugins/README.md#独立-mcp)。
+
+### 跨宿主插件数据
+
+`PluginData.ts` 是通用 JSON 数据的唯一实现，桌面 host 的 core/store 只转导出它。
+`PluginManager` 在 `paths.config` 可用时创建绑定当前 pluginId 的 `ctx.data`：
+
+```ts
+const data = context.data!; // plugin.json: requires: ["data"]
+const current = data.read<{ items: string[] }>();
+const saved = data.write({ items: [...(current.value?.items ?? []), 'new'] }, {
+  expectedVersion: current.version,
+});
+if (!saved.ok) {
+  // 冲突时重新读取，只重放本次修改，不要直接重写旧副本。
+}
+
+const document = data.documents.read<{ text: string }>('page-1');
+const result = data.documents.write('page-1', { text: '正文' }, {
+  expectedVersion: document.version,
+});
+// 成功时 result.version 就是本次提交的版本，下一次 CAS 无需为确认版本重读整篇文档。
+```
+
+- 接口为同步读写（可以 `await`），缺文件返回 `{ value: null, version: null }`；成功写入返回
+  `{ ok: true, version }`，版本冲突或正在保存返回 `{ ok: false, conflict: true, error }`。
+  IO、非法路径、序列化或大小错误抛错。泛型只描述插件预期结构，不做 schema 校验。
+- 省略 `expectedVersion` 是无条件写；显式 `null` 是「仅在文件不存在时创建」。版本按实际原始
+  文件内容（包含末尾换行）计算 SHA-256，CAS 和原子重命名在同一跨进程临界区内完成。
+- 普通数据落在 `<paths.config>/plugin-data/<pluginId>/data.json`，序列化 JSON 上限 256 KiB；
+  独立文档落在同目录的 `documents/<key>.json`，每篇上限 6 MiB。文件写入权限为 0600。
+- 文档 key 为 1–128 位 ASCII 字母数字与 `. _ -`，须以字母数字开头，不含 `..` 或路径分隔符；
+  文档路径及锁目录的已有符号链接被拒绝（用户选择的 MICA_HOME 本身可为符号链接）。
+- 损坏文档读取会抛错，即使无 CAS 也拒绝覆盖；有效 JSON `null` 与缺文件由 version 区分。
+  普通 data.json 保持原有「损坏时 value 为 null，但保留版本」约定，未改变持久化格式。
+- 非插件宿主可从公共入口导入 `createPluginDataApi`、`readPluginData`、`writePluginData`，
+  或使用 `pluginDataPath`、encode/decode、校验函数与大小常量；底层函数的可选 `key` 供传输层使用。
 
 ### System prompt 扩展
 

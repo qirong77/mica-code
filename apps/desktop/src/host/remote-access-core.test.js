@@ -186,6 +186,9 @@ describe('remoteAccessDecision', () => {
     expect(remoteAccessDecision({ policy: off, pathname: '/files', hasShare: true })).toBe(
       'not-found'
     )
+    // 分享会话不授予独立插件 MCP 的入口权限。
+    expect(remoteAccessDecision({ policy: off, pathname: '/plugin/notebook/mcp', hasShare: true })).toBe('not-found')
+    expect(remoteAccessDecision({ policy: on, pathname: '/plugin/notebook/mcp', hasShare: true })).toBe('login')
   })
 
   // 侧栏 Connections 连另一台机器时，是先探活再开窗的：探活若被口令挡住，

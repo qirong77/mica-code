@@ -48,6 +48,7 @@ mica 选后者，这个插件就是「洗」的地方。
 | `generation-timing-v2`   | 将没有 `generationOutputTokens` 的旧 `generationDurationMs` 归档为 `legacyGenerationDurationMs`；旧形态不再参与生成速率统计，token 用量与响应等待不变。 |
 | `quick-buttons-accent-color` | 只为会话 `snapshot.pluginState['quick-buttons'].buttons` 中缺失的 `style.color` 补 `accent`；已有颜色、图标、形状、纯图标配置与按钮内容、动作和顺序保持不变，其它插件不受影响。 |
 | `pi-messages-v1` | 将旧 Chat Completions / Responses 原生历史转换为完整 pi `Message[]`，写入 `snapshot.messageFormat: 'pi-ai-v1'`。身份由快照 provider/model/协议决定；保留正文、内联图片、reasoning 原项签名、工具调用与结果，展示对话及用量账本保留。已标记的快照不再改写。 |
+| `notebook-mcp` | 将旧 `notebook_read` / `notebook_write` 工具停用项迁为 `mica-plugin-notebook` MCP 停用项；移除已撤下的 `notebook` skill 选择，其它能力与会话内容不动。 |
 
 `pi-messages-v1` 只读文档本身：内联图片保留数据与 MIME，远程图片 URL / 文件引用保留为 `[Image](引用)` 文本（pi 图片块只支持内联数据）。Responses reasoning 的完整原项保存到 `thinkingSignature`，正文项的 id / phase 保存到 `textSignature`，函数调用与结果共享 pi 的 `call_id|item_id`。缺失的时间取会话创建时间，缺失的用量填零；现有用量记录的 token 数映射到消息内的 pi usage，不改原账本。无法识别的消息会使该文件转换失败，保留原文，不会把半份历史标成 pi。运行时不再支持旧 wire 历史，必须先经此迁移。
 
@@ -63,6 +64,7 @@ mica 选后者，这个插件就是「洗」的地方。
 | `plugin-startup-health` | 将旧 `plugin-health/<id>.json` 中宿主写下的「启动失败：…」错误原文归档到 `plugin-data/evolution/legacy-plugin-health/`，不再当作当前运行健康。只识别明确的旧启动错误，真实运行错误、成功记录与损坏文件不动；装配结论由当前宿主的 `plugin-status.json` 负责。 |
 | `subagent-task-files` | 将 `subagent-tasks/<sessionId>.json` 的旧任务数组拆为 `<sessionId>/<taskId>.json`，已有独立任务更新优先；完整原文件改名归档为 `*.legacy-v1.json`，归档重名时加编号。损坏、未知数据与符号链接不改。运行时不再读取旧数组，需经此迁移。 |
 | `notebook-comments` | 评论功能移除后，笔记文档里的 `comments` 讨论记录先归档到 `plugin-data/evolution/legacy-notebook-comments/<noteId>.json`（重名加编号），再删掉该字段；正文里由评论产生的 MarkNode 锚点拆回普通子节点，文字与格式不变。文档只剩 `version` 与 `editorState`，损坏文档与非 `version: 1` 文档不动；重复执行改动数为 0。 |
+| `notebook-mcp` | 将 Notebook 旧插件 skill 索引移到 `plugin-data/evolution/legacy-notebook-skill/` 原文归档，迁移默认能力中的旧工具停用项；不改笔记正文、用户手写 skill 或其它插件索引。旧 skill / 直连工具入口不再支持。 |
 
 新增一条迁移 = 在 `migrations.ts` 里加一个 `Migration`（`id`、`description`、纯函数 `apply`），
 然后写进 `MIGRATIONS`。账本按 id 记进度，所以追加迁移会让所有会话重新评估一次；已经洗过的

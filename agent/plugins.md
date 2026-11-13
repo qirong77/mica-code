@@ -5,7 +5,7 @@
 **插件系统仍在持续迭代：实现一个插件时，把「这个插件是否需要先推动插件系统进化」当作设计的一部分，而不是只在现有能力面上将就。**
 
 - 该先重构的信号：需求要读插件拿不到的数据、要靠改别人的数据伪造界面、要依赖宿主里的私有约定、要在多个插件间共享同一份可变状态、或必须为某个插件在宿主里写死分支——出现任一条都说明能力面缺东西，先重构插件系统，再在新机制上实现该插件。
-- 重构方向是通用能力面：扩展 `PluginContext` 的某一面（`agent` / `background` / `commands` / `desktop` / `events` / `hooks` / `session` / `sessionState` / `settings` / `skills` / `tools` / `ui`）或复用已有能力；宿主里不出现具体插件名词，「加个 if 兼容某插件」不算设计。
+- 重构方向是通用能力面：扩展 `PluginContext` 的某一面（`agent` / `background` / `commands` / `data` / `desktop` / `events` / `hooks` / `session` / `sessionState` / `settings` / `skills` / `tools` / `ui`）或复用已有能力；宿主里不出现具体插件名词，「加个 if 兼容某插件」不算设计。
 - 重构与实现同一次变更交付：插件系统改动、受影响的官方插件、`plugins/README.md` 与本文一并更新；不留旧形态兼容分支，不为过渡保留双路径。
 - 插件格式或能力面变更后跑 `plugins/**` 相关测试与 `bun run typecheck`；触及工具定义或 prompt 前缀时确认前缀稳定。
 
@@ -21,7 +21,7 @@
 
 - 启停状态在 `$MICA_HOME/plugins-state.json`（`{ "disabled": [...] }`）；停用的插件**照常注册**、在装配阶段跳过，所以启用只是「再 setup 一次」。
 - 常驻宿主（TUI / app-server）在 `baseContext.pluginStateSync` 里交出「怎么重新扫描用户插件」与 `canSyncNow()`，manager 据此跟着 `plugins-state.json` 走：**文件一变（`watchFile` 400ms + 120ms 去抖）就对齐一次**，停用的插件立刻卸载、重新启用的立刻装配，并重写 `plugin-status.json`；`canSyncNow()` 为 false（这一轮正在跑）时只记下来，等 `turn:after` 补做——工具与钩子不能从跑到一半的轮次脚底抽走。`turn:before` 仍兜底 stat 一次（容器 / 网络盘可能漏事件），所以漏了也不会错到下一轮之后。一次性宿主（`mica exec`、插件命令 / 动作）没有下一轮可等，名单只在装配时读一次。每插件的资源按 pluginId 分开登记，卸载一个插件不能碰别人的工具、命令与钩子。
-- `requires` 必须写全插件触碰的每一面：`actions` / `agent` / `background` / `commands` / `desktop` / `events` / `git` / `hooks` / `llm` / `models` / `prompt` / `runtime` / `session` / `sessionSettings` / `sessionState` / `settings` / `skills` / `subagents` / `tools` / `ui`。缺一项整插件跳过，原因写进 `plugin-status.json` 的 `skipped`；跳过**不写** `plugin-health`——缺哪一面是当前宿主的事实（TUI / `mica exec` 没有 `desktop`），写进所有宿主共享的健康状态会让桌面端显示别的宿主留下的「待配置」。
+- `requires` 必须写全插件触碰的每一面：`actions` / `agent` / `background` / `commands` / `data` / `desktop` / `events` / `git` / `hooks` / `llm` / `models` / `prompt` / `runtime` / `session` / `sessionSettings` / `sessionState` / `settings` / `skills` / `subagents` / `tools` / `ui`。缺一项整插件跳过，原因写进 `plugin-status.json` 的 `skipped`；跳过**不写** `plugin-health`——缺哪一面是当前宿主的事实（TUI / `mica exec` 没有 `desktop`），写进所有宿主共享的健康状态会让桌面端显示别的宿主留下的「待配置」。
 - `plugin-status.json` 由 `mica-plugin` 的 `writePluginStatus()` 唯一写盘（装配完成与每次启停对齐后各写一次）：记**全部**装配过的插件（官方与用户一视同仁）、写下 `host`（`tui` / `app-server`）。装配结论来自 manager 记的每插件 attempt（`setupReport()`），被停用的插件因此不会留下一条过期的「已加载」。配置页显示「已跳过 · TUI」，跳过不参与「插件坏了」的判定；没有记录时页面如实说「尚未加载」，不给官方插件编默认值。
 
 ## 能力面
@@ -48,7 +48,7 @@ setup 必须先登记独立动作再按能力装配会话工具；动作宿主�
 - 内置 skill 用 `ctx.skills.register()`：正文随包用 `import … with { type: 'text' }` 内嵌，元数据由 `micaSkills.parseMarkdown(SKILL.md)` 解析（frontmatter 是唯一来源），注册后与磁盘 skill 同权（prompt 索引 / `skill` 工具 / 会话能力开关）。磁盘上的同名 skill 优先，被遮蔽的条目从返回值 `skipped` 读出来并 `ctx.health.report()`。`baseDir` 必须是真能读到的目录——单二进制没有插件目录，所以随包资源要先落盘到 `$MICA_HOME/<插件目录>` 再注册（`plugins/computer-use` 是完整示例，源码内嵌由 `scripts/generate-computer-use-sources.mjs` 生成，改 `runtime/**` 必须重跑）；**正文不落盘（`baseDir/SKILL.md` 不存在）的 skill 不会进补全列表**，因为补全插入的就是这条路径。
 - 注册成功的内置 skill 由插件系统顺带发布到 `$MICA_HOME/plugin-skills/<pluginId>.json`（`PluginSkills.ts`，一个插件一份、整份重写）：不 setup 插件的宿主（桌面运行时给 `/` 补全、配置页）靠这份索引列出内置 skill，不必为两个名字冷启动会话进程。索引不主动清理（多进程会互相踩），读的时候按 `plugins-state.json` 的停用名单与 `SKILL.md` 是否还在过滤——所以停用插件、卸掉插件之后它立刻从列表消失。
 - 插件整块按会话角色门控时（段落、工具、技能一起只对某个角色出现），技能也要声明角色：`ctx.skills.register(skill, { roles: ['需求开发'] })`（空数组＝所有角色）。角色随条目写进索引（`version: 2`，缺 `roles` 的旧索引直接当没有），由读索引的一方按会话角色过滤——索引是全局一份、注册只发生在跑插件的那个进程里，判定只能留在读取侧。
-- **随插件分发的 skill 用清单 `skills` 声明**，不要手写 `ctx.skills.register()`，也不要把正文抄到 `$MICA_HOME`：每条是相对插件目录的路径，目录里有 `SKILL.md` 就是一条 skill、否则当容器扫一层子目录（`["skills"]` 带一组、`["./skills/x"]` 带一条）。宿主按 `MicaPlugin.root` 读成运行期 skill 并发布索引，**编辑插件目录里的文件就是编辑 skill**；相对路径以外（绝对路径、`..`）在清单解析阶段就拒绝。目录读不到只报一条健康状态、插件其余能力照常启动。`ctx.skills.register()` 仍然保留给「正文来自内存/需要动态生成」的场合（`plugins/computer-use` 的源码内嵌就是这一种）。
+- **随插件分发的 skill 用清单 `skills` 声明**，不要手写 `ctx.skills.register()`，也不要把正文抄到 `$MICA_HOME`：每条是相对插件目录的路径，目录里有 `SKILL.md` 就是一条 skill、否则当容器扫一层子目录（`["skills"]` 带一组、`["./skills/x"]` 带一条）。宿主按 `MicaPlugin.root` 读成运行期 skill，**编辑插件目录里的文件就是编辑 skill**；相对路径以外（绝对路径、`..`）在清单解析阶段就拒绝。目录读不到只报一条健康状态、插件其余能力照常启动。`ctx.skills.register()` 仍然保留给「正文来自内存/需要动态生成」的场合（`plugins/computer-use` 的源码内嵌 runtime 就是这一种）。
 - **随插件分发的角色用清单 `roles` 声明**（同一套相对路径规则、同样在解析阶段拒绝越界），正文是 `<插件目录>/roles/<名字>.md`。它与 `$MICA_HOME/role/*.md` 的注入方式相同：非默认角色统一通过 `rolePrompt` **追加**为紧接固定 `<system>` 的 `<role>` 段，同属 system prompt，只写「这个角色额外要遵守什么」，不替换通用约束；内置 `default` 正文只读且不重复追加。宿主装配时写索引 `$MICA_HOME/plugin-roles/<pluginId>.json`（`mica-plugin/PluginRoles.ts`，仍为 `version: 1` 的 `name` / `path` 条目），输入框的角色箭头（`host/chat.js` 的 `listRoles`）与 `/role`（`mica-agent` 的 `listAgentRoles`）都只读索引，不必 setup 插件；磁盘同名角色优先并遮蔽插件那条。读索引的一方要按 `plugins-state.json` 的停用名单过滤（索引要等某个宿主对齐时才清，用户刚关掉插件时那些名字不该还能切到）。改角色 = 改插件目录里的文件。
 
 ### session / sessionState / sessionSettings
@@ -237,6 +237,8 @@ macOS 浮窗只取键盘焦点、不连带唤起主应用；原生窗口策略�
 
 ## MCP 与 Skills
 
+- 随包插件可声明 `mcp: true` 并提供 `mcp.ts` 的 default `createMcp(context)`：公共契约在 `mica-plugin/PluginMcp.ts`，上下文只有插件身份、绑定的 `data` 与只读设置，返回 `instructions/tools/dispose?`，工具 `execute(input,{signal})` 返回 JSON/文本。应用用 `host/plugin-mcp-runtime.js` 懒加载并缓存、按启停与退出释放，不启动会话；`host/plugin-mcp.js` 负责 stateless Streamable HTTP 与输入 schema 校验，挂在已有端口 `/plugin/<id>/mcp`。宿主只接线，不出现具体插件分支；首版与 launcher 一样只加载随包模块。独立 MCP 不再经 `ctx.tools` 重复注册或用 skill 充当接口。
+- 桌面/Web 会话宿主启动时，实际可用插件端点按 `mica-plugin-<id>` 合并到 `--mcp-config`，与受控能力共存，不写用户配置；`/` 候选用同一目录且不导入模块、不握手。停用后路由拒绝新调用；已运行宿主的连接目录仍为启动时快照，重新启用需重连/新起宿主。路径在 remoteGate 之后分派，复用 Host/Origin 校验，未知 `/plugin/*` 不能回落到 SPA，分享 cookie 不开放独立 MCP。Notebook 使用这条路径，旧 skill 索引与能力停用项由 Evolution 的 `notebook-mcp` 迁移，不改笔记正文。
 - `mica-mcp` 管理 `config.json.mcpServers` 生命周期；读取时展开 `url` / `headers` 里的 `${VAR}` 与 `${VAR:-默认值}`，`command` / `args` / `env` 不展开。
 - 会话能力目录（`mica/capabilities/get` 的 `mcpServers`）由 `micaMcp.catalog()` 合并三处：用户配置、会话自己的 `--mcp-config`、已连上的 server。桌面端把受控浏览器 / 终端挂进 `--mcp-config` 而不写用户配置，漏掉第二处界面上就看不到也关不掉它们。
 - MCP 工具名由 `mcpToolNamePrefix()` 生成；按 server 关闭时用前缀匹配，断开/重连失败同步清理并刷新 registry。
