@@ -12,6 +12,9 @@ import { clip } from './views.js';
 /** 同时活着的子会话上限：再多就不是「派一个去干活」，而是一个没人收的进程池。 */
 export const MAX_SIDECARS = 4;
 
+/** 迭代预算太小时，模型通常还没完成一次有效的工具链就会被截断。 */
+export const MIN_MAX_TURNS = 200;
+
 /**
  * 进程已经退出的条目最多留几条。
  *
@@ -133,8 +136,8 @@ export class SidecarRegistry {
     // 回收之后还派：这个进程马上要退出，派出来的孩子没人管。
     if (this.disposed) return { ok: false, error: '会话已经关闭，不再派生新的子会话。' };
     if (input.signal?.aborted) return { ok: false, error: '派生子会话已取消。' };
-    if (input.maxTurns !== undefined && (!Number.isInteger(input.maxTurns) || input.maxTurns <= 0)) {
-      return { ok: false, error: 'max_turns 必须为正整数。' };
+    if (input.maxTurns !== undefined && (!Number.isInteger(input.maxTurns) || input.maxTurns < MIN_MAX_TURNS)) {
+      return { ok: false, error: `max_turns 必须为不小于 ${MIN_MAX_TURNS} 的整数。` };
     }
     this.sweep();
     // 名额算的是「还活着」的：退了但还没清掉的死条目不该占着并发名额，否则

@@ -978,6 +978,7 @@ const child = spawn(micaExecutable, ['app-server', '--dir', cwd, '--parent', thi
   和 `/resume` 都能直接打开它——用户能看到，但不必为了看到而操作界面。
 - **一次 spawn 就是一个会话**，不要给一个子进程投两轮以上之外的期望：`turn/start` 在忙时
   会报错，需要排队就用 `turn/steer`（等价的用户操作是按回车）。
+- `sidecar_spawn.max_turns` 是可选的迭代上限；显式传入时必须至少为 **200**，避免子会话还没完成有效工具链就被截断。省略时不额外设置这个上限。
 
 `plugins/sidecar` 是完整示例：`sidecarProcess.ts` 负责协议与进程，`transcript.ts` 把事件投影
 成轮次（纯函数，可单测），`tools.ts` 把它包成 `sidecar_*` 工具。

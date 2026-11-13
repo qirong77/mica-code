@@ -1,5 +1,5 @@
 import { MicaTool, type ToolExecuteCallbacks } from '@packages/mica-tools/MicaTool.js';
-import { MAX_SIDECARS, waitBaseline, waitSatisfied, type SidecarRegistry } from './registry.js';
+import { MAX_SIDECARS, MIN_MAX_TURNS, waitBaseline, waitSatisfied, type SidecarRegistry } from './registry.js';
 import {
   DEFAULT_TURN_INDEX_LIMIT,
   DEFAULT_TRANSCRIPT_CHARS,
@@ -52,7 +52,11 @@ export class SidecarSpawnTool extends MicaTool {
           role: { type: 'string', description: '角色名（$MICA_HOME/role/<name>.md），默认沿用当前配置。' },
           model: { type: 'string', description: '模型 id（provider/model），默认沿用当前配置。' },
           effort: { type: 'string', description: '推理档位，取该模型声明的档位名。' },
-          max_turns: { type: 'integer', minimum: 1, description: '最多几轮模型往返，用来兜住跑飞的任务。' },
+          max_turns: {
+            type: 'integer',
+            minimum: MIN_MAX_TURNS,
+            description: `最多几轮模型往返，最小为 ${MIN_MAX_TURNS}，用来兜住跑飞的任务。`,
+          },
         },
         required: ['prompt'],
       },

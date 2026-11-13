@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { PluginContext } from '@packages/mica-plugin/index.js';
-import { MAX_SIDECARS, SidecarRegistry } from './registry.js';
+import { MAX_SIDECARS, MIN_MAX_TURNS, SidecarRegistry } from './registry.js';
 import { SidecarProcess } from './sidecarProcess.js';
 
 afterEach(() => vi.restoreAllMocks());
@@ -100,11 +100,27 @@ describe('SidecarRegistry startup', () => {
     await registry.closeAll();
   });
 
-  it.each([0, -1, 1.5, NaN, Infinity])('rejects invalid max_turns=%s before starting a child', async (maxTurns) => {
+  it.each([0, -1, 1, MIN_MAX_TURNS - 1, 1.5, NaN, Infinity])(
+    'rejects invalid max_turns=%s before starting a child',
+    async (maxTurns) => {
+      const { registry } = harness();
+      const start = vi.spyOn(SidecarProcess, 'start');
+      expect(await registry.spawn({ prompt: 'work', maxTurns })).toMatchObject({
+        ok: false,
+        error: `max_turns 必须为不小于 ${MIN_MAX_TURNS} 的整数。`,
+      });
+      expect(start).not.toHaveBeenCalled();
+    },
+  );
+
+  it('accepts the minimum max_turns value', async () => {
     const { registry } = harness();
-    const start = vi.spyOn(SidecarProcess, 'start');
-    expect((await registry.spawn({ prompt: 'work', maxTurns })).ok).toBe(false);
-    expect(start).not.toHaveBeenCalled();
+    const child = processFor('minimum-budget-child');
+    const start = vi.spyOn(SidecarProcess, 'start').mockResolvedValue(child);
+
+    expect((await registry.spawn({ prompt: 'work', maxTurns: MIN_MAX_TURNS })).ok).toBe(true);
+    expect(start).toHaveBeenCalledWith(expect.objectContaining({ maxTurns: MIN_MAX_TURNS }));
+    await registry.closeAll();
   });
 
   it('reserves capacity while handshakes are still in flight', async () => {

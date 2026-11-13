@@ -6,6 +6,11 @@ import { SidecarTranscript } from './transcript.js';
 afterEach(() => vi.useRealTimers());
 
 describe('sidecar tool boundaries', () => {
+  it('advertises the minimum max_turns value to the model', () => {
+    const tool = new SidecarSpawnTool({} as SidecarRegistry);
+    expect(tool.input_schema.properties?.max_turns).toMatchObject({ type: 'integer', minimum: 200 });
+  });
+
   it.each([{ until: 'typo' }, { timeout_ms: 0 }, { timeout_ms: -1 }, { timeout_ms: NaN }, { timeout_ms: Infinity }])(
     'rejects invalid wait input before subscribing: %j',
     async (input) => {
@@ -20,8 +25,8 @@ describe('sidecar tool boundaries', () => {
     const spawn = vi.fn(async () => ({ ok: false, error: 'cancelled' }));
     const controller = new AbortController();
     const tool = new SidecarSpawnTool({ spawn } as unknown as SidecarRegistry);
-    await tool.execute({ prompt: 'work', max_turns: 0 }, { signal: controller.signal });
-    expect(spawn).toHaveBeenCalledWith({ prompt: 'work', maxTurns: 0, signal: controller.signal });
+    await tool.execute({ prompt: 'work', max_turns: 200 }, { signal: controller.signal });
+    expect(spawn).toHaveBeenCalledWith({ prompt: 'work', maxTurns: 200, signal: controller.signal });
   });
 
   it('cancels an outstanding wait without advancing the polling clock', async () => {
