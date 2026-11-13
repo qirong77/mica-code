@@ -26,6 +26,7 @@ import {type JSX, useMemo, useState} from 'react';
 import useModal from '../../hooks/useModal';
 import Button from '../../ui/Button';
 import {DialogActions} from '../../ui/Dialog';
+import TextInput from '../../ui/TextInput';
 import {INSERT_FIGMA_COMMAND} from '../FigmaExtension';
 import {$isPullQuoteNode} from '../PullQuoteExtension/PullQuoteNode';
 import {$isReviewNode} from '../ReviewExtension/ReviewNode';
@@ -50,7 +51,7 @@ interface PlaygroundEmbedConfig extends EmbedConfig {
 }
 
 export const YoutubeEmbedConfig: PlaygroundEmbedConfig = {
-  contentName: 'Youtube Video',
+  contentName: 'YouTube 视频',
 
   exampleUrl: 'https://www.youtube.com/watch?v=jNQXAC9IVRw',
 
@@ -85,7 +86,7 @@ export const YoutubeEmbedConfig: PlaygroundEmbedConfig = {
 
 export const TwitterEmbedConfig: PlaygroundEmbedConfig = {
   // e.g. Tweet or Google Map.
-  contentName: 'X(Tweet)',
+  contentName: 'X 帖子',
 
   exampleUrl: 'https://x.com/jack/status/20',
 
@@ -121,7 +122,7 @@ export const TwitterEmbedConfig: PlaygroundEmbedConfig = {
 };
 
 export const FigmaEmbedConfig: PlaygroundEmbedConfig = {
-  contentName: 'Figma Document',
+  contentName: 'Figma 文档',
 
   exampleUrl: 'https://www.figma.com/file/LKQ4FJ4bTnCSjedbRpk931/Sample-File',
 
@@ -203,28 +204,24 @@ export function AutoEmbedDialog({
   };
 
   return (
-    <div style={{width: '600px'}}>
-      <div className="Input__wrapper">
-        <input
-          type="text"
-          className="Input__input"
-          placeholder={embedConfig.exampleUrl}
-          value={text}
-          autoFocus={true}
-          data-test-id={`${embedConfig.type}-embed-modal-url`}
-          onChange={e => {
-            const {value} = e.target;
-            setText(value);
-            validateText(value);
-          }}
-        />
-      </div>
+    <div>
+      <TextInput
+        label="链接地址"
+        placeholder={embedConfig.exampleUrl}
+        value={text}
+        autoFocus={true}
+        data-test-id={`${embedConfig.type}-embed-modal-url`}
+        onChange={value => {
+          setText(value);
+          validateText(value);
+        }}
+      />
       <DialogActions>
         <Button
           disabled={!embedResult}
           onClick={onClick}
           data-test-id={`${embedConfig.type}-embed-modal-submit-btn`}>
-          Embed
+          插入
         </Button>
       </DialogActions>
     </div>
@@ -258,7 +255,7 @@ export default function AutoEmbedPlugin(): JSX.Element {
   const [modal, showModal] = useModal();
 
   const openEmbedModal = (embedConfig: PlaygroundEmbedConfig) => {
-    showModal(`Embed ${embedConfig.contentName}`, onClose => (
+    showModal(`插入${embedConfig.contentName}`, onClose => (
       <AutoEmbedDialog embedConfig={embedConfig} onClose={onClose} />
     ));
   };
@@ -269,10 +266,10 @@ export default function AutoEmbedPlugin(): JSX.Element {
     dismissFn: () => void,
   ) => {
     return [
-      new AutoEmbedOption('Dismiss', {
+      new AutoEmbedOption('取消', {
         onSelect: dismissFn,
       }),
-      new AutoEmbedOption(`Embed ${activeEmbedConfig.contentName}`, {
+      new AutoEmbedOption(`插入${activeEmbedConfig.contentName}`, {
         onSelect: embedFn,
       }),
     ];

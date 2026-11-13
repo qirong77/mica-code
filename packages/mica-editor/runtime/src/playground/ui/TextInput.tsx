@@ -38,6 +38,7 @@ export default function TextInput({
       <label htmlFor={id} className="Input__label">{label}</label>
       <Input
         id={id}
+        size="small"
         type={type}
         className="Input__input"
         autoFocus={autoFocus}

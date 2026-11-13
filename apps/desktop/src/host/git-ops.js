@@ -75,6 +75,15 @@ const repositoryState = new Map()
  */
 const worktreeInFlight = new Map()
 /**
+ * Git summary reads are expensive even when they ask for different bases.  A
+ * repository gets one FIFO so two summaries cannot compete for the same disk
+ * and CPU.  The in-flight map above remains the cheap lookup for callers that
+ * can share an already running request; the queue is the ownership boundary
+ * that also covers requests waiting for the slot.
+ */
+const worktreeQueues = new Map()
+let worktreeRequestId = 0
+/**
  * 每个仓库「一次全树扫描」实测花了多久。
  *
  * 工作区文件一改就要重扫，而重扫的代价只取决于仓库大小：小仓库几十毫秒可以每 2 秒一次，
@@ -262,47 +271,147 @@ export async function cachedWorktreeRead(root, key, run, { refresh = false, inva
     if (diagnostics) diagnostics.cache = 'hit'
     return cached.value
   }
+
+  // Only repository-wide summary reads need the FIFO.  Keep this generic
+  // helper's cheap status/diagnostic callers independent.
+  if (!key.startsWith('summary:')) {
+    const inFlightKey = `${root}\u0000${key}`
+    const previous = worktreeInFlight.get(inFlightKey)
+    if (!refresh && previous && previous.signature === signature && previous.epoch === epoch) {
+      if (diagnostics) diagnostics.cache = 'wait'
+      return previous.promise
+    }
+    if (diagnostics) diagnostics.cache = 'miss'
+    const pending = { signature, epoch, refresh, promise: null }
+    pending.promise = (async () => {
+      const value = await run()
+      if (!signature || worktreeInFlight.get(inFlightKey) !== pending || headSignature(root) !== signature)
+        return value
+      const values = worktreeState.get(root) || new Map()
+      values.set(key, { signature, epoch, at: Date.now(), value })
+      worktreeState.set(root, values)
+      return value
+    })()
+    worktreeInFlight.set(inFlightKey, pending)
+    try {
+      return await pending.promise
+    } finally {
+      if (worktreeInFlight.get(inFlightKey) === pending) worktreeInFlight.delete(inFlightKey)
+    }
+  }
+
   // `refresh: true` 是用户主动点刷新：既不读缓存，也不搭别人那次还没跑完的顺风车。
   const inFlightKey = `${root}\u0000${key}`
+  const queue = worktreeQueues.get(root) || { running: null, queued: [] }
+  worktreeQueues.set(root, queue)
+
   if (!refresh) {
-    const pending = worktreeInFlight.get(inFlightKey)
-    if (pending && pending.signature === signature && pending.epoch === epoch) {
+    const running = worktreeInFlight.get(inFlightKey)
+    if (running && running.signature === signature && running.epoch === epoch && !running.refresh) {
       if (diagnostics) diagnostics.cache = 'wait'
-      return pending.promise
+      const startedWaiting = Date.now()
+      return running.promise.then(
+        (value) => {
+          if (diagnostics) diagnostics.cachewait = Date.now() - startedWaiting
+          return value
+        },
+        (error) => {
+          if (diagnostics) diagnostics.cachewait = Date.now() - startedWaiting
+          throw error
+        }
+      )
+    }
+    // A request which has not started yet can safely adopt the newest identity.
+    // This avoids a second scan when several file-change notifications arrive
+    // while another base is occupying the repository slot.
+    const queued = queue.queued.find((item) => item.key === key && !item.refresh)
+    if (queued) {
+      queued.signature = signature
+      queued.epoch = epoch
+      if (diagnostics) diagnostics.cache = 'wait'
+      const startedWaiting = Date.now()
+      return queued.promise.then(
+        (value) => {
+          if (diagnostics) diagnostics.cachewait = Date.now() - startedWaiting
+          return value
+        },
+        (error) => {
+          if (diagnostics) diagnostics.cachewait = Date.now() - startedWaiting
+          throw error
+        }
+      )
     }
   }
+
   if (diagnostics) diagnostics.cache = 'miss'
-  const pending = { signature, epoch, promise: null }
-  pending.promise = (async () => {
-    const startedAt = Date.now()
-    const value = await run()
-    // 只有全树扫描（`summary:<base>`）值得计量：`workspace-status` 是一条 rev-parse，
-    // 拿它的耗时当冷却依据会让工作区推送过于密集。
-    if (key.startsWith('summary')) summaryScanCost.set(root, Date.now() - startedAt)
-    if (
-      !signature ||
-      worktreeInFlight.get(inFlightKey) !== pending ||
-      (key !== 'workspace-status' && worktreeEpochOf(root) !== epoch) ||
-      headSignature(root) !== signature
-    ) {
-      return value
-    }
-    // 每个 key 独立记身份、epoch 和时间，避免 summary 与 status 互相覆盖/续期。
-    const values = worktreeState.get(root) || new Map()
-    for (const [otherKey, other] of values) {
-      if (other.signature !== signature) values.delete(otherKey)
-    }
-    values.set(key, { signature, epoch, at: Date.now(), value })
-    worktreeState.set(root, values)
-    return value
-  })()
-  // 手动刷新也登记为最新读取，防止它完成后被更早开始的慢请求覆盖。
-  worktreeInFlight.set(inFlightKey, pending)
-  try {
-    return await pending.promise
-  } finally {
-    if (worktreeInFlight.get(inFlightKey) === pending) worktreeInFlight.delete(inFlightKey)
+  let resolvePending
+  let rejectPending
+  const pending = {
+    key,
+    refresh,
+    signature,
+    epoch,
+    requestId: ++worktreeRequestId,
+    promise: new Promise((resolve, reject) => {
+      resolvePending = resolve
+      rejectPending = reject
+    }),
+    run,
+    resolve: resolvePending,
+    reject: rejectPending
   }
+  queue.queued.push(pending)
+  if (!refresh) worktreeInFlight.set(inFlightKey, pending)
+
+  const pump = () => {
+    if (queue.running || !queue.queued.length) return
+    const current = queue.queued.shift()
+    queue.running = current
+    // Only the currently running request may publish a result.  An older
+    // request can still resolve its own callers, but never evict a queued
+    // replacement from the identity/cache maps.
+    ;(async () => {
+      const startedAt = Date.now()
+      try {
+        const value = await current.run()
+        if (current.key.startsWith('summary')) summaryScanCost.set(root, Date.now() - startedAt)
+        const stillCurrent =
+          queue.running === current &&
+          (!current.signature || headSignature(root) === current.signature) &&
+          (current.key === 'workspace-status' || worktreeEpochOf(root) === current.epoch)
+        if (stillCurrent) {
+          const values = worktreeState.get(root) || new Map()
+          for (const [otherKey, other] of values) {
+            if (other.signature !== current.signature) values.delete(otherKey)
+          }
+          values.set(current.key, {
+            signature: current.signature,
+            epoch: current.epoch,
+            at: Date.now(),
+            value
+          })
+          worktreeState.set(root, values)
+        }
+        current.resolve(value)
+      } catch (error) {
+        // Wait for the task itself to settle before releasing the repository
+        // slot.  Callers of `run` are responsible for settling their own
+        // parallel IO (readSummary uses allSettled for this reason).
+        current.reject(error)
+      } finally {
+        if (worktreeInFlight.get(`${root}\u0000${current.key}`) === current) {
+          worktreeInFlight.delete(`${root}\u0000${current.key}`)
+        }
+        queue.running = null
+        if (!queue.running && !queue.queued.length && worktreeQueues.get(root) === queue) {
+          worktreeQueues.delete(root)
+        }
+        pump()
+      }
+    })()
+  }
+  pump()
+  return pending.promise
 }
 
 function errorText(error) {

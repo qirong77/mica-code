@@ -8,7 +8,7 @@
 
 import './index.css';
 
-import {Button, Input} from '@arco-design/web-react';
+import {Input} from '@arco-design/web-react';
 import type {RefInputType} from '@arco-design/web-react/es/Input/interface';
 import {autoUpdate, flip, inline, offset, shift, useFloating} from '@floating-ui/react';
 import {$isAutoLinkNode, $isLinkNode} from '@lexical/link';
@@ -37,6 +37,7 @@ import {
 import * as React from 'react';
 import {type Dispatch, type JSX, useCallback, useEffect, useId, useRef, useState} from 'react';
 import {createPortal} from 'react-dom';
+import {Button} from '../../../../../../mica-config-ui/web/components/Ui';
 import {$isImageNode} from '../../nodes/ImageNode';
 
 import {
@@ -397,6 +398,7 @@ function FloatingLinkEditor({
         refs.setFloating(element);
       }}
       className="link-editor mica-link-editor"
+      data-mode={isLinkEditMode ? 'edit' : 'preview'}
       role="dialog"
       aria-label={isLinkEditMode ? '编辑链接' : '链接'}
       hidden={!target}
@@ -453,14 +455,14 @@ function FloatingLinkEditor({
             </p>
             <div className="mica-link-editor__actions">
               {target.linkKey && (
-                <Button htmlType="button" type="text" size="mini" onClick={remove}>
+                <Button variant="danger-ghost" onClick={remove}>
                   移除链接
                 </Button>
               )}
-              <Button htmlType="button" size="mini" onClick={() => dismiss(true)}>
+              <Button onClick={() => dismiss(true)}>
                 取消
               </Button>
-              <Button htmlType="button" type="primary" size="mini" onClick={submit}>
+              <Button variant="accent" onClick={submit}>
                 保存链接
               </Button>
             </div>
@@ -468,8 +470,8 @@ function FloatingLinkEditor({
         ) : (
           <div className="mica-link-editor__preview">
             <Button
-              htmlType="button"
-              type="text"
+              variant="ghost"
+              size="compact"
               className="mica-link-editor__address"
               aria-label={`编辑链接地址：${target.url}`}
               title={target.url}
@@ -477,13 +479,13 @@ function FloatingLinkEditor({
               {target.url || '编辑链接地址'}
             </Button>
             <div className="mica-link-editor__actions">
-              <Button htmlType="button" type="text" size="mini" onClick={() => beginEditing(target)}>
+              <Button variant="ghost" size="compact" onClick={() => beginEditing(target)}>
                 编辑链接
               </Button>
-              <Button htmlType="button" type="text" size="mini" aria-label="在新窗口打开链接" onClick={openLink}>
+              <Button variant="ghost" size="compact" aria-label="在新窗口打开链接" onClick={openLink}>
                 打开链接
               </Button>
-              <Button htmlType="button" type="text" size="mini" onClick={remove}>
+              <Button variant="danger-ghost" size="compact" onClick={remove}>
                 移除链接
               </Button>
             </div>

@@ -6,6 +6,7 @@ import { randomUUID } from 'node:crypto';
 import setupModelEffortContext from '@packages/mica-builtin-commands/startup/model-effort-context/index.js';
 import { micaConfig } from '@packages/mica-config/index.js';
 import { VERSION_LABEL, resolveMicaHome } from '@packages/mica-config/brand.js';
+import { SLOW_MS } from '@packages/mica-diagnostics/index.js';
 import { micaMcp } from '@packages/mica-mcp/index.js';
 import { micaPlugin } from '@packages/mica-plugin/index.js';
 import type { PluginMaintenanceWindow } from '@packages/mica-plugin/index.js';
@@ -87,6 +88,7 @@ import { createHeadlessPluginHost, startAsSubmit } from '../headless/HeadlessPlu
 import { createPluginAskBroker } from '../headless/PluginAskBroker.js';
 import { resolveRuntimeConfigOverride, type EffortAdjustment, type ResolvedRuntimeOverride } from './modelCatalog.js';
 import { applyPluginSessionSettings, listPluginSessionSettings } from './pluginSessionSettings.js';
+import { AppServerRequestQueue } from './appServerRequestQueue.js';
 
 export type AppServerOptions = {
   sessionId?: string;
@@ -238,6 +240,7 @@ export function projectSubagentTaskDetail(record: SubagentTaskRecord): MicaSubag
  * Exits when stdin closes or on SIGINT/SIGTERM.
  */
 export async function runAppServer(options: AppServerOptions): Promise<void> {
+  const requests = new AppServerRequestQueue();
   const writeNotification = (method: string, params: unknown) => {
     process.stdout.write(encodeCodexNotification(method, params));
   };
@@ -264,14 +267,16 @@ export async function runAppServer(options: AppServerOptions): Promise<void> {
    */
   let maintenanceDepth = 0;
   const runMaintenance = async <T>(window: PluginMaintenanceWindow, task: () => Promise<T>): Promise<T> => {
-    if (maintenanceDepth === 0) announceMaintenance(true, window);
-    maintenanceDepth += 1;
-    try {
-      return await task();
-    } finally {
-      maintenanceDepth -= 1;
-      if (maintenanceDepth === 0) announceMaintenance(false, window);
-    }
+    return requests.withReadOnlyBypass(async () => {
+      if (maintenanceDepth === 0) announceMaintenance(true, window);
+      maintenanceDepth += 1;
+      try {
+        return await task();
+      } finally {
+        maintenanceDepth -= 1;
+        if (maintenanceDepth === 0) announceMaintenance(false, window);
+      }
+    });
   };
   /**
    * Non-fatal degradation (stale --dir, failed MCP init, stray rejection).
@@ -626,9 +631,8 @@ export async function runAppServer(options: AppServerOptions): Promise<void> {
       // 「现在能不能写」：轮次中、别的进程持锁、或者刚好有人按了发送都返回 busy。
       runIdleTask: (task, busy) =>
         executor!.runIdleMaintenance(async () => {
-          // 压缩是同步的：它跑着的时候宿主读不到 stdin 上的下一条 turn/start，用户这几秒
-          // 发的消息只会静静排在管道里，界面上什么也看不出来。动手之前先说一声，客户端
-          // 据此把这段时间的发送放进队列（可见、可撤回），压完收到 active:false 再补发。
+          // 压缩期间仍可响应只读面板，但会话写操作必须保持串行。动手之前先说一声，
+          // 客户端将发送留在可见、可撤回的队列里，active:false 之后才补发。
           return runMaintenance({ reason: 'compaction', label: '压缩' }, async () => {
             const outcome = await task();
 
@@ -751,6 +755,7 @@ export async function runAppServer(options: AppServerOptions): Promise<void> {
     void exit(1);
   });
 
+  const slowRequestAt = new Map<string, number>();
   const rl = createInterface({ input: process.stdin, crlfDelay: Infinity });
   for await (const line of rl) {
     if (!line.trim()) continue;
@@ -777,42 +782,75 @@ export async function runAppServer(options: AppServerOptions): Promise<void> {
     const id = message.id as CodexRequestId;
     const method = message.method;
     const params = (message.params ?? {}) as Record<string, unknown>;
-    try {
-      await handleCodexRequest(id, method, params, {
-        agent: agent!,
-        sessionController: sessionController!,
-        plugins: pluginHost?.plugins,
-        panels: pluginHost?.panels,
-        sessionMenus: pluginHost?.sessionMenus,
-        asks: pluginHost?.asks ?? undefined,
-        events: pluginHost?.events,
-        configDir: resolveMicaHome(),
-        subagentTasks: subagentTasks!,
-        refreshTaskSnapshots: () => pushTaskSnapshots(),
-        runtimeOverride,
-        executor: executor!,
-        btw: btwController,
-        mcpReady: mcpInitPromise ?? Promise.resolve(),
-        ...(options.mcpConfigPath ? { mcpConfigPath: resolve(options.mcpConfigPath) } : {}),
-        sessionId,
-        setSessionId: (nextSessionId) => {
-          if (sessionId !== nextSessionId) clientRollbackCapabilities.reset();
-          sessionId = nextSessionId;
+    const receivedAt = performance.now();
+    // Parsing must keep going while a maintenance operation awaits external work.
+    // The queue preserves mutation order; only this read-only method can bypass it.
+    void requests
+      .enqueue(
+        async () => {
+          const startedAt = performance.now();
+          try {
+            await handleCodexRequest(id, method, params, {
+              agent: agent!,
+              sessionController: sessionController!,
+              plugins: pluginHost?.plugins,
+              panels: pluginHost?.panels,
+              sessionMenus: pluginHost?.sessionMenus,
+              asks: pluginHost?.asks ?? undefined,
+              events: pluginHost?.events,
+              configDir: resolveMicaHome(),
+              subagentTasks: subagentTasks!,
+              refreshTaskSnapshots: () => pushTaskSnapshots(),
+              runtimeOverride,
+              executor: executor!,
+              btw: btwController,
+              mcpReady: mcpInitPromise ?? Promise.resolve(),
+              ...(options.mcpConfigPath ? { mcpConfigPath: resolve(options.mcpConfigPath) } : {}),
+              sessionId,
+              setSessionId: (nextSessionId) => {
+                if (sessionId !== nextSessionId) clientRollbackCapabilities.reset();
+                sessionId = nextSessionId;
+              },
+              getCurrentTurnId: () => currentTurnId,
+              clientRollbackCapabilities,
+              turnOverrides,
+              writeNotification,
+              writeResponse: (result) => process.stdout.write(encodeCodexResponse(id, result)),
+              writeError: (code, errorMessage, data) =>
+                process.stdout.write(encodeCodexError(id, code, errorMessage, data)),
+              warn: (warningMessage) => writeWarning(sessionId, warningMessage),
+            });
+          } catch (error) {
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            process.stdout.write(encodeCodexError(id, CODEX_ERROR_INTERNAL, errorMessage));
+          } finally {
+            const finishedAt = performance.now();
+            if (
+              (method === MICA_METHODS.pluginPanelView || method === MICA_METHODS.pluginSessionMenuRun) &&
+              finishedAt - receivedAt >= SLOW_MS &&
+              finishedAt - (slowRequestAt.get(method) ?? -Infinity) >= 10_000
+            ) {
+              slowRequestAt.set(method, finishedAt);
+              diagnostics?.log.warn('request.slow', {
+                method,
+                pid: process.pid,
+                session: sessionId || undefined,
+                plugin: typeof params.pluginId === 'string' ? params.pluginId.slice(0, 128) : undefined,
+                queueMs: Math.round(startedAt - receivedAt),
+                executionMs: Math.round(finishedAt - startedAt),
+              });
+            }
+          }
         },
-        getCurrentTurnId: () => currentTurnId,
-        clientRollbackCapabilities,
-        turnOverrides,
-        writeNotification,
-        writeResponse: (result) => process.stdout.write(encodeCodexResponse(id, result)),
-        writeError: (code, errorMessage, data) => process.stdout.write(encodeCodexError(id, code, errorMessage, data)),
-        warn: (warningMessage) => writeWarning(sessionId, warningMessage),
+        { readOnly: method === MICA_METHODS.pluginPanelView },
+      )
+      .catch(() => {
+        // stdout may already be closed. Do not turn a response write failure into
+        // an unhandled rejection while accepted requests are being drained.
       });
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      process.stdout.write(encodeCodexError(id, CODEX_ERROR_INTERNAL, errorMessage));
-    }
   }
 
+  await requests.drain();
   await exit(0);
 }
 
@@ -2290,7 +2328,9 @@ async function resolveClientOverride(
   if (removedPrefix) throw new Error(`Provider not found: ${removedPrefix}`);
   const fallbackProviderId = ctx.agent.config.provider.id;
   const probe = resolveRuntimeConfigOverride(refreshed, model, undefined, { fallbackProviderId });
-  const targetProvider = refreshed.providers.find((provider) => provider.id === (probe.providerId ?? fallbackProviderId));
+  const targetProvider = refreshed.providers.find(
+    (provider) => provider.id === (probe.providerId ?? fallbackProviderId),
+  );
   if (!targetProvider) throw new Error(`Provider not found: ${probe.providerId ?? fallbackProviderId}`);
   const targetModel = probe.model ?? ctx.agent.config.model;
   await ensureChatHostModelRule(targetModel, targetProvider);

@@ -119,8 +119,10 @@ if (process.env.MICA_GIT_SUMMARY_TEST_CHILD === '1') {
       scan(2, background)
       expect((await counts()).counts.additions).toBe(1)
       scan(3)
-      expect((await counts({ refresh: true })).counts.additions).toBe(3)
       background.resolve()
+      // Manual refresh is independent from the automatic request, but the
+      // repository FIFO waits for the older scan before starting it.
+      expect((await counts({ refresh: true })).counts.additions).toBe(3)
       await flush()
       expect((await counts()).counts.additions).toBe(3)
       expect((await summary()).repository.additions).toBe(3)
@@ -144,7 +146,9 @@ if (process.env.MICA_GIT_SUMMARY_TEST_CHILD === '1') {
       })
       await flush()
       expect(settled).toBe(false)
-      expect(scans).toHaveLength(3)
+      // The repository FIFO keeps the replacement behind the old generation;
+      // it must not overlap the still-running scan.
+      expect(scans).toHaveLength(2)
       background.resolve()
       await flush()
       const second = counts()

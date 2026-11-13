@@ -4,9 +4,12 @@ html.mica-markdown-page #root { height: 100%; min-height: 0; width: 100%; min-wi
 html.mica-markdown-page #root { display: flex; flex-direction: column; }
 .workspace.notebook-editor.markdown-editor { display: flex; flex: 1 1 0; flex-direction: column; height: 100%; min-height: 0; min-width: 0; overflow: hidden; }
 .markdown-editor .editor-canvas { display: flex; flex: 1 1 0; height: 100%; min-height: 0; min-width: 0; flex-direction: column; overflow: hidden; }
-.markdown-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 7px 12px; border-bottom: 1px solid var(--color-line-soft); flex: none; background: var(--color-canvas); }
+.markdown-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-height: 44px; padding: 7px 12px; border-bottom: 1px solid var(--color-line-soft); flex: none; background: var(--color-canvas); }
 .markdown-tools { display: flex; align-items: center; gap: 2px; min-width: 0; }
-.markdown-tools .arco-btn-text { color: var(--color-fg-soft); border-radius: 4px; }
+.markdown-tools .arco-btn-text { display: inline-flex; align-items: center; justify-content: center; flex: none; height: 28px; min-width: 28px; padding: 4px 6px; color: var(--color-fg-soft); border-radius: 4px; }
+.markdown-tools .arco-btn .arco-icon { width: 16px; height: 16px; }
+.markdown-tools .arco-select-view { min-height: 28px; line-height: 26px; }
+.markdown-tools .arco-btn:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 1px; }
 .markdown-tools .arco-btn-text:hover:not(:disabled) { background: var(--color-active); }
 .markdown-tools .arco-btn-text:disabled { color: var(--color-fg-faint); }
 .markdown-tools .arco-btn-text[aria-pressed='true'] { color: var(--color-accent); background: var(--color-primary-light-1); }

@@ -1,4 +1,4 @@
-import { readFile } from 'fs/promises'
+import { lstat, open, readlink } from 'fs/promises'
 import path from 'path'
 import { ipcMain } from 'electron'
 import {
@@ -10,7 +10,6 @@ import {
   sumLineChanges
 } from './git-core'
 import {
-  countLines,
   getBranchSummary,
   getFile,
   getRefSummary,
@@ -39,6 +38,13 @@ import { logger, SLOW_MS } from './log'
 
 const gitLog = logger('git')
 
+const ADDED_FILE_CHUNK_SIZE = 64 * 1024
+const ADDED_FILE_WORKERS = 4
+let summaryScanId = 0
+const lastSummaryLogAt = new Map()
+const SUMMARY_LOG_INTERVAL_MS = 30_000
+const SUMMARY_DETAILS = Symbol('git-summary-details')
+
 /** 徽标自己那一层缓存：比全树扫描的 5s 长，配合「先回旧值、后台重算」。 */
 const CHANGE_COUNTS_TTL_MS = 20_000
 const changeCountsState = new Map()
@@ -46,41 +52,163 @@ const changeCountsInFlight = new Map()
 
 async function getSummary(cwd, { refresh = false, invalidate = false } = {}) {
   const { root, base } = await cachedRepository(cwd)
+  const diagnostics = { cache: 'uncached', epoch: worktreeEpochOf(root) }
   // 顶栏徽标（change-counts）与 Git 面板（summary）要的是同一份全树扫描，10s 的 Git
   // 轮询 + 3s 的文件视图轮询又会各自来一次：同一仓库在几秒内复用结果，切换分支或
   // 我们自己写过工作区（stage/unstage/discard）时缓存自动失效。
-  return cachedWorktreeRead(root, `summary:${base}`, () => readSummary(root, base), {
+  const startedAt = Date.now()
+  const summary = await cachedWorktreeRead(root, `summary:${base}`, () => readSummary(root, base), {
     refresh,
-    invalidate
+    invalidate,
+    diagnostics
   })
+  const details = summary[SUMMARY_DETAILS]
+  const elapsed = Date.now() - startedAt
+  const previousLog = lastSummaryLogAt.get(root) || 0
+  if (elapsed >= SLOW_MS && Date.now() - previousLog >= SUMMARY_LOG_INTERVAL_MS) {
+    lastSummaryLogAt.set(root, Date.now())
+    gitLog.warn('summary-detail', {
+      ms: elapsed,
+      status: details?.status || 0,
+      diff: details?.diff || 0,
+      files: details?.files || summary.files.length,
+      bytes: details?.bytes || 0,
+      cachewait: diagnostics.cachewait || 0,
+      epoch: diagnostics.epoch,
+      scanid: details?.scanid || 0
+    })
+  }
+  return summary
+}
+
+async function timedGit(root, args, details, field) {
+  const startedAt = Date.now()
+  try {
+    return await git(root, args)
+  } finally {
+    details[field] = Date.now() - startedAt
+  }
+}
+
+function lineCounter() {
+  let bytes = 0
+  let nul = false
+  let lines = 0
+  let lastByte = -1
+  return {
+    add(chunk) {
+      bytes += chunk.length
+      for (const byte of chunk) {
+        if (byte === 0) nul = true
+        if (byte === 10) lines += 1
+        lastByte = byte
+      }
+    },
+    result() {
+      return {
+        additions: nul ? 0 : lines + (bytes > 0 && lastByte !== 10 ? 1 : 0),
+        deletions: 0,
+        binary: nul,
+        bytes
+      }
+    }
+  }
+}
+
+function sameFile(left, right) {
+  return left?.dev === right?.dev && left?.ino === right?.ino
+}
+
+/** Read an added path without ever following a symlink to its target. */
+async function countAddedFile(filePath) {
+  const before = await lstat(filePath)
+  if (before.isSymbolicLink()) {
+    const target = await readlink(filePath)
+    const after = await lstat(filePath)
+    if (!sameFile(before, after)) return null
+    const counter = lineCounter()
+    counter.add(Buffer.from(target))
+    return counter.result()
+  }
+  if (!before.isFile()) return null
+
+  const handle = await open(filePath, 'r')
+  try {
+    // If the path was replaced between lstat and open, do not read the new
+    // file (and especially not a newly installed symlink target).
+    const opened = await handle.stat()
+    if (!sameFile(before, opened)) return null
+    const counter = lineCounter()
+    const chunk = Buffer.allocUnsafe(ADDED_FILE_CHUNK_SIZE)
+    for (;;) {
+      const { bytesRead } = await handle.read(chunk, 0, chunk.length, null)
+      if (!bytesRead) break
+      counter.add(chunk.subarray(0, bytesRead))
+    }
+    const after = await lstat(filePath)
+    if (!sameFile(before, after)) return null
+    return counter.result()
+  } finally {
+    await handle.close()
+  }
+}
+
+async function countAddedFiles(paths, details) {
+  const results = new Array(paths.length)
+  const errors = []
+  let next = 0
+  const worker = async () => {
+    for (;;) {
+      const index = next++
+      if (index >= paths.length) return
+      try {
+        const result = await countAddedFile(paths[index])
+        results[index] = result
+        if (result) details.bytes += result.bytes
+      } catch (error) {
+        if (error.code === 'ENOENT' || error.code === 'ENOTDIR') continue
+        errors.push(error)
+      }
+    }
+  }
+  await Promise.all(
+    Array.from({ length: Math.min(ADDED_FILE_WORKERS, paths.length) }, () => worker())
+  )
+  if (errors.length) throw errors[0]
+  return results
 }
 
 async function readSummary(root, base) {
-  const [statusOutput, numstatOutput] = await Promise.all([
-    git(root, ['status', '--porcelain=v1', '-z', '--untracked-files=all', '--no-renames']),
-    git(root, ['diff', base, '--numstat', '--no-renames', '--'])
+  const details = { status: 0, diff: 0, files: 0, bytes: 0, scanid: ++summaryScanId }
+  const [statusResult, numstatResult] = await Promise.allSettled([
+    timedGit(root, ['status', '--porcelain=v1', '-z', '--untracked-files=all', '--no-renames'], details, 'status'),
+    timedGit(root, ['diff', base, '--numstat', '--no-renames', '--'], details, 'diff')
   ])
+  if (statusResult.status === 'rejected') throw statusResult.reason
+  if (numstatResult.status === 'rejected') throw numstatResult.reason
+  const statusOutput = statusResult.value
+  const numstatOutput = numstatResult.value
   const codes = parseStatusCode(statusOutput)
   const numstats = parseNumstat(numstatOutput)
   const files = []
+
+  const addedPaths = []
+  for (const [filePath, code] of codes) {
+    const status = statusFromCode(code)
+    if (!numstats.has(filePath) && status === 'added') addedPaths.push(path.join(root, filePath))
+  }
+  const addedStats = await countAddedFiles(addedPaths, details)
+  let addedIndex = 0
 
   for (const [filePath, code] of codes) {
     const status = statusFromCode(code)
     let stat = numstats.get(filePath)
     if (!stat && status === 'added') {
-      let content
-      try {
-        content = await readFile(path.join(root, filePath))
-      } catch (error) {
-        // A staged addition removed again from the worktree has no final diff against HEAD.
-        if (error.code !== 'ENOENT' && error.code !== 'ENOTDIR') throw error
-        continue
-      }
-      stat = {
-        additions: content.includes(0) ? 0 : countLines(content),
-        deletions: 0,
-        binary: content.includes(0)
-      }
+      stat = addedStats[addedIndex++]
+      // A staged addition removed again from the worktree has no final diff
+      // against HEAD.  A file replaced during the bounded read has the same
+      // safe zero-information result rather than a count for the wrong path.
+      if (!stat) continue
     }
     files.push({
       path: filePath,
@@ -95,7 +223,10 @@ async function readSummary(root, base) {
   }
 
   files.sort((a, b) => compareChangePaths(a.path, b.path))
-  return { root, files, ...sumLineChanges(files) }
+  details.files = files.length
+  const summary = { root, files, ...sumLineChanges(files) }
+  Object.defineProperty(summary, SUMMARY_DETAILS, { value: details })
+  return summary
 }
 
 /**

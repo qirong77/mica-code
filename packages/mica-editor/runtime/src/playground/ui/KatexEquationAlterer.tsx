@@ -10,8 +10,9 @@ import './KatexEquationAlterer.css';
 
 import {useLexicalComposerContext} from '@lexical/react/LexicalComposerContext';
 import {LexicalErrorBoundary} from '@lexical/react/LexicalErrorBoundary';
+import {Input} from '@arco-design/web-react';
 import * as React from 'react';
-import {type JSX, useCallback, useState} from 'react';
+import {type JSX, useCallback, useId, useState} from 'react';
 
 import Button from '../ui/Button';
 import KatexRenderer from './KatexRenderer';
@@ -29,6 +30,7 @@ export default function KatexEquationAlterer({
   const [editor] = useLexicalComposerContext();
   const [equation, setEquation] = useState<string>(initialEquation);
   const [inline, setInline] = useState<boolean>(true);
+  const equationInputId = useId();
 
   const onClick = useCallback(() => {
     onConfirm(equation, inline);
@@ -49,23 +51,24 @@ export default function KatexEquationAlterer({
           data-test-id="equation-inline-checkbox"
         />
       </div>
-      <div className="KatexEquationAlterer_defaultRow">LaTeX 公式</div>
+      <div className="KatexEquationAlterer_defaultRow">
+        <label htmlFor={equationInputId}>LaTeX 公式</label>
+      </div>
       <div className="KatexEquationAlterer_centerRow">
         {inline ? (
-          <input
-            onChange={event => {
-              setEquation(event.target.value);
-            }}
+          <Input
+            id={equationInputId}
+            size="small"
+            onChange={setEquation}
             value={equation}
             autoFocus={true}
             className="KatexEquationAlterer_textArea"
             data-test-id="equation-input"
           />
         ) : (
-          <textarea
-            onChange={event => {
-              setEquation(event.target.value);
-            }}
+          <Input.TextArea
+            id={equationInputId}
+            onChange={setEquation}
             value={equation}
             autoFocus={true}
             className="KatexEquationAlterer_textArea"

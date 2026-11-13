@@ -148,6 +148,10 @@ body.mica-arco-theme {
 .floating-filter-indicator { --notebook-table-icon: url('../playground/images/icons/filter-left.svg'); }
 .floating-drag-indicator { --notebook-table-icon: url('../playground/images/icons/draggable-block-menu.svg'); }
 .table-context-toolbar, .table-control-popup { background: var(--color-panel); color: var(--color-fg-soft); border-color: var(--color-line); border-radius: 6px; box-shadow: var(--notebook-popup-shadow); font: 12px/1.6 var(--font-family); }
+.table-context-toolbar .arco-btn:hover:not(.arco-btn-disabled):not([aria-expanded='true']):not([aria-pressed='true']), .table-context-label:hover:not(.has-selection), .table-menu-style-entry:hover { color: var(--color-fg-strong); background: var(--color-active); }
+.table-context-label .arco-icon { color: inherit; }
+.table-context-toolbar .arco-btn[aria-expanded='true'], .table-context-label.has-selection { color: var(--color-accent); background: var(--color-primary-light-1); }
+.table-format-alignment .arco-btn { width: 28px; height: 28px; }
 .table-selection-handle, .table-selection-all { background: var(--color-panel-hi); border-color: var(--color-line); color: var(--color-fg-faint); }
 .table-selection-handle:is(:hover, .is-active), .table-selection-all:is(:hover, .is-active), .table-selection-handle-grip { background: var(--color-primary-light-1); border-color: var(--color-primary-light-3); color: var(--color-accent); }
 .table-selection-handle-grip:hover { background: var(--color-primary-light-2); color: var(--color-accent); }
@@ -188,6 +192,10 @@ body.mica-arco-theme {
 .ruby-editor .ruby-base-text { color: var(--color-fg-faint); font-size: 12px; }
 .ruby-editor .ruby-input { color: var(--color-fg-strong); background: var(--color-canvas); font-size: 12px; }
 .ruby-editor .ruby-input:focus, .ruby-editor .button.hovered { background: var(--color-active); }
+.ruby-editor .ruby-input { height: 28px; padding: 4px 8px; line-height: 20px; }
+.ruby-editor .button { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; padding: 0; border-radius: 4px; background-size: 16px; }
+.ruby-editor .button:hover { background-color: var(--color-active); }
+.ruby-editor :is(.button, .ruby-input):focus-visible { outline: 2px solid var(--color-accent); outline-offset: 1px; }
 .find-replace-panel { top: 50px; right: 12px; }
 .find-replace-input:focus { background: var(--color-canvas); border-color: var(--color-accent); }
 .find-replace-count { color: var(--color-fg-faint); }
@@ -212,6 +220,16 @@ body[arco-theme='dark'] :is(.link-edit, .link-trash, .link-cancel, .link-confirm
 /* Arco controls get palette + primary channel mapping from the virtual import;
    only notebook-specific density/layout belongs here. */
 body.mica-arco-theme :is(.arco-btn, .arco-input, .arco-textarea, .arco-select-view, .arco-picker input, .arco-menu, .arco-tooltip-content) { font-size: 12px; }
+/* Neutral actions stay neutral even in body portals; accent and danger remain semantic. */
+body.mica-arco-theme :is(.image-settings-popover, .image-preview-footer, .image-crop-footer, .table-format-popup, .color-picker-wrapper) .arco-btn-text:not(:is(.arco-btn-status-danger, .arco-btn-disabled)):not([aria-pressed='true']):not([aria-expanded='true']) { color: var(--color-fg-soft); }
+body.mica-arco-theme :is(.image-settings-popover, .image-preview-footer, .image-crop-footer, .table-format-popup, .color-picker-wrapper) .arco-btn-text:not(:is(.arco-btn-status-danger, .arco-btn-disabled)):not([aria-pressed='true']):not([aria-expanded='true']):hover { color: var(--color-fg-strong); background: var(--color-active); }
+body.mica-arco-theme :is(.image-size-fields, .table-format-alignment) .arco-btn-text[aria-pressed='true'] { color: var(--color-accent); background: var(--color-primary-light-1); }
+body.mica-arco-theme .image-settings-popover { border-radius: 6px; box-shadow: var(--notebook-popup-shadow); }
+body.mica-arco-theme .image-settings-popover-title { font-size: 12px; }
+body.mica-arco-theme .image-settings-popover .Input__wrapper { display: flex; flex-direction: column; gap: 6px; }
+body.mica-arco-theme .image-settings-popover .Input__label { color: var(--color-fg-soft); font-size: 12px; }
+body.mica-arco-theme .image-size-fields > .arco-btn { width: 28px; height: 28px; margin-bottom: 0; }
+body.mica-arco-theme .image-size-fields > .arco-btn .arco-icon { width: 16px; height: 16px; }
 body.mica-arco-theme :is(.arco-modal, .arco-drawer) { color: var(--color-fg-soft); background: var(--color-panel); font: 12px/1.7 var(--font-family); }
 body.mica-arco-theme :is(.arco-modal-header, .arco-modal-footer, .arco-drawer-header, .arco-drawer-footer) { border-color: var(--color-line-soft); background: transparent; }
 body.mica-arco-theme :is(.arco-modal-title, .arco-drawer-title) { color: var(--color-fg-strong); font-size: 14px; font-weight: 600; text-align: left; }
@@ -221,7 +239,7 @@ body.mica-arco-theme {
 .editor-modal .arco-modal-content, .workspace-drawer .arco-drawer-content { padding: 16px; font-size: 12px; }
 .workspace-drawer .arco-drawer-header { height: 44px; }
 .editor-modal :is(.Input__label, .Select__label, .Input__input), .color-picker-wrapper .Input__label { font-size: 12px; }
-.editor-modal .KatexEquationAlterer_textArea { color: var(--color-fg-strong); background: var(--color-canvas); border-color: var(--color-line); }
+.editor-modal .KatexEquationAlterer_textArea { font-family: var(--font-mono, ui-monospace, monospace); }
 .settings-intro, .settings-options .editor-setting label, .workspace-outline .outline-link { font-size: 12px; }
 .settings-options .editor-setting { padding: 10px 0; border-color: var(--color-line-soft); }
 .Modal__overlay, .ExcalidrawModal__overlay { background: var(--color-mask-bg); }
