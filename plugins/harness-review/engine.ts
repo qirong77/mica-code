@@ -20,7 +20,7 @@ export type CaptureOptions = { captureContent: boolean; maxEventChars: number; m
  * 问题推导规则的版本。改了 classify / 退出码白名单 / 重复调用判定就加一：
  * 宿主据此重算 findings 与派生错误计数，不动用量、耗时和人工结论。
  */
-export const CLASSIFIER_VERSION = 8;
+export const CLASSIFIER_VERSION = 9;
 type Config = { providerId: string; protocol: string; model: string; effort: string; role: string };
 /**
  * `paused` 是宿主在迭代边界主动停下（开发构建重载），历史完整、随后续跑；
@@ -290,6 +290,8 @@ type RunState = {
   candidates: Map<string, ReviewFinding>;
   toolTally?: ToolTally;
   unknownResults?: number;
+  /** Paired results whose exit owner is ambiguous; safe to rederive, never healthy successes. */
+  uncertainExits?: number;
   /** Transient replay hook; never serialized into summaries. */
   onFinding?: (id: string, seq: number) => void;
 };
@@ -431,8 +433,8 @@ function heredocEnd(text: string, index: number): number | null {
  * are tracked so their contents never split the line; an unterminated quote means the
  * command cannot be parsed confidently.
  */
-function commandSegments(text: string): string[] | null {
-  const segments: string[] = [];
+function commandSegments(text: string): { text: string; after: string }[] | null {
+  const segments: { text: string; after: string }[] = [];
   let current = '';
   let quote = '';
   for (let index = 0; index < text.length; index++) {
@@ -460,21 +462,21 @@ function commandSegments(text: string): string[] | null {
       continue;
     }
     if (char === '\n' || char === ';') {
-      segments.push(current);
+      segments.push({ text: current, after: ';' });
       current = '';
       continue;
     }
     if (char === '&') {
       // `&&` separates commands; `>&` and `&>` are redirections; a lone `&` backgrounds.
       if (text[index + 1] === '&') {
-        segments.push(current);
+        segments.push({ text: current, after: '&&' });
         current = '';
         index++;
       }
       continue;
     }
     if (char === '|') {
-      segments.push(current);
+      segments.push({ text: current, after: text[index + 1] === '|' ? '||' : '|' });
       current = '';
       if (text[index + 1] === '|') index++;
       continue;
@@ -482,7 +484,7 @@ function commandSegments(text: string): string[] | null {
     current += char;
   }
   if (quote) return null;
-  segments.push(current);
+  segments.push({ text: current, after: '' });
   return segments;
 }
 
@@ -512,20 +514,134 @@ function programOf(segment: string): string {
   return (word.split('/').pop() ?? word).replace(/\.exe$/i, '');
 }
 
-/**
- * The program whose status decides `$?`: last command of the line, after wrappers and
- * environment assignments. Empty when the command cannot be parsed confidently.
- */
-export function terminalProgram(command: string): string {
-  if (typeof command !== 'string') return '';
-  if (!command.trim()) return '';
+/** Possible owners of a nonzero status. Pipelines bind before left-associative && / ||. */
+function exitSegments(command: string): string[] | null {
+  if (typeof command !== 'string' || !command.trim()) return null;
   const segments = commandSegments(command.trim());
-  if (!segments) return '';
-  for (let index = segments.length - 1; index >= 0; index--) {
-    const program = programOf(segments[index]);
-    if (program) return program;
+  if (!segments) return null;
+  let candidates: string[] = [];
+  let connector = ';';
+  for (const segment of segments) {
+    // Only the last program in a pipeline determines its status (without pipefail).
+    if (segment.after === '|') continue;
+    if (programOf(segment.text)) {
+      if (connector === '&&') candidates.push(segment.text);
+      else candidates = [segment.text];
+    } else if ((connector === '&&' || connector === '||') && segment.after === ';') continue;
+    connector = segment.after || connector;
   }
-  return '';
+  return candidates.length ? candidates : null;
+}
+
+/** Empty when short-circuiting leaves more than one possible exit program. */
+export function terminalProgram(command: string): string {
+  const programs = new Set(exitSegments(command)?.map(programOf));
+  return programs.size === 1 ? [...programs][0] : '';
+}
+
+/** Literal shell words, sufficient for git options; expansions are deliberately unsupported. */
+function literalWords(text: string): string[] | null {
+  const words: string[] = [];
+  let word = '';
+  let quote = '';
+  let started = false;
+  let plain = true;
+  let redirectTarget = false;
+  const finishWord = (): void => {
+    if (started) {
+      if (redirectTarget) redirectTarget = false;
+      else words.push(word);
+    }
+    word = '';
+    started = false;
+    plain = true;
+  };
+  for (let index = 0; index < text.length; index++) {
+    const char = text[index];
+    if (char === '`' || (char === '$' && quote !== "'")) return null;
+    if (char === '\\' && quote !== "'" && index + 1 < text.length) {
+      word += text[++index];
+      started = true;
+      plain = false;
+    } else if (quote) {
+      if (char === quote) quote = '';
+      else word += char;
+    } else if (char === '>' || char === '<') {
+      // An adjacent, unquoted number is a file descriptor, not a Git argument.
+      if (started && plain && /^\d+$/.test(word) && !redirectTarget) {
+        word = '';
+        started = false;
+      } else finishWord();
+      if (redirectTarget || text[index + 1] === '<') return null;
+      if (text[index + 1] === char || text[index + 1] === '&' || text[index + 1] === '|' ||
+          (char === '<' && text[index + 1] === '>')) index++;
+      redirectTarget = true;
+    } else if (char === '"' || char === "'") {
+      quote = char;
+      started = true;
+      plain = false;
+    } else if (/\s/.test(char)) {
+      finishWord();
+    } else {
+      word += char;
+      started = true;
+    }
+  }
+  if (quote) return null;
+  finishWord();
+  if (redirectTarget) return null;
+  return words;
+}
+
+function expectedGitExit(segment: string): boolean {
+  const words = literalWords(segment);
+  if (!words) return false;
+  let index = 0;
+  while (ENV_ASSIGNMENT.test(words[index] ?? '') || SHELL_WRAPPERS.has(words[index] ?? '')) {
+    const wrapper = words[index++];
+    if (SHELL_WRAPPERS.has(wrapper)) while (words[index]?.startsWith('-')) index++;
+  }
+  if (programOf(words[index++] ?? '') !== 'git') return false;
+  for (; words[index]?.startsWith('-'); index++) {
+    const option = words[index];
+    if (['-C', '-c', '--git-dir', '--work-tree', '--namespace', '--config-env'].includes(option)) {
+      if (words[++index] === undefined) return false;
+    } else if (
+      !/^(?:--(?:git-dir|work-tree|namespace|config-env)=.+|--(?:no-pager|paginate|bare|literal-pathspecs|no-optional-locks))$/.test(option)
+    )
+      return false;
+  }
+  const subcommand = words[index++];
+  const args = words.slice(index);
+  if (subcommand === 'diff') {
+    let check = false;
+    for (let cursor = 0; cursor < args.length && args[cursor] !== '--'; cursor++) {
+      const arg = args[cursor];
+      if (['--output', '--src-prefix', '--dst-prefix', '--line-prefix', '--word-diff-regex', '--diff-algorithm', '--anchored', '--find-object', '-S', '-G', '-O', '-I'].includes(arg)) {
+        if (args[++cursor] === undefined) return false;
+      } else if (arg === '--quiet' || arg === '--exit-code') check = true;
+    }
+    return check;
+  }
+  if (subcommand !== 'config') return false;
+  let query = false;
+  const positional: string[] = [];
+  for (let cursor = 0; cursor < args.length; cursor++) {
+    const arg = args[cursor];
+    if (arg === '--get' || arg === '--get-all') {
+      if (query || positional.length) return false;
+      query = true;
+    } else if (arg === '--file' || arg === '-f') {
+      if (args[++cursor] === undefined) return false;
+    } else if (
+      /^--(?:global|local|system|worktree|includes|no-includes|show-origin|show-scope|null)$/.test(arg) ||
+      /^--file=.+/.test(arg) || arg === '-z'
+    ) continue;
+    else if (arg.startsWith('-')) return false;
+    else positional.push(arg);
+  }
+  return query && positional.length >= 1 && positional.length <= 2 &&
+    /^[A-Za-z0-9-]+\.(?:.+\.)?[A-Za-z][A-Za-z0-9-]*$/.test(positional[0]);
 }
 
 /**
@@ -536,13 +652,57 @@ export function terminalProgram(command: string): string {
 export function expectedExit(program: string, code: number, command: string): boolean {
   if (!program || !Number.isInteger(code) || code !== 1) return false;
   if (NO_MATCH_EXIT.has(program) || MISSING_EXIT.has(program) || DIFF_EXIT.has(program)) return true;
-  return program === 'git' && /(?:^|\s)--(?:quiet|exit-code)\b/.test(command);
+  return program === 'git' && expectedGitExit(command);
 }
 
-function isExpectedExit(call: Call | undefined, name: string, category: string | null): boolean {
-  if (!category || !/^exit-\d+$/.test(category) || !SHELL_TOOL.test(name)) return false;
-  const command = call?.command ?? '';
-  return expectedExit(terminalProgram(command), Number(category.slice(5)), command);
+/** Read output only from the shell envelope, never from the echoed command or source text. */
+function shellOutput(raw: string): { stdout: string; stderr: string } {
+  try {
+    const item = JSON.parse(raw) as Record<string, unknown>;
+    return {
+      stdout: typeof item.stdout === 'string' ? item.stdout : '',
+      stderr: typeof item.stderr === 'string' ? item.stderr : '',
+    };
+  } catch {
+    const section = (name: string): string =>
+      raw.match(
+        new RegExp(`(?:^|\\n)\\[${name}\\]\\r?\\n([\\s\\S]*?)(?=\\r?\\n\\[\\/?(?:stdout|stderr|output)\\]|$)`, 'i'),
+      )?.[1] ?? '';
+    return { stdout: section('stdout'), stderr: section('stderr') };
+  }
+}
+
+function exitVerdict(
+  call: Call | undefined,
+  name: string,
+  category: string | null,
+  result: string,
+): 'expected' | 'error' | 'unknown' {
+  if (!category || !/^exit-\d+$/.test(category) || !SHELL_TOOL.test(name)) return 'error';
+  const segments = exitSegments(call?.command ?? '');
+  if (!segments) return 'error';
+  const code = Number(category.slice(5));
+  const expected = segments.map((segment) => expectedExit(programOf(segment), code, segment));
+  const { stdout, stderr } = shellOutput(result);
+  const otherOutputSources = (commandSegments(call?.command ?? '')?.filter((segment) => programOf(segment.text)).length ?? 0) > segments.length;
+  // Git can report invalid keys, arguments or permissions with status 1 as well.
+  if (
+    /^(?:\s*(?:error|fatal):|\s*usage: git\b)|\b(?:EACCES|EPERM|permission denied)\b/im.test(stderr) &&
+    segments.some((segment) => programOf(segment) === 'git')
+  ) return otherOutputSources ? 'unknown' : 'error';
+  if (expected.every(Boolean)) return 'expected';
+  if (!expected.some(Boolean)) return 'error';
+  // Earlier sequence / OR branches and upstream pipeline stages can leave
+  // diagnostics even when they did not determine the final exit status.
+  if (otherOutputSources) return 'unknown';
+  // Mixed && chains need affirmative failure evidence. Ordinary output (including matches
+  // printed by rg) cannot prove which command ran. Recognise only explicit diagnostics.
+  const diagnostics = `${stdout}\n${stderr}`.replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, '');
+  if (
+    /^\s*(?:(?:SyntaxError|TypeError|ReferenceError|AssertionError|Error|error|fatal):|(?:ls|stat|find|cd):)/m.test(stderr) ||
+    /^\s*(?:FAIL(?:ED)?(?:\s|$)|\d+\s+(?:fail(?:ed)?|tests? failed)\b|error TS\d+:)/m.test(diagnostics)
+  ) return 'error';
+  return 'unknown';
 }
 
 /**
@@ -1049,6 +1209,10 @@ function classifyError(text: string, name = ''): string {
   if (/EACCES|EPERM|permission denied|unauthorized|forbidden/i.test(cause)) return 'permission';
   if (/\b(?:timeout|timed out|ETIMEDOUT)\b|超时/i.test(cause)) return 'timeout';
   if (
+    /^页面(?:截图超过 \d+ms 未返回(?:（页面可能在忙）；可重试或改用 evaluate 读 DOM)?|脚本执行超过 \d+ms)[。.]?$/.test(cause) ||
+    /^No stream data from provider for \d+(?:\.\d+)?s \(waiting for model output\)\.$/i.test(cause)
+  ) return 'timeout';
+  if (
     /\b(?:invalid|validation|schema)\b|(?:unknown|unexpected|unrecognized|unsupported|missing|required) (?:parameter|argument|field|key)|(?:未知|不支持|未识别|非法)(?:的)?(?:参数|字段)|不认识这些参数/i.test(
       cause,
     )
@@ -1475,7 +1639,7 @@ export class HarnessRecorder {
     state.pending.set(pendingKey, {
       name,
       argsHash,
-      ...(command === undefined ? {} : { command: boundedText(command, 1000) }),
+      ...(command === undefined ? {} : { command: textOf(command) }),
     });
     // Polls (and subagent reads) repeat by design; they are not repetition candidates.
     if (isPollingCall(name, args)) return argsHash;
@@ -1528,7 +1692,15 @@ export class HarnessRecorder {
       recordedResultHash === undefined ? digest(textOf(result)) : recordedResultHash,
     );
     const category = recordedCategory === undefined ? errorCategory(result, name) : recordedCategory;
-    const expected = recordedExpected ?? isExpectedExit(call, name, category);
+    const verdict = recordedExpected === undefined
+      ? exitVerdict(call, name, category, result)
+      : recordedExpected ? 'expected' : 'error';
+    if (category === 'unknown-exit' || verdict === 'unknown') {
+      state.unknownResults = (state.unknownResults ?? 0) + 1;
+      state.uncertainExits = (state.uncertainExits ?? 0) + 1;
+      return { category: 'unknown-exit', expectedExit: false };
+    }
+    const expected = verdict === 'expected';
     if (state.toolTally) {
       const entry = state.toolTally.get(name) ?? { calls: 0, errors: new Map<string, number>() };
       if (category && !expected) entry.errors.set(category, (entry.errors.get(category) ?? 0) + 1);
@@ -2170,7 +2342,7 @@ export class HarnessRecorder {
           );
         stored.errorCategory = outcome.category;
         // Recorded so a metadata-only replay reaches the same conclusion.
-        if (outcome.expectedExit) stored.expectedExit = true;
+        stored.expectedExit = outcome.expectedExit;
         if (event.id) stored.idHash = digest(event.id);
         break;
       }
@@ -2450,7 +2622,7 @@ export class HarnessRecorder {
                 (events &&
                   summary.droppedEvents === 0 &&
                   events.length === summary.eventCount &&
-                  !state.unknownResults &&
+                  (state.unknownResults ?? 0) === (state.uncertainExits ?? 0) &&
                   state.pending.size === 0)
                 ? observed.get(candidate.id)
                 : undefined,
@@ -2478,26 +2650,37 @@ export class HarnessRecorder {
         if (event.type === 'tool:call' || event.type === 'tool:result') this.replay(healthState, event, memory);
       const unknown = (healthState.unknownResults ?? 0) + healthState.pending.size;
       toolHealthCoverage.unknownResults += unknown;
+      // Ambiguous exits are classified as unknown, rather than missing trace data.
+      // Replace stale tool findings even when these results exclude the run from health;
+      // other confirmed errors in this same replay must remain visible.
+      if (unknown === (healthState.uncertainExits ?? 0)) {
+        summary.toolErrors = healthState.summary.toolErrors;
+        summary.expectedExits = healthState.summary.expectedExits;
+        summary.derivationDrops = healthState.summary.derivationDrops;
+        const runtimeKind = (finding: ReviewFinding): boolean => finding.kind === 'retry' || finding.kind === 'run-error';
+        const runtimeComplete = events.every((event) =>
+          !(event.type === 'retry' || (event.type === 'run:finish' && event.outcome === 'error')) ||
+          hasCompleteContent(event.error) || typeof event.errorCategory === 'string',
+        );
+        summary.findings = [
+          ...healthState.candidates.values(),
+          ...(runtimeComplete ? [...state.candidates.values()].filter(runtimeKind) : summary.findings.filter(runtimeKind)),
+          ...summary.findings.filter((finding) => finding.kind !== 'tool-error' && finding.kind !== 'repeated-call' && !runtimeKind(finding)),
+        ];
+        for (const finding of summary.findings)
+          for (const evidence of finding.evidence)
+            evidence.available = events.some((event) => event.seq === evidence.seq);
+      }
       if (unknown > 0) {
         toolHealthCoverage.excludedRuns++;
         warnings.push(
-          `Run ${summary.id} has ${unknown} unpaired or unclassifiable tool result(s); excluded from tool health.`,
+          `Run ${summary.id} has ${unknown} unpaired or unclassifiable tool result(s), including ${healthState.uncertainExits ?? 0} with unknown shell exit ownership; excluded from tool health.`,
         );
         recordTimes();
         continue;
       }
       toolHealthCoverage.includedRuns++;
       mergeToolTally(toolTally, healthState.toolTally);
-      summary.toolErrors = healthState.summary.toolErrors;
-      summary.expectedExits = healthState.summary.expectedExits;
-      summary.derivationDrops = healthState.summary.derivationDrops;
-      summary.findings = [
-        ...healthState.candidates.values(),
-        ...summary.findings.filter((finding) => finding.kind !== 'tool-error' && finding.kind !== 'repeated-call'),
-      ];
-      for (const finding of summary.findings)
-        for (const evidence of finding.evidence)
-          evidence.available = events.some((event) => event.seq === evidence.seq);
       recordTimes();
     }
     runs.sort((a, b) => b.startedAt.localeCompare(a.startedAt));
@@ -2905,7 +3088,10 @@ export class HarnessRecorder {
         }
         this.replay(state, event, memory);
       }
-      if (!usable || expected !== summary.eventCount || (state.unknownResults ?? 0) > 0 || state.pending.size > 0) {
+      if (
+        !usable || expected !== summary.eventCount ||
+        (state.unknownResults ?? 0) > (state.uncertainExits ?? 0) || state.pending.size > 0
+      ) {
         skippedUnreadable++;
         continue;
       }
@@ -2989,8 +3175,11 @@ export class HarnessRecorder {
       if (call) call.argsComplete = hasCompleteContent(event.args);
     } else if (event.type === 'tool:result') {
       const complete = hasCompleteContent(event.result);
+      const argsIncomplete = state.pending.get(correlation ?? `name:${name}`)?.argsComplete === false;
       const category =
-        truncatedToolCategory(event.result, name) ??
+        argsIncomplete && event.errorCategory === 'unknown-exit'
+          ? 'unknown-exit'
+          : truncatedToolCategory(event.result, name) ??
         (!complete && (typeof event.errorCategory === 'string' || event.errorCategory === null)
           ? event.errorCategory
           : undefined);
@@ -3012,9 +3201,9 @@ export class HarnessRecorder {
         storedText(event.result),
         correlation,
         category,
-        (!complete || state.pending.get(correlation ?? `name:${name}`)?.argsComplete === false) &&
-          event.expectedExit === true
-          ? true
+        (!complete || argsIncomplete) &&
+          typeof event.expectedExit === 'boolean'
+          ? event.expectedExit
           : undefined,
         resultHash,
       );

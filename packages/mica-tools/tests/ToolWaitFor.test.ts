@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 import { createServer, type Server } from 'node:http';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -181,6 +181,39 @@ describe('wait_for process conditions', () => {
 });
 
 describe('wait_for command conditions', () => {
+  it('checks a command from a leased file parent and rejects unrelated cwd', async () => {
+    const callbacks = { context: { cwd: dir, writeMode: 'owned_paths', ownedPaths: [path.join(dir, 'new-file')] } };
+    const result = await tool.execute(
+      { kind: 'command', command: 'echo ready', cwd: dir, timeout_ms: 1_000, ...FAST },
+      callbacks,
+    );
+    expect(parseField(result, 'status')).toBe('satisfied');
+
+    const outside = await tool.execute(
+      { kind: 'command', command: 'echo ready', cwd: path.dirname(dir), timeout_ms: 1_000, ...FAST },
+      callbacks,
+    );
+    expect(parseField(outside, 'status')).toBe('failed');
+    expect(outside).toContain('outside subagent owned_paths');
+  });
+
+  it('checks the same default and relative cwd that the command would execute in', async () => {
+    const directory = path.join(dir, 'packages', 'mica-tools');
+    mkdirSync(directory, { recursive: true });
+    const callbacks = {
+      context: { cwd: dir, writeMode: 'owned_paths', ownedPaths: [path.join(directory, 'owned.ts')] },
+    };
+    for (const cwd of [undefined, '.', 'packages/mica-tools']) {
+      const result = await tool.execute(
+        { kind: 'command', command: 'echo should-not-run', cwd, timeout_ms: 1_000, ...FAST },
+        callbacks,
+      );
+      expect(parseField(result, 'status')).toBe('failed');
+      expect(result).toContain('outside subagent owned_paths');
+      expect(result).toMatch(/polls: 1\b/);
+    }
+  });
+
   it('polls a command until its exit code matches', async () => {
     const flag = path.join(dir, 'flag');
     setTimeout(() => writeFileSync(flag, ''), 200);

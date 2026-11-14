@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { EventEmitter } from 'node:events';
 import { tmpdir } from 'node:os';
 import { dirname } from 'node:path';
@@ -111,6 +111,70 @@ describe('ToolRunShell', () => {
 
     expect(result).toContain(`cwd: ${cwd}`);
     expect(result).toContain(`[stdout]\n${cwd}`);
+  });
+
+  it('runs a file-scoped subagent from its workspace and containing directory', async () => {
+    const workspace = realpathSync(mkdtempSync(path.join(tmpdir(), 'mica-file-lease-shell-')));
+    try {
+      const directory = path.join(workspace, 'src');
+      const file = path.join(directory, 'owned.ts');
+      mkdirSync(directory);
+      writeFileSync(file, 'export {};');
+      const tool = new ToolRunShell();
+      const callbacks = { context: { cwd: workspace, writeMode: 'owned_paths', ownedPaths: [file] } };
+
+      for (const cwd of [workspace, directory]) {
+        const result = await tool.execute({ command: bunEval('console.log(process.cwd())'), cwd }, callbacks);
+        expect(result).toContain('exit_code: 0');
+        expect(result).toContain(`[stdout]\n${cwd}`);
+      }
+      const outside = await tool.execute({ command: 'exit 0', cwd: dirname(workspace) }, callbacks);
+      expect(outside).toContain('outside subagent owned_paths');
+      const invalid = await tool.execute({ command: 'exit 0', cwd: file }, callbacks);
+      expect(invalid).toContain('cwd is not a directory');
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
+    }
+  });
+
+  it('checks the actual execution cwd when the task context uses a different workspace', async () => {
+    const workspace = realpathSync(mkdtempSync(path.join(tmpdir(), 'mica-shell-cwd-context-')));
+    try {
+      const directory = path.join(workspace, 'packages', 'mica-tools');
+      mkdirSync(directory, { recursive: true });
+      const callbacks = {
+        context: { cwd: workspace, writeMode: 'owned_paths', ownedPaths: [path.join(directory, 'owned.ts')] },
+      };
+      for (const tool of [new ToolRunShell(), new ToolBackgroundStart()]) {
+        for (const cwd of [undefined, '.', 'packages/mica-tools']) {
+          const result = await tool.execute({ command: 'echo should-not-run', cwd }, callbacks);
+          expect(result).toContain('outside subagent owned_paths');
+          expect(result).not.toContain('[stdout]');
+          expect(result).not.toContain('输出文件:');
+        }
+      }
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
+    }
+  });
+
+  it('starts a background check from a leased file parent without broadening the lease', async () => {
+    const workspace = realpathSync(mkdtempSync(path.join(tmpdir(), 'mica-file-lease-background-')));
+    let outputPath: string | undefined;
+    try {
+      const tool = new ToolBackgroundStart();
+      const result = await tool.execute(
+        { command: 'echo file-lease-background-ok', cwd: workspace },
+        { context: { cwd: workspace, writeMode: 'owned_paths', ownedPaths: [path.join(workspace, 'new-file')] } },
+      );
+      outputPath = parseOutputPath(result);
+      const output = await waitForFileContains(outputPath, '[mica background task exited]');
+      expect(output).toContain('file-lease-background-ok');
+      expect(output).toContain('exit_code: 0');
+    } finally {
+      if (outputPath) cleanupTask(outputPath);
+      rmSync(workspace, { recursive: true, force: true });
+    }
   });
 
   it('allows cwd outside the workspace', async () => {

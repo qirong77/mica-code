@@ -11,6 +11,7 @@ import {
 } from '../ToolRunShellBackground.js';
 import { BoundedTextAccumulator } from '../ToolRunShellOutput.js';
 import { assertShellPathAccess } from '../utils/pathOwnership.js';
+import { resolveCwd } from '../utils/shell.js';
 import type { NormalizedWaitCondition, WaitBaseline, WaitProbeResult } from './types.js';
 
 /** 单次轮询自身的上限：命令/请求挂住时也不能把整条等待卡死。 */
@@ -88,15 +89,15 @@ export async function probeCondition(params: {
       // 「等 /tmp 产物出现」在 subagent 里莫名其妙失败。
       return probeFile(condition, baseline);
     case 'command': {
-      const access = assertCommandCwd(condition.cwd);
+      const access = resolveCwd(condition.cwd);
       // cwd 不存在/不是目录：换多少个轮询周期也都是这个结果。
       if (!access.ok) return { satisfied: false, error: access.message, fatal: true };
       try {
-        assertShellPathAccess(condition.cwd ?? process.cwd(), pathContext);
+        assertShellPathAccess(access.cwd, pathContext);
       } catch (error) {
         return { satisfied: false, error: error instanceof Error ? error.message : String(error), fatal: true };
       }
-      return probeCommand(condition, baseline, signal);
+      return probeCommand({ ...condition, cwd: access.cwd }, baseline, signal);
     }
     case 'http':
       return probeHttp(condition, baseline, signal);
@@ -258,18 +259,6 @@ function probeFile(
   } catch (error) {
     return { satisfied: false, error: error instanceof Error ? error.message : String(error), fatal: true };
   }
-}
-
-function assertCommandCwd(cwd: string | undefined): { ok: true } | { ok: false; message: string } {
-  if (!cwd?.trim()) return { ok: true };
-  const resolved = path.resolve(process.cwd(), cwd);
-  try {
-    if (!statSync(resolved).isDirectory()) return { ok: false, message: `cwd is not a directory: ${cwd}` };
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    return { ok: false, message: `cwd is not accessible: ${cwd} (${message})` };
-  }
-  return { ok: true };
 }
 
 /** 把外部 signal 与单次轮询超时合成一个 signal，dispose 时清理定时器与监听。 */

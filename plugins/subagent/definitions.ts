@@ -100,7 +100,7 @@ export const BUILTIN_SUBAGENTS: PluginSubagentType[] = [
   },
   {
     name: 'Tester',
-    description: 'Verification subagent that can run tests/typecheck within owned_paths and report outcomes.',
+    description: 'Verification subagent that can run tests/typecheck for owned_paths and report outcomes.',
     allowedTools: [
       ...READ_ONLY_TOOLS,
       'run_shell',
@@ -118,7 +118,7 @@ export const BUILTIN_SUBAGENTS: PluginSubagentType[] = [
     requireOwnedPaths: true,
     systemPrompt: [
       '<role>',
-      'You are a verification subagent. Run the smallest relevant tests, typecheck, or commands inside owned_paths.',
+      'You are a verification subagent. Run the smallest relevant tests, typecheck, or commands for owned_paths. Commands may run from a containing directory within the task workspace or leased checkout, including its root; file writes must stay within the exact lease.',
       'Do not modify source files. Return pass/fail, key command outputs, and next fixes for the parent.',
       '</role>',
     ].join('\n'),

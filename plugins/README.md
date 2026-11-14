@@ -13,7 +13,9 @@
 
 [Long Reply Digest](reply-digest/README.md) 在成功回合结束后识别过长的 Agent 回复，先展示运行中摘要卡，再调用模型并原位更新简短摘要；失败或取消会停止运行态，各轮摘要分别保留，短回复不会额外调用模型。
 
-[Harness Review](harness-review/README.md) 记录运行轨迹并聚合问题候选，工具错误与健康率共用分类并标出数据覆盖缺口；评估按历史追加，验证后的新证据提醒复核但不自动宣判回归。用户纠正独立持久化，仅由下一次同会话主运行消费。它不自动修改代码、提示词或记忆，也不把运行完成当成验收通过。
+[Harness Review](harness-review/README.md) 记录运行轨迹并聚合问题候选，工具错误与健康率共用分类并标出数据覆盖缺口；条件命令链无法确定非零退出来源时记为未知，不当成功或已确认工具故障。评估按历史追加，验证后的新证据提醒复核但不自动宣判回归。用户纠正独立持久化，仅由下一次同会话主运行消费。它不自动修改代码、提示词或记忆，也不把运行完成当成验收通过。
+
+[Subagent](subagent/README.md) 的文件租约限定文件工具的写入路径；shell 可从工作区内包含租约的目录执行，文件租约也能运行测试。外部 checkout 的祖先以最近 `.git` 为界，独立外部路径只放行到直接父目录；cwd 检查不是 shell 沙箱，命令仍须遵守写策略。
 
 面板视图可返回 `cards`（每插件最多 3 张）：`{ id, title, summary?, detail?, tone?, revision, actions?, impressionAction? }`。卡片动作 `{ id, label, key?, tone? }` 复用面板动作通道；`key` 应携带版本并由插件校验，拒绝旧界面执行新内容。`impressionAction` 仅用于记录实际展示，不应产生用户可见操作。清单声明 `desktop.panel.dynamicShortcuts: true` 让快捷区获取卡片视图。卡片里显示摘要，详细清单仍放 `sections`。
 

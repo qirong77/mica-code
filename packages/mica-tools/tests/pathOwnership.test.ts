@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { join } from 'node:path';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
 import {
   assertShellPathAccess,
   assertWritablePath,
@@ -31,12 +33,68 @@ describe('path ownership', () => {
     expect(() => assertWritablePath('src/a.ts', { writeMode: 'proposal', cwd: root })).toThrow(/proposal mode/);
   });
 
-  it('keeps shell cwd inside the lease', () => {
+  it('allows shell cwd inside or above the lease within the workspace', () => {
     const context = { writeMode: 'owned_paths', ownedPaths: [src], cwd: root };
 
     expect(() => assertShellPathAccess('src', context)).not.toThrow();
-    expect(() => assertShellPathAccess(undefined, context)).toThrow(/outside subagent owned_paths/);
+    expect(() => assertShellPathAccess('src/nested', context)).not.toThrow();
+    expect(() => assertShellPathAccess(undefined, context)).not.toThrow();
+    expect(() => assertShellPathAccess('docs', context)).toThrow(/outside subagent owned_paths/);
+    expect(() => assertShellPathAccess('src-extra', context)).toThrow(/outside subagent owned_paths/);
     expect(() => assertShellPathAccess('..', context)).toThrow(/outside subagent owned_paths/);
+  });
+
+  it('supports not-yet-created file leases without widening file writes', () => {
+    const context = { writeMode: 'owned_paths', ownedPaths: [join(src, 'nested', 'new-file')], cwd: root };
+
+    for (const cwd of [undefined, '.', 'src', 'src/nested'])
+      expect(() => assertShellPathAccess(cwd, context)).not.toThrow();
+    expect(() => assertWritablePath('src/nested/new-file', context)).not.toThrow();
+    expect(() => assertWritablePath('src/nested/other-file', context)).toThrow(/outside subagent owned_paths/);
+    expect(() => assertShellPathAccess('src/other', context)).toThrow(/outside subagent owned_paths/);
+    expect(() => assertShellPathAccess('/', context)).toThrow(/outside subagent owned_paths/);
+  });
+
+  it.each(['file', 'directory'])('bounds external checkout cwd at its .git %s', (gitKind) => {
+    const outer = mkdtempSync(join(tmpdir(), 'mica-lease-checkout-'));
+    const checkout = join(outer, 'nested-checkout');
+    try {
+      mkdirSync(join(outer, '.git'));
+      mkdirSync(checkout);
+      if (gitKind === 'file') writeFileSync(join(checkout, '.git'), 'gitdir: /unused/worktree-metadata');
+      else mkdirSync(join(checkout, '.git'));
+      const context = {
+        writeMode: 'owned_paths',
+        ownedPaths: [join(checkout, 'src', 'new-file')],
+        cwd: root,
+      };
+
+      expect(() => assertShellPathAccess(checkout, context)).not.toThrow();
+      expect(() => assertShellPathAccess(join(checkout, 'src'), context)).not.toThrow();
+      expect(() => assertShellPathAccess(dirname(checkout), context)).toThrow(/outside subagent owned_paths/);
+      expect(() => assertShellPathAccess(join(checkout, 'unrelated'), context)).toThrow(/outside subagent owned_paths/);
+      expect(() => assertShellPathAccess(root, context)).toThrow(/outside subagent owned_paths/);
+      expect(() => assertWritablePath(join(checkout, 'src', 'other-file'), context)).toThrow(
+        /outside subagent owned_paths/,
+      );
+
+      const directoryLease = { ...context, ownedPaths: [checkout] };
+      expect(() => assertShellPathAccess(checkout, directoryLease)).not.toThrow();
+      expect(() => assertShellPathAccess(dirname(checkout), directoryLease)).toThrow(/outside subagent owned_paths/);
+    } finally {
+      rmSync(outer, { recursive: true, force: true });
+    }
+  });
+
+  it('allows only the containing directory for standalone external file leases', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'mica-lease-standalone-'));
+    try {
+      const context = { writeMode: 'owned_paths', ownedPaths: [join(directory, 'new-file')], cwd: root };
+      expect(() => assertShellPathAccess(directory, context)).not.toThrow();
+      expect(() => assertShellPathAccess(dirname(directory), context)).toThrow(/outside subagent owned_paths/);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
   });
 
   it('parses owned_paths strictly: bad input must not degrade into "no limit"', () => {

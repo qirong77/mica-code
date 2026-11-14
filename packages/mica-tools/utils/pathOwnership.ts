@@ -1,4 +1,5 @@
-import { isAbsolute, relative, resolve, sep } from 'node:path';
+import { existsSync } from 'node:fs';
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 
 export type PathOwnershipContext = {
   ownedPaths?: string[];
@@ -48,17 +49,41 @@ export function assertWritablePath(path: string, context: unknown): void {
 export function assertShellPathAccess(cwd: string | undefined, context: unknown): void {
   const ownership = getPathOwnershipContext(context);
   if (!ownership?.ownedPaths || ownership.ownedPaths.length === 0) return;
-  if (ownership.writeMode === 'none' || ownership.writeMode === 'proposal') {
-    // Read-only / proposal subagents may still inspect code, but keep cwd inside owned paths when provided.
-  }
   const processCwd = ownership.cwd ?? process.cwd();
   const target = cwd?.trim() ? resolve(processCwd, cwd) : processCwd;
-  if (ownership.ownedPaths.some((owned) => pathIsWithin(target, resolve(processCwd, owned)))) return;
+  if (
+    ownership.ownedPaths.some((owned) => {
+      const ownedPath = resolve(processCwd, owned);
+      // A file lease has no directory inside it. Commands may instead run from a
+      // containing directory, up to the task workspace (or the leased worktree).
+      // This does not grant writes to that directory: file tools keep using the
+      // exact lease, and shell commands must still respect the write policy.
+      return (
+        pathIsWithin(target, ownedPath) ||
+        (pathIsWithin(ownedPath, target) && pathIsWithin(target, shellScopeRoot(ownedPath, resolve(processCwd))))
+      );
+    })
+  )
+    return;
   throw new Error(
-    `path is outside subagent owned_paths: ${cwd ?? '.'}. Allowed: ${ownership.ownedPaths
+    `path is outside subagent owned_paths: ${cwd ?? '.'}. Use a directory containing an owned path within its workspace, or a directory inside an owned path. Owned: ${ownership.ownedPaths
       .map((item) => formatOwnedPath(processCwd, item))
       .join(', ')}`,
   );
+}
+
+function shellScopeRoot(ownedPath: string, workspace: string): string {
+  if (pathIsWithin(ownedPath, workspace)) return workspace;
+  // Leases can point into another checkout. A worktree has a .git file rather
+  // than a directory; either bounds its usable ancestors without allowing / or
+  // the user's home directory. Standalone paths allow only their direct parent.
+  let directory = ownedPath;
+  while (true) {
+    if (existsSync(join(directory, '.git'))) return directory;
+    const parent = dirname(directory);
+    if (parent === directory) return dirname(ownedPath);
+    directory = parent;
+  }
 }
 
 export function pathIsWithin(target: string, root: string): boolean {

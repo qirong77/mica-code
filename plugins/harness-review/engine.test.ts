@@ -1585,7 +1585,7 @@ test('failure lines and tool identity win over unrelated examples; rebuilt categ
   const cwd = resolve('workspace-failure-lines');
   const run = runner(recorder, { cwd });
   run.start();
-  assert.equal(CLASSIFIER_VERSION, 8);
+  assert.equal(CLASSIFIER_VERSION, 9);
   const samples = [
     {
       name: 'memory',
@@ -1708,6 +1708,59 @@ test('network retries and helper deadlines retain their causes through rebuild',
   assert.deepEqual((await recorder.review(cwd)).findings, before.findings);
 });
 
+test('browser deadlines and provider stream silence are timeouts only in explicit failures, including replay', async (t) => {
+  const { recorder } = await fixture(t);
+  const screenshot = 'Error: 页面截图超过 20000ms 未返回（页面可能在忙）；可重试或改用 evaluate 读 DOM';
+  const script = 'Error: 页面脚本执行超过 15000ms';
+  const provider = ' No stream data from provider for 60s (waiting for model output).';
+  for (const [index, capture] of [options, { ...options, captureContent: false }, { ...options, maxEventChars: 40 }].entries()) {
+    const cwd = resolve(`workspace-explicit-timeouts-${index}`);
+    const browser = 'mcp__mica-browser__control_4e54cce9';
+    const run = runner(recorder, { runId: index + 1, cwd, capture });
+    run.start();
+    run.call('{}', browser, 'screenshot');
+    run.result(screenshot, browser, 'screenshot');
+    run.call('{}', browser, 'script');
+    run.result(JSON.stringify({ isError: true, message: script }), browser, 'script');
+    run.call('{}', 'read_file', 'source');
+    run.result(`1 | const message = ${JSON.stringify(screenshot)};\n2 | ${provider}`, 'read_file', 'source');
+    run.call('{"command":"cat timeout-fixture.txt"}', 'run_shell', 'stdout');
+    run.result(JSON.stringify({ exit_code: 0, stdout: `${screenshot}\n${script}\n${provider}`, stderr: '' }), 'run_shell', 'stdout');
+    run.call('{}', browser, 'successful-message');
+    run.result(JSON.stringify({ success: true, message: script }), browser, 'successful-message');
+    run.call('{}', browser, 'ordinary-text');
+    run.result('页面脚本执行超过 15000ms 的提示已记录', browser, 'ordinary-text');
+    run.emit({ type: 'retry', attempt: 1, delayMs: 10, error: provider });
+    run.finish('error', provider);
+    let before = await recorder.review(cwd);
+    if (index === 0) {
+      const expected = before.findings;
+      const summary = before.runs[0];
+      const events = await trace(summary);
+      for (const event of events) if (event.errorCategory === 'timeout') event.errorCategory = 'tool-error';
+      await writeFile(summary.traceFile, events.map((event) => JSON.stringify(event)).join('\n') + '\n');
+      await writeFile(join(summary.traceFile, '..', 'summary.json'), JSON.stringify({
+        ...summary,
+        findings: summary.findings.map((finding) => ({
+          ...finding,
+          id: sha(`old-timeout-${finding.id}`),
+          title: finding.title.replace('timeout', 'tool-error'),
+        })),
+      }));
+      before = await recorder.review(cwd);
+      assert.deepEqual(before.findings, expected);
+    }
+    assert.equal(before.runs[0].toolErrors, 2);
+    assert.deepEqual(before.toolHealth.find((row) => row.name === browser)?.categories, [{ category: 'timeout', count: 2 }]);
+    assert.equal(before.findings.find((finding) => finding.title === `Tool error in ${browser}: timeout`)?.occurrences, 2);
+    assert.ok(before.findings.some((finding) => finding.title === 'Request retry: timeout'));
+    assert.ok(before.findings.some((finding) => finding.title === 'Run ended with an error: timeout'));
+    assert.equal(before.findings.length, 3);
+    assert.equal((await recorder.rebuild({ cwd })).rebuilt, 1);
+    assert.deepEqual((await recorder.review(cwd)).findings, before.findings);
+  }
+});
+
 test('rebuild reclassifies a complete failure line before truncated memory entries', async (t) => {
   const { recorder } = await fixture(t);
   const cwd = resolve('workspace-truncated-memory');
@@ -1767,9 +1820,16 @@ test('rebuild keeps full sanitized result fingerprints when stored prefixes matc
   assert.ok(!(await recorder.review(cwd)).findings.some((finding) => finding.kind === 'repeated-call'));
 });
 
-test('terminalProgram keeps the program that decides the exit code', () => {
+test('terminalProgram returns a program only when nonzero exit ownership is unambiguous', () => {
   const cases: Array<[string, string]> = [
-    ['cd x && rg foo', 'rg'],
+    ['cd x && rg foo', ''],
+    ['rg foo && node --check file.js', ''],
+    ['rg foo &&\n node --check file.js', ''],
+    ['rg foo && grep bar file', ''],
+    ['rg foo && rg bar', 'rg'],
+    ['rg foo && node --check file.js; git status', 'git'],
+    ['rg foo && bun test | tail -25', ''],
+    ['rg foo || node --check file.js', 'node'],
     ['a; b', 'b'],
     ['rg foo | head', 'head'],
     ['FOO=1 bun test', 'bun'],
@@ -1802,6 +1862,22 @@ test('expectedExit only accepts the nonzero codes a command documents itself', (
   assert.equal(expectedExit('[', 1, '[ -f missing ]'), true);
   assert.equal(expectedExit('git', 1, 'git diff --quiet'), true);
   assert.equal(expectedExit('git', 1, 'git diff --exit-code HEAD'), true);
+  assert.equal(expectedExit('git', 1, 'git config --get user.name'), true);
+  assert.equal(expectedExit('git', 1, 'git config --global --get-all remote.origin.url'), true);
+  assert.equal(expectedExit('git', 1, 'git config --get user.name --global'), true);
+  assert.equal(expectedExit('git', 1, 'git config --file="/a path/config" --get user.name'), true);
+  assert.equal(expectedExit('git', 1, 'git -C "/a path" -c core.hooksPath=/dev/null config --get user.name'), true);
+  assert.equal(expectedExit('git', 2, 'git config --get user.name'), false);
+  assert.equal(expectedExit('git', 3, 'git config --get-all user.name'), false);
+  assert.equal(expectedExit('git', 1, 'git config --get user.name --bogus'), false);
+  assert.equal(expectedExit('git', 1, 'git config --get --unset user.name'), false);
+  assert.equal(expectedExit('git', 1, 'git config --get invalid-key'), false);
+  assert.equal(expectedExit('git', 1, 'git config --get-regexp user.name'), false);
+  assert.equal(expectedExit('git', 1, 'git status --quiet'), false);
+  assert.equal(expectedExit('git', 1, 'git -c alias.foo=--quiet status'), false);
+  assert.equal(expectedExit('git', 1, 'git log --format="--get --quiet"'), false);
+  assert.equal(expectedExit('git', 1, 'git diff -- --quiet'), false);
+  assert.equal(expectedExit('git', 1, 'git diff --output "--quiet"'), false);
   assert.equal(expectedExit('git', 1, 'git diff HEAD'), false);
   assert.equal(expectedExit('bun', 1, 'bun run build'), false);
   assert.equal(expectedExit('rg', 0, 'rg -n needle src'), false);
@@ -1883,6 +1959,120 @@ test('nonzero exits a command documents itself are counted apart from real tool 
   // The same verdict has to come back out of the stored trace.
   assert.equal((await recorder.rebuild({ cwd })).rebuilt, 1);
   assert.deepEqual((await recorder.review(cwd)).findings, report.findings);
+});
+
+test('git config missing-value exits are expected while query errors and unrelated git flags remain failures', async (t) => {
+  const { recorder } = await fixture(t);
+  const run = runner(recorder);
+  run.start();
+  const cases: Array<[string, number, string, boolean]> = [
+    ['git config --get user.name', 1, '', true],
+    ['git config --global --get-all remote.origin.url', 1, '', true],
+    ['git -C "/some path" config --get user.email', 1, '', true],
+    ['git diff --quiet', 1, '', true],
+    ['git config --get user.name', 2, '', false],
+    ['git config --get user.name', 3, '', false],
+    ['git config --get user.name', 1, 'error: permission denied', false],
+    ['git config --get invalid-key', 1, 'error: key does not contain a section: invalid-key', false],
+    ['git config --get user.name --bogus', 1, '', false],
+    ['git status --quiet', 1, '', false],
+    ['git log --format="--get --quiet"', 1, '', false],
+  ];
+  for (const [index, [command, exit_code, stderr]] of cases.entries()) {
+    const id = `git-${index}`;
+    run.call(JSON.stringify({ command }), 'run_shell', id);
+    run.result(JSON.stringify({ exit_code, stdout: '', stderr }), 'run_shell', id);
+  }
+  run.finish();
+  const before = await recorder.review();
+  assert.equal(before.runs[0].expectedExits, 4);
+  assert.equal(before.runs[0].toolErrors, cases.length - 4);
+  assert.deepEqual(
+    (await trace(before.runs[0])).filter((event) => event.type === 'tool:result').map((event) => event.expectedExit),
+    cases.map((sample) => sample[3]),
+  );
+  assert.equal(before.toolHealth[0].errors, cases.length - 4);
+  assert.equal((await recorder.rebuild()).rebuilt, 1);
+  assert.deepEqual((await recorder.review()).findings, before.findings);
+});
+
+test('ambiguous && exits stay unknown without retaining stale errors or hiding confirmed failures in the same run', async (t) => {
+  const { recorder } = await fixture(t);
+  for (const [index, capture] of [options, { ...options, captureContent: false }, { ...options, maxEventChars: 40 }].entries()) {
+    const cwd = resolve(`workspace-ambiguous-exits-${index}`);
+    const run = runner(recorder, { runId: index + 1, cwd, capture });
+    run.start();
+    const cases: Array<[string, number, string, string]> = [
+      ['rg absent src && node --check file.js', 1, '', ''],
+      [`rg absent ${'x'.repeat(1200)} && node --check file.js`, 1, '', ''],
+      ['rg present src && node --check file.js', 1, 'ordinary matching output', ''],
+      ['rg present src && bun test', 1, 'FAIL unit.spec.ts', ''],
+      ['bun test && rg absent src', 1, '', '\u001b[31m1 fail\u001b[0m'],
+      ['ls missing && rg absent src', 1, '', 'ls: missing: No such file or directory'],
+      ['rg present src && node --check file.js', 1, '', 'SyntaxError: Unexpected token'],
+      ['bun test && node --check file.js', 1, '', ''],
+      ['rg absent src && grep absent file', 1, '', ''],
+      ['rg absent src && bun test', 2, '', ''],
+      ['rg absent src && node --check file.js', 0, '', ''],
+    ];
+    for (const [caseIndex, [command, exit_code, stdout, stderr]] of cases.entries()) {
+      const id = `chain-${caseIndex}`;
+      run.call(JSON.stringify({ command }), 'run_shell', id);
+      run.result(
+        caseIndex === 0
+          ? '[command]\nexit_code: 1\n[/command]\n[stdout]\n\n[/stdout]\n[stderr]\n\n[/stderr]'
+          : JSON.stringify({ exit_code, stdout, stderr }),
+        'run_shell',
+        id,
+      );
+    }
+    run.call('{}', 'read_file', 'confirmed-other-error');
+    run.result('Error: ENOENT: no such file', 'read_file', 'confirmed-other-error');
+    run.emit({ type: 'retry', attempt: 1, delayMs: 10, error: 'request timed out' });
+    run.finish();
+    await recorder.flush();
+    const initial = (await recorder.review(cwd)).runs[0];
+    const file = join(initial.traceFile, '..', 'summary.json');
+    const live = JSON.parse(await readFile(file, 'utf8')) as RunSummary;
+    assert.equal(live.toolErrors, 7);
+    assert.equal(live.expectedExits, 1);
+    const events = await trace(initial);
+    const results = events.filter((event) => event.type === 'tool:result');
+    assert.deepEqual(results.slice(0, 3).map((event) => event.errorCategory), ['unknown-exit', 'unknown-exit', 'unknown-exit']);
+    // Simulate the previous classifier's stale aggregate, including an obsolete
+    // candidate whose only evidence is the short-circuited call.
+    const stale = { ...live.findings.find((finding) => finding.kind === 'tool-error')! };
+    stale.id = sha(`obsolete-chain-${index}`);
+    stale.title = 'Tool error in run_shell: obsolete-chain';
+    stale.occurrences = 3;
+    stale.evidence = [{ runId: live.id, seq: Number(results[0].seq), traceFile: live.traceFile, available: true }];
+    await writeFile(file, JSON.stringify({ ...live, toolErrors: 10, findings: [...live.findings, stale] }));
+    if (index === 0) {
+      // Full historical traces can overturn a saved exit-1 verdict without
+      // relying on metadata emitted by the new classifier.
+      for (const event of results.slice(0, 3)) {
+        event.errorCategory = 'exit-1';
+        delete event.expectedExit;
+      }
+      await writeFile(initial.traceFile, events.map((event) => JSON.stringify(event)).join('\n') + '\n');
+    }
+    const before = await recorder.review(cwd);
+    assert.equal(before.runs[0].toolErrors, 7, `capture mode ${index}`);
+    assert.equal(before.runs[0].expectedExits, 1);
+    assert.deepEqual(before.toolHealth, []);
+    assert.deepEqual(before.toolHealthCoverage, { includedRuns: 0, excludedRuns: 1, unknownResults: 3 });
+    assert.ok(before.warnings.some((warning) => warning.includes('unknown shell exit ownership')));
+    assert.ok(!before.findings.some((finding) => finding.id === stale.id));
+    assert.equal(before.findings.find((finding) => finding.title === 'Tool error in run_shell: exit-1')?.occurrences, 5);
+    assert.equal(before.findings.find((finding) => finding.title === 'Tool error in run_shell: exit-2')?.occurrences, 1);
+    assert.ok(before.findings.some((finding) => finding.title === 'Tool error in read_file: not-found'));
+    assert.ok(before.findings.some((finding) => finding.title === 'Request retry: timeout'));
+    assert.equal((await recorder.rebuild({ cwd })).rebuilt, 1);
+    const after = await recorder.review(cwd);
+    assert.deepEqual(after.findings, before.findings);
+    assert.deepEqual(after.toolHealthCoverage, before.toolHealthCoverage);
+    assert.equal((JSON.parse(await readFile(file, 'utf8')) as RunSummary).toolErrors, 7);
+  }
 });
 
 test('a repeated call is reported only while nothing has changed in between', async (t) => {

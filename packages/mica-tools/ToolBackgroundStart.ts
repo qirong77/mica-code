@@ -75,15 +75,14 @@ export class ToolBackgroundStart extends MicaTool {
   }
 
   async execute(input: BackgroundStartInput, callbacks?: ToolExecuteCallbacks): Promise<string> {
+    const cwdResult = resolveCwd(input.cwd);
+    if (!cwdResult.ok) return `工具 background_tasks_start 输入校验失败：${cwdResult.message}`;
     try {
-      assertShellPathAccess(input.cwd, callbacks?.context);
+      assertShellPathAccess(cwdResult.cwd, callbacks?.context);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       return `工具 background_tasks_start 输入校验失败：${message}`;
     }
-    const cwdResult = resolveCwd(input.cwd);
-    if (!cwdResult.ok) return `工具 background_tasks_start 输入校验失败：${cwdResult.message}`;
-
     const id = taskId();
     const outputPath = getTaskOutputPath(id);
     const shell = defaultShell();

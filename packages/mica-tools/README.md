@@ -60,6 +60,7 @@ const result = await micaTools.execute('read_file', { file_path: 'README.md' });
 - 工具结果可以是字符串或文本/图片内容块；UI 和日志消费文本投影，provider adapter 负责嵌入图片。
 - 新增工具优先继承 `MicaTool` 并提供参数校验、展示文案和错误格式化。
 - 文件、shell、网络类工具需要保留边界检查和输出限制。
+- `assertWritablePath()` 按子代理的精确文件/目录租约检查文件写入；`assertShellPathAccess()` 允许 cwd 在租约内，或在任务工作区中包含租约的目录里，文件租约因此也能从工作区根运行测试。外部 checkout 的祖先上界是最近的 `.git` 文件或目录，独立外部路径的祖先只到直接父目录。无关兄弟目录及边界之外的祖先仍拒绝。前台、后台与命令等待先按进程目录解析默认 / 相对 cwd，再用同一绝对路径做目录校验、租约检查和执行；不会按任务目录放行却在另一个目录执行。cwd 检查不是 shell 沙箱，命令本身仍需遵守写策略。
 - MCP 工具只能通过注册接口接入，便于 server 断开后清理。
 
 ## 目录说明

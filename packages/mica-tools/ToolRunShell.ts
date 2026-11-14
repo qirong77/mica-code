@@ -49,15 +49,14 @@ export class ToolRunShell extends MicaTool {
   }
 
   async execute(input: RunShellInput, callbacks?: ToolExecuteCallbacks): Promise<string> {
+    const cwdResult = resolveCwd(input.cwd);
+    if (!cwdResult.ok) return `工具 run_shell 输入校验失败：${cwdResult.message}`;
     try {
-      assertShellPathAccess(input.cwd, callbacks?.context);
+      assertShellPathAccess(cwdResult.cwd, callbacks?.context);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       return `工具 run_shell 输入校验失败：${message}`;
     }
-    const cwdResult = resolveCwd(input.cwd);
-    if (!cwdResult.ok) return `工具 run_shell 输入校验失败：${cwdResult.message}`;
-
     const timeout = clampNumber(input.timeout_ms, DEFAULT_TIMEOUT_MS, MIN_TIMEOUT_MS, MAX_TIMEOUT_MS);
     const shell = defaultShell();
     const startTime = Date.now();
@@ -170,4 +169,3 @@ export class ToolRunShell extends MicaTool {
     return `$ ${truncateDisplayText(cmd.trim(), 12)}`;
   }
 }
-
