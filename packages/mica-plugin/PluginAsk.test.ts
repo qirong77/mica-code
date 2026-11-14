@@ -99,9 +99,6 @@ describe('resolvePluginAskDisplay', () => {
     // 单选：点一下就交，不需要「确定」这条（能自由输入也一样，输入框按回车即可）
     expect(resolvePluginAskDisplay(normalized(base())).confirm).toBe(false);
     expect(
-      resolvePluginAskDisplay(normalized({ ...base(), allowCustom: false })).confirm,
-    ).toBe(false);
-    expect(
       resolvePluginAskDisplay(normalized({ ...base(), multiple: true })).confirm,
     ).toBe(true);
     // 插件显式要也可以：单选时留一次确认
@@ -110,13 +107,15 @@ describe('resolvePluginAskDisplay', () => {
     ).toBe(true);
   });
 
-  it('shows the input box by default and only drops it when told to', () => {
+  it('always keeps the free-text field, whatever the plugin asks for', () => {
     expect(resolvePluginAskDisplay(normalized(base())).input).toBe(true);
-    expect(resolvePluginAskDisplay(normalized({ ...base(), allowCustom: true })).input).toBe(true);
-    expect(resolvePluginAskDisplay(normalized({ ...base(), allowCustom: false })).input).toBe(false);
-    expect(resolvePluginAskDisplay(normalized({ ...base(), ui: { input: false } })).input).toBe(
-      false,
-    );
+    // `ui.input` 这个开关已经没有了；老插件（或手写对象）硬塞进来也不会关掉它——
+    // 选项是模型想的，想不全时用户必须有地方说自己的答案。
+    const legacy = normalized({
+      ...base(),
+      ui: { input: false },
+    } as unknown as Parameters<typeof normalizePluginAskQuestion>[0]);
+    expect(resolvePluginAskDisplay(legacy).input).toBe(true);
   });
 
   it('drops the detail row when there is no detail, even if ui asks for it', () => {
@@ -130,11 +129,11 @@ describe('resolvePluginAskDisplay', () => {
   });
 
   it('lets a plugin turn every element off for a bare confirm dialog', () => {
-    // 自动压缩那种场景：只要标题 + 两个按钮，不要输入框、不要元信息
+    // 自动压缩那种场景：只要标题 + 两个按钮、不要元信息；输入框照样在
     const display = resolvePluginAskDisplay(
-      normalized({ ...base(), ui: { input: false, meta: false, hint: false, dismiss: false } }),
+      normalized({ ...base(), ui: { meta: false, hint: false, dismiss: false } }),
     );
-    expect(display).toMatchObject({ input: false, meta: false, hint: false, dismiss: false });
+    expect(display).toMatchObject({ input: true, meta: false, hint: false, dismiss: false });
     expect(display.options).toBe(true);
   });
 

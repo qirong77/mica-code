@@ -2844,7 +2844,8 @@ function normalizeAsk(raw) {
     meta: rawDisplay.meta !== false,
     detail: rawDisplay.detail !== false,
     options: rawDisplay.options !== false,
-    input: rawDisplay.input !== false,
+    // 自由输入框恒开：选项是模型想出来的，它想不全的时候用户必须有地方说自己的答案。
+    input: true,
     confirm: rawDisplay.confirm === true,
     hint: rawDisplay.hint !== false,
     dismiss: rawDisplay.dismiss !== false
@@ -2856,7 +2857,6 @@ function normalizeAsk(raw) {
     ...(typeof raw.detail === 'string' ? { detail: raw.detail } : {}),
     options,
     multiple: raw.multiple === true,
-    allowCustom: raw.allowCustom !== false,
     presentation: raw.presentation === 'modal' ? 'modal' : 'dock',
     display,
     passive: raw.passive === true

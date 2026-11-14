@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { PluginAskAnswer, PluginAskApi, PluginAskQuestion } from '@packages/mica-plugin/index.js';
+import { resolvePluginAskDisplay } from '@packages/mica-plugin/index.js';
 import { AskUserTool } from './AskTool.js';
 
 function stubAsk(answer: PluginAskAnswer) {
@@ -48,16 +49,20 @@ describe('AskUserTool', () => {
       cancelled: false,
       reason: 'answered',
     });
-    const text = await new AskUserTool(api).execute({ ...question, allowCustom: true });
+    const text = await new AskUserTool(api).execute(question);
     expect(text).toContain('用户的补充：都不做，先补文档');
   });
 
-  it('leaves the free-text field on by default and can be turned off', async () => {
+  it('never forwards a switch for the free-text field', async () => {
     const { api, seen } = stubAsk({ optionIds: ['a'], cancelled: false, reason: 'answered' });
     await new AskUserTool(api).execute(question);
-    expect(seen[0].allowCustom).toBeUndefined();
-    await new AskUserTool(api).execute({ ...question, allowCustom: false });
-    expect(seen[1].allowCustom).toBe(false);
+    const legacy = (value: PluginAskQuestion) => value as unknown as Record<string, unknown>;
+    expect(legacy(seen[0]!).allowCustom).toBeUndefined();
+    // 老 schema 里的 `allowCustom` / `ui.input` 不再往下传：输入框没有开关。
+    await new AskUserTool(api).execute({ ...question, allowCustom: false, ui: { input: false } });
+    expect(legacy(seen[1]!).allowCustom).toBeUndefined();
+    // `ui` 是整块透传的；`input: false` 传到显示层也不再生效（恒为 true）
+    expect(resolvePluginAskDisplay(seen[1]).input).toBe(true);
   });
 
   it('tells the model not to re-ask after a cancellation', async () => {

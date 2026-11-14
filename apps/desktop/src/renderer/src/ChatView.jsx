@@ -619,11 +619,12 @@ function QueueDock({ items, onRecall, recallingId, running }) {
 // 选择与提交分成两层看得清——鼠标点一下选项不会立刻生效，误点也还有反悔的余地。
 //
 // 画哪几个元素由宿主下发（ask.display），组件不自己判断：同一套界面要同时服务
-// 「两行文字 + 输入框」和「只有一个确认按钮」这两种完全不同的场合。
+// 「两行文字 + 输入框」和「只有一个确认按钮」这两种完全不同的场合。**自由输入框例外**：
+// 它永远在（见下面那段），选项是模型想出来的，它想不全的时候用户要有地方说自己的答案。
 //
 // 位置有两种：默认挂在输入框上方（和排队行同一个位置，都是「这一轮卡在这里」的东西）；
 // `presentation: 'modal'` 时铺一层遮罩居中显示，用于需要打断注意力的事情。
-function AskDock({ ask, submitting, onSubmit, onCancel }) {
+export function AskDock({ ask, submitting, onSubmit, onCancel }) {
   const [selected, setSelected] = useState([])
   const [custom, setCustom] = useState('')
   useEffect(() => {
@@ -651,7 +652,6 @@ function AskDock({ ask, submitting, onSubmit, onCancel }) {
     meta: false,
     detail: true,
     options: true,
-    input: true,
     confirm: false,
     hint: true,
     dismiss: true,
@@ -749,32 +749,32 @@ function AskDock({ ask, submitting, onSubmit, onCancel }) {
           })}
         </div>
       ) : null}
-      {display.input ? (
-        <div className="chat-ask-input-row">
-          <Input
-            className="chat-ask-input"
-            value={custom}
-            placeholder={display.options ? '或者直接说你的想法…' : '写下来…'}
-            disabled={submitting}
-            onChange={setCustom}
-            onKeyDown={(event) => {
-              if (event.key !== 'Enter' || event.nativeEvent.isComposing) return
-              if (!canSubmit) return
-              event.preventDefault()
-              submit()
-            }}
-          />
-        </div>
-      ) : null}
+      {/* 自由输入框没有开关：选项是模型想的，想不全时（「先别改，等我问一下产品」）
+          用户得有地方说话。宿主下发的是 `input: true`，这里也不再读它。 */}
+      <div className="chat-ask-input-row">
+        <Input
+          className="chat-ask-input"
+          value={custom}
+          placeholder={display.options ? '或者直接说你的想法…' : '写下来…'}
+          disabled={submitting}
+          onChange={setCustom}
+          onKeyDown={(event) => {
+            if (event.key !== 'Enter' || event.nativeEvent.isComposing) return
+            if (!canSubmit) return
+            event.preventDefault()
+            submit()
+          }}
+        />
+      </div>
       {showConfirm || display.hint ? (
         <div className="chat-ask-bar">
           {display.hint ? (
             <span className="chat-ask-hint" title={summaryText}>
               {summaryText
                 ? `已选 ${summaryText}`
-                : display.input
+                : display.options
                   ? '选一个继续，或直接写下来'
-                  : '选一个继续'}
+                  : '直接写下来，比如「先别动，等我确认」'}
             </span>
           ) : null}
           <span className="chat-ask-spacer" aria-hidden="true" />

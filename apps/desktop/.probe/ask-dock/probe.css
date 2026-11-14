@@ -1,0 +1,95 @@
+/* 探针自己的外壳：主题切换条、几个对照样例，以及一条「假装是输入条」的底边，
+   让卡片落回它真实的位置感（贴着输入条上方）。 */
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  background: var(--color-canvas);
+}
+
+body {
+  overflow: auto;
+}
+
+.probe-toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--color-line);
+  background: var(--color-panel);
+  font:
+    11px/1.5 ui-monospace,
+    monospace;
+}
+
+.probe-toolbar-label {
+  margin-right: 4px;
+  color: var(--color-fg-ghost);
+}
+
+.probe-toolbar-gap {
+  margin-left: 12px;
+}
+
+.probe-theme {
+  padding: 2px 8px;
+  border: 1px solid var(--color-line);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--color-fg-soft);
+  font: inherit;
+  cursor: pointer;
+}
+
+.probe-theme.is-active {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+}
+
+.probe-stage {
+  display: flex;
+  width: 820px;
+  flex-direction: column;
+  gap: 22px;
+  padding: 16px 0 40px;
+}
+
+.probe-case-label {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 0 12px 6px;
+  color: var(--color-fg-soft);
+  font:
+    11px/1.5 ui-monospace,
+    monospace;
+}
+
+.probe-case-hint {
+  color: var(--color-fg-ghost);
+}
+
+/* 卡片落回真实位置：贴着输入条上方的一条底 */
+.probe-dock {
+  display: flex;
+  flex-direction: column;
+  background: var(--color-canvas);
+}
+
+/* 假输入条：只给出「卡片下面是输入区」这一层上下文，不是产品的一部分。 */
+.probe-composer {
+  display: flex;
+  align-items: center;
+  height: 38px;
+  border-top: 1px solid var(--color-line-strong);
+  border-bottom: 1px solid var(--color-line-strong);
+  padding: 0 12px;
+  color: var(--color-fg-ghost);
+  font: 12px/1.4 var(--chat-font);
+}

@@ -20,6 +20,8 @@
 | `stats-export/`   | 将对照探针导出为不依赖服务的单文件 HTML                                             |
 | `notebook-design/` | Notebook 真实编辑预览：C 工作台 / D 分区 / E 一体对比，保留 A/B；丰富示例、共享 Lexical 与六套主题 |
 | `notebook-workbench/` | 方案 D 正式 Notebook 页面验收：真实目录/自动保存/大纲组件、内存 CAS 宿主、丰富示例与主题切换 |
+| `dock-rows/`       | 停靠区行高：回合日志的标题 / 思考 / 工具行与 todo、subagent、后台任务的行必须同样高（终端式一行一行），页内打出每种行的实测高度 |
+| `ask-dock/`        | `ask` 插件的提问卡：真实 `AskDock` 的四种形态 × 六套主题，看它是不是一屏里最先被看见的那个（选项 + 永远在的自由输入框 + 确认条） |
 
 ## 运行
 
@@ -35,6 +37,8 @@ npx vite --config .probe/stats-design/vite.config.mjs    # http://127.0.0.1:5233
 npx vite --config .probe/digest-design/vite.config.mjs   # http://127.0.0.1:5234
 npx vite --config .probe/notebook-design/vite.config.mjs # http://127.0.0.1:5286/comparison.html
 npx vite --config .probe/notebook-workbench/vite.config.mjs # http://127.0.0.1:5287/
+npx vite --config .probe/dock-rows/vite.config.mjs      # http://127.0.0.1:5237
+npx vite --config .probe/ask-dock/vite.config.mjs       # http://127.0.0.1:5238
 ```
 
 `vite.config.mjs` 里已固定 `root`，所以在哪个目录执行都能跑；端口按上面两行分配，新增探针另取一个。

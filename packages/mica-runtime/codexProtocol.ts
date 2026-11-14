@@ -258,7 +258,6 @@ export type MicaAskPending = {
   detail?: string;
   options: MicaAskOption[];
   multiple?: boolean;
-  allowCustom?: boolean;
   /** 画在哪里：输入框上方一条（默认），或居中弹窗。 */
   presentation: MicaAskPresentation;
   /**
@@ -290,8 +289,8 @@ export type MicaAskDisplay = {
   detail: boolean;
   /** 选项列表。单独一个选项也可以只当成一个确认按钮。 */
   options: boolean;
-  /** 自由输入框。 */
-  input: boolean;
+  /** 自由输入框。恒为 `true`：它没有开关，界面照着画即可。 */
+  input: true;
   /** 底部「确定」。单选且点一下就提交时不需要它。 */
   confirm: boolean;
   /** 底部的「已选 A · 转账」与快捷键提示。 */

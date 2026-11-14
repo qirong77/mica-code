@@ -47,13 +47,6 @@ export type PluginAskQuestion = {
   /** 允许多选。多选时用户点「确定」才提交。 */
   multiple?: boolean;
   /**
-   * 除了给定选项，还允许用户自己写一句。默认开。
-   *
-   * 关掉它（`allowCustom: false` 或 `ui.input: false`）只留给「答案就在这几个选项里」的
-   * 确认弹窗：输入框在的时候用户可以随时改口说别的，那多数场景正是想要的。
-   */
-  allowCustom?: boolean;
-  /**
    * 画在哪里。默认 `dock`（输入框上方一条）；`modal` 是居中弹窗。
    *
    * 需要打断当前注意力的事情（例如「上下文快满了，要不要现在压缩」）用 modal；
@@ -64,7 +57,8 @@ export type PluginAskQuestion = {
    * 逐个元素开关，缺省按数据推导。
    *
    * 用途是让同一套组件适配很不一样的场景：自动压缩的确认弹窗只要标题 + 两个按钮，
-   * 不要自由输入框；收集一段文字的场景则反过来，只留输入框。
+   * 收集一段文字的场景则反过来，只留输入框。**自由输入框不在可关之列**：选项是模型
+   * 想出来的，想不全的时候用户得有地方说自己的答案（见 `resolvePluginAskDisplay`）。
    */
   ui?: PluginAskUi;
   /**
@@ -90,7 +84,7 @@ export type PluginAskPresentation = 'dock' | 'modal';
  * - `icon` / `hint` / `dismiss` 默认画；
  * - `meta` 只在有两个以上选项时画（「3 个方案 · 单选」）；
  * - `detail` 看有没有 `detail`；
- * - `input` 默认画（`allowCustom: false` 才关）；
+ * - `input` **永远画**，不接受开关；
  * - `confirm` 看是否需要二次确认（多选）；
  * - `options` 只要有选项就画。
  */
@@ -99,11 +93,18 @@ export type PluginAskUi = {
   meta?: boolean;
   detail?: boolean;
   options?: boolean;
-  input?: boolean;
   confirm?: boolean;
   hint?: boolean;
   dismiss?: boolean;
 };
+
+/**
+ * 推导出来的最终结论：每个元素画不画。
+ *
+ * `input` 不在 `PluginAskUi` 里（它没有开关），但结论里必须给它一个位置——宿主要照着
+ * 这份结论画，缺字段时只能猜。
+ */
+export type PluginAskDisplay = Required<PluginAskUi> & { input: true };
 
 /** 结束原因。`answered` 是唯一「用户真的选了」的情况。 */
 export type PluginAskReason = 'answered' | 'cancelled' | 'timeout' | 'aborted';
@@ -111,7 +112,7 @@ export type PluginAskReason = 'answered' | 'cancelled' | 'timeout' | 'aborted';
 export type PluginAskAnswer = {
   /** 用户选中的选项 id（单选时最多一个）。 */
   optionIds: string[];
-  /** `allowCustom` 时用户自己写的那句话。 */
+  /** 用户在自由输入框里写的那句话（输入框永远在，所以这两个字段也可能只有它）。 */
   custom?: string;
   cancelled: boolean;
   reason: PluginAskReason;
@@ -214,7 +215,6 @@ export function normalizePluginAskQuestion(input: PluginAskQuestion): PluginAskQ
     ...(detail ? { detail } : {}),
     options,
     ...(input?.multiple === true ? { multiple: true } : {}),
-    ...(typeof input?.allowCustom === 'boolean' ? { allowCustom: input.allowCustom } : {}),
     ...(input?.presentation === 'modal' ? { presentation: 'modal' as const } : {}),
     ...(input?.ui ? { ui: { ...input.ui } } : {}),
     timeoutMs,
@@ -226,20 +226,21 @@ export function normalizePluginAskQuestion(input: PluginAskQuestion): PluginAskQ
  * 把「要不要画某个元素」定成最终结论。
  *
  * 放在这一侧而不是界面里：界面只有一份快照，缺字段时只能猜；插件知道这道题是干什么
- * 的，猜错了也只是它自己的界面难看。默认值依赖数据，所以要能同时看到选项数、`multiple`、
- * `allowCustom`。
+ * 的，猜错了也只是它自己的界面难看。默认值依赖数据，所以要能同时看到选项数、`multiple`。
  */
-export function resolvePluginAskDisplay(question: PluginAskQuestion): Required<PluginAskUi> {
+export function resolvePluginAskDisplay(question: PluginAskQuestion): PluginAskDisplay {
   const ui = question.ui ?? {};
   const pick = (value: boolean | undefined, fallback: boolean): boolean =>
     typeof value === 'boolean' ? value : fallback;
-  const allowCustom = question.allowCustom !== false;
   return {
     icon: pick(ui.icon, true),
     meta: pick(ui.meta, question.options.length > 1),
     detail: pick(ui.detail, true) && Boolean(question.detail),
     options: pick(ui.options, question.options.length > 0),
-    input: pick(ui.input, allowCustom),
+    // 自由输入框没有开关：选项是模型想出来的，它想不全的时候用户必须有地方说自己的
+    // 答案（「先别改，等我问一下产品」这类回答从来不在选项里）。插件能收窄的只有
+    // 「画不画选项」，不能收掉这个出口。
+    input: true,
     // 单选时点一下就交；多选要攒几个再提交，才需要「确定」。
     // 自由输入不需要额外的确认按钮：打了字之后界面自己会出现一个。
     confirm: pick(ui.confirm, Boolean(question.multiple)),

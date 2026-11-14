@@ -164,11 +164,10 @@ function approvalQuestion(goal: string, steps: Step[]): PluginAskQuestion {
       { id: 'allow', label: `允许这 ${steps.length} 步` },
       { id: 'deny', label: '不要执行' },
     ],
-    allowCustom: false,
     presentation: 'dock',
     summary: '等你确认桌面操作',
     timeoutMs: ASK_TIMEOUT_MS,
-    ui: { input: false, meta: false, dismiss: true },
+    ui: { meta: false, dismiss: true },
   };
 }
 

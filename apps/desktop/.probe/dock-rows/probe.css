@@ -1,0 +1,72 @@
+/* 探针自己的外壳：只负责给一个真实的窄宽与底色，停靠区本身全部是 app.css 的类。 */
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  background: var(--color-canvas);
+}
+
+body {
+  overflow: auto;
+}
+
+.probe-stage {
+  display: flex;
+  width: 760px;
+  flex-direction: column;
+  padding: 24px 0 40px;
+}
+
+/* 停靠区在真实界面里贴着输入条：这里给它一个「输入条」的底，看得出边界在哪。 */
+.probe-dock {
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--color-line);
+  background: var(--color-canvas);
+}
+
+.probe-verdict {
+  align-self: flex-start;
+  margin: 0 0 10px 12px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--color-warn) 18%, transparent);
+  color: var(--color-warn);
+  font:
+    12px/1.6 ui-monospace,
+    monospace;
+}
+
+.probe-verdict.is-ok {
+  background: color-mix(in srgb, var(--color-success) 16%, transparent);
+  color: var(--color-success);
+}
+
+.probe-verdict.is-bad {
+  background: color-mix(in srgb, var(--color-danger) 16%, transparent);
+  color: var(--color-danger);
+}
+
+.probe-out {
+  margin: 16px 12px 0;
+  color: var(--color-fg-faint);
+  font:
+    11px/1.5 ui-monospace,
+    monospace;
+  white-space: pre-wrap;
+}
+
+/* 另外两个消费者：subagent 详情弹窗的时间线（左）与 By The Way 抽屉（右）。 */
+.probe-elsewhere {
+  display: flex;
+  gap: 12px;
+  margin-top: 16px;
+  padding: 0 12px;
+}
+
+.probe-elsewhere > * {
+  flex: 0 0 auto;
+  width: 320px;
+}

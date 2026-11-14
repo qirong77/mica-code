@@ -128,7 +128,8 @@ describe('computer_use tool', () => {
     expect(question.detail).toContain('点击「Calculator」里的「1」');
     expect(question.detail).toContain('键入 "123"');
     expect(question.options.map((option) => option.id)).toEqual(['allow', 'deny']);
-    expect(question.allowCustom).toBe(false);
+    // 确认弹窗也不收掉自由输入框：用户可以直接说「先别动，改成点右上角」
+    expect(question.ui ?? {}).not.toHaveProperty('input');
 
     expect(result).toContain('ok tap');
     const logged = calls(logFile);

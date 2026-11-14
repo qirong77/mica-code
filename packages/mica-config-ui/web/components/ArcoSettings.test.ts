@@ -7,17 +7,19 @@ import { ProviderEditor } from './ProviderEditor.js';
 import { PROVIDER_PROTOCOLS } from '@packages/mica-config/providerProtocol.js';
 import { providerProtocolLabel } from '../labels.js';
 
+const BASE_RAW = {
+  id: 'example',
+  api_base: 'https://api.example.com',
+  api_key: 'example-key',
+  protocol: 'openai_chat_completions',
+  models: ['example-chat'],
+};
+
 function renderProvider(overrides: Partial<Parameters<typeof ProviderEditor>[0]> = {}) {
   return renderToStaticMarkup(
     createElement(ArcoSettings, {
       children: createElement(ProviderEditor, {
-        raw: {
-          id: 'example',
-          api_base: 'https://api.example.com',
-          api_key: 'example-key',
-          protocol: 'openai',
-          models: ['example-chat'],
-        },
+        raw: BASE_RAW,
         index: 0,
         errorFor: () => undefined,
         removable: true,
@@ -38,16 +40,18 @@ describe('Arco 配置页试验', () => {
     for (const name of ['entry-row', 'entry-row-head', 'entry-row-body', 'setting-row']) {
       expect(html).toContain(name);
     }
-    for (const name of ['arco-btn', 'arco-input', 'arco-radio-group', 'arco-tag']) {
+    for (const name of ['arco-btn', 'arco-input', 'arco-select', 'arco-tag']) {
       expect(html).toContain(name);
     }
     expect(html).toContain('type="password"');
     expect(html).toContain('aria-label="服务商 1 API Key"');
     expect(html).toContain('aria-label="显示明文"');
     expect(html).toContain('aria-label="移除模型 example-chat"');
+    // 协议是下拉框：收起态只显示当前取值，四个取值都由同一份人读名称渲染。
+    expect(html).toContain('aria-label="服务商 1 协议"');
     for (const protocol of PROVIDER_PROTOCOLS) {
-      expect(html).toContain(`value="${protocol}"`);
-      expect(html).toContain(providerProtocolLabel(protocol));
+      const one = renderProvider({ raw: { ...BASE_RAW, protocol } });
+      expect(one).toContain(`title="${providerProtocolLabel(protocol)}"`);
     }
   });
 

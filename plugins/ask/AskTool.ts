@@ -36,7 +36,7 @@ export class AskUserTool extends MicaTool {
         'Ask the user to pick between concrete options, and continue in the same turn once they answer.',
         'Use it when several approaches are genuinely reasonable and the choice is theirs: product/taste decisions, which of two designs to build, whether to touch live data, which row of data is the right one.',
         'Give 2-4 options (max 8). Each option needs an `id` and a short `label`; add `description` for the one-line trade-off.',
-        'The card also shows a free-text field by default, so the user can type their own answer instead of picking; pass `allowCustom: false` when the answer must be one of the listed options.',
+        'The card always shows a free-text field, so the user can type their own answer instead of picking. Never assume your options cover what they want.',
         'Attach `prompt` to an option to tell yourself what to do when it is picked (it becomes part of the tool result). Attach `command` only when a real shell command should run on pick — and make sure the label or description says what will run, since the user clicks before it executes.',
         'The question should be one decision, phrased as a question. Do not use it for "should I continue?" or to narrate progress.',
         'This tool blocks until the user answers. If it returns `cancelled`, do not ask the same thing again: continue with the most conservative option and say what you chose.',
@@ -81,11 +81,6 @@ export class AskUserTool extends MicaTool {
             },
           },
           multiple: { type: 'boolean', description: 'Allow picking more than one option.' },
-          allowCustom: {
-            type: 'boolean',
-            description:
-              'The card shows a free-text field by default, so the user can always type their own answer instead of picking. Set `false` only when the decision is strictly one of the listed options.',
-          },
           timeoutMs: {
             type: 'number',
             description:
@@ -104,13 +99,12 @@ export class AskUserTool extends MicaTool {
           ui: {
             type: 'object',
             description:
-              'Turn individual elements on or off. Omit to let them follow the data (e.g. the input box only disappears with `allowCustom: false`).',
+              'Turn individual elements on or off. Omit to let them follow the data. The free-text field is not switchable: it is always there.',
             properties: {
               icon: { type: 'boolean', description: 'The leading question mark badge.' },
               meta: { type: 'boolean', description: 'The "2 options · single choice" line next to the title.' },
               detail: { type: 'boolean', description: 'The detail paragraph.' },
               options: { type: 'boolean', description: 'The option list.' },
-              input: { type: 'boolean', description: 'The free-text field.' },
               confirm: { type: 'boolean', description: 'The explicit 确定 button (needed when a pick is not final).' },
               hint: { type: 'boolean', description: 'The "已选 A" line in the footer.' },
               dismiss: { type: 'boolean', description: 'The close button that cancels the question.' },
@@ -167,7 +161,6 @@ function toQuestion(input: ToolInput, defaultTimeoutMs: number): PluginAskQuesti
     detail: typeof input?.detail === 'string' ? input.detail : undefined,
     options: options as PluginAskOption[],
     multiple: input?.multiple === true,
-    ...(typeof input?.allowCustom === 'boolean' ? { allowCustom: input.allowCustom } : {}),
     presentation: input?.presentation === 'modal' ? 'modal' : undefined,
     ...(input?.ui && typeof input.ui === 'object' ? { ui: input.ui as PluginAskQuestion['ui'] } : {}),
     timeoutMs,

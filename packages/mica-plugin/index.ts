@@ -316,6 +316,7 @@ export {
 export type {
   PluginAskAnswer,
   PluginAskApi,
+  PluginAskDisplay,
   PluginAskHandle,
   PluginAskOption,
   PluginAskPresentation,

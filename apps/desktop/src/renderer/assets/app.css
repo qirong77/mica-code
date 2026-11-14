@@ -568,6 +568,12 @@ html[data-appearance='light'] .quick-pick-panel {
 html[data-appearance='light'] .chat-ask-card.is-modal {
   box-shadow: 0 18px 52px rgb(0 0 0 / 17%);
 }
+/* 亮色底的画布本身就是白，同一份青色的浮光会糊成一片；压淡一档，只靠描边抬起来。 */
+html[data-appearance='light'] .chat-ask-card:not(.is-modal) {
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--color-ask) 10%, transparent),
+    0 4px 12px color-mix(in srgb, var(--color-ask) 8%, transparent);
+}
 
 /* 查找条里的输入框：暗色是「面板叠黑 28%」压出的内凹面，亮色底上同样的黑会变脏灰，
    改成内容区白底（描边已由 --color-line 系列跟随主题）。 */
@@ -580,6 +586,12 @@ html[data-appearance='light'] .chat-ask-card.is-modal {
        portal 到 body（要躲开对话区的 overflow 裁剪），拿不到 `.chat-view` 上的
        局部变量——放到根上两份都能解析。 */
     --chat-text-size: 13px;
+    /* 停靠区的一行（回合日志的标题 / 思考 / 工具行，以及它下面 todo、subagent、
+       后台、等待那几块的行）：终端式排版里一行就是一行字，所以这几处共用同一份
+       字号、行高与行框高度，改一处就全对齐——不要在某个块里另写一个 px。 */
+    --chat-log-font-size: 11.5px;
+    --chat-log-line-height: 1.45;
+    --chat-log-row-height: 20px;
     /* 用户消息的行高：折叠阈值（chat-collapse.js 读 computed 值）与长消息浮层
        都按这一个数对齐，不在两处各写一份。 */
     --chat-message-line-height: 1.28;
@@ -2430,8 +2442,8 @@ html[data-appearance='light'] .chat-markdown code:not(pre code) {
   background: var(--chat-surface-log);
   color: var(--color-fg-dim);
   font-family: var(--chat-font);
-  font-size: 11.5px;
-  line-height: 1.45;
+  font-size: var(--chat-log-font-size);
+  line-height: var(--chat-log-line-height);
 }
 
 /*
@@ -2441,7 +2453,7 @@ html[data-appearance='light'] .chat-markdown code:not(pre code) {
  */
 .chat-turn-log-head {
   display: flex;
-  height: 22px;
+  height: var(--chat-log-row-height);
   align-items: center;
   gap: 6px;
   border-top: 1px solid var(--color-line);
@@ -2522,7 +2534,7 @@ html[data-appearance='light'] .chat-markdown code:not(pre code) {
   /* 只有这一块滚：历史轮次是固定的目录，最新一轮的正文在它下面滚动并跟随到底。 */
   min-height: 0;
   flex: 0 1 auto;
-  max-height: calc(1.45em * 10 + 14px);
+  max-height: calc(var(--chat-log-row-height) * 10 + 14px);
   overflow-x: hidden;
   overflow-y: auto;
   padding: 8px 14px 9px 13px;
@@ -2538,7 +2550,7 @@ html[data-appearance='light'] .chat-markdown code:not(pre code) {
   flex: 0 1 auto;
   overflow-y: auto;
   /* 展开一个长轮次也不能把下面正在跑的那一轮挤没：目录自己滚。 */
-  max-height: calc(1.45em * 12 + 14px);
+  max-height: calc(var(--chat-log-row-height) * 12 + 14px);
   padding: 6px 14px 0 13px;
   overscroll-behavior: contain;
 }
@@ -2548,7 +2560,7 @@ html[data-appearance='light'] .chat-markdown code:not(pre code) {
  * 展开的长轮次因此不必挤在 12 行的小窗口里滚。
  */
 .chat-turn-log.is-reading-history .chat-turn-log-rounds {
-  max-height: calc(1.45em * 22 + 14px);
+  max-height: calc(var(--chat-log-row-height) * 22 + 14px);
 }
 
 /*
@@ -2600,7 +2612,8 @@ html[data-appearance='light'] .chat-markdown code:not(pre code) {
   border: 0;
   border-radius: 3px;
   background: none;
-  padding: 1px 0;
+  min-height: var(--chat-log-row-height);
+  padding: 0;
   color: var(--color-fg-faint);
   font: inherit;
   text-align: left;
@@ -2663,11 +2676,13 @@ html[data-appearance='light'] .chat-markdown code:not(pre code) {
 
 .chat-turn-log-thinking {
   min-width: 0;
-  margin: 1px 0 7px;
   /* 不用左侧竖条：淡背景即可，侧边高亮条容易被读成选中态。 */
   border-radius: 4px;
   background: color-mix(in srgb, var(--color-info) 5%, transparent);
-  padding: 4px 9px;
+  padding: 0 9px;
+  /* 思考照旧整段折行，但每一行都落在与工具行同高的格子上：`line-height` 就是行高。
+     上下内边距与下外边距都不要加回来——它们会把「一行思考」撑得比「一行工具调用」高。 */
+  line-height: var(--chat-log-row-height);
   color: var(--color-fg-muted);
   overflow-wrap: anywhere;
   white-space: pre-wrap;
@@ -2679,10 +2694,8 @@ html[data-appearance='light'] .chat-markdown code:not(pre code) {
   padding-left: 0;
 }
 
-.chat-turn-log-tool + .chat-turn-log-tool,
-.chat-turn-log-thinking + .chat-turn-log-tool {
-  margin-top: 3px;
-}
+/* 行与行之间不留外边距：行高已经由 `--chat-log-row-height` 定死，再加一条缝
+   就会读成两种行距（思考块与工具行之间曾经就是这样对不上）。 */
 
 /* 整行就是按钮：点哪里都能打开详情，hover 给一层浅底标出可点范围 */
 .chat-turn-log-row {
@@ -2694,7 +2707,8 @@ html[data-appearance='light'] .chat-markdown code:not(pre code) {
   border: 0;
   border-radius: 3px;
   background: none;
-  padding: 1px 6px 1px 3px;
+  min-height: var(--chat-log-row-height);
+  padding: 0 6px 0 3px;
   color: inherit;
   font: inherit;
   text-align: left;
@@ -2849,38 +2863,55 @@ html[data-appearance='light'] .chat-markdown code:not(pre code) {
 }
 
 /* 插件（工具）抛出的一道选择题。
-   版式：扁平卡（无阴影、只有一层细边），中间选项两列，底部一条独立确认条写「已选 A ·
-   转账」并给出「确定」——「选了什么」和「提交」分成两层，误点还有反悔余地。
+   版式：一张**高优先级**的卡——中间选项两列，底部一条独立确认条写「已选 A · 转账」并
+   给出「确定」，「选了什么」和「提交」分成两层，误点还有反悔余地。
    与排队行同一个位置，靠一支专属的青（`--color-ask`）区分：排队是「等这一轮结束」，
-   这里是「等你动手」。这支青不与主题强调色、未读蓝、运行绿共用——一张等你点选的卡片
-   必须能在一屏里被一眼认出来。 */
+   这里是「等你动手」。它卡着这一轮，用户不答就没有下文，所以**不能**画成与输入条同色
+   的扁平块（以前就是：细边 + 淡底，一屏里最先被漏掉）：描边、头部色带、选项边框、
+   确认条都用这支青，并且离开窗口左右边——先看见它，再读它。这支青不与主题强调色、
+   未读蓝、运行绿共用。 */
 .chat-ask-card {
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  border: 1px solid var(--color-line-soft);
+  border: 1px solid color-mix(in srgb, var(--color-ask) 55%, var(--color-line));
   border-radius: 10px;
   background: var(--color-panel);
+  /* 一圈同色浮光：暗色主题里靠它把卡片从画布上「抬起来」，比加粗描边安静 */
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--color-ask) 14%, transparent),
+    0 6px 18px color-mix(in srgb, var(--color-ask) 10%, transparent);
+}
+
+/* 停在输入条上方时左右留边、顶上留一道缝：贴满整行会被读成「输入条又长出来一条」，
+   而它应该是一张插进来的卡。浮层版有自己的宽度与遮罩，不加这份外边距。 */
+.chat-ask-card:not(.is-modal) {
+  margin: 8px 12px;
 }
 
 .chat-ask-head {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 9px 11px 0;
+  /* 头部是整张卡最先被读到的部分：一条 ask 色淡底 + 下边线，与下面的选项分开，
+     也给「有人在等你」这件事一个色块。 */
+  border-bottom: 1px solid color-mix(in srgb, var(--color-ask) 24%, transparent);
+  background: color-mix(in srgb, var(--color-ask) 12%, transparent);
+  padding: 8px 11px;
 }
 
 /* 问号徽标：ask 识别色实心圆，比图标更省一行高度 */
 .chat-ask-mark {
   display: grid;
   flex: none;
-  width: 16px;
-  height: 16px;
+  width: 18px;
+  height: 18px;
   place-items: center;
   border-radius: 50%;
   background: var(--color-ask);
   color: var(--color-ask-contrast);
-  font-size: 10.5px;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-ask) 16%, transparent);
+  font-size: 11.5px;
   font-weight: 800;
   line-height: 1;
 }
@@ -2892,7 +2923,8 @@ html[data-appearance='light'] .chat-markdown code:not(pre code) {
 }
 
 .chat-ask-meta {
-  color: var(--color-fg-ghost);
+  /* 与卡片同一支青：这行「几个方案 · 单选」说的是这道题本身，不是普通元信息 */
+  color: color-mix(in srgb, var(--color-ask) 78%, var(--color-fg-dim));
   font-size: 10.5px;
 }
 
@@ -2932,9 +2964,9 @@ html[data-appearance='light'] .chat-markdown code:not(pre code) {
   flex-direction: column;
   gap: 3px;
   padding: 9px 11px;
-  border: 1px solid transparent;
+  border: 1px solid var(--color-line);
   border-radius: 7px;
-  background: var(--color-overlay-subtle);
+  background: var(--color-overlay);
   color: inherit;
   font: inherit;
   text-align: left;
@@ -2942,12 +2974,15 @@ html[data-appearance='light'] .chat-markdown code:not(pre code) {
 }
 
 .chat-ask-option:hover:not(:disabled) {
-  background: var(--color-overlay);
+  border-color: color-mix(in srgb, var(--color-ask) 40%, var(--color-line));
+  background: var(--color-overlay-strong);
 }
 
 .chat-ask-option.is-selected {
-  border-color: color-mix(in srgb, var(--color-ask) 55%, transparent);
-  background: color-mix(in srgb, var(--color-ask) 14%, transparent);
+  border-color: var(--color-ask);
+  background: color-mix(in srgb, var(--color-ask) 18%, transparent);
+  /* 选中的那一个再压一圈内描边：两列并排时，只靠底色深浅分不出「我点的是哪个」 */
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-ask) 40%, transparent);
 }
 
 .chat-ask-option:disabled {
@@ -2957,24 +2992,33 @@ html[data-appearance='light'] .chat-markdown code:not(pre code) {
 
 .chat-ask-option-head {
   display: flex;
-  align-items: baseline;
+  /* 键位是一枚 15px 的小方片，基线对齐会让它吊在文字上方半个身位 */
+  align-items: center;
   gap: 6px;
 }
 
 .chat-ask-option-key {
-  color: var(--color-fg-ghost);
+  display: grid;
+  width: 15px;
+  height: 15px;
+  flex: none;
+  place-items: center;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--color-ask) 16%, transparent);
+  color: var(--color-ask);
   font-family: var(--font-mono);
   font-size: 10.5px;
   font-weight: 700;
 }
 
 .chat-ask-option.is-selected .chat-ask-option-key {
-  color: var(--color-ask);
+  background: var(--color-ask);
+  color: var(--color-ask-contrast);
 }
 
 .chat-ask-option-label {
   color: var(--color-fg-strong);
-  font-size: 12.5px;
+  font-size: 13px;
   font-weight: 600;
 }
 
@@ -3006,8 +3050,8 @@ html[data-appearance='light'] .chat-markdown code:not(pre code) {
   align-items: center;
   gap: 8px;
   padding: 7px 11px;
-  border-top: 1px solid var(--color-line-soft);
-  background: var(--color-overlay-subtle);
+  border-top: 1px solid color-mix(in srgb, var(--color-ask) 24%, transparent);
+  background: color-mix(in srgb, var(--color-ask) 8%, transparent);
 }
 
 /* 提示语是这条里唯一可以被压缩的东西：写了很长的自定义答案时它先省略号收尾，
@@ -3017,7 +3061,7 @@ html[data-appearance='light'] .chat-markdown code:not(pre code) {
   flex: 0 1 auto;
   min-width: 0;
   overflow: hidden;
-  color: var(--color-fg-soft);
+  color: var(--color-fg-strong);
   font-size: 11.5px;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -3047,6 +3091,16 @@ html[data-appearance='light'] .chat-markdown code:not(pre code) {
   padding: 4px 13px;
   font-size: 11.5px;
   white-space: nowrap;
+}
+
+/* 还没选之前「确定」是禁用的：Arco 的禁用底色会落到主题强调色上（Darcula 是橙），
+   和这张卡不是同一支颜色。这里压成同一支青、只降不透明度——一眼看出没生效，
+   也不会让人以为卡片里混进了别的东西。 */
+.chat-ask-submit.arco-btn-disabled {
+  border-color: transparent;
+  background: var(--color-ask);
+  color: var(--color-ask-contrast);
+  opacity: 0.45;
 }
 
 /* hover 往「前景色」方向混：暗色里 fg-max 是白（提亮），亮色里是近黑（加深），
@@ -3487,23 +3541,22 @@ html[data-appearance='light'] .chat-markdown code:not(pre code) {
 .chat-task-dock {
   width: 100%;
   min-width: 0;
-  padding: 6px 12px 2px;
+  /* 这几块（todo / subagent / 后台 / 等待）是回合日志的续行，不是卡片：上下内边距
+     会把一行撑成「一行 + 一道缝」，行高就和日志里的行对不上了。字号与行高同样取
+     日志那一份，两边看起来才是同一种行。 */
+  padding: 0 12px;
   background: var(--color-canvas);
   color: var(--color-fg-soft);
   font-family: var(--chat-font);
-  font-size: var(--chat-text-size);
-  line-height: 1.35;
-}
-
-.chat-task-dock + .chat-task-dock {
-  padding-top: 1px;
+  font-size: var(--chat-log-font-size);
+  line-height: var(--chat-log-line-height);
 }
 
 .chat-task-summary-row {
   display: grid;
   width: 100%;
   min-width: 0;
-  min-height: 22px;
+  min-height: var(--chat-log-row-height);
   grid-template-columns: 12ch 8ch auto auto minmax(0, 1fr);
   align-items: center;
   column-gap: 8px;
@@ -3612,7 +3665,7 @@ html[data-appearance='light'] .chat-markdown code:not(pre code) {
 .chat-task-child {
   display: flex;
   min-width: 0;
-  min-height: 22px;
+  min-height: var(--chat-log-row-height);
   align-items: center;
   color: var(--color-fg-dim);
 }
@@ -4449,8 +4502,8 @@ html[data-appearance='light'] .chat-markdown code:not(pre code) {
   min-width: 0;
   color: var(--color-fg-dim);
   font-family: var(--chat-font);
-  font-size: 11.5px;
-  line-height: 1.45;
+  font-size: var(--chat-log-font-size);
+  line-height: var(--chat-log-line-height);
 }
 
 .chat-timeline-earlier {
@@ -5215,8 +5268,8 @@ body.is-resizing-btw {
   padding: 2px 0 1px 8px;
   border-left: 1px solid color-mix(in srgb, var(--color-fg-max) 9%, transparent);
   color: var(--color-fg-dim);
-  font-size: 11.5px;
-  line-height: 1.45;
+  font-size: var(--chat-log-font-size);
+  line-height: var(--chat-log-line-height);
 }
 
 /* 抽屉更窄，行首再收一点，免得图标离左边那条细线太远 */

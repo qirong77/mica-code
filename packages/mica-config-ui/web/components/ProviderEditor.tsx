@@ -4,7 +4,7 @@ import { providerProtocolLabel } from '../labels.js';
 import { PROVIDER_PROTOCOL_VALUES, readProviderDraft, type ProviderDraft } from '../configDraft.js';
 import type { ConfigWebProviderTest, ConfigWebProviderTestInput } from '../../src/shared/types.js';
 import { SettingRow } from './Ui.js';
-import { Button, Input, Radio, Tag } from './ArcoSettings.js';
+import { Button, Input, Select, Tag } from './ArcoSettings.js';
 
 type ProviderEditorProps = {
   raw: unknown;
@@ -186,12 +186,13 @@ export function ProviderEditor({
           </SettingRow>
 
           <SettingRow label="协议" error={errorFor('protocol')}>
-            <Radio.Group
-              type="button"
+            <Select
               value={fields.protocol}
+              options={PROVIDER_PROTOCOL_VALUES.map((value) => ({ value, label: providerProtocolLabel(value) }))}
               disabled={disabled}
               aria-label={`服务商 ${index + 1} 协议`}
-              options={PROVIDER_PROTOCOL_VALUES.map((value) => ({ value, label: providerProtocolLabel(value) }))}
+              error={Boolean(errorFor('protocol'))}
+              renderFormat={() => providerProtocolLabel(fields.protocol)}
               onChange={(protocol) => patch({ protocol })}
             />
           </SettingRow>

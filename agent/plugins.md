@@ -89,7 +89,7 @@ Capabilities 可按插件查看实际工具、技能和提示词贡献。工具�
 
 ### ask（问用户一个问题，等一个回答）
 
-- `ctx.ask.request(question, { signal })` 把一道选择题交给客户端：`title` 一句话问题、`detail` 补充说明、`options`（`id` / `label` / `description`，最多 8 个）、可选的 `multiple` / `allowCustom`（默认开，`false` 才收掉自由输入框）/ `timeoutMs` / `summary`。答案 `{ optionIds, custom?, cancelled, reason }`，`reason` 取 `answered` / `cancelled` / `timeout` / `aborted`。
+- `ctx.ask.request(question, { signal })` 把一道选择题交给客户端：`title` 一句话问题、`detail` 补充说明、`options`（`id` / `label` / `description`，最多 8 个）、可选的 `multiple` / `timeoutMs` / `summary`。自由输入框（`custom`）**没有开关、永远画**：选项是模型想的，想不全时用户必须有地方说自己的答案；插件能收窄的只有「画不画选项」。答案 `{ optionIds, custom?, cancelled, reason }`，`reason` 取 `answered` / `cancelled` / `timeout` / `aborted`。
 - **它在工具里 await 到用户点选为止，然后回到同一次迭代**——不追加消息、不开新一轮，所以「选完之后直接继续」不需要任何投递机制。改写/中止由传进去的 `AbortSignal` 结束（工具拿到的 `callbacks.signal`），宿主会同时撤掉那张卡片。
 - 选项上的 `prompt` / `command` 不进客户端，只回到插件手里：前者是「选中后要做什么」的一段指令，后者是要当场执行的命令。真正执行命令的是插件（`ask` 只负责问答），所以「用户点一下就跑脚本」这条路径由插件自己实现并负责把它写进用户看得见的地方。
 - 超时不是错误：拿到的仍是 `cancelled` + `reason: 'timeout'`，插件自己决定退化成什么。
