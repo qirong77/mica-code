@@ -5,13 +5,6 @@ import { ToolSessionPeers } from './SessionAutonomyTools.js';
 import { formatSameCwdPeer, readPeerSnapshot, type SessionPeerDeps } from './sessionPeers.js';
 import { installSessionWriteTracking } from './sessionWriteTracking.js';
 
-const SESSION_AUTONOMY_GUIDANCE = `# 会话自治（Session Autonomy）
-
-你可以通过以下工具观察当前会话：
-- session_peers：查看正在运行的其他 Mica 实例及其 session 文件路径；同一工作目录的并发会话还会列出它本轮写过的文件。
-  不确定一批未提交改动是不是自己的、发现文件内容与预期不符、或改动突然消失时用它，不要靠推断。
-  传入 hours（如 6）还会列出最近 N 小时内结束的会话——它们已释放 turn 锁，但可能刚改过工作区。`;
-
 /**
  * 同一个工作目录上还有别的会话在跑时的提醒。
  *
@@ -48,16 +41,10 @@ export default function setupSessionAutonomy(ctx: PluginContext): void {
   ctx.onDispose(() => writeTracking.dispose());
 
   if (!ctx.prompt) throw new Error('SessionAutonomyPlugin requires ctx.prompt');
-  const promptBuildDisposable = ctx.prompt.section({
-    id: 'guidance',
-    order: -200,
-    render: () => SESSION_AUTONOMY_GUIDANCE,
-  });
-  ctx.onDispose(() => promptBuildDisposable.dispose());
-
   // 排在最末：内容随别的会话起落而变化，放在前缀里会连累前面稳定的段落一起失效。
   const concurrencyDisposable = ctx.prompt.section({
     id: 'concurrency',
+    label: '并发会话',
     order: 1100,
     render: () => buildConcurrencyNotice(deps),
   });

@@ -1047,7 +1047,13 @@ const child = spawn(micaExecutable, ['app-server', '--dir', cwd, '--parent', thi
 
 ### 系统提示词段落
 
-通过 `ctx.prompt.section({ id, order, render })` 贡献提示词，并在清单 `requires` 声明 `prompt`。宿主为每个非空段落生成 `<injection source="plugin" plugin="插件 ID" section="段落 ID">`；插件正文可使用语义 XML 标签组织规则、状态与上下文，动态文本需转义。`injection` 为宿主保留标签。按 `order` 与注册顺序排列，不用随机 ID，空段落不输出。`system-prompt:build` 形态不再支持。
+通过 `ctx.prompt.section({ id, label?, order, render })` 贡献提示词，并在清单 `requires` 声明 `prompt`。`label` 是界面里的可读段名，归属名称由宿主取注册插件的 `name`；它们只影响展示，不改变控制键、正文或 XML。宿主为每个非空段落生成 `<injection source="plugin" plugin="插件 ID" section="段落 ID">`；插件正文可使用语义 XML 标签组织规则、状态与上下文，动态文本需转义。`injection` 为宿主保留标签。按 `order` 与注册顺序排列，不用随机 ID，空段落不输出。`system-prompt:build` 形态不再支持。
+
+段落还可声明 `available: () => boolean` 作为插件自身的启用条件；false 会同时拦住动态正文和
+用户正文覆盖，界面快照带对应可用性。仅返回空正文不代表不可用，仍允许用户覆盖。
+
+工具参数、操作顺序与调用纪律统一写在工具描述中，不再额外注入同一份提示词或用 skill 包装同一个工具。
+提示词段落保留工具无法提供的动态事实和额外策略：例如 Memory 的适用记忆与历史回查、SSH 的会话主机范围、并发会话提醒、可配置的委派倾向。Todo 的计划纪律、Video 的抽帧用法与 Web Search 的查证步骤归工具描述；Schedule 直接提供排期工具，不再分发重复的说明 skill。历史回查归 Memory，宿主不再另装 `builtin.command-memory`。
 
 Capabilities 会显示当前会话各插件的工具、技能与提示词来源。用户可在 Plugins 页签开关整个插件的提示词注入，或在提示词控制中逐段开关、覆盖正文与恢复原文；插件的工具保持注册。控制存全局 `prompt-controls.json`，下一轮开始生效。覆盖正文后该段使用固定内容，恢复原文后继续由 `render()` 动态生成；完整预览与最近实际发送的存档分开。
 

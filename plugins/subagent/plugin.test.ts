@@ -30,6 +30,7 @@ describe('subagent plugin', () => {
     expect(harness.tools[0]?.options).toEqual({ primaryAgentOnly: true });
     expect(harness.sections).toHaveLength(1);
     expect(harness.sections[0]?.id).toBe('delegation');
+    expect(harness.sections[0]?.label).toBe('委派策略');
     expect(harness.sections[0]?.render()).toBe(DELEGATION_GUIDANCE);
   });
 
@@ -60,6 +61,18 @@ describe('subagent plugin', () => {
     expect(harness.sections[0]?.render()).toBe(buildDelegationGuidance('on-request'));
     expect(harness.sections[0]?.render()).not.toBe(DELEGATION_GUIDANCE);
   });
+
+  it.each(['proactive', 'on-request'] as const)(
+    'keeps %s ownership and verification guidance without tool parameters',
+    (mode) => {
+      const text = buildDelegationGuidance(mode);
+      expect(text).toContain('按文件或目录划分所有权');
+      expect(text).toContain('委派描述要自包含');
+      expect(text).toContain('收到结果后自己核对再交付');
+      expect(text).toContain('不要盲目重试用户主动停止的任务');
+      expect(text).not.toMatch(/owned_paths|run_in_background|operation=|await|join|restart|最多 4 个/);
+    },
+  );
 
   it('refuses to run on a host that has no subagent capability', () => {
     const ctx = createHarness().ctx as { subagents?: unknown };

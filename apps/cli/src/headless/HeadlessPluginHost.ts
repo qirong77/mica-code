@@ -39,7 +39,6 @@ import type { SessionController } from '../session/SessionController.js';
 import { commandHostToken } from '@packages/mica-builtin-commands/commandHost.js';
 import { createPluginPaths } from '../plugins/pluginPaths.js';
 import {
-  setupCommandMemory,
   setupMessageQueue,
   setupMicaCodeAppNotify,
   setupSessionAutonomy,
@@ -165,7 +164,7 @@ export async function startAsSubmit(
  * - user file plugins ($MICA_HOME/plugins) are not scanned.
  *
  * Everything that shapes the agent's capabilities is shared: session_* tools,
- * message queueing, the command-memory system-prompt guidance, todo_write and
+ * message queueing, Memory's history guidance, todo_write and
  * the app-notify hooks.
  */
 export function createHeadlessPluginHost(options: HeadlessPluginHostOptions): HeadlessPluginHost {
@@ -259,7 +258,6 @@ export function createHeadlessPluginHost(options: HeadlessPluginHostOptions): He
 
   const builtinPlugins: Array<{ id: string; name: string; required?: boolean; setup: MicaPlugin['setup'] }> = [
     { id: 'runtime.messageQueue', name: 'Message Queue', setup: setupMessageQueue },
-    { id: 'command-memory', name: 'Command Memory', setup: setupCommandMemory },
     { id: 'session-autonomy', name: 'Session Autonomy', setup: setupSessionAutonomy },
     // 笔记工具与 prompt 注入在 TUI / app-server / exec 三端必须一致：只注册在一处，
     // 会出现「桌面端能记、headless 记不了」的不对称。

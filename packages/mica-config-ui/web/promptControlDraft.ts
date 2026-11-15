@@ -10,7 +10,10 @@ export function effectivePromptSection(section: PromptSectionSnapshot, controls:
   const override = controls.sections[section.id];
   return {
     ...section,
-    enabled: override?.enabled !== false && (!section.pluginId || !controls.disabledPlugins.includes(section.pluginId)),
+    enabled:
+      section.available !== false &&
+      override?.enabled !== false &&
+      (!section.pluginId || !controls.disabledPlugins.includes(section.pluginId)),
     content: override?.content ?? section.originalContent,
   };
 }

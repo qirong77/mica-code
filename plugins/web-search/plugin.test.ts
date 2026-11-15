@@ -36,12 +36,12 @@ describe('web-search plugin', () => {
     expect(countHint('')).toContain('默认 5');
   });
 
-  it('contributes its own prompt section so the guidance disappears with the plugin', () => {
+  it('keeps verification guidance in the tool description without another prompt section', () => {
     const harness = createHarness();
 
-    expect(harness.promptSections).toHaveLength(1);
-    expect(harness.promptSections[0]).toMatchObject({ id: 'web-search' });
-    expect(harness.promptSections[0]?.render()).toContain('`web_search`');
+    expect(harness.promptSections).toHaveLength(0);
+    expect(harness.registered[0]?.description).toContain('web_fetch');
+    expect(harness.registered[0]?.description).toContain('不能只依据搜索摘要');
   });
 
   it('reports an unconfigured instance as usable but with the default address', () => {

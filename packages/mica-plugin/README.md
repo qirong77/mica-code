@@ -168,9 +168,21 @@ const result = data.documents.write('page-1', { text: '正文' }, {
 
 `PluginPromptSections.inspect(controls?)` 返回按实际顺序排列的来源快照（空动态段也列出），`render(controls?)` 使用同样的开关与正文覆盖。全局控制的段键是 `plugin:<pluginId>/<sectionId>`；Capabilities 可关闭整插件注入或单段、编辑正文与恢复原文，这些操作不会卸载插件工具。无覆盖时顺序与 XML 包装不变。
 
+段落可声明 `label` 作为可读名称；`PluginPromptSections.add(pluginId, section, pluginName?)` 的第三项由
+manager 传入注册插件的 `name`，快照以可选 `pluginName` 返回。名称只用于界面，不改段键、排序或
+XML。宿主内置段落直接显示能力名，插件段落显示真实来源；与段名相同的来源不重复显示。
+工具用法优先写在工具描述里，不用常驻段落再重复一份。manager 自动回收本插件登记的段落，
+停用或 setup 失败时不会残留；插件仍可用返回值提前撤下单段。
+
+有独立启用条件的段落可声明 `available: () => boolean`；返回 false 时，该段即使有用户正文覆盖
+也不注入，检查快照带 `available: false`，界面不能用段落开关绕过插件的启用设置。返回空正文
+仍表示「目前没有动态内容」，用户可覆盖它；这与不可用是两种状态。可用性只属于运行时检查，
+不写入 `prompt-controls.json` 或会话快照。
+
 ```ts
 const registration = context.prompt!.section({
   id: 'guidance',
+  label: '使用策略',
   order: 0,
   render: () => '<guidance>Plugin system guidance.</guidance>',
 });
@@ -185,7 +197,7 @@ context.onDispose(() => registration.dispose());
 </injection>
 ```
 
-属性由宿主转义；正文保留插件自己的 XML 结构，但 `injection` 是宿主保留标签，其开闭标签会被转义，避免提前关闭或伪造外层边界。这些段落不会写入 user message 或 session provider history。会话记忆、会话自治、Loop 的顺序分别为 -300、-200、-100，位于默认顺序的动态段落之前。
+属性由宿主转义；正文保留插件自己的 XML 结构，但 `injection` 是宿主保留标签，其开闭标签会被转义，避免提前关闭或伪造外层边界。这些段落不会写入 user message 或 session provider history。Memory 的历史回查与 Loop 分别使用 -300、-100，动态记忆 / 笔记 / 并发提醒放在末尾；会话自治不再另注入静态工具教程。
 
 ### 模型请求之间的扩展
 

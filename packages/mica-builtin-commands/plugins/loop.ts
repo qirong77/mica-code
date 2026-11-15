@@ -54,6 +54,7 @@ export default function setupLoop(ctx: PluginContext): void {
   if (!ctx.prompt) throw new Error('loop requires ctx.prompt');
   const promptBuildDisposable = ctx.prompt.section({
     id: 'guidance',
+    label: '定时循环',
     order: -100,
     render: () => controller.buildSystemPromptSuffix() ?? '',
   });

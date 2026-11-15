@@ -8,7 +8,13 @@ import { JsonEditor } from '../components/JsonEditor.js';
 import { applyGroupEnabled, capabilityToggleNames } from '../capabilityGroups.js';
 import { Modal } from '../components/Modal.js';
 import { readCapabilityDefaults, writeCapabilityDefaults, readPromptControls, writePromptControls } from '../api.js';
-import { CAPABILITY_LABELS as L, pluginLoadStatusLabel, pluginSourceLabel, mcpStatusLabel } from '../labels.js';
+import {
+  CAPABILITY_LABELS as L,
+  capabilitySourceLabel,
+  pluginLoadStatusLabel,
+  pluginSourceLabel,
+  mcpStatusLabel,
+} from '../labels.js';
 import { setPluginPromptEnabled } from '../promptControlDraft.js';
 import {
   capabilityDraftCache,
@@ -218,7 +224,9 @@ export function CapabilitiesPage({ runtime }: { runtime?: ConfigWebCapabilitiesR
           state: 'enabled',
         });
     }
-    return [...byId.values()].sort((a, b) => a.name.localeCompare(b.name));
+    return [...byId.values()]
+      .filter((plugin) => !plugin.id.startsWith('builtin.'))
+      .sort((a, b) => a.name.localeCompare(b.name));
   }, [details, live]);
   const pluginNames = useMemo(
     () => Object.fromEntries(plugins.map((plugin) => [plugin.id, plugin.name])),
@@ -227,18 +235,17 @@ export function CapabilitiesPage({ runtime }: { runtime?: ConfigWebCapabilitiesR
 
   const items: Item[] = (
     tab === 'tools'
-      ? tools.map((tool) => ({
-          ...tool,
-          sourceLabel: tool.pluginId
-            ? `插件 ${tool.pluginId}`
-            : tool.group?.key.startsWith('plugin:')
-              ? `插件 ${tool.group.key.slice(7)}`
-              : '内置',
-        }))
+      ? tools.map((tool) => {
+          const pluginId = tool.pluginId ?? (tool.group?.key.startsWith('plugin:') ? tool.group.key.slice(7) : undefined);
+          return {
+            ...tool,
+            sourceLabel: capabilitySourceLabel(pluginId, pluginNames[pluginId ?? ''] ?? tool.group?.label),
+          };
+        })
       : tab === 'skills'
         ? skills.map((skill) => ({
             ...skill,
-            sourceLabel: skill.pluginId ? `插件 ${skill.pluginId}` : '磁盘技能',
+            sourceLabel: skill.pluginId ? capabilitySourceLabel(skill.pluginId, pluginNames[skill.pluginId]) : '磁盘技能',
           }))
         : tab === 'mcpServers'
           ? servers.map((name) => {
@@ -384,29 +391,31 @@ export function CapabilitiesPage({ runtime }: { runtime?: ConfigWebCapabilitiesR
                         )}
                         {actual?.error ? <span>{actual.error}</span> : null}
                       </div>
-                      <div className="capability-plugin-actions">
-                        {pluginSections.length ? (
-                          <Button
-                            size="compact"
-                            variant="ghost"
-                            onClick={() => {
-                              setPromptFocusId(pluginSections[0]!.id);
-                              setTab('prompts');
-                            }}
-                          >
-                            查看提示词
-                          </Button>
-                        ) : null}
-                        <span>{L.injection}</span>
-                        <Switch
-                          label={`${plugin.name} 提示词注入`}
-                          checked={plugin.state !== 'disabled' && !controls?.disabledPlugins.includes(plugin.id)}
-                          disabled={!controls || loading || plugin.state === 'disabled'}
-                          onChange={(enabled) =>
-                            commitControls(setPluginPromptEnabled(controls ?? EMPTY_CONTROLS, plugin.id, enabled))
-                          }
-                        />
-                      </div>
+                      {!actual || pluginSections.length > 0 ? (
+                        <div className="capability-plugin-actions">
+                          {pluginSections.length ? (
+                            <Button
+                              size="compact"
+                              variant="ghost"
+                              onClick={() => {
+                                setPromptFocusId(pluginSections[0]!.id);
+                                setTab('prompts');
+                              }}
+                            >
+                              查看提示词
+                            </Button>
+                          ) : null}
+                          <span>{L.injection}</span>
+                          <Switch
+                            label={`${plugin.name} 提示词注入`}
+                            checked={plugin.state !== 'disabled' && !controls?.disabledPlugins.includes(plugin.id)}
+                            disabled={!controls || loading || plugin.state === 'disabled'}
+                            onChange={(enabled) =>
+                              commitControls(setPluginPromptEnabled(controls ?? EMPTY_CONTROLS, plugin.id, enabled))
+                            }
+                          />
+                        </div>
+                      ) : null}
                     </div>
                   );
                 })}

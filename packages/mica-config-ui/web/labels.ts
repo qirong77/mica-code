@@ -47,6 +47,22 @@ export function promptSectionLabel(id: string, fallback: string): string {
   return labels[id] ?? fallback;
 }
 
+/** 宿主段落直接显示能力名；插件段落用真实名称说明来源。 */
+export function promptSectionSourceLabel(
+  pluginId: string | undefined,
+  pluginName: string | null,
+  title: string,
+): string | null {
+  if (!pluginId || pluginId.startsWith('builtin.')) return null;
+  const source = pluginName?.trim() || pluginId;
+  return source.toLocaleLowerCase() === title.trim().toLocaleLowerCase() ? null : source;
+}
+
+export function capabilitySourceLabel(pluginId?: string, pluginName?: string): string {
+  if (!pluginId || pluginId.startsWith('builtin.')) return '内置';
+  return `插件 ${pluginName?.trim() || pluginId}`;
+}
+
 const MCP_STATUS_LABEL: Record<string, string> = {
   connected: '已连接',
   connecting: '连接中',

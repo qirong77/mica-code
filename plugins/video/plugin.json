@@ -9,7 +9,7 @@
   "priority": 205,
   "required": false,
   "mica": { "apiVersion": 1 },
-  "requires": ["tools", "settings", "prompt", "actions"],
+  "requires": ["tools", "settings", "actions"],
   "settings": [
     {
       "key": "ffmpegPath",

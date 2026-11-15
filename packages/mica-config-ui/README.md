@@ -55,7 +55,11 @@ render(<ConfigWebApp />)
 
 Tools / Skills / MCP 的开关写 `config.capabilityDefaults`（有会话宿主时写该会话）。Plugins 与提示词控制页签的开关、正文覆盖与段落顺序写全局 `prompt-controls.json`，下一轮生效；默认 system 只读，其他基础段落与插件段落可按来源关闭、编辑、查看原文或恢复原文。正文与顺序自动保存，失败草稿在当前页面内存中跨设置导航保留并可重试；会话草稿绑定编辑时的目标，跨组件写入按目标串行。
 
-`ConfigWebClient.readPromptControls()` / `writePromptControls(controls)` 由两宿主调用同一存储实现；HTTP 为 `GET/PUT /api/details/prompt-controls`，PUT 参数 `{ controls }`。提示词控制是单列列表：一行一段，拖动把手改顺序、行上开关决定是否注入、展开后编辑正文（`web/components/PromptControlsPanel.tsx`，排序落在 `PromptControls.order`）。独立 config-web 没有当前会话适配器时，插件级注入开关与正文覆盖仍可用，只是读不到动态正文。
+Plugins 贡献页列官方与用户插件；宿主内部 `builtin.*` 能力在 Tools / 提示词控制中直接呈现。
+工具与技能来源用插件显示名，内置工具标「内置」。当前会话已确认某插件没有提示词贡献时，
+不显示无效的注入开关；没有会话宿主时仍可提前设置插件级开关。
+
+`ConfigWebClient.readPromptControls()` / `writePromptControls(controls)` 由两宿主调用同一存储实现；HTTP 为 `GET/PUT /api/details/prompt-controls`，PUT 参数 `{ controls }`。提示词控制是单列列表：一行一段，拖动把手改顺序、行上开关决定是否注入、展开后编辑正文（`web/components/PromptControlsPanel.tsx`，排序落在 `PromptControls.order`）。段名优先使用注册时的可读 `label`，来源优先取当前会话快照中的 `pluginName`；宿主内置能力只显示段名，避免把 `builtin.*` 内部标识作为插件名称展示。独立 config-web 没有当前会话适配器时，插件级注入开关与正文覆盖仍可用，只是读不到动态正文。
 
 ## 只在桌面宿主出现的章节
 

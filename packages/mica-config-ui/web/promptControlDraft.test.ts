@@ -36,6 +36,14 @@ const sections: PromptSectionSnapshot[] = [
 ];
 
 describe('prompt control drafts', () => {
+  it('keeps unavailable plugin sections out of the preview even with enabled content overrides', () => {
+    const source = { ...sections[1]!, available: false };
+    const controls = setPromptSection(empty(), source.id, { enabled: true, content: 'replacement' });
+    expect(effectivePromptSection(source, controls).enabled).toBe(false);
+    expect(previewPrompt([source], controls)).toBe('');
+    expect(previewPrompt([{ ...source, available: true }], controls)).toContain('replacement');
+  });
+
   it('keeps unrelated plugin sections in place when gating one plugin', () => {
     const controls = setPluginPromptEnabled(empty(), 'user.notes', false);
     const preview = previewPrompt(sections, controls);

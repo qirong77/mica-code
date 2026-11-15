@@ -3,12 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { micaCommands } from '@packages/mica-commands/index.js';
-import {
-  micaPlugin,
-  type PluginContext,
-  type PluginPromptSection,
-  type PluginStatusItem,
-} from '@packages/mica-plugin/index.js';
+import { micaPlugin, type PluginContext, type PluginStatusItem } from '@packages/mica-plugin/index.js';
 import { micaRuntime } from '@packages/mica-runtime/index.js';
 import { micaTools, type MicaTool, type ToolExecuteCallbacks } from '@packages/mica-tools/index.js';
 import { micaUi } from '@packages/mica-ui/index.js';
@@ -24,7 +19,7 @@ describe('TodoPlugin', () => {
     vi.restoreAllMocks();
   });
 
-  it('registers the tool, status component, and command', async () => {
+  it('registers the tool, status component, and command without a prompt capability', async () => {
     const harness = createTodoHarness(disposeCallbacks);
 
     expect(harness.upsert).toHaveBeenCalledWith({ id: 'todo.list', component: expect.any(Function) });
@@ -37,6 +32,10 @@ describe('TodoPlugin', () => {
     const description = micaTools.getDefinitions().find((tool) => tool.name === 'todo_write')?.description ?? '';
     expect(description).toContain('the complete list on every call');
     expect(description).toContain('Only call it when the list actually changes');
+    expect(description).toContain('skip simple tasks and pure questions');
+    expect(description).toContain('at most one item in_progress');
+    expect(description).toContain('supplied recovery progress');
+    expect(description).toContain('dated schedule for long-term milestones');
 
     const result = await micaTools.execute('todo_write', {
       todos: [
@@ -52,19 +51,6 @@ describe('TodoPlugin', () => {
     for (const dispose of disposeCallbacks.splice(0).reverse()) await dispose();
     expect(harness.remove).toHaveBeenCalledWith('todo.list');
     expect(micaTools.getDefinitions().some((tool) => tool.name === 'todo_write')).toBe(false);
-  });
-
-  it('contributes the plan guidance as a prompt section that goes away with the tool', async () => {
-    const harness = createTodoHarness(disposeCallbacks);
-    const rendered = harness.promptSections.render();
-
-    expect(rendered).toContain('# 计划');
-    expect(rendered).toContain('`todo_write`');
-    // 与工具描述同源：段落不能和 schema 说相反的话。
-    expect(rendered).toContain('只在清单确实变化时重发整份清单');
-
-    for (const dispose of disposeCallbacks.splice(0).reverse()) await dispose();
-    expect(harness.promptSections.size).toBe(0);
   });
 
   it('accepts a list with several in-progress items instead of failing the call', async () => {
@@ -417,7 +403,6 @@ function createTodoHarness(
   const commands = new micaCommands.CommandRegistry();
   const hooks = new micaPlugin.HookRegistry();
   const events = new micaRuntime.RuntimeEventBus();
-  const promptSections = new micaPlugin.PluginPromptSections();
   const showMessage = vi.fn();
   const upsert = vi.fn<(item: PluginStatusItem) => void>();
   const remove = vi.fn<(id: string) => boolean>(() => true);
@@ -454,7 +439,6 @@ function createTodoHarness(
     health: { path: null, read: () => null, report: reportHealth, clear: () => {} },
     logger: { info: vi.fn(), warn, error: vi.fn() },
     tools: { register: registerTool },
-    prompt: { section: (section: PluginPromptSection) => promptSections.add('todo', section) },
     ui: { submit: vi.fn(), showMessage, status: { upsert, remove } },
     onDispose: (dispose: () => void | Promise<void>) => disposeCallbacks.push(dispose),
   } as unknown as PluginContext;
@@ -464,7 +448,6 @@ function createTodoHarness(
     commands,
     events,
     hooks,
-    promptSections,
     registerTool,
     remove,
     reportHealth,

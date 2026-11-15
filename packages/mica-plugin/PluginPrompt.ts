@@ -21,13 +21,18 @@ import {
 export type PluginPromptSection = {
   /** 插件内唯一，重复注册时报错。 */
   id: string;
+  /** 界面中的可读段名；不改变控制键、顺序与 XML 来源。 */
+  label?: string;
   /** 越小越靠前；相同 order 按注册顺序。 */
   order?: number;
+  /** 插件自身的可用条件；false 时正文覆盖也不能重新启用该段。 */
+  available?(): boolean;
   render(): string;
 };
 
 type RegisteredSection = {
   pluginId: string;
+  pluginName?: string;
   section: PluginPromptSection;
   sequence: number;
 };
@@ -42,12 +47,12 @@ export class PluginPromptSections {
   private sections: RegisteredSection[] = [];
   private sequence = 0;
 
-  add(pluginId: string, section: PluginPromptSection): Disposable {
+  add(pluginId: string, section: PluginPromptSection, pluginName?: string): Disposable {
     const duplicate = this.sections.find((item) => item.pluginId === pluginId && item.section.id === section.id);
     if (duplicate) {
       throw new Error(`prompt section already registered: ${pluginId}/${section.id}`);
     }
-    const registered: RegisteredSection = { pluginId, section, sequence: ++this.sequence };
+    const registered: RegisteredSection = { pluginId, pluginName, section, sequence: ++this.sequence };
     this.sections.push(registered);
     return {
       dispose: () => {
@@ -64,16 +69,19 @@ export class PluginPromptSections {
     const snapshots = ordered.map((item) => {
       const text = item.section.render();
       const originalContent = typeof text === 'string' ? text.trim() : '';
+      const available = item.section.available?.() !== false;
       const id = promptSectionKey(item.pluginId, item.section.id);
       const override = controls?.sections[id];
       return {
         id,
-        label: item.section.id,
+        label: item.section.label?.trim() || item.section.id,
         pluginId: item.pluginId,
+        ...(item.pluginName ? { pluginName: item.pluginName } : {}),
         sectionId: item.section.id,
         originalContent,
         content: (override?.content ?? originalContent).trim(),
-        enabled: !controls?.disabledPlugins.includes(item.pluginId) && override?.enabled !== false,
+        ...(item.section.available ? { available } : {}),
+        enabled: available && !controls?.disabledPlugins.includes(item.pluginId) && override?.enabled !== false,
         editable: true,
       };
     });

@@ -110,7 +110,7 @@ export class WebSearchTool extends MicaTool {
   constructor(options: WebSearchOptions) {
     super(
       'web_search',
-      '搜索网络信息，返回结果标题、链接和摘要。用于查询最新信息、官方文档、API/模型/provider 行为、价格、版本、法规或任何可能变化的事实。先用 web_search 发现 URL，再用 web_fetch 获取完整内容。',
+      '搜索网络信息，返回结果标题、链接和摘要。用于查询最新信息、官方文档、API/模型/provider 行为、价格、版本、法规或任何可能变化的事实，以及用户要求验证、依据或来源时。先搜索发现 URL，再用 web_fetch 读取官方或一手页面；准确结论不能只依据搜索摘要。工具不可用或失败时如实说明未能联网核实。',
       {
         type: 'object' as const,
         properties: {

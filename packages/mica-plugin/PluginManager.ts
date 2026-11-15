@@ -414,7 +414,13 @@ export class PluginManager {
     if (sessionState) ctx.sessionState = sessionState;
     if (askFor) ctx.ask = askFor(plugin.id);
     if (promptRegistry) {
-      ctx.prompt = { section: (section) => promptRegistry.add(plugin.id, section) };
+      ctx.prompt = {
+        section: (section) => {
+          const registration = promptRegistry.add(plugin.id, section, plugin.name);
+          localDisposables.push(registration);
+          return registration;
+        },
+      };
     }
     if (agentRegistry) {
       ctx.agent = {

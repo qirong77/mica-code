@@ -1,6 +1,6 @@
 # mica-builtin-commands
 
-`mica-builtin-commands` 是 Mica Code 的内置命令与官方插件包。它定义全部产品命令实现（`commands/`）、运行期插件装配（`plugins/`，含 `command-*.ts`、MCP、message queue、文件 mention、`command-memory.ts` 的会话记忆指引、`mica-code-app-notify.ts`、session-autonomy、loop）、启动扩展（`startup/`，validate-config、process-diagnostics、file-plugins、model-effort-context）以及 command host 契约与运行时服务类型。运行期插件与启动扩展统一从本包 `index.ts` 导出。
+`mica-builtin-commands` 是 Mica Code 的内置命令与宿主扩展包。它定义全部产品命令实现（`commands/`）、运行期插件装配（`plugins/`，含 `command-*.ts`、MCP、message queue、文件 mention、`mica-code-app-notify.ts`、session-autonomy、loop）、启动扩展（`startup/`，validate-config、process-diagnostics、file-plugins、model-effort-context）以及 command host 契约与运行时服务类型。运行期插件与启动扩展统一从本包 `index.ts` 导出。历史会话回查由官方 Memory 插件提供，旧 `setupCommandMemory` 入口不再支持。
 
 ## 主要能力
 
@@ -63,6 +63,6 @@ packages/mica-builtin-commands/
 - `commandHost.ts`：向单文件命令插件暴露 active agent、session controller、runtime services 和统一注册函数。
 - `index.ts`：稳定公共导出入口；应用层只应从这里引用。
 
-System prompt 指引统一注册到 `ctx.prompt.section()`，对应插件清单需声明 `requires: ["prompt"]`。会话记忆、会话自治、Loop 使用 -300、-200、-100 的 order 保持原有相对顺序；宿主统一生成带插件与 section 来源的 XML injection 边界。
+System prompt 指引统一注册到 `ctx.prompt.section()`，对应插件清单需声明 `requires: ["prompt"]`。段落提供可读 `label`，宿主统一生成带插件与 section 来源的 XML injection 边界；显示名不改变标识、顺序或正文。Loop 使用 -100 的 order，只在循环运行时注入。`session_peers` 用法只在工具描述中提供，不再另注入静态「会话自治」说明。
 
-`session-autonomy` 另外有一条 order 1100 的 `concurrency` 段落：同一工作目录上还有活着的会话租约时才渲染（没有并发就返回空串、不占 token），内容是同 cwd 会话清单 +「`git status` 不记录作者，不要据此推断归属」。它排在最末，因为内容随别的会话起落变化，放进前缀会连累前面稳定的段落一起让 prompt cache 失效。同一个插件的 `session_peers` 会列出这些会话本轮写过的文件——写入路径由 `observeToolExecution`（`mica-tools`）在工具执行后记进 `$MICA_HOME/sessions/.turn-locks/<id>.writes`，`run_shell` 里的重定向不在其中。
+`session-autonomy` 只保留 order 1100 的 `concurrency` 动态段落，界面直接显示「并发会话」：同一工作目录上还有活着的会话租约时才渲染（没有并发就返回空串、不占 token），内容是同 cwd 会话清单 +「`git status` 不记录作者，不要据此推断归属」。它排在最末，因为内容随别的会话起落变化，放进前缀会连累前面稳定的段落一起让 prompt cache 失效。`session_peers` 会列出这些会话本轮写过的文件——写入路径由 `observeToolExecution`（`mica-tools`）在工具执行后记进 `$MICA_HOME/sessions/.turn-locks/<id>.writes`，`run_shell` 里的重定向不在其中。

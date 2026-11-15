@@ -7,7 +7,7 @@
   "main": "index.js",
   "priority": 200,
   "required": false,
-  "requires": ["tools", "settings", "prompt"],
+  "requires": ["tools", "settings"],
   "settings": [
     {
       "key": "searxngUrl",

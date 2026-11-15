@@ -41,6 +41,35 @@ describe('validatePluginStateValue', () => {
 });
 
 describe('PluginPromptSections', () => {
+  it('adds readable names without changing control keys or transmitted prompt text', () => {
+    const registry = new PluginPromptSections();
+    registry.add('memory', { id: 'history', label: '历史会话', render: () => 'recall relevant context' }, 'Memory');
+    expect(registry.inspect()[0]).toMatchObject({
+      id: 'plugin:memory/history',
+      label: '历史会话',
+      pluginName: 'Memory',
+      pluginId: 'memory',
+      sectionId: 'history',
+    });
+    expect(registry.render()).toBe('<injection source="plugin" plugin="memory" section="history">\nrecall relevant context\n</injection>');
+    expect(registry.render({ version: 1, disabledPlugins: [], sections: { 'plugin:memory/history': { enabled: false } } })).toBe('');
+  });
+
+  it('does not let a content override enable a section unavailable in its plugin', () => {
+    const registry = new PluginPromptSections();
+    let available = false;
+    registry.add('feature', { id: 'context', available: () => available, render: () => '' });
+    const controls: PromptControls = {
+      version: 1,
+      disabledPlugins: [],
+      sections: { 'plugin:feature/context': { content: 'replacement', enabled: true } },
+    };
+    expect(registry.inspect(controls)[0]).toMatchObject({ available: false, enabled: false, content: 'replacement' });
+    expect(registry.render(controls)).toBe('');
+    available = true;
+    expect(registry.render(controls)).toContain('replacement');
+  });
+
   it('renders sections in order and skips empty ones', () => {
     const registry = new PluginPromptSections();
     registry.add('a', { id: 'late', order: 20, render: () => 'late' });

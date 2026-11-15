@@ -63,29 +63,9 @@ const plugin: MicaPlugin = {
     const registration = ctx.tools.register(tool, { icon: '🎞️' });
     ctx.onDispose(() => registration.dispose());
 
-    // 视频的用法没法靠 schema 描述讲清楚「先粗看再点名」，所以带一小段 prompt。
-    // 只在插件启用时出现——插件停用之后模型不该还惦记一个不存在的工具。
-    if (ctx.prompt) {
-      const section = ctx.prompt.section({
-        id: 'video',
-        order: 60,
-        render: () => VIDEO_PROMPT,
-      });
-      ctx.onDispose(() => section.dispose());
-    }
-
     ctx.logger.info('video:ready', readConfig());
   },
 };
-
-const VIDEO_PROMPT = [
-  '## 理解视频',
-  '',
-  '- 用户给出视频文件或链接、并问「里面发生了什么」时，用 `video_frames` 抽帧来看，不要猜内容。',
-  '- 先只传 `source` 拿 4 帧概览与时长，再按返回的时间轴用 `at` 精确点名要看的那几秒。除非用户已经指明时间点，不要一上来就一次要满帧数。',
-  '- 引用画面时说时间点（"在 4:50 处"），不要说「第几帧」——帧序号在后续轮次里没有意义。',
-  '- 音轨不会被转写。用户问的是「说了什么」而不是「画面是什么」时，先说明这一点，再决定要不要抽帧看画面上的字幕或标注。',
-].join('\n');
 
 async function refreshAvailability(
   ctx: PluginContext,

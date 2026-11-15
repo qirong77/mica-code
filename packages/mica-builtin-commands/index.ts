@@ -85,7 +85,6 @@ export { default as setupCommandNew } from './plugins/command-new.js';
 export { default as setupCommandRename } from './plugins/command-rename.js';
 export { default as setupCommandResume } from './plugins/command-resume.js';
 export { default as setupCommandRewind } from './plugins/command-rewind.js';
-export { default as setupCommandMemory } from './plugins/command-memory.js';
 export { default as setupLoop } from './plugins/loop.js';
 export { default as setupMcp } from './plugins/mcp.js';
 export { default as setupMessageQueue } from './plugins/message-queue.js';

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { PromptControls, PromptSectionSnapshot, RuntimePromptInspection } from '@packages/mica-common/promptControls.js';
 import { Button, Empty, Switch } from './Ui.js';
 import { JsonEditor } from './JsonEditor.js';
-import { CAPABILITY_LABELS as L, promptSectionLabel } from '../labels.js';
+import { CAPABILITY_LABELS as L, promptSectionLabel, promptSectionSourceLabel } from '../labels.js';
 import {
   effectivePromptSection,
   movePromptSection,
@@ -86,7 +86,9 @@ export function PromptControlsPanel({
           controls={controls}
           open={openIds.includes(section.id)}
           disabled={disabled}
-          pluginName={section.pluginId ? (pluginNames?.[section.pluginId] ?? section.pluginId) : null}
+          pluginName={
+            section.pluginName ?? (section.pluginId ? (pluginNames?.[section.pluginId] ?? section.pluginId) : null)
+          }
           dragging={draggingId === section.id}
           dropPosition={dropTarget?.id === section.id ? dropTarget.position : null}
           rowRef={(element) => {
@@ -150,6 +152,7 @@ const PromptSectionRow = ({
   const overridden = controls.sections[section.id]?.content !== undefined;
   const text = showOriginal ? section.originalContent : effective.content;
   const title = promptSectionLabel(section.id, section.label);
+  const source = promptSectionSourceLabel(section.pluginId, pluginName, title);
   const draggable = section.editable && !disabled;
   const ChevronIcon = appIcons.chevronRight;
   const GripIcon = appIcons.grip;
@@ -209,14 +212,14 @@ const PromptSectionRow = ({
         )}
         <button type="button" className="prompt-control-toggle" aria-expanded={open} onClick={() => onToggleOpen(!open)}>
           <span className="prompt-control-title">{title}</span>
-          {pluginName ? <span className="prompt-control-source">{pluginName}</span> : null}
+          {source ? <span className="prompt-control-source">{source}</span> : null}
           {!section.editable ? <span className="prompt-control-source">只读</span> : null}
           <ChevronIcon className="prompt-control-chevron" size={15} aria-hidden="true" />
         </button>
         <Switch
           label={`${title} 提示词`}
           checked={effective.enabled}
-          disabled={disabled || !section.editable}
+          disabled={disabled || !section.editable || section.available === false}
           onChange={(enabled) => onPromptEnabled(section, enabled, controls, onChange, disabled)}
         />
       </div>
@@ -278,7 +281,7 @@ function onPromptEnabled(
   onChange: (controls: PromptControls) => void,
   disabled: boolean,
 ) {
-  if (disabled || !section.editable) return;
+  if (disabled || !section.editable || section.available === false) return;
   let next = setPromptSection(controls, section.id, { enabled });
   if (section.pluginId && enabled && controls.disabledPlugins.includes(section.pluginId)) {
     next = setPluginPromptEnabled(next, section.pluginId, true);

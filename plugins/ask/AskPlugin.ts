@@ -3,7 +3,7 @@ import { AskUserTool } from './AskTool.js';
 import { buildAskGuidance } from './prompt.js';
 
 /**
- * 提问段落排在计划（50）之后、委派（100）之前：先把要做的事定下来，遇到岔路再问用户。
+ * 提问策略排在委派（100）之前。
  */
 const PROMPT_SECTION_ORDER = 70;
 
@@ -34,6 +34,7 @@ export class AskPlugin implements MicaPlugin {
 
     ctx.prompt?.section({
       id: 'ask',
+      label: '提问策略',
       order: PROMPT_SECTION_ORDER,
       render: () => buildAskGuidance(),
     });

@@ -5,6 +5,7 @@ import { memoryScopes } from './memory.js';
 import { notebookComments } from './notebook-comments.js';
 import { notebookMcpData } from './notebook-mcp.js';
 import { pluginStartupHealth } from './plugin-health.js';
+import { promptContributions } from './prompt-contributions.js';
 import { sessionTagSlots } from './session-tags.js';
 import { subagentTaskFiles } from './subagent-tasks.js';
 import type { DataMigration } from './types.js';
@@ -22,4 +23,5 @@ export const DATA_MIGRATIONS: DataMigration[] = [
   subagentTaskFiles,
   notebookComments,
   notebookMcpData,
+  promptContributions,
 ];

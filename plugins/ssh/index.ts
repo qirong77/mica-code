@@ -69,6 +69,7 @@ export default function setup(ctx: PluginContext): void {
   syncTools();
 
   ctx.prompt?.section({
+    label: '会话服务器',
     id: 'ssh',
     // 排在项目说明之后：主机清单是会变的内容，前面稳定的前缀不跟着它失效。
     order: 60,

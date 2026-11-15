@@ -16,9 +16,13 @@ export type PromptSectionSnapshot = {
   id: string;
   label: string;
   pluginId?: string;
+  /** 当前宿主登记的插件名称，仅用于界面展示。 */
+  pluginName?: string;
   sectionId?: string;
   originalContent: string;
   content: string;
+  /** 插件自身是否允许注入；关闭时自定义正文也不生效。 */
+  available?: boolean;
   enabled: boolean;
   editable: boolean;
 };

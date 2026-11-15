@@ -96,4 +96,6 @@ bunx tsc --noEmit
 
 插件工具通过 `ctx.tools.register()` 注册时，由 PluginManager 自动注入 `group: { key, label }`（插件 id 与清单名称），宿主传给工具 registry。会话能力与默认能力列表按插件归组，只提供整组开关；工具详情的开关同样作用于整组。
 
-Capabilities 的真实会话目录使用 `micaSkills.getCatalog()` 保留技能 `pluginId`，工具目录包含完整 `inputSchema`。全局提示词控制纯类型在 `mica-common/promptControls.ts`，读写在 `mica-config/promptControls.ts`；`PluginPromptSections.inspect(controls?)` 与 `mica-agent/prompt/index.ts` 的 `inspectSystemPrompt(options)` 提供来源快照，宿主将其与最近发送存档分开展示。`ConfigWebApp.capabilitiesRuntime` 可选适配当前会话的读取与能力选择，独立配置宿主不冒充实际运行时。
+提示词段落的可选 `available()` 表达插件自身的启用条件，检查快照返回对应 `available`；不可用时用户正文覆盖也不注入。可用性是即时检查结果，不写入提示词控制文件或会话数据。
+
+Capabilities 的真实会话目录使用 `micaSkills.getCatalog()` 保留技能 `pluginId`，工具目录包含完整 `inputSchema`。全局提示词控制纯类型在 `mica-common/promptControls.ts`，读写在 `mica-config/promptControls.ts`；`PluginPromptSections.inspect(controls?)` 与 `mica-agent/prompt/index.ts` 的 `inspectSystemPrompt(options)` 提供来源快照，宿主将其与最近发送存档分开展示。`PluginPromptSection.label` 和快照的 `pluginName` 只提供可读名称，不影响控制键与 XML；内置段落在界面直接显示段名。`ConfigWebApp.capabilitiesRuntime` 可选适配当前会话的读取与能力选择，独立配置宿主不冒充实际运行时。历史回查已归官方 Memory 插件，`mica-builtin-commands.setupCommandMemory` 入口不再支持。

@@ -59,26 +59,6 @@ const plugin: MicaPlugin = {
     );
     ctx.onDispose(() => registration.dispose());
 
-    // 让「什么时候该联网、怎么查证」跟着插件走。
-    //
-    // 这段文字原本在 base 的 system prompt 里（「网络检索策略」一节 + 工具策略里的一行），
-    // 但那条指引只会指向 `web_search`——工具挪进插件之后如果还留在 base，插件停用后模型
-    // 仍会照着提示词去调一个不存在的工具。base prompt 只保留与具体工具无关的原则
-    // （「可能变化的事实要先查证」），工具相关的操作方式由工具的主人自己声明。
-    const section = ctx.prompt!.section({
-      id: 'web-search',
-      order: 50,
-      render: () =>
-        [
-          '## 联网查证',
-          '',
-          '- 当用户要求“验证”“确认”“依据”“来源”“链接”，或结论依赖外部服务行为时，先用 `web_search` 找到入口，再用 `web_fetch` 打开一手页面。',
-          '- 搜索结果只作为入口；需要准确结论时，用 `web_fetch` 读取官方页面、原始文档或一手资料，不要只拿标题与摘要当结论。',
-          '- 工具报告未配置或失败时，明确说明无法联网核实，不要假装已经查过，也不要凭印象推断。',
-        ].join('\n'),
-    });
-    ctx.onDispose(() => section.dispose());
-
     ctx.logger.info('web-search:ready', { baseUrl, defaultCount });
   },
 };

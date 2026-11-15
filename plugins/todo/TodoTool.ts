@@ -27,11 +27,11 @@ export class TodoWriteTool extends MicaTool {
     super(
       TODO_TOOL_NAME,
       [
-        'Create or update the plan for the current turn. The user sees it as your working plan.',
-        `Use it when the task needs 3+ meaningful milestones; skip it for trivial or single-step work. Keep ${RECOMMENDED_TODO_ITEMS} items or fewer.`,
-        'Describe outcomes, not keystrokes: no "open file X" or "run command Y" items.',
+        "Create or update the current turn's working plan, shown to the user.",
+        `Use for multi-stage, cross-file or uncertain tasks with several meaningful milestones; skip simple tasks and pure questions. Keep ${RECOMMENDED_TODO_ITEMS} items or fewer, each a verifiable outcome rather than a file-opening or command-running step.`,
         'Send the complete list on every call; it replaces the previous one. Only call it when the list actually changes.',
-        'Mark an item in_progress when you start it, and completed only when it is really done.',
+        'Keep at most one item in_progress: set it when starting, and mark completed only when it is really done. Update after each milestone; revise the plan when needed and briefly explain changes.',
+        'Keep the list scoped to the current task. After interruption, use the supplied recovery progress to continue or revise; use a dated schedule for long-term milestones.',
       ].join(' '),
       {
         type: 'object',
@@ -46,13 +46,13 @@ export class TodoWriteTool extends MicaTool {
                 content: {
                   type: 'string',
                   maxLength: MAX_TODO_TEXT_LENGTH,
-                  description: 'Imperative label, for example "Run tests".',
+                  description: 'Verifiable outcome, for example "Validate the change".',
                 },
                 activeForm: {
                   type: 'string',
                   maxLength: MAX_TODO_TEXT_LENGTH,
                   description:
-                    'Optional present-progressive label shown while the item runs, for example "Running tests". Omit it to reuse content.',
+                    'Optional present-progressive label shown while the item runs, for example "Validating the change". Omit it to reuse content.',
                 },
                 status: { type: 'string', enum: ['pending', 'in_progress', 'completed'] },
                 id: {

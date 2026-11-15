@@ -342,8 +342,9 @@ describe('prompt 段落', () => {
     expect(text).toContain('`test` — root@10.0.0.1:22');
     expect(text).toContain('测试机');
     expect(text).toContain('密码认证');
-    expect(text).toContain('ssh_read');
+    expect(text).toContain('本次会话可用的远程服务器');
     expect(text).not.toContain('id_ed25519');
+    expect(text).not.toMatch(/ssh_(run|read|session)|多行脚本|并发|超时|全文/);
   });
 
   it('只读机器标出来', () => {

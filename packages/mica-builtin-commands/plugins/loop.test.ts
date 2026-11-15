@@ -17,8 +17,6 @@ import {
 import type { MicaTool } from '@packages/mica-tools/index.js';
 import { micaUi } from '@packages/mica-ui/index.js';
 import setupLoop from './loop.js';
-import setupCommandMemory from './command-memory.js';
-import setupSessionAutonomy from './session-autonomy/SessionAutonomyPlugin.js';
 
 describe('parseDuration', () => {
   it('parses unit durations', () => {
@@ -183,27 +181,12 @@ describe('LoopController', () => {
 });
 
 describe('loop plugin', () => {
-  it('keeps memory, autonomy and loop before default sections regardless of registration order', async () => {
-    const { ctx, sections, registered } = createHarness();
+  it('keeps an active loop before default dynamic sections regardless of registration order', async () => {
+    const { sections, registered } = createHarness();
     sections.add('other', { id: 'dynamic', render: () => 'dynamic section' });
-    for (const [pluginId, setup] of [
-      ['autonomy', setupSessionAutonomy],
-      ['memory', setupCommandMemory],
-    ] as const) {
-      setup({
-        ...ctx,
-        pluginId,
-        prompt: {
-          section: (section: Parameters<NonNullable<PluginContext['prompt']>['section']>[0]) =>
-            sections.add(pluginId, section),
-        },
-      });
-    }
     await registered.get('loop')!.action('60m 测试顺序');
     const prompt = sections.render();
-    const positions = ['# 会话记忆', '# 会话自治', '定时循环任务', 'dynamic section'].map((text) =>
-      prompt.indexOf(text),
-    );
+    const positions = ['定时循环任务', 'dynamic section'].map((text) => prompt.indexOf(text));
     expect(positions.every((position) => position >= 0)).toBe(true);
     expect(positions).toEqual([...positions].sort((a, b) => a - b));
     await registered.get('loop')!.action('stop');

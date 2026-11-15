@@ -39,7 +39,7 @@ export class AskUserTool extends MicaTool {
         'The card always shows a free-text field, so the user can type their own answer instead of picking. Never assume your options cover what they want.',
         'Attach `prompt` to an option to tell yourself what to do when it is picked (it becomes part of the tool result). Attach `command` only when a real shell command should run on pick — and make sure the label or description says what will run, since the user clicks before it executes.',
         'The question should be one decision, phrased as a question. Do not use it for "should I continue?" or to narrate progress.',
-        'This tool blocks until the user answers. If it returns `cancelled`, do not ask the same thing again: continue with the most conservative option and say what you chose.',
+        'This tool blocks until answered or cancelled. Cancellation is not a choice or authorization: do not ask the same thing again; if the task is still active, continue safe, reversible work conservatively and state your assumption.',
       ].join(' '),
       {
         type: 'object',
@@ -173,7 +173,7 @@ function cancelledText(answer: PluginAskAnswer): string {
     return '等待用户回复已超时，没有回应。不代表用户选择了任何选项或批准了任何操作。告知用户：“等待回复已超时，我先按保守方案实现第一版，你可以稍后补充想法。”不要重复问同一个问题，也不要停在等待确认：说明采用的假设，继续完成安全、可逆的部分。不要自动执行选项里的 command，也不要把超时当成删除、覆盖、发布、改凭据或操作生产数据的授权；这些部分保留待确认。';
   }
   const why = answer.reason === 'aborted' ? '用户中止了这一轮' : '用户没有选';
-  return `${why}。不要重复问同一个问题：按最保守的方案继续，并在回复里说明你选了哪个、为什么。`;
+  return `${why}。不代表用户选择了任何选项或批准了任何操作。不要重复问同一个问题；任务仍在继续时，只推进安全、可逆的部分，并说明采用的保守假设。`;
 }
 
 async function answeredText(question: PluginAskQuestion, answer: PluginAskAnswer): Promise<string> {

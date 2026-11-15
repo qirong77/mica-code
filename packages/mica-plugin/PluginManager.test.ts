@@ -12,6 +12,7 @@ import { parsePluginManifest } from './PluginManifest.js';
 import { writePluginState } from './PluginState.js';
 import type { PluginStatusFile } from './PluginStatus.js';
 import { ServiceContainer } from './ServiceContainer.js';
+import { PluginPromptSections } from './PluginPrompt.js';
 
 let configDir: string;
 let managers: PluginManager[];
@@ -69,6 +70,22 @@ function observeStatus(manager: PluginManager): () => PluginStatusFile {
 }
 
 describe('PluginManager health ownership', () => {
+  it('passes the registered plugin name into prompt inspection and removes it on disposal', async () => {
+    const manager = createManager();
+    const sections = new PluginPromptSections();
+    manager.register({
+      id: 'user.notes',
+      name: 'Project Notes',
+      setup(ctx) {
+        ctx.prompt!.section({ id: 'context', label: '项目笔记', render: () => 'saved notes' });
+      },
+    });
+    await manager.setupAll({ ...context(), promptSections: sections });
+    expect(sections.inspect()[0]).toMatchObject({ label: '项目笔记', pluginName: 'Project Notes', pluginId: 'user.notes' });
+    await manager.disposeAll();
+    expect(sections.inspect()).toEqual([]);
+  });
+
   it.each([false, true])('keeps setup failure out of runtime health (required=%s)', async (required) => {
     const manager = createManager();
     const error = new Error('setup exploded');

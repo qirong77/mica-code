@@ -9,8 +9,9 @@
   默认上下文模式、写策略（`none` / `owned_paths` / `proposal` / `unrestricted`）与迭代上限。
 - **工具**（`ctx.tools.register`，`primaryAgentOnly`）：`agent`，支持
   `run` / `list` / `read` / `kill` / `restart` / `await` / `run_many` / `join`，参数与文案在本目录。
-- **prompt**（`ctx.prompt.section`，id `delegation`）：只说什么时候该委派、怎么划分
-  所有权、结果怎么验收；`context_mode`、`owned_paths`、后台与等待的用法留给工具描述。
+- **prompt**（`ctx.prompt.section`，id `delegation`）：只保留委派倾向、合适场景、所有权、
+  自包含任务与结果核实策略；类型与参数、前后台执行、等待、并发上限与重启用法统一在工具描述中。
+  段落保留，已有开关与自定义正文继续生效。
 
 设置项 `delegationMode` 决定委派倾向：`proactive`（默认，能拆就拆、优先并行）或
 `on-request`（只有用户 / AGENT.md / skill 明确要求时才开子代理）。改完下一轮生效。

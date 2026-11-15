@@ -123,12 +123,17 @@ describe('AskUserTool', () => {
   });
 
   it.each(['cancelled', 'aborted'] as const)('does not report %s as a timeout', async (reason) => {
-    const { api } = stubAsk({ optionIds: [], cancelled: true, reason });
+    const { api } = stubAsk({ optionIds: ['a'], cancelled: true, reason });
     const onTimeout = vi.fn();
-    const text = await new AskUserTool(api, { onTimeout }).execute(question);
+    const tool = new AskUserTool(api, { onTimeout });
+    const text = await tool.execute(question);
     expect(onTimeout).not.toHaveBeenCalled();
     expect(text).not.toContain('超时');
     expect(text).not.toContain('实现第一版');
+    expect(text).not.toContain('先做转账入口');
+    expect(text).toContain('不代表用户选择了任何选项或批准了任何操作');
+    expect(text).toContain('安全、可逆');
+    expect(tool.description).toContain('Cancellation is not a choice or authorization');
   });
 
   it('does not issue a timeout notice after the user answers', async () => {

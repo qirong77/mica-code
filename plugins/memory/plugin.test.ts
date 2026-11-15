@@ -14,6 +14,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { micaCommands } from '@packages/mica-commands/index.js';
 import { createPluginLlmApi } from '@packages/mica-plugin/index.js';
 import { HookRegistry } from '@packages/mica-plugin/HookRegistry.js';
+import { PluginPromptSections, type PluginPromptSection } from '@packages/mica-plugin/PluginPrompt.js';
 import type {
   PluginContext,
   PluginSettingIssue,
@@ -112,7 +113,8 @@ function createHarness(options: HarnessOptions = {}) {
   const commands = new micaCommands.CommandRegistry();
   const tools: MemoryTool[] = [];
   const activeTools = new Set<MemoryTool>();
-  const promptSections: { id: string; order?: number; render(): string }[] = [];
+  const promptSections: PluginPromptSection[] = [];
+  const promptRegistry = new PluginPromptSections();
   const healthReports: { level: string; message: string; hint?: string }[] = [];
   const shown: string[] = [];
   const subagentTypes: PluginSubagentType[] = [];
@@ -165,9 +167,9 @@ function createHarness(options: HarnessOptions = {}) {
       },
     },
     prompt: {
-      section: (section: { id: string; order?: number; render(): string }) => {
+      section: (section: PluginPromptSection) => {
         promptSections.push(section);
-        return { dispose() {} };
+        return promptRegistry.add('memory', section);
       },
     },
     health: {
@@ -225,6 +227,7 @@ function createHarness(options: HarnessOptions = {}) {
     activeTools,
     settings,
     promptSections,
+    promptRegistry,
     healthReports,
     shown,
     subagentTypes,
@@ -247,8 +250,11 @@ describe('memory plugin setup', () => {
 
     expect(harness.tools).toHaveLength(1);
     expect(harness.tools[0]?.name).toBe('memory');
-    expect(harness.promptSections).toHaveLength(1);
+    expect(harness.promptSections).toHaveLength(2);
     expect(harness.promptSections[0]).toMatchObject({ id: 'memory', order: 900 });
+    expect(harness.promptSections[1]).toMatchObject({ id: 'history', order: -300 });
+    expect(harness.promptSections[1]!.render()).toContain(join(harness.home, 'sessions'));
+    expect(harness.promptSections[1]!.render()).toContain('snapshot.conversationMessages');
     expect(harness.commands.list().map((command) => command.name)).toEqual(['memory']);
     expect(harness.subagentTypes[0]).toMatchObject({
       name: 'memory-curator',
@@ -278,6 +284,7 @@ describe('memory plugin setup', () => {
 
     expect(harness.tools).toHaveLength(0);
     expect(harness.promptSections[0]!.render()).toBe('');
+    expect(harness.promptSections[1]!.render()).toBe('');
     expect(harness.commands.list().map((command) => command.name)).toEqual(['memory']);
     expect(harness.healthReports.at(-1)?.message).toContain('已关闭');
   });
@@ -295,6 +302,27 @@ describe('memory plugin setup', () => {
 });
 
 describe('memory prompt snapshot', () => {
+  it('keeps customized history and fact sections off while memory is disabled', () => {
+    const harness = createHarness();
+    const controls = {
+      version: 1 as const,
+      disabledPlugins: [],
+      sections: {
+        'plugin:memory/history': { content: 'custom history instructions', enabled: true },
+        'plugin:memory/memory': { content: 'custom memory facts', enabled: true },
+      },
+    };
+    expect(harness.promptRegistry.render(controls)).toContain('custom history instructions');
+    harness.settings.enabled = 'false';
+    expect(harness.promptRegistry.render(controls)).toBe('');
+    expect(harness.activeTools.size).toBe(0);
+    expect(harness.promptRegistry.inspect(controls).every((section) => section.available === false && !section.enabled))
+      .toBe(true);
+    harness.settings.enabled = 'true';
+    expect(harness.promptRegistry.render(controls)).toContain('custom history instructions');
+    expect(harness.promptRegistry.render(controls)).toContain('custom memory facts');
+  });
+
   it('applies changes to enabled without restarting and refuses calls to an old tool', async () => {
     const harness = createHarness({ settings: { autoCapture: 'true' } });
     const section = harness.promptSections[0]!;
@@ -307,12 +335,14 @@ describe('memory prompt snapshot', () => {
       staleTool.execute({ scope: 'profile', operations: [{ action: 'add', content: '不该保存' }] }),
     ).rejects.toThrow(/disabled/);
     expect(section.render()).toBe('');
+    expect(harness.promptSections[1]!.render()).toBe('');
     expect(harness.activeTools.size).toBe(0);
     await harness.emitTurnAfter();
     expect(harness.runs).toHaveLength(0);
 
     harness.settings.enabled = 'true';
     expect(section.render()).toContain('偏好中文');
+    expect(harness.promptSections[1]!.render()).toContain('# 历史会话');
     expect(harness.activeTools.size).toBe(1);
     expect(existsSync(profileFile(harness.home))).toBe(true);
   });

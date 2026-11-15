@@ -41,6 +41,7 @@ export default function setup(ctx: PluginContext): void {
 
   const section = prompt.section({
     id: 'delegation',
+    label: '委派策略',
     order: 100,
     // 每轮重新渲染：用户在配置页把倾向改成「仅按要求委派」后，下一轮就生效。
     render: () => buildDelegationGuidance(readDelegationMode()),

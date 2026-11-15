@@ -28,13 +28,13 @@ const OPERATIONS = ['list', 'add_task', 'update_task', 'delete_task'] as const;
 type Operation = (typeof OPERATIONS)[number];
 
 const DESCRIPTION = [
-  'Read and edit the local schedule (the gantt page "Schedule" in this app). The schedule is independent local data — it has nothing to do with any chat app.',
-  'Every task has a name, a start and end date, a color, and an optional Markdown note. Tasks with the same color are drawn on one row; the color only groups rows visually.',
-  "Always call operation=list first: it returns every task_id together with today's date and a status relative to today. Dates are plain `YYYY-MM-DD`; a task covers its start and end day.",
-  `Writes are per item (by id), so unrelated tasks are never touched. To reschedule use update_task with the new start/end; to add work use add_task. Colors: ${COLOR_KEYS.join(
-    ' / ',
-  )} (default blue).`,
-  'After writing, report the change to the user in one short sentence — do not paste the whole schedule unless they asked to see it.',
+  "Read and edit dated tasks and milestones in this app's local Schedule gantt page. The data persists independently of conversation turns.",
+  "Call operation=list first to get today's date, current tasks and task_id; never guess an id. Ask if multiple tasks match the user's request.",
+  'Use add_task for new work, update_task to change only the supplied fields, and delete_task only for requested removal; preserve past tasks.',
+  'Each call changes one task. Use this tool for edits so writes coordinate with the page; do not edit its JSON directly. If an id no longer exists, list again before retrying.',
+  'Dates are YYYY-MM-DD and include both the start and end day; omitted end on add_task means a one-day task. Resolve relative dates from the returned today and report the concrete dates.',
+  'Tasks with the same color share a row: reuse the color of related work, and pick another color for a new topic. Keep Markdown notes concise: dependencies, acceptance criteria or links.',
+  'After edits, briefly report what changed; show the whole schedule only when requested.',
 ].join(' ');
 
 export class ScheduleTool extends MicaTool {
@@ -59,7 +59,7 @@ export class ScheduleTool extends MicaTool {
         color: {
           type: 'string',
           enum: [...COLOR_KEYS],
-          description: 'Row color. Defaults to blue for add_task; unchanged for update_task.',
+          description: 'Row color. Omit for automatic palette selection on add_task; unchanged for update_task.',
         },
         note: { type: 'string', description: 'Markdown note (optional; empty string clears it).' },
       },

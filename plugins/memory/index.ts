@@ -23,6 +23,7 @@ import { contextScopes, resolveMemoryContext, scopeKey, type MemoryContext } fro
 import { TouchedRepoIndex, injectionRepos } from './activity.js';
 import { resolveRepoIdentity } from './repo.js';
 import { registerMemoryCommand, type MemoryReviewOutcome } from './commands.js';
+import { buildHistoryGuidance } from './history.js';
 
 /**
  * 记忆插件。
@@ -117,7 +118,9 @@ export default function setupMemory(ctx: PluginContext): void {
   // 变化的那一段保持在最后。
   const section = prompt.section({
     id: 'memory',
+    label: '已知记忆',
     order: PROMPT_SECTION_ORDER,
+    available: () => !disposed && readSettings(ctx).enabled,
     render: () => {
       if (!syncEnabled()) return '';
       const context = contextFor();
@@ -128,6 +131,16 @@ export default function setupMemory(ctx: PluginContext): void {
     },
   });
   ctx.onDispose(() => section.dispose());
+
+  const historyGuidance = buildHistoryGuidance(join(ctx.paths?.config ?? resolveMicaHome(), 'sessions'));
+  const history = prompt.section({
+    id: 'history',
+    label: '历史会话',
+    order: -300,
+    available: () => !disposed && readSettings(ctx).enabled,
+    render: () => (syncEnabled() ? historyGuidance : ''),
+  });
+  ctx.onDispose(() => history.dispose());
 
   const curatorType = ctx.subagents?.registerType({
     name: CURATOR_SUBAGENT_TYPE,

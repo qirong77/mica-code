@@ -36,6 +36,7 @@ export default function setupSessionNotes(ctx: PluginContext): void {
   // 免得它一变就把别的插件段落的 cache 前缀也带失效。
   const section = ctx.prompt.section({
     id: 'session-notes',
+    label: '会话笔记',
     order: 1000,
     render: () => formatSessionNotesSection(read()),
   });

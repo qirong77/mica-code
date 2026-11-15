@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { QUICK_BUTTON_LIMIT, QUICK_BUTTON_STALE_MS, readQuickButtons, type QuickButton } from './buttons.js';
 import { QUICK_BUTTONS_TOOL_NAME, QuickButtonsTool } from './QuickButtonsTool.js';
+import { renderQuickButtonsPrompt } from './prompt.js';
 
 function harness(initial: QuickButton[] = [], options: { desktop?: boolean } = {}) {
   let buttons = initial;
@@ -17,6 +18,16 @@ function harness(initial: QuickButton[] = [], options: { desktop?: boolean } = {
 }
 
 describe('quick_buttons 工具', () => {
+  it('keeps entry preferences in the prompt and field tutorials in the tool', () => {
+    const text = renderQuickButtonsPrompt();
+    expect(text).toContain('网页 / 本地服务主动给按钮');
+    expect(text).toContain('先说结论');
+    expect(text).toContain('只有用户明确要求打开文件时才建文件按钮');
+    expect(text).toContain('不是你执行动作的通道');
+    expect(text).toContain('任务变了就清理或替换旧入口');
+    expect(text).not.toMatch(/\b(kind|operation|style|preview|dialog)\b/);
+  });
+
   it('timestamps model writes and preserves creation time on updates', async () => {
     const clock = vi.spyOn(Date, 'now').mockReturnValue(1000);
     try {

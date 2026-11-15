@@ -170,16 +170,17 @@ describe('HeadlessPluginHost (headless === TUI plugin surface)', () => {
     }
   });
 
-  it('injects the session-autonomy guidance through a host-wrapped prompt section', async () => {
+  it('attributes history recall to Memory and keeps only dynamic host concurrency context', async () => {
     const { agent, host } = await mount();
     const prompt = agent.promptSections.render();
-    expect(prompt).toContain('会话自治');
-    expect(prompt).toContain('session_peers');
-    expect(prompt).toContain('section="guidance">');
-    expect(prompt.indexOf('# 会话记忆')).toBeGreaterThanOrEqual(0);
-    expect(prompt.indexOf('# 会话记忆')).toBeLessThan(prompt.indexOf('# 会话自治'));
+    expect(prompt).toContain('<injection source="plugin" plugin="memory" section="history">');
+    expect(prompt).toContain('# 历史会话');
+    expect(prompt).not.toContain('builtin.command-memory');
+    const sections = agent.promptSections.inspect();
+    expect(sections.filter((section) => section.pluginId === 'builtin.session-autonomy').map((section) => section.sectionId))
+      .toEqual(['concurrency']);
     await host.dispose();
-    expect(agent.promptSections.render()).not.toContain('会话自治');
+    expect(agent.promptSections.render()).not.toContain('# 历史会话');
   });
 
   it('fires turn:before / prompt:build / turn:after in order around a turn', async () => {

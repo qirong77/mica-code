@@ -65,6 +65,7 @@ mica 选后者，这个插件就是「洗」的地方。
 | `subagent-task-files` | 将 `subagent-tasks/<sessionId>.json` 的旧任务数组拆为 `<sessionId>/<taskId>.json`，已有独立任务更新优先；完整原文件改名归档为 `*.legacy-v1.json`，归档重名时加编号。损坏、未知数据与符号链接不改。运行时不再读取旧数组，需经此迁移。 |
 | `notebook-comments` | 评论功能移除后，笔记文档里的 `comments` 讨论记录先归档到 `plugin-data/evolution/legacy-notebook-comments/<noteId>.json`（重名加编号），再删掉该字段；正文里由评论产生的 MarkNode 锚点拆回普通子节点，文字与格式不变。文档只剩 `version` 与 `editorState`，损坏文档与非 `version: 1` 文档不动；重复执行改动数为 0。 |
 | `notebook-mcp` | 将 Notebook 旧插件 skill 索引移到 `plugin-data/evolution/legacy-notebook-skill/` 原文归档，迁移默认能力中的旧工具停用项；不改笔记正文、用户手写 skill 或其它插件索引。旧 skill / 直连工具入口不再支持。 |
+| `prompt-contributions` | 历史回查控制从 `plugin:builtin.command-memory/guidance` 迁到 `plugin:memory/history`，保留正文、开关与顺序，已有新控制优先；撤下 Todo / 会话自治 / Video / Web Search 的静态段落前将原控制文件归档到 `legacy-prompt-controls/`。归档 Schedule 随包 skill 索引到 `legacy-schedule-skill/`，不改排期数据、用户 skill 或能力停用选择（同名用户 skill 可能仍存在）。旧入口不再支持。 |
 
 新增一条迁移 = 在 `migrations.ts` 里加一个 `Migration`（`id`、`description`、纯函数 `apply`），
 然后写进 `MIGRATIONS`。账本按 id 记进度，所以追加迁移会让所有会话重新评估一次；已经洗过的

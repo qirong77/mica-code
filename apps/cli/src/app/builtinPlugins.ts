@@ -10,7 +10,6 @@ import {
   setupCommandCompact,
   setupCommandExit,
   setupCommandFork,
-  setupCommandMemory,
   setupCommandNew,
   setupCommandRename,
   setupCommandResume,
@@ -37,7 +36,6 @@ export function useBuiltinPlugins(
   app
     .use(createBuiltinFilePlugin('runtime.messageQueue', 'Message Queue', setupMessageQueue))
     .use(createBuiltinFilePlugin('mcp', 'MCP', setupMcp))
-    .use(createBuiltinFilePlugin('command-memory', 'Command Memory', setupCommandMemory))
     .use(createBuiltinFilePlugin('session-autonomy', 'Session Autonomy', setupSessionAutonomy))
     .use(createBuiltinFilePlugin('file-mention', 'File Mention', setupFileMention, true));
   for (const plugin of officialPlugins) app.use(plugin);

@@ -9,6 +9,7 @@
 ## 装配
 
 - `HeadlessPluginHost` 是 exec / app-server 共用的插件装配层；MCP 显式初始化，不注册输入框与命令 UI。用户插件（`$MICA_HOME/plugins`）只在常驻宿主装：`createHeadlessPluginHost({ loadUserPlugins: true })` 交出「重新扫描用户插件」的加载器（app-server 传 true、exec 不传），面板与桌面入口都靠它；加载与 `plugin-status.json` 的写入都由 manager 按 `pluginStateSync` 完成，启停走同一条路。
+- 历史会话回查与适用记忆统一由官方 Memory 提供，宿主不再另装 `builtin.command-memory`。会话自治只保留 `session_peers` 与动态并发提醒；工具已有的静态用法不再单独注入。
 - 应用独立托管的插件 MCP 不由 `HeadlessPluginHost` 再注册工具；桌面/Web 启动会话宿主时经 `--mcp-config` 传入同端口 `/plugin/<id>/mcp`，按普通 MCP 连接。TUI / exec 不自动启动应用服务，可显式配置已有 URL。
 - `attachPluginLayer()` 同步替换 executor queue，避免插件写入与 loop 读取不同实例。
 - `mica/turn/input`（`MICA_TURN_NOTIFICATIONS.input`）在插件发起的轮次启动**之前**发出，带展示文本；晚于 `turn/started` 会让页面把上一轮的文本当成本轮用户消息。
@@ -20,7 +21,7 @@
 - `--parent <sessionId>` 标记这条会话由谁派生（子会话、fork 分支），写进会话文件的 `parentSessionId`。只对新建会话生效：resume 时以文件里记的那条为准。`thread/start` 的 `parentSessionId` 同样只被尚未落盘的会话采纳，且已有值时幂等——重复 startNewSession 会换掉会话 id，客户端手里那份 thread 就对不上落盘文件名了。
 - `mica/*` 扩展通知直接送 renderer，不进 turn 重放缓冲：queue、tasks、BTW、history、capabilities、turn retrying、host maintenance。
 - `mica/notice/updated` 在 `ctx.ui.notice` 的展示记录保存后即时推送 `{ threadId, notice: { role: 'notice', content, variant?, command?, status? }, replace: boolean, noticeIndex: number }`；`HeadlessPluginHost.onNotice` 是内部可选回调，exec 不传，第二参数为 `{ replace?, noticeIndex }`。`noticeIndex` 是保存后 `noticeLog().compose()` 中所有 `role: 'notice'` 行的 0-based 派生 slot，不是持久字段，也不改变持久结构或需要迁移。桌面端将其投影为普通 `notice` 事件（`text/variant/command/status/replace`，仅安全非负整数时带 `noticeIndex`），直接推送 renderer、不进 turn 缓冲；历史行按相同口径派生 slot，upsert 优先按 slot 幂等更新，既避免恢复期间 pending 终态与磁盘行重复，又保留同一 command 的多次历史。更新不重读会话、不轮询，也不借 `historyReplaced` 结束正文流。持久形态与插件 API 不变。
-- `mica/capabilities/get|set` 读写会话能力；运行中 set 返回 `ok:false`。get 额外返回 `prompt`（来源分段 / 下一轮预览 / 最近实际发送）、`plugins`（当前 manager 装配记录与工具 / 技能 / 提示词归属）和 `mcpTools`（完整工具描述及 schema）；这些按需读取，不加入高频 capabilities 通知。全局提示词控制经配置页 API 写入 `prompt-controls.json`，不通过 set 改会话存档。
+- `mica/capabilities/get|set` 读写会话能力；运行中 set 返回 `ok:false`。get 额外返回 `prompt`（来源分段 / 下一轮预览 / 最近实际发送，段落 `label` 与可选 `pluginName` 提供可读展示，不改控制键和 XML）、`plugins`（当前 manager 装配记录与工具 / 技能 / 提示词归属）和 `mcpTools`（完整工具描述及 schema）；这些按需读取，不加入高频 capabilities 通知。全局提示词控制经配置页 API 写入 `prompt-controls.json`，不通过 set 改会话存档。
 - `mica/input/activity` 是「用户在输入框敲了字」（不是提交）：宿主只把它翻成运行期事件 `input:activity`，由插件决定要不要动作。桌面端在 `ChatView` 里节流 2s 发出，没有常驻进程时 host 直接吞掉（绝不为几个按键 spawn 一个）；TUI 与 `mica exec` 不发。自动压缩不订阅它——轮次之外不压，只当「人在不在」的通用信号。
 - `mica/input/focus` 是「焦点回到了输入框」（还没敲字）：同样只翻成运行期事件 `input:focus`。桌面端在 `ChatComposer` 获得焦点时发，并且只在会话没在跑（本页或其他进程都没在跑）时发。与 `input/activity` 一样，当前没有插件消费它。
 - `turn/start` / `mica/turn/editMessage` 可传 role，由 host 在启动 turn 前应用；edit 时必须在 `loadSnapshot()` 之后应用。角色缺失只 warning 并保留原角色，不为切角色重建 host。

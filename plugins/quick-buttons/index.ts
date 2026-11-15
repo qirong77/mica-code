@@ -51,6 +51,7 @@ export default function setupQuickButtons(ctx: PluginContext): void {
 
   const section = ctx.prompt?.section({
     id: QUICK_BUTTONS_PLUGIN_ID,
+    label: '快捷按钮',
     // 插件段落本来就追加在 base prompt 之后（受影响的只有它们自己这一段之后的部分），
     // 排在会话笔记（1000）之前：这段讲的是「这一轮可以用的手段」，越早越容易被用上。
     order: 70,

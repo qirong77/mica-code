@@ -9,7 +9,7 @@
   "assets": ["README.md"],
   "priority": 35,
   "mica": { "apiVersion": 1 },
-  "requires": ["tools", "skills"],
+  "requires": ["tools"],
   "desktop": {
     "entry": { "label": "Schedule", "placement": "header" },
     "page": { "title": "排期" }
