@@ -213,7 +213,10 @@ jobs:
   desktop-publish:
     name: Publish desktop updater packages
     needs: [desktop, publish]
-    if: ${{ always() && needs.desktop.result == 'success' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) }}
+    # `desktop` is a matrix: one platform can have a usable artifact even when
+    # another platform runner is cancelled. download-artifact below fails only
+    # if no platform produced anything, otherwise publish what is available.
+    if: ${{ always() && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
