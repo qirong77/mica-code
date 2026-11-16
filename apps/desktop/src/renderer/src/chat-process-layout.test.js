@@ -27,7 +27,9 @@ describe('turn log visibility', () => {
     expect(transcript).toBeGreaterThan(-1)
     expect(log).toBeGreaterThan(transcript)
     expect(composer).toBeGreaterThan(log)
-    expect(view).toContain('<TodoDock panel={todoPanel} />')
+    // TODO panel may carry a turn-scoped key so its local collapse state resets
+    // when the active turn changes; the layout contract only needs the panel.
+    expect(view).toMatch(/<TodoDock(?: key=.*?)? panel=\{todoPanel\} \/>/)
     expect(view).not.toMatch(/useProcessLayout|processSidebar|onTogglePlacement/)
     expect(css).not.toMatch(/has-process-sidebar|chat-turn-log\.is-sidebar|chat-process-placement/)
   })
