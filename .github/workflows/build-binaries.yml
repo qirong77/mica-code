@@ -134,7 +134,10 @@ jobs:
   # CLI tar.gz 当成桌面更新包。
   desktop:
     name: Build desktop ${{ matrix.asset }}
-    needs: [desktop-checks, checks]
+    # CLI / 全量检查有一批与桌面更新无关的环境依赖（例如 Linux runner
+    # 没有 macOS tar 参数）。桌面包自己跑针对性更新测试和完整 electron build，
+    # 不让其它项目的失败阻断这条发布链路。
+    needs: []
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
@@ -169,6 +172,10 @@ jobs:
         working-directory: apps/desktop
         run: npm ci
 
+      - name: Test desktop updater
+        working-directory: apps/desktop
+        run: npm test -- src/main/app-update.test.js src/server/update-check.test.js src/renderer/src/app-update.test.js
+
       - name: Build Linux desktop updater package
         if: matrix.command == 'linux'
         working-directory: apps/desktop
@@ -196,6 +203,38 @@ jobs:
             apps/desktop/dist/*.zip
             apps/desktop/dist/*.blockmap
             apps/desktop/dist/latest-*.yml
+
+  # 即使 CLI 全量检查失败，桌面更新包也要能追加到已有 latest Release。
+  # 如果 publish 已成功，这里只做 clobber；如果 publish 被跳过，则创建 latest。
+  desktop-publish:
+    name: Publish desktop updater packages
+    needs: [desktop, publish]
+    if: ${{ always() && needs.desktop.result == 'success' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download desktop updater packages
+        uses: actions/download-artifact@v4
+        with:
+          pattern: desktop-*
+          path: dist/desktop
+          merge-multiple: true
+
+      - name: Publish desktop updater packages
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG_NAME: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || 'latest' }}
+          RELEASE_TITLE: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || 'Latest' }}
+        run: |
+          if ! gh release view "$TAG_NAME" >/dev/null 2>&1; then
+            gh release create "$TAG_NAME" \
+              --target "$GITHUB_SHA" \
+              --title "$RELEASE_TITLE" \
+              --notes-file .github/release-notes.md
+          fi
+          gh release upload "$TAG_NAME" dist/desktop/* --clobber
 
   publish:
     name: Publish release assets
