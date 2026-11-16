@@ -223,9 +223,9 @@ const SOURCE_MODES = {
     '安装方式不支持',
     '当前 Linux 安装方式不支持自动更新，需要通过 AppImage 运行。'
   ],
-  'mac-signature-required': [
-    'macOS 签名要求未满足',
-    '当前 macOS 应用不满足自动更新的签名要求，不能安全地自动安装。'
+  'macos-not-published': [
+    'macOS 暂未发布',
+    'macOS 桌面更新尚未发布：系统安装器要求 Developer ID 正式签名的安装包，请用正式下载页手动安装。'
   ],
   'updater-disabled': ['自动更新已停用', '本机自动更新已停用，不会自动下载安装更新。'],
   'capability-unavailable': ['本机安装器不可用', '当前桌面环境无法使用本机更新安装器。'],

@@ -139,6 +139,11 @@ jobs:
   # 生成 latest-*.yml 和平台安装包，electron-updater 只消费这组文件；不要把
   # CLI tar.gz 当成桌面更新包。桌面 job 不依赖 CLI 全量测试，避免一个与
   # Electron 更新无关的 CLI 测试失败时把已经验证过的桌面更新包一起挡掉。
+  #
+  # 桌面更新目前只发布 Linux x64 AppImage。macOS 没有 Developer ID 证书时
+  # 签不出 Squirrel 能安装的包（adhoc / 自签都不适合分发），所以这里不跑
+  # macOS runner：既不会白烧 macOS 分钟数，也不会产出一个装不上的包。
+  # 证书就绪后按 docs/desktop-auto-update.md 的说明再加回 mac job。
   desktop-linux:
     name: Build desktop mica-code-linux-x64
     runs-on: ubuntu-latest
@@ -189,109 +194,6 @@ jobs:
             apps/desktop/dist/*.AppImage
             apps/desktop/dist/*.deb
             apps/desktop/dist/*.snap
-            apps/desktop/dist/*.dmg
-            apps/desktop/dist/*.zip
-            apps/desktop/dist/*.exe
-            apps/desktop/dist/*.blockmap
-            apps/desktop/dist/latest*.yml
-
-  # macOS is published only when the runner and a stable Developer ID
-  # certificate are available. A missing macOS secret skips only the macOS
-  # artifact with a visible warning; it must never publish an unsigned package
-  # that Squirrel.Mac cannot install or block a valid Linux update.
-  desktop-mac:
-    name: Build desktop mica-code-mac-arm64
-    if: github.event_name != 'pull_request'
-    runs-on: macos-15
-    outputs:
-      available: ${{ steps.signing.outputs.available }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Verify runner architecture
-        run: test "$(uname -m)" = arm64
-
-      - name: Check macOS signing configuration
-        id: signing
-        env:
-          CSC_LINK: ${{ secrets.CSC_LINK }}
-          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
-        run: |
-          if [[ -z "$CSC_LINK" || -z "$CSC_KEY_PASSWORD" ]]; then
-            echo "::warning::macOS updater package skipped: configure CSC_LINK and CSC_KEY_PASSWORD with a Developer ID Application certificate."
-            echo "available=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "available=true" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-          cache: npm
-          cache-dependency-path: apps/desktop/package-lock.json
-
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: latest
-
-      - name: Install repo dependencies
-        run: bun install --frozen-lockfile
-
-      - name: Install desktop dependencies
-        working-directory: apps/desktop
-        run: npm ci
-
-      - name: Test desktop updater
-        working-directory: apps/desktop
-        run: npm test -- src/main/app-update.test.js src/server/update-check.test.js src/renderer/src/app-update.test.js
-
-      - name: Run real MacUpdater download smoke
-        working-directory: apps/desktop
-        run: node scripts/test-app-update-e2e.mjs
-
-      - name: Build macOS desktop updater package
-        if: steps.signing.outputs.available == 'true'
-        working-directory: apps/desktop
-        env:
-          CSC_LINK: ${{ secrets.CSC_LINK }}
-          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
-        run: |
-          rm -rf dist
-          # Clear the local self-signed identity; electron-builder discovers the
-          # imported Developer ID certificate from CSC_LINK.
-          npm run build:mac -- --arm64 --publish never -c.mac.identity= -c.forceCodeSigning=true -c.extraMetadata.version=1.0.${GITHUB_RUN_NUMBER}
-
-      - name: Verify desktop updater assets
-        if: steps.signing.outputs.available == 'true'
-        run: bun apps/desktop/scripts/verify-update-assets.mjs apps/desktop/dist mac 1.0.${GITHUB_RUN_NUMBER}
-
-      - name: Verify signed macOS updater bundle
-        if: steps.signing.outputs.available == 'true'
-        working-directory: apps/desktop
-        run: |
-          bundles=(dist/mac-arm64/*.app)
-          [[ ${#bundles[@]} -eq 1 && -d "${bundles[0]}" ]]
-          test -s "${bundles[0]}/Contents/Resources/app-update.yml"
-          codesign --verify --deep --strict "${bundles[0]}"
-          signature=$(codesign --display --verbose=2 "${bundles[0]}" 2>&1)
-          grep -q '^Authority=Developer ID Application:' <<< "$signature"
-
-      - name: Upload desktop updater package
-        if: steps.signing.outputs.available == 'true'
-        uses: actions/upload-artifact@v4
-        with:
-          name: desktop-mica-code-mac-arm64
-          if-no-files-found: error
-          path: |
-            apps/desktop/dist/*.AppImage
-            apps/desktop/dist/*.deb
-            apps/desktop/dist/*.snap
-            apps/desktop/dist/*.dmg
-            apps/desktop/dist/*.zip
-            apps/desktop/dist/*.exe
             apps/desktop/dist/*.blockmap
             apps/desktop/dist/latest*.yml
 
@@ -356,8 +258,8 @@ jobs:
   # `latest` Release, so tagged builds also update that same feed.
   desktop-publish:
     name: Publish desktop updater assets
-    needs: [desktop-linux, desktop-mac]
-    if: ${{ always() && needs.desktop-linux.result == 'success' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) }}
+    needs: [desktop-linux]
+    if: ${{ needs.desktop-linux.result == 'success' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) }}
     concurrency:
       group: release-assets-publish
       cancel-in-progress: false
@@ -372,19 +274,8 @@ jobs:
           name: desktop-mica-code-linux-x64
           path: dist/desktop/linux
 
-      - name: Download macOS desktop updater package
-        if: needs.desktop-mac.result == 'success' && needs.desktop-mac.outputs.available == 'true'
-        uses: actions/download-artifact@v4
-        with:
-          name: desktop-mica-code-mac-arm64
-          path: dist/desktop/mac
-
       - name: Re-verify downloaded Linux updater assets
         run: bun apps/desktop/scripts/verify-update-assets.mjs dist/desktop/linux linux 1.0.${GITHUB_RUN_NUMBER}
-
-      - name: Re-verify downloaded macOS updater assets
-        if: needs.desktop-mac.result == 'success' && needs.desktop-mac.outputs.available == 'true'
-        run: bun apps/desktop/scripts/verify-update-assets.mjs dist/desktop/mac mac 1.0.${GITHUB_RUN_NUMBER}
 
       - name: Upload desktop updater workflow artifact
         uses: actions/upload-artifact@v4

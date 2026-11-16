@@ -55,6 +55,8 @@ bun run test -- packages/mica-agent/providers/piModelClient.test.ts
 
 `build` 会调用根目录的 `bun run build`，默认更新 `~/.local/lib/mica` 与 `~/.local/bin/mica`。保留发布版时使用根 README 中的独立安装目录。构建锁、macOS 签名与跨平台条件只在 [agent/build.md](../../agent/build.md) 维护。
 
+发布与自动更新目前只覆盖 **Linux x64 AppImage**：workflow 不构建也不发布 macOS 包，`build:mac` 只用于本机打包。macOS 自动更新需要 Developer ID 正式签名，自签与 adhoc 都不适合分发，原因与恢复步骤见 [`docs/desktop-auto-update.md`](../../docs/desktop-auto-update.md)。
+
 独立 Web 工作区需要已有的 renderer 和 server 产物：
 
 ```bash

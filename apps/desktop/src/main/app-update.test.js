@@ -1,11 +1,8 @@
 import assert from 'node:assert/strict'
-import { EventEmitter } from 'node:events'
 import { test } from 'bun:test'
 import {
   APP_UPDATE_CHANNEL,
   createAppUpdateController,
-  hasMacUpdateSignature,
-  prepareMacInstaller,
   resolveUpdateCapability,
   UPDATE_RELEASE_URL
 } from './app-update.js'
@@ -37,7 +34,6 @@ function fixture({
   updaterOverrides = {},
   getActivity = () => ({ blockers: [] }),
   confirmInstall = async () => true,
-  prepareInstall,
   setTimeoutImpl,
   capability
 } = {}) {
@@ -81,7 +77,6 @@ function fixture({
     isDev,
     getActivity,
     confirmInstall,
-    prepareInstall,
     capability:
       capability ??
       (isDev
@@ -371,23 +366,19 @@ test('classifies installer prerequisites instead of trusting app.isPackaged', ()
   const base = {
     isPackaged: true,
     updater: {},
-    platform: 'darwin',
-    architecture: 'arm64',
+    platform: 'linux',
+    architecture: 'x64',
     hasUpdateConfig: true,
-    hasMacSignature: true
+    isAppImage: true
   }
   for (const [options, reason] of [
     [{ ...base, isDev: true }, 'development'],
     [{ ...base, isPackaged: false }, 'development'],
     [{ ...base, hasUpdateConfig: false }, 'local-build'],
-    [{ ...base, platform: 'linux', architecture: 'x64', isAppImage: false }, 'appimage-required'],
-    [{ ...base, hasMacSignature: false }, 'mac-signature-required'],
+    [{ ...base, isAppImage: false }, 'appimage-required'],
+    [{ ...base, platform: 'darwin', architecture: 'arm64' }, 'macos-not-published'],
     [{ ...base, platform: 'freebsd' }, 'unsupported-platform'],
-    [{ ...base, architecture: 'x64' }, 'unsupported-architecture'],
-    [
-      { ...base, platform: 'linux', architecture: 'arm64', isAppImage: true },
-      'unsupported-architecture'
-    ],
+    [{ ...base, architecture: 'arm64' }, 'unsupported-architecture'],
     [{ ...base, updater: null }, 'updater-disabled']
   ]) {
     const result = resolveUpdateCapability(options)
@@ -396,31 +387,7 @@ test('classifies installer prerequisites instead of trusting app.isPackaged', ()
     assert.equal(result.releaseUrl, UPDATE_RELEASE_URL)
     assert.ok(result.message)
   }
-  for (const options of [
-    { ...base, platform: 'darwin' },
-    { ...base, platform: 'linux', architecture: 'x64', isAppImage: true }
-  ]) {
-    assert.equal(resolveUpdateCapability(options).supported, true)
-  }
-})
-
-test('detects a stable macOS signing authority and rejects adhoc signatures', () => {
-  const run =
-    (stderr, status = 0) =>
-    () => ({ status, stderr })
-  assert.equal(
-    hasMacUpdateSignature('/tmp/app', run('Authority=Developer ID Application: Mica\n')),
-    true
-  )
-  assert.equal(hasMacUpdateSignature('/tmp/app', run('Authority=Apple Development: Mica\n')), false)
-  assert.equal(hasMacUpdateSignature('/tmp/app', run('Signature=adhoc\n')), false)
-  assert.equal(hasMacUpdateSignature('/tmp/app', run('', 1)), false)
-  assert.equal(
-    hasMacUpdateSignature('/tmp/app', () => {
-      throw new Error('codesign failed')
-    }),
-    false
-  )
+  assert.equal(resolveUpdateCapability(base).supported, true)
 })
 
 test('dispose prevents a late native check from publishing or scheduling work', async () => {
@@ -511,7 +478,12 @@ test('stale updater cache errors are distinguished from AppImage capability erro
 test('packaged directory builds without app-update.yml never schedule or invoke the updater', async () => {
   let checks = 0
   let scheduled = 0
-  const capability = resolveUpdateCapability({ isPackaged: true, updater: {}, platform: 'darwin' })
+  const capability = resolveUpdateCapability({
+    isPackaged: true,
+    updater: {},
+    platform: 'linux',
+    architecture: 'x64'
+  })
   const value = fixture({
     capability,
     updaterOverrides: {
@@ -626,72 +598,6 @@ test('a missing platform feed is actionable and can recover on the next check', 
     assert.equal((await value.invoke('check')).status.status, 'not-available')
     assert.equal(value.controller.getStatus().reason, undefined)
     assert.equal(value.controller.getStatus().message, null)
-  } finally {
-    value.cleanup()
-  }
-})
-
-test('native macOS staging never queues a quit before the final activity check', async () => {
-  const native = new EventEmitter()
-  const started = deferred()
-  let ready = false
-  let busy = false
-  let prepares = 0
-  // Same listener ordering as MacUpdater: it tracks readiness, but does not quit.
-  native.on('update-downloaded', () => {
-    ready = true
-  })
-  native.checkForUpdates = () => {
-    prepares += 1
-    started.resolve()
-  }
-  const value = await reachDownloaded({
-    getActivity: () => ({ blockers: busy ? [{ label: '准备期间又启动了一个会话' }] : [] }),
-    prepareInstall: () => prepareMacInstaller({ nativeUpdater: native, isReady: () => ready })
-  })
-  try {
-    const install = value.invoke('install')
-    await started.promise
-    assert.equal(
-      value.sent.some((entry) => entry[0] === 'install'),
-      false
-    )
-    busy = true
-    native.emit('update-downloaded')
-    assert.equal((await install).code, 'busy')
-    assert.equal(value.controller.getStatus().status, 'downloaded')
-    // A later native callback cannot trigger the cancelled quit.
-    native.emit('update-downloaded')
-    assert.equal(
-      value.sent.some((entry) => entry[0] === 'install'),
-      false
-    )
-    busy = false
-    assert.equal((await value.invoke('install')).ok, true)
-    assert.equal(prepares, 1)
-    assert.equal(value.sent.filter((entry) => entry[0] === 'install').length, 1)
-  } finally {
-    value.cleanup()
-  }
-})
-
-test('native preparation error removes listeners and preserves the downloaded package', async () => {
-  const native = new EventEmitter()
-  native.checkForUpdates = () => native.emit('error', new Error('stage failed'))
-  const value = await reachDownloaded({
-    prepareInstall: () => prepareMacInstaller({ nativeUpdater: native, isReady: () => false })
-  })
-  try {
-    const result = await value.invoke('install')
-    assert.equal(result.ok, false)
-    assert.match(result.error, /stage failed/)
-    assert.equal(value.controller.getStatus().status, 'downloaded')
-    assert.equal(native.listenerCount('update-downloaded'), 0)
-    assert.equal(native.listenerCount('error'), 0)
-    assert.equal(
-      value.sent.some((entry) => entry[0] === 'install'),
-      false
-    )
   } finally {
     value.cleanup()
   }

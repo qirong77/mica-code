@@ -1,4 +1,3 @@
-import { spawnSync } from 'node:child_process'
 import { isClientSenderAllowed } from './client-context.js'
 
 export const APP_UPDATE_CHANNEL = 'mica:app-update'
@@ -7,9 +6,9 @@ export const UPDATE_RELEASE_URL = 'https://github.com/qirong77/mica-code/release
 // Keep this list in sync with the desktop artifacts published by
 // build-binaries.yml. The CLI has more targets, but a CLI archive is not an
 // electron-updater payload and must not make the desktop installer look
-// available on that platform/architecture.
-const SUPPORTED_UPDATE_PLATFORMS = new Set(['darwin', 'linux'])
-const SUPPORTED_UPDATE_TARGETS = new Set(['darwin:arm64', 'linux:x64'])
+// available on that platform/architecture. Only Linux AppImage is published.
+const SUPPORTED_UPDATE_PLATFORMS = new Set(['linux'])
+const SUPPORTED_UPDATE_TARGETS = new Set(['linux:x64'])
 
 function capability({ supported, reason = null, message = null } = {}) {
   return { supported, reason, message, releaseUrl: UPDATE_RELEASE_URL }
@@ -29,14 +28,23 @@ export function resolveUpdateCapability({
   platform = process.platform,
   architecture = process.arch,
   hasUpdateConfig = false,
-  isAppImage = false,
-  hasMacSignature = false
+  isAppImage = false
 } = {}) {
   if (isDev || !isPackaged) {
     return capability({
       supported: false,
       reason: 'development',
       message: '当前运行的是源码 / 开发模式，不使用桌面自动安装器。'
+    })
+  }
+  // macOS 桌面更新没有发布通道：Squirrel 只接受 Developer ID 正式签名包，
+  // 自签 / adhoc 都不适合分发，所以这里直接说明，不再尝试准备安装器。
+  if (platform === 'darwin') {
+    return capability({
+      supported: false,
+      reason: 'macos-not-published',
+      message:
+        'macOS 桌面更新暂未发布：系统安装器要求 Developer ID 正式签名的安装包。请用正式下载页手动安装。'
     })
   }
   if (!SUPPORTED_UPDATE_PLATFORMS.has(platform)) {
@@ -67,40 +75,14 @@ export function resolveUpdateCapability({
       message: '当前是本机构建的桌面包，没有正式自动更新配置，不能自动下载安装。'
     })
   }
-  if (platform === 'linux' && !isAppImage) {
+  if (!isAppImage) {
     return capability({
       supported: false,
       reason: 'appimage-required',
       message: '当前 Linux 安装方式不支持自动更新，需要通过 AppImage 运行。'
     })
   }
-  if (platform === 'darwin' && !hasMacSignature) {
-    return capability({
-      supported: false,
-      reason: 'mac-signature-required',
-      message:
-        '当前 macOS 应用没有稳定的证书签名，不能使用系统自动安装器。请先安装正式签名的发布包。'
-    })
-  }
   return capability({ supported: true })
-}
-
-/** Display only; Squirrel still verifies the downloaded app against the running app's requirements. */
-export function hasMacUpdateSignature(appPath, spawnImpl = spawnSync) {
-  try {
-    const result = spawnImpl('/usr/bin/codesign', ['--display', '--verbose=2', appPath], {
-      encoding: 'utf8',
-      timeout: 5000,
-      stdio: ['ignore', 'pipe', 'pipe']
-    })
-    return (
-      result.status === 0 &&
-      /^Authority=Developer ID Application:/m.test(result.stderr || '') &&
-      !/^Signature=adhoc/m.test(result.stderr || '')
-    )
-  } catch {
-    return false
-  }
 }
 
 function errorDetails(error) {
@@ -141,44 +123,7 @@ function errorDetails(error) {
       message: '更新包校验失败，已拒绝安装。请重新检查并下载。'
     }
   }
-  if (/signature|signed|squirrel/i.test(text) && process.platform === 'darwin') {
-    return {
-      reason: 'mac-signature-required',
-      message: '当前 macOS 安装包不满足自动更新的签名要求。'
-    }
-  }
   return { reason: null, message: null }
-}
-
-/** Stage Squirrel without scheduling a quit. MacUpdater.quitAndInstall otherwise schedules one itself. */
-export function prepareMacInstaller({ nativeUpdater, isReady, timeoutMs = 60_000 }) {
-  if (isReady()) return Promise.resolve()
-  return new Promise((resolve, reject) => {
-    let timer
-    const cleanup = () => {
-      clearTimeout(timer)
-      nativeUpdater.removeListener('update-downloaded', ready)
-      nativeUpdater.removeListener('error', failed)
-    }
-    const failed = (error) => {
-      cleanup()
-      reject(error)
-    }
-    const ready = () => {
-      cleanup()
-      if (isReady()) resolve()
-      else reject(new Error('原生安装器尚未就绪，暂不重启'))
-    }
-    nativeUpdater.once('update-downloaded', ready)
-    nativeUpdater.once('error', failed)
-    timer = setTimeout(() => failed(new Error('原生安装器准备超时，更新包已保留')), timeoutMs)
-    timer.unref?.()
-    try {
-      nativeUpdater.checkForUpdates()
-    } catch (error) {
-      failed(error)
-    }
-  })
 }
 
 function publicStatus(status) {
@@ -204,7 +149,6 @@ export function createAppUpdateController({
   clearTimeoutImpl = clearTimeout,
   getActivity,
   confirmInstall = async () => false,
-  prepareInstall = async () => {},
   onInstalling = () => {},
   capability = null,
   checkIntervalMs = 10 * 60 * 1000
@@ -367,9 +311,6 @@ export function createAppUpdateController({
       if (busy) return busy
       if (!(await confirmInstall())) return { ok: false, code: 'cancelled' }
       if (interrupted()) return { ok: false, code: 'cancelled' }
-      // macOS staging can take seconds. It must not register a delayed quit callback:
-      // work may start while staging, and the last activity check must be AFTER it.
-      await prepareInstall()
       // Another window can start work while the confirmation is open. Fail closed, keep the package.
       const becameBusy = await blockers()
       if (interrupted()) return { ok: false, code: 'cancelled' }

@@ -222,7 +222,7 @@ test('unsupported native capabilities retain their specific reason, message, rel
     ['unsupported-platform', '平台暂不支持'],
     ['unsupported-architecture', '架构暂不支持'],
     ['appimage-required', '安装方式不支持'],
-    ['mac-signature-required', 'macOS 签名要求未满足'],
+    ['macos-not-published', 'macOS 暂未发布'],
     ['updater-disabled', '自动更新已停用'],
     ['capability-unavailable', '本机安装器不可用'],
     ['feed-unavailable', '更新源不可用']
@@ -267,7 +267,7 @@ test('unsupported modes have specific explanations even without a native human m
     ['unsupported-platform', /当前平台/],
     ['unsupported-architecture', /架构/],
     ['appimage-required', /AppImage/],
-    ['mac-signature-required', /签名要求/],
+    ['macos-not-published', /Developer ID/],
     ['updater-disabled', /已停用/],
     ['capability-unavailable', /安装器/],
     ['feed-unavailable', /无法读取桌面更新源/],
@@ -337,17 +337,17 @@ test('unsupported download and install actions return source explanations rather
         [action]: async () => ({
           ok: false,
           code: 'unsupported',
-          reason: 'mac-signature-required',
-          error: 'signature check failed',
-          status: { status: 'unsupported', message: '此应用签名不支持自动安装' }
+          reason: 'macos-not-published',
+          error: 'no macOS feed',
+          status: { status: 'unsupported', message: 'macOS 暂未发布桌面更新' }
         })
       },
       onStatus: (status) => phases.push(status)
     })
     assert.equal(outcome.kind, 'source')
-    assert.equal(outcome.reason, 'mac-signature-required')
+    assert.equal(outcome.reason, 'macos-not-published')
     assert.equal(phases.at(-1).status, 'unsupported')
-    assert.equal(outcome.status.message, '此应用签名不支持自动安装')
+    assert.equal(outcome.status.message, 'macOS 暂未发布桌面更新')
   }
 })
 

@@ -1,6 +1,5 @@
 import {
   app,
-  autoUpdater as nativeAutoUpdater,
   BrowserWindow,
   dialog,
   globalShortcut,
@@ -47,12 +46,7 @@ import {
 import { resolveMicaHome } from '@packages/mica-config/index.js'
 import { readPluginData, writePluginData } from '../host/plugin-data-store.js'
 import { autoUpdater } from 'electron-updater'
-import {
-  createAppUpdateController,
-  hasMacUpdateSignature,
-  prepareMacInstaller,
-  resolveUpdateCapability
-} from './app-update.js'
+import { createAppUpdateController, resolveUpdateCapability } from './app-update.js'
 import { updateActivityBlockers } from '../host/update-activity.js'
 import { retainHiddenWindow } from './window-retention.js'
 
@@ -1191,8 +1185,7 @@ app.whenReady().then(async () => {
       app.isPackaged &&
       typeof process.resourcesPath === 'string' &&
       existsSync(join(process.resourcesPath, 'app-update.yml')),
-    isAppImage: Boolean(process.env.APPIMAGE),
-    hasMacSignature: process.platform !== 'darwin' || hasMacUpdateSignature(app.getPath('exe'))
+    isAppImage: Boolean(process.env.APPIMAGE)
   })
   appUpdater = createAppUpdateController({
     ipcMain,
@@ -1201,13 +1194,6 @@ app.whenReady().then(async () => {
     isDev: is.dev || !app.isPackaged,
     capability: updateCapability,
     getActivity: readUpdateActivity,
-    prepareInstall: () =>
-      process.platform === 'darwin'
-        ? prepareMacInstaller({
-            nativeUpdater: nativeAutoUpdater,
-            isReady: () => autoUpdater.squirrelDownloadedUpdate === true
-          })
-        : Promise.resolve(),
     onInstalling: (value) => {
       quitting = value
     },

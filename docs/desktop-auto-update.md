@@ -21,7 +21,7 @@
 
 此时只提示具体阻塞原因，**不停止任务、不发中断信号，也不预约稍后自动重启**。任务结束或保存并关闭相关窗口后，用户再次点击「重启更新」。
 
-完全空闲后弹出原生确认框，默认选「取消」。macOS 在确认后先单独准备 Squirrel 原生安装器，不注册延迟退出回调；准备完成后再读取活动状态，防止这几秒内新启动的会话被稍后的回调中断。两次检查都通过才调用已就绪的 `quitAndInstall`。状态接口不可达、返回字段缺失、页面状态超时、会话锁无法判断时，一律拒绝重启，而不是按空闲处理。退出标志在实际安装前设置，避免 macOS 更新器关闭窗口时被应用的「关闭即隐藏」逻辑拦住。
+完全空闲后弹出原生确认框，默认选「取消」。确认框开着的时候可能又有新会话启动，所以确认之后要再读一次活动状态，两次都通过才调用 `quitAndInstall`。状态接口不可达、返回字段缺失、页面状态超时、会话锁无法判断时，一律拒绝重启，而不是按空闲处理。退出标志在实际安装前设置，避免安装器关闭窗口时被应用的「关闭即隐藏」逻辑拦住。
 
 这是一套**安装前检查**，不是运行任务的热迁移：历史保留不代表进程可以无缝续跑。安装器替换及系统重启路径需真实发布包验收；跨进程外部 TUI 在最终快照之后自行启动仍不受桌面端调度控制。
 
@@ -36,13 +36,22 @@
 
 ## 发布与首次启用
 
-正式桌面更新包必须由发布 workflow 产出完整的 manifest 和 payload：Linux 只把**已发布的 AppImage**视为支持；macOS 至少需要 `latest-mac.yml`、zip、`app-update.yml` 以及稳定的正式证书签名。adhoc 或临时本机签名可以运行，不能替代 macOS 发布签名，也不能据此宣称可更新。UI 的新提交提示不等于可安装的新版本。
+正式桌面更新包必须由发布 workflow 产出完整的 manifest 和 payload：Linux 只把**已发布的 AppImage**视为支持。manifest 必须引用实际存在的文件，并校验 SHA512 与 size；artifact 下载后还要再次验证，发布顺序先取 payload、再取 manifest，失败时保留现有 Release，不删除已发布资产。UI 的新提交提示不等于可安装的新版本。
 
-发布 workflow 应使用官方 `macos-15`（Arm64）runner，并以更新专用测试 gate 阻止不完整发布；macOS 签名通过 `CSC_LINK` / `CSC_KEY_PASSWORD` 提供。macOS runner 不可用或证书未配置时必须明确告警并跳过 macOS 资产，不能上传未签名包，也不能阻断已经通过校验的 Linux 更新。manifest 必须引用实际存在的文件，并校验 SHA512 与 size；artifact 下载后还要再次验证，发布顺序先取并验证 metadata，再取 payload，失败时保留现有 Release，不删除已发布资产。2026-11-16 核查时 Release 仅有 Linux 资产，macOS runner 曾失败；这只是当时的线上状态，不是永久平台规则。
+**桌面发布目前只有 Linux x64 AppImage。** macOS 没有发布通道，因此 workflow 里没有 `desktop-mac` job：它既签不出系统安装器认可的包，又会在每次 push 时白跑一台 macOS runner。macOS 上运行时明确显示「macOS 暂未发布」并给出正式下载页，不会尝试准备安装器。
 
-平台能力由主进程根据配置、运行架构、AppImage 运行环境和 macOS 签名门槛判定。当前桌面发布目标只有 **macOS arm64** 和 **Linux x64 AppImage**；Windows、macOS Intel、Linux arm64 没有桌面 CI 包，不能在 UI 或文档中虚称支持。缺少目标包时必须明确显示平台 / 架构原因和官方 Release 链接。完成正式签名发布后，首次启用需要安装该正式包，不能用源码目录包替代。
+### 为什么 macOS 自签 / adhoc 不行
 
-只有 CI 成功产出并发布了**当前平台可安装的包**，才有下载路径。macOS 还依赖系统认可的签名及安装条件；源码差异提示不能替代这些条件。
+本机实测（`codesign` + `spctl`，临时钥匙串，2026-11）：
+
+| 签名方式 | designated requirement | 结果 |
+| -------- | ---------------------- | ---- |
+| 自签 Code Signing 证书 | `identifier "…" and certificate leaf = H"…"`，同一证书跨版本一致 | 更新校验可通过（`codesign -v -R` 退出 0），但 `spctl` 判 `rejected`，首次安装必须手动放行，也无法公证 |
+| adhoc（`codesign -s -`） | `cdhash H"…"`，每次构建都变 | 下一版永远不满足上一版的 DR，自动更新不可能成功 |
+
+两者都只适合本机自用，不适合分发，所以不作为发布路径。要恢复 macOS 自动更新需要：Apple Developer Program 的 **Developer ID Application** 证书 → 导出 p12 填 `CSC_LINK` / `CSC_KEY_PASSWORD` → 加回 `macos-15` arm64 job（`npm run build:mac -- --arm64`）→ 用 `verify-update-assets.mjs dist mac <版本>` 确认 `latest-mac.yml`、zip、`app-update.yml` 齐全 → 先传 zip 再传 manifest。证书与口令不进仓库。
+
+平台能力由主进程判定：`darwin` 直接给「暂未发布」；Linux 需要 `Resources/app-update.yml` **且**从 AppImage 运行，只有 x64 有包。Windows、macOS Intel、Linux arm64 没有桌面 CI 包，必须明确显示平台 / 架构原因和官方 Release 链接。首次启用需要安装一次正式发布的包，不能用源码目录包替代。
 
 旧应用不会因为源码修改而自动获得修复后的主进程 / preload。首次接入或修复旧更新器，需要在没有任务运行时安装一次包含修复的新版本。不要在有人工作时覆盖正在运行的 `app.asar` 或强制重启。
 
@@ -63,15 +72,10 @@
 
 ```bash
 # 平台与期望版本显式给定，避免把另一平台或残留旧清单当成功
-node scripts/verify-update-assets.mjs dist mac 1.0.675
+node scripts/verify-update-assets.mjs dist linux 1.0.675
 npm test -- scripts/verify-update-assets.test.js src/main/app-update.test.js src/renderer/src/app-update.test.js
-
-# macOS：真实 Electron + preload IPC + MacUpdater + 本机 HTTP 更新源
-node scripts/test-app-update-e2e.mjs
 ```
 
-期望版本应替换为本次构建版本；Linux 使用 `linux`，Windows 使用 `win`。资产校验覆盖清单引用、SHA-512、大小、路径逃逸及更新器必需文件类型。
-
-下载 E2E 使用独立的 `MICA_HOME` / userData / 端口和合成 ZIP，覆盖缺配置、正常下载、下载状态保留、忙 / 取消 / 远程窗口拦截、404、坏哈希拒绝与恢复、同版本 / 降级拒绝及 DMG-only 拒绝。测试不会调用原生 staging、`quitAndInstall`、签名或替换当前应用，临时数据结束后删除。**这些验证不等于真实 macOS / AppImage 替换、正式签名及重启链路验收。**
+期望版本应替换为本次构建版本。资产校验覆盖清单引用、SHA-512、大小、路径逃逸及更新器必需文件类型，不下载真实安装包、不替换应用、不重启。**真实 AppImage 的替换与重启链路仍需一次性真机验收。**
 
 官方边界参考：[Electron autoUpdater 的 macOS 签名要求](https://www.electronjs.org/docs/latest/api/auto-updater)、[GitHub-hosted runner 标签](https://docs.github.com/en/actions/reference/runners/github-hosted-runners)。
