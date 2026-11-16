@@ -195,7 +195,9 @@ export class CompactionService {
     // 用户与助手正文原样保留，不生成 boundary/summary、不调用模型，所以连续执行不会
     // 丢失对话信息（没有可清理内容时报 not needed）。
     if (options.toolResultsOnly) return compactToolResultsOnly(originalMessages, options);
-    const minMessages = options.force ? 2 : DEFAULT_MIN_MESSAGES;
+    // 显式保护最新用户请求时，单轮长历史也有可压缩的部分（例如一条很长的
+    // 请求/回复，或一次请求里积累了很多工具批次），不能再用消息条数把它挡掉。
+    const minMessages = options.force || options.preserveLatestUserMessage ? 2 : DEFAULT_MIN_MESSAGES;
     if (beforeCount < minMessages) {
       throw new CompactionNotNeededError();
     }
@@ -205,7 +207,19 @@ export class CompactionService {
     if (activeMessages.length < minMessages) {
       throw new CompactionNotNeededError();
     }
-    if (!options.lightweightPrune && !options.preserveLatestUserMessage && groupMessagesByRound(activeMessages).length < 2) {
+    const activeRounds = groupMessagesByRound(activeMessages);
+    // 保留最新请求的单轮路径只在历史确实大于最近上下文窗口时才调用摘要模型；否则
+    // 两条普通的 user/assistant 消息会为了一个注定不节省空间的摘要白花一次请求。
+    if (
+      !options.lightweightPrune &&
+      options.preserveLatestUserMessage &&
+      !options.force &&
+      activeRounds.length < 2 &&
+      estimateMessagesTokens(activeMessages) <= getRecentTokenBudget(options)
+    ) {
+      throw new CompactionNotNeededError('当前会话可压缩内容较少，暂不需要 compact');
+    }
+    if (!options.lightweightPrune && !options.preserveLatestUserMessage && activeRounds.length < 2) {
       throw new CompactionNotNeededError('当前会话可压缩内容较少，暂不需要 compact');
     }
 

@@ -191,7 +191,13 @@ export async function compactIdleSessionHistory(input: {
             summarize:
               input.summarize ??
               ((transcript, prompt) => summarizeWithSubAgent(agent, transcript, prompt, undefined, input.pluginId)),
-            options: { summaryInput: 'dialogue', contextWindowSize: snapshot.contextWindowSize },
+            // 手动模型压缩即使只有一轮，也应能整理一段很长的请求/回复；最新用户请求
+            // 原样保留，避免摘要把用户刚说的约束、图片或精确措辞一起改写掉。
+            options: {
+              summaryInput: 'dialogue',
+              contextWindowSize: snapshot.contextWindowSize,
+              preserveLatestUserMessage: true,
+            },
           })
         : await service.compact({
             messages: snapshot.messages,

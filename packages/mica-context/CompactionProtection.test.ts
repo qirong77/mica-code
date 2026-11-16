@@ -89,6 +89,37 @@ describe('pi compaction protection', () => {
     expect(summarize.mock.calls.length).toBeLessThanOrEqual(2);
   });
 
+  it('allows an explicitly protected latest request to summarize a long two-message round', async () => {
+    const messages = [
+      user('Keep this request verbatim. ' + 'constraint '.repeat(2000)),
+      assistant('The answer contains a lot of stale detail. ' + 'detail '.repeat(12_000)),
+    ];
+    const summarize = vi.fn(async () => '<summary>The stale detail was condensed.</summary>');
+
+    const result = await service.compact({
+      messages,
+      summarize,
+      options: { preserveLatestUserMessage: true },
+    });
+
+    expect(summarize).toHaveBeenCalledOnce();
+    expect(result.messages).toContainEqual(messages[0]);
+    expect(result.messages).not.toContainEqual(messages[1]);
+    expect(result.afterTokenEstimate).toBeLessThan(result.beforeTokenEstimate);
+  });
+
+  it('does not call the summary model for a short single round', async () => {
+    const summarize = vi.fn(async () => '<summary>should not run</summary>');
+
+    await expect(service.compact({
+      messages: [user('short request'), assistant('short answer')],
+      summarize,
+      options: { preserveLatestUserMessage: true },
+    })).rejects.toBeInstanceOf(CompactionNotNeededError);
+
+    expect(summarize).not.toHaveBeenCalled();
+  });
+
   it.each(['quick', 'summary'] as const)('protects latest user image before the recent tool window (%s)', async (mode) => {
     const request = user([text('Inspect this exact image.'), image()]);
     const messages = [request, ...Array.from({ length: 30 }, (_, i) => toolBatch(`c${i}`)).flat()];

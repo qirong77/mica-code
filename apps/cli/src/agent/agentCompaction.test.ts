@@ -93,6 +93,42 @@ describe('compactIdleSessionHistory display history', () => {
     });
     expect(saveCurrent.mock.calls[0]?.[0]).not.toHaveProperty('conversationMessages');
   });
+
+  it('protects the latest request for idle model compaction', async () => {
+    const snapshot = {
+      messageFormat: 'pi-ai-v1',
+      contextWindowSize: 100_000,
+      messages: [piUser('old'), piAssistant('answer')],
+    };
+    const compact = vi.spyOn(micaContext.CompactionService.prototype, 'compact').mockImplementation(async (input) => {
+      expect(input.options).toMatchObject({
+        summaryInput: 'dialogue',
+        preserveLatestUserMessage: true,
+      });
+      return {
+        messages: [piUser('summary')],
+        beforeCount: 2,
+        afterCount: 1,
+        beforeTokenEstimate: 100,
+        afterTokenEstimate: 10,
+        savedTokenEstimate: 90,
+      } as CompactResult;
+    });
+
+    await compactIdleSessionHistory({
+      agent: {
+        getSnapshot: () => snapshot,
+        loadSnapshot: vi.fn(),
+        getSubagentUsageHistory: () => [],
+        estimateRequestOverheadTokens: () => 0,
+      } as unknown as AgentRuntime,
+      sessionController: { saveCurrent: vi.fn() } as unknown as SessionController,
+      mode: 'model',
+      summarize: async () => 'summary',
+    });
+
+    expect(compact).toHaveBeenCalledOnce();
+  });
 });
 
 function display(messages: Message[]): MicaUiConversationMessage[] {

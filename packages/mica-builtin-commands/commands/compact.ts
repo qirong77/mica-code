@@ -13,6 +13,8 @@ const LLM_COMPACT_OPTIONS = {
   maxPromptTooLongRetries: 4,
   minRecentRounds: 1,
   maxRecentRounds: 3,
+  // 显式模型压缩允许只有一轮的长历史，但保留用户最新请求原文。
+  preserveLatestUserMessage: true,
 };
 
 export function createCompactCommand(

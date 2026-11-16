@@ -106,7 +106,7 @@ describe('session compaction menu', () => {
       message: '没有可清理的工具结果',
     });
     expect(await createHarness({ status: 'skipped', reason: 'empty' }).run('model')).toEqual({
-      message: '对话内容太少，不用压缩',
+      message: '当前没有可压缩的历史，或压缩后预计不会节省上下文',
     });
   });
 

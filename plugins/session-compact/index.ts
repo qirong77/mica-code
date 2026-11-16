@@ -64,7 +64,11 @@ async function model(ctx: PluginContext, compact: CompactHistory) {
     if (!result.text.trim()) throw new Error('摘要请求返回了空内容');
     return result.text;
   };
-  return report(() => compact({ mode: 'model', summarize }), '模型压缩', '对话内容太少，不用压缩');
+  return report(
+    () => compact({ mode: 'model', summarize }),
+    '模型压缩',
+    '当前没有可压缩的历史，或压缩后预计不会节省上下文',
+  );
 }
 
 /** 菜单动作没有别的地方可以说结果，这里的一句话就是全部反馈。 */
