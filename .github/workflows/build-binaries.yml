@@ -274,10 +274,15 @@ jobs:
         with:
           bun-version: latest
 
-      # 这个 job 只需要校验器那一个依赖，不为它装整套 desktop 依赖
+      # 这个 job 只需要校验器那一个依赖，不为它装整套 desktop 依赖。
+      # 版本从 lockfile 取：npm 直接装 latest 会拿到没有 default export 的新主版本，
+      # bun 一 import 就报 "Missing 'default' export"。
       - name: Install verifier dependency
         working-directory: apps/desktop
-        run: npm install --no-save --no-package-lock --no-audit --no-fund js-yaml
+        run: |
+          version=$(node -p "require('./package-lock.json').packages['node_modules/js-yaml'].version")
+          npm install --no-save --no-package-lock --no-audit --no-fund "js-yaml@$version"
+          node -p "require('js-yaml/package.json').version"
 
       - name: Download Linux desktop updater package
         uses: actions/download-artifact@v4
