@@ -34,24 +34,24 @@ npm run build:mac          # 再打 DMG + zip（发布用；打包与压缩占 2
 npm run start:web          # 运行已构建的 Web 运行时
 ```
 
-`build:app` 之前会执行根 `bun run build`：桌面端经 `resolveMicaExecutable()` 使用 `~/.local/bin/mica`，不刷新 CLI 就会连到旧二进制。
+`build:app` 之前会执行根 `bun run build`：桌面端经 `resolveMicaExecutable()` 使用 `~/.local/bin/mica`，不刷新 CLI 就会连到旧二进制。`build:app` / `pack:app` 的 `electron-builder --dir` 目录包不保证 `Resources/app-update.yml`，仅用于本机运行和调试，不是正式自更新包。
 
 ### macOS 签名
 
 `electron-builder.yml` 里 `mac.identity: mica-codesign` 指向一个**本机自签证书**（`~/.mica/codesign/` + 名为 `mica-codesign` 的钥匙串，密码在 login keychain 的通用密码项里）。这样做的原因是 adhoc 签名的 designated requirement 绑 cdhash，每次重建都变，macOS 的「本地网络」授权会随之失效——表现为进程内访问 `172.x`/`10.x` 4ms 内 `EHOSTUNREACH`，而 launchd 拉起的独立进程同时刻一切正常。
 
-- **`electron-builder` 自己的签名不要用**：它带 `--timestamp` 向 Apple 时间戳服务器请求，只能走代理的机器上每个二进制都要等超时，整包卡 5–8 分钟。`CSC_IDENTITY_AUTO_DISCOVERY=false` 压不住 yml 里显式写的 identity，要跳过必须用 `-c.mac.identity=null`（`pack:app` 已经这么做）。
+- **本机快速打包不使用 `electron-builder` 自己的签名**：它带 `--timestamp` 向 Apple 时间戳服务器请求，只能走代理的机器上每个二进制都要等超时，整包卡 5–8 分钟。`CSC_IDENTITY_AUTO_DISCOVERY=false` 压不住 yml 里显式写的 identity，要跳过必须用 `-c.mac.identity=null`（`pack:app` 已经这么做）。正式 CI 发布不是这条快速路径，需使用 Developer ID 和标准签名验证。
 - `sign-app.sh` 不请求时间戳，几秒签完。它只签 Mach-O（node-pty 的 prebuilds 混着 win32 的 `.node`），顺序是 `.node/.dylib/.so` → framework/嵌套 app（按深度倒序）→ 主 app。
-- **跨机器安全**：没有 `mica-codesign` 证书的机器（同事、CI、Linux/Windows）`sign-app.sh` 打印一行说明后退出 0，`electron-builder` 找不到该身份也只是 `skipped macOS application code signing` 并以 0 退出，产物保持 adhoc 签名、可运行。想让缺证书变成硬失败（发布流水线）设 `MICA_SIGN_REQUIRED=1`。
+- **跨机器安全**：没有 `mica-codesign` 证书的机器（同事、CI、Linux/Windows）`sign-app.sh` 打印一行说明后退出 0，`electron-builder` 找不到该身份也只是 `skipped macOS application code signing` 并以 0 退出，产物保持 adhoc 签名、可运行。adhoc 只适合本机运行，不能作为正式 macOS 自更新包；发布流水线必须以稳定证书签名，缺证书应硬失败（设 `MICA_SIGN_REQUIRED=1`，CI 用 `CSC_LINK` / `CSC_KEY_PASSWORD`）。
 
 ## 构建
 
 - `mica.build.env` 定义品牌键，同名环境变量优先；改键同步构建文件与本文。
 - models.dev 种子用 `bun scripts/update-models-dev-seed.mjs` 刷新。
-- 发布链路 `build-binaries.yml`：checks / desktop-checks 任一失败，build 与 publish 整段跳过。
+- 发布链路 `build-binaries.yml`：checks / desktop-checks gate CLI binary build；桌面更新包单独跑 updater tests 与资产校验，避免无关 CLI 测试失败吞掉已经验证的桌面更新。
 - 打包按平台取 node-pty 原生产物（`scripts/stage-node-pty.mjs`）；`spawn-helper` 只属于 macOS。
 - desktop 用 `scripts/run-parallel.mjs` 并行跑三份构建；Vite 8 需搭配 electron-vite 6。
-- `npm run build:app` = 三份构建 + 强制跳过 electron-builder 签名的 `--dir` 打包 + 本机快速签名，只产出可运行的 `.app`；没有本机证书时签名步骤安全跳过。DMG + zip 是发布产物，走 `npm run build:mac`。后者省不掉：`hdiutil` 单压 277MB 的 app 就要 9s，zip 与 blockmap 再加 6s，两者串行约 20s，占整个 `build:mac` 的四分之三。
+- `npm run build:app` = 三份构建 + 强制跳过 electron-builder 签名的 `--dir` 打包 + 本机快速签名，只产出可运行的 `.app`，不保证 `app-update.yml`，不能当正式自更新包；没有本机证书时签名步骤安全跳过。DMG + zip、`latest-*.yml` 与 `app-update.yml` 是发布产物，走 `npm run build:mac` 及 CI 的资产校验。后者省不掉：`hdiutil` 单压 277MB 的 app 就要 9s，zip 与 blockmap 再加 6s，两者串行约 20s，占整个 `build:mac` 的四分之三。
 - 构建产物是唯一的共享点（`~/.local/lib/mica/mica` 与运行中的 `.app` 会被覆盖）：同一台机器上多个会话可能同时构建，动手前先争 `$HOME/.mica/.build-lock`（`mkdir` 自旋，结束 `rmdir`），并在动手前说明会覆盖哪些产物。
 - 品牌 SVG 唯一源 `apps/desktop/resources/icon.svg`，位图由 `npm run icons:generate` 生成。
 - 官网架构图只改 `apps/website/architecture/*.architecture.json`，再由 Archify 生成。
@@ -61,6 +61,7 @@ npm run start:web          # 运行已构建的 Web 运行时
 **默认只跑与改动最接近的那一两条单测 + `bun run typecheck`。** 全量 `bun run test`（实测 8 核、load 8–10 的机器上约 4 分钟：unit 43s + process 209s，另加 desktop `npm test` 51s）、`npx eslint src/`（desktop 全量，带缓存约 8s）、`apps/cli/src/cli/app-server.flows.test.ts` 这类真实子进程 E2E 只在发布前、跨慢套件改动或用户明确要求时跑；不要用长测试兜底，也不要为「更保险」重复跑同一批。
 
 - 局部改动跑相关测试 + `bun run typecheck` + `git diff --check`。
+- 更新资产改动在 `apps/desktop` 跑 `node scripts/verify-update-assets.mjs dist <mac|linux|win> <期望版本>`，并跑 `npm test -- scripts/verify-update-assets.test.js`；这只验证 manifest 引用、SHA512 与 size 等静态边界。用户要求下载 E2E 时可在 macOS 跑 `node scripts/test-app-update-e2e.mjs`：隔离 Electron + preload IPC + MacUpdater + 本机 HTTP 合成更新包，不调用原生安装器，不等于正式签名、应用替换或重启验收。
 - `bun run test` 走 `scripts/run-tests.mjs`：先 `scripts/prune-test-temp.mjs` 清掉 `os.tmpdir()` 下过期的 `mica*` 测试目录（保留 `mica-tasks`，`MICA_TEST_TEMP_MAX_AGE_HOURS` 默认 6h），再串行跑两个 project，unit 失败即跳过 process。`test/globalSetup.ts` 用 `MICA_TEST_ROOT` 作整轮唯一的临时根并在结束时删除；worker 是被直接杀掉的，`setupFiles` 里的 exit 钩子不会触发，清理只能放在 globalSetup。
 - 测试分两个 project（`vitest.config.ts`）：`unit` 是进程内单测、按文件并行；`process` 是真实子进程 / PTY / TUI 的 E2E，文件串行、文件内用例并发。慢的根源是每个用例 spawn 一次真实 `mica`（冷启动 1–1.5s），所以新增 E2E 用例要用 `it.concurrent` 语义（每用例自带 mock provider 与 `MICA_HOME`），不要把 `process` 项目丢回并行池：它和 unit 的 worker 抢 CPU 时会打挂 `btw.pty`、turn lease 这类时序敏感用例。
 - `testTimeout` 显式给定而不是沿用 Vitest 默认 5s：unit 里有真实 git 仓库与文件 I/O，process 的 PTY 用例内部就按 20s 等待。机器一忙（多个 worker + 开发者自己的进程）5s 会打挂与代码无关的用例。desktop 的 `npm test` 同理显式给 `--timeout=20000`：那里的 git 夹具用例常态就要 3–8s，沿用 bun 默认 5s 会随机报「timed out after 5000ms」。并发上限：`unit` 的 `maxWorkers` 固定 4（6 个实测有 7 个用例超时）；`process` 的 `maxConcurrency` 是 6（实测 3 → 6 把整轮 397s 压到 209s，失败数不变）。

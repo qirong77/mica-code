@@ -24,7 +24,7 @@
 - `package.json` 的 `dependencies` 只放主进程/运行时真正 require 的包；renderer 依赖全部归 `devDependencies`。
 - `electron.vite.config.mjs` 的 `resolve.dedupe: ['react', 'react-dom']` 不能删。
 - `tablerIconDeepImports()` 只影响 build，新增图标无需同步清单。
-- 更新入口在 `AppUpdateAction`，安装状态机在 `main/app-update.js`；窗口集合是 `Set`，授权复用 `isClientSenderAllowed`（主框架 / origin）并额外限制本机页面。`status` 与定时检查不能覆盖已下载 / 下载中状态。安装前由主进程读 `/api/update/activity` 和原生窗口、页面未保存状态，空闲后确认、确认后再检查；忙或未知时拒绝，不强杀、不预约自动重启。活动判据复用 `chat-idle.js` 的 `isBusy`，涵盖队列、BTW 和后台任务，不能只用 `countBusyChatHosts()`。源码 / 远程页面不直接安装；桌面包不更新外置 CLI，完整边界见 `docs/desktop-auto-update.md`。
+- 更新入口在 `AppUpdateAction`，安装状态机在 `main/app-update.js`；窗口集合是 `Set`，授权复用 `isClientSenderAllowed`（主框架 / origin）并额外限制本机页面。可安装能力不仅看 `app.isPackaged`，还看发布架构、`Resources/app-update.yml`、Linux AppImage 环境及 macOS 证书签名；本机 `--dir` 包不当正式安装器，新提交提示不等于有平台包。当前桌面发布目标是 macOS arm64 / Linux x64 AppImage，其他平台 / 架构必须明确说明而不是等到 404。`status` 与定时检查不能覆盖已下载 / 下载中状态。安装前由主进程读 `/api/update/activity` 和原生窗口、页面未保存状态，空闲后确认、确认后再检查；忙或未知时拒绝，不强杀、不预约自动重启。活动判据复用 `chat-idle.js` 的 `isBusy`，涵盖队列、BTW 和后台任务，不能只用 `countBusyChatHosts()`。源码 / 远程页面不直接安装；桌面包不更新外置 CLI，完整边界见 `docs/desktop-auto-update.md`。
 - 页面根节点必须套 `renderer/src/ErrorBoundary.jsx`。按需视图统一用 `renderer/src/lazy-view.jsx` 的 `lazyView(loader, name)`：校验导出、局部捕获失败，重试时重建 lazy 实例；外层仍由 `Suspense` 提供加载占位，单个视图失败不能卸掉整个对话页面。
 - 运行时启动即 `stripContainerEnv()`；受控浏览器与终端 socket 只在 `will-quit` 关闭。
 - 同一时刻只起一个 Electron 实例；验证时串行。
@@ -89,6 +89,7 @@
   按钮外观只由插件声明**意图**（`style: { icon, color, shape, iconOnly }`），实际快捷栏与演示页共用 `ShortcutButton`（底层 ArcoAction），`quickbarButtonLook()` 负责图标、标题与状态，颜色/形状映射到 Arco 的 tone / appearance；`app.css` 只保留快捷栏的尺寸、间距和定位，图标走 `@mica-config-ui/web` 的 `PluginIcon`。运行期按钮还可带通用 `preview`（标题、纯文本或 Markdown、表格、说明、动作），宿主用共享 `ArcoPopover`（portal 到 body）画非打断式预览卡片，hover 延迟约 180ms、键盘聚焦也可打开，点外 / Esc / 外部滚动关闭，正文内部滚动不关闭；卡片动作仍回到插件原 action，不在渲染层写死插件名词。大内容只滚正文，底部动作固定；强制用户做选择才用 `dialog` Modal。改视觉只改这些类，不要在插件或 JSX 里写色值。
 
   插件弹窗（`dialog`）由 `ChatView` 的 `PluginTableDialog` 画：ModalShell + 表格 + `Button`，正文支持 `markdown`（与面板分区同一套渲染），底部的 `actions` 用共享 `Button` 画、点了经 `runPanelEntryAction` 交回插件自己的 `action`（与 `desktop.panel.open` 同一条通路，先收起旧弹窗，插件回新弹窗就替换）。
+
 - 清单 `desktop.panel.status: true` 的插件额外给一行**常驻状态行**（视图返回 `statusBar`，画在输入框正上方、面板关着也在），用来说「这个能力此刻生效没有」。宿主里快捷栏与抽屉各存一份视图，抽屉的动作改完要经 `plugin-panels.js` 的 `notifyPluginPanelStatusChanged()` 广播一次，状态行立刻跟着变，不要等 30 秒轮询。
 - 面板缓存只作首屏展示：fresh view 更新未编辑字段，保留用户已输入或主动清空的字段；快捷栏与抽屉共享含 node/session/cwd/role 的视图身份。自动提交按面板串行、每分区只保留最新待交值，忙时不丢弃；切分区或关闭补交尾部，显式动作废弃本分区旧待交任务。编辑器正文超过 200000 字符时只读告知，超限提交显式拒绝并保留草稿，不把裁剪结果写回文件。
 - 输入框动作区只有一个「+」按钮：展开后是添加附件 / By The Way / 定时任务 / 每个插件面板（按清单顺序，标签取 `desktop.panel.label`；声明了 `open` 的入口点下去是把那个动作交给插件——手机访问因此直接弹二维码，不打开抽屉）。只读的分析与详情不进这里（耗时分析、会话详情都在对话右键菜单）。面板入口在这里也有，所以配置类插件不必为「能被打开」而声明一个常驻胶囊；宿主不认识任何具体插件 id，列表来自 `readPluginsDetails`。「添加附件」是文件按钮（`host/attachments.js` 把文件存进 `$MICA_HOME/attachments/` 并插入绝对路径，图片同样走这条路），不是只选图片。

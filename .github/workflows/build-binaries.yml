@@ -12,6 +12,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: build-installer-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   desktop-checks:
     name: Desktop checks
@@ -37,7 +41,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
       - name: Test
-        run: npm test
+        run: |
+          npm test
+          npm test -- scripts/verify-update-assets.test.js
       - name: Lint
         run: npm run lint
 
@@ -131,28 +137,11 @@ jobs:
 
   # Electron 的桌面更新包与 CLI 是两条发布链路。桌面端用 electron-builder
   # 生成 latest-*.yml 和平台安装包，electron-updater 只消费这组文件；不要把
-  # CLI tar.gz 当成桌面更新包。
-  desktop:
-    name: Build desktop ${{ matrix.asset }}
-    # CLI / 全量检查有一批与桌面更新无关的环境依赖（例如 Linux runner
-    # 没有 macOS tar 参数）。桌面包自己跑针对性更新测试和完整 electron build，
-    # 不让其它项目的失败阻断这条发布链路。
-    needs: []
-    runs-on: ${{ matrix.runner }}
-    # macOS runner availability is independent from the Linux package. Keep a
-    # successful Linux updater artifact publishable when the mac job is queued
-    # or cancelled by GitHub capacity.
-    continue-on-error: ${{ matrix.command == 'mac' }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - asset: mica-code-linux-x64
-            runner: ubuntu-latest
-            command: linux
-          - asset: mica-code-mac-arm64
-            runner: macos-14
-            command: mac
+  # CLI tar.gz 当成桌面更新包。桌面 job 不依赖 CLI 全量测试，避免一个与
+  # Electron 更新无关的 CLI 测试失败时把已经验证过的桌面更新包一起挡掉。
+  desktop-linux:
+    name: Build desktop mica-code-linux-x64
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -181,7 +170,6 @@ jobs:
         run: npm test -- src/main/app-update.test.js src/server/update-check.test.js src/renderer/src/app-update.test.js
 
       - name: Build Linux desktop updater package
-        if: matrix.command == 'linux'
         working-directory: apps/desktop
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
@@ -189,63 +177,131 @@ jobs:
           rm -rf dist
           npm run build:linux -- --publish never -c.extraMetadata.version=1.0.${GITHUB_RUN_NUMBER}
 
-      - name: Build macOS desktop updater package
-        if: matrix.command == 'mac'
-        working-directory: apps/desktop
-        env:
-          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
-        run: |
-          rm -rf dist
-          npm run build:mac -- --publish never -c.mac.identity=null -c.extraMetadata.version=1.0.${GITHUB_RUN_NUMBER}
+      - name: Verify desktop updater assets
+        run: bun apps/desktop/scripts/verify-update-assets.mjs apps/desktop/dist linux 1.0.${GITHUB_RUN_NUMBER}
 
       - name: Upload desktop updater package
         uses: actions/upload-artifact@v4
         with:
-          name: desktop-${{ matrix.asset }}
+          name: desktop-mica-code-linux-x64
+          if-no-files-found: error
           path: |
             apps/desktop/dist/*.AppImage
+            apps/desktop/dist/*.deb
+            apps/desktop/dist/*.snap
+            apps/desktop/dist/*.dmg
             apps/desktop/dist/*.zip
+            apps/desktop/dist/*.exe
             apps/desktop/dist/*.blockmap
-            apps/desktop/dist/latest-*.yml
+            apps/desktop/dist/latest*.yml
 
-  # 即使 CLI 全量检查失败，桌面更新包也要能追加到已有 latest Release。
-  # 如果 publish 已成功，这里只做 clobber；如果 publish 被跳过，则创建 latest。
-  desktop-publish:
-    name: Publish desktop updater packages
-    needs: [desktop, publish]
-    # `desktop` is a matrix: one platform can have a usable artifact even when
-    # another platform runner is cancelled. download-artifact below fails only
-    # if no platform produced anything, otherwise publish what is available.
-    if: ${{ always() && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) }}
-    runs-on: ubuntu-latest
+  # macOS is published only when the runner and a stable Developer ID
+  # certificate are available. A missing macOS secret skips only the macOS
+  # artifact with a visible warning; it must never publish an unsigned package
+  # that Squirrel.Mac cannot install or block a valid Linux update.
+  desktop-mac:
+    name: Build desktop mica-code-mac-arm64
+    if: github.event_name != 'pull_request'
+    runs-on: macos-15
+    outputs:
+      available: ${{ steps.signing.outputs.available }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Download desktop updater packages
-        uses: actions/download-artifact@v4
-        with:
-          pattern: desktop-*
-          path: dist/desktop
-          merge-multiple: true
+      - name: Verify runner architecture
+        run: test "$(uname -m)" = arm64
 
-      - name: Publish desktop updater packages
+      - name: Check macOS signing configuration
+        id: signing
         env:
-          GH_TOKEN: ${{ github.token }}
-          TAG_NAME: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || 'latest' }}
-          RELEASE_TITLE: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || 'Latest' }}
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
         run: |
-          if ! gh release view "$TAG_NAME" >/dev/null 2>&1; then
-            gh release create "$TAG_NAME" \
-              --target "$GITHUB_SHA" \
-              --title "$RELEASE_TITLE" \
-              --notes-file .github/release-notes.md
+          if [[ -z "$CSC_LINK" || -z "$CSC_KEY_PASSWORD" ]]; then
+            echo "::warning::macOS updater package skipped: configure CSC_LINK and CSC_KEY_PASSWORD with a Developer ID Application certificate."
+            echo "available=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=true" >> "$GITHUB_OUTPUT"
           fi
-          gh release upload "$TAG_NAME" dist/desktop/* --clobber
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: apps/desktop/package-lock.json
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install repo dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Install desktop dependencies
+        working-directory: apps/desktop
+        run: npm ci
+
+      - name: Test desktop updater
+        working-directory: apps/desktop
+        run: npm test -- src/main/app-update.test.js src/server/update-check.test.js src/renderer/src/app-update.test.js
+
+      - name: Run real MacUpdater download smoke
+        working-directory: apps/desktop
+        run: node scripts/test-app-update-e2e.mjs
+
+      - name: Build macOS desktop updater package
+        if: steps.signing.outputs.available == 'true'
+        working-directory: apps/desktop
+        env:
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+        run: |
+          rm -rf dist
+          # Clear the local self-signed identity; electron-builder discovers the
+          # imported Developer ID certificate from CSC_LINK.
+          npm run build:mac -- --arm64 --publish never -c.mac.identity= -c.forceCodeSigning=true -c.extraMetadata.version=1.0.${GITHUB_RUN_NUMBER}
+
+      - name: Verify desktop updater assets
+        if: steps.signing.outputs.available == 'true'
+        run: bun apps/desktop/scripts/verify-update-assets.mjs apps/desktop/dist mac 1.0.${GITHUB_RUN_NUMBER}
+
+      - name: Verify signed macOS updater bundle
+        if: steps.signing.outputs.available == 'true'
+        working-directory: apps/desktop
+        run: |
+          bundles=(dist/mac-arm64/*.app)
+          [[ ${#bundles[@]} -eq 1 && -d "${bundles[0]}" ]]
+          test -s "${bundles[0]}/Contents/Resources/app-update.yml"
+          codesign --verify --deep --strict "${bundles[0]}"
+          signature=$(codesign --display --verbose=2 "${bundles[0]}" 2>&1)
+          grep -q '^Authority=Developer ID Application:' <<< "$signature"
+
+      - name: Upload desktop updater package
+        if: steps.signing.outputs.available == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-mica-code-mac-arm64
+          if-no-files-found: error
+          path: |
+            apps/desktop/dist/*.AppImage
+            apps/desktop/dist/*.deb
+            apps/desktop/dist/*.snap
+            apps/desktop/dist/*.dmg
+            apps/desktop/dist/*.zip
+            apps/desktop/dist/*.exe
+            apps/desktop/dist/*.blockmap
+            apps/desktop/dist/latest*.yml
 
   publish:
-    name: Publish release assets
-    needs: [build, desktop]
+    name: Publish CLI release assets
+    needs: [build]
+    if: ${{ needs.build.result == 'success' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) }}
+    concurrency:
+      group: release-assets-publish
+      cancel-in-progress: false
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -254,14 +310,8 @@ jobs:
       - name: Download platform archives
         uses: actions/download-artifact@v4
         with:
+          pattern: mica-code-*
           path: dist/packages
-          merge-multiple: true
-
-      - name: Download desktop updater packages
-        uses: actions/download-artifact@v4
-        with:
-          pattern: desktop-*
-          path: dist/desktop
           merge-multiple: true
 
       - name: Prepare release assets
@@ -292,15 +342,73 @@ jobs:
           TAG_NAME: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || 'latest' }}
           RELEASE_TITLE: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || 'Latest' }}
         run: |
-          # Recreate the mutable release so old bare binaries / payload assets do not linger.
-          if gh release view "$TAG_NAME" >/dev/null 2>&1; then
-            gh release delete "$TAG_NAME" --yes --cleanup-tag
+          # Keep older payloads: clients may still be downloading an older manifest.
+          if ! gh release view "$TAG_NAME" >/dev/null 2>&1; then
+            gh release create "$TAG_NAME" \
+              --target "$GITHUB_SHA" \
+              --title "$RELEASE_TITLE" \
+              --notes-file .github/release-notes.md
           fi
-          gh release create "$TAG_NAME" \
-            --target "$GITHUB_SHA" \
-            --title "$RELEASE_TITLE" \
-            --notes-file .github/release-notes.md \
-            install.sh \
-            dist/packages/*.tar.gz \
-            dist/packages/sha256sums.txt \
-            dist/desktop/*
+          gh release upload "$TAG_NAME" install.sh dist/packages/*.tar.gz dist/packages/sha256sums.txt --clobber
+
+  # Desktop updater assets are published independently from the CLI archives.
+  # The feed in electron-builder.yml intentionally points at the rolling
+  # `latest` Release, so tagged builds also update that same feed.
+  desktop-publish:
+    name: Publish desktop updater assets
+    needs: [desktop-linux, desktop-mac]
+    if: ${{ always() && needs.desktop-linux.result == 'success' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) }}
+    concurrency:
+      group: release-assets-publish
+      cancel-in-progress: false
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download Linux desktop updater package
+        uses: actions/download-artifact@v4
+        with:
+          name: desktop-mica-code-linux-x64
+          path: dist/desktop/linux
+
+      - name: Download macOS desktop updater package
+        if: needs.desktop-mac.result == 'success' && needs.desktop-mac.outputs.available == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: desktop-mica-code-mac-arm64
+          path: dist/desktop/mac
+
+      - name: Re-verify downloaded Linux updater assets
+        run: bun apps/desktop/scripts/verify-update-assets.mjs dist/desktop/linux linux 1.0.${GITHUB_RUN_NUMBER}
+
+      - name: Re-verify downloaded macOS updater assets
+        if: needs.desktop-mac.result == 'success' && needs.desktop-mac.outputs.available == 'true'
+        run: bun apps/desktop/scripts/verify-update-assets.mjs dist/desktop/mac mac 1.0.${GITHUB_RUN_NUMBER}
+
+      - name: Upload desktop updater workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-updater-release
+          if-no-files-found: error
+          path: dist/desktop
+
+      - name: Publish desktop updater assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG_NAME: latest
+          RELEASE_TITLE: Latest
+        run: |
+          if ! gh release view "$TAG_NAME" >/dev/null 2>&1; then
+            gh release create "$TAG_NAME" \
+              --target "$GITHUB_SHA" \
+              --title "$RELEASE_TITLE" \
+              --notes-file .github/release-notes.md
+          fi
+          # Publish payloads first; never expose a manifest whose payload is not uploaded.
+          shopt -s nullglob
+          mapfile -t payloads < <(find dist/desktop -type f ! -name 'latest*.yml' -print | sort)
+          mapfile -t manifests < <(find dist/desktop -type f -name 'latest*.yml' -print | sort)
+          (( ${#payloads[@]} > 0 && ${#manifests[@]} > 0 ))
+          gh release upload "$TAG_NAME" "${payloads[@]}" --clobber
+          gh release upload "$TAG_NAME" "${manifests[@]}" --clobber

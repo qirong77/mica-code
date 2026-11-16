@@ -2,8 +2,8 @@
 
 ## 点击后会发生什么
 
-- 页面每 10 分钟检查一次当前运行时对应的 `main`；从后台切回前台也会检查。源码有新提交时，底部左侧显示「有新版本」。**新提交不等于该平台的安装包已经发布**。
-- 本机 Electron **打包版**找到可用安装包后，点击会开始下载，并显示检查、下载进度或错误。首次点击检查到包时会接着下载，不需要再点一次。
+- 页面每 10 分钟检查一次当前运行时对应的 `main`；原生更新源也会定期检查，从后台切回前台还会补查。源码有新提交时，底部左侧显示「有新提交」。**新提交不等于该平台的安装包已经发布**。
+- 只有带正式更新元数据的 Electron 安装包才会进入下载流程。本机 `build:app` / `pack:app` 是 `electron-builder --dir` 目录包，不保证 `Resources/app-update.yml`，不能当作正式可自更新安装包；这类包只显示模式说明与官方 Release 链接。
 - 下载完成显示「重启更新」。后台检查、窗口切换或打开另一窗口，不会把已下载状态改回「有新版本」，也不会自动安装。
 - 源码 / 开发模式、普通浏览器，以及连接另一台运行时的窗口，只展示版本信息和可点击的更新链接；不执行 `git pull`、覆盖源码或重启远程服务。没有平台包、IPC 被拒绝或网络失败时，页面明确说明原因，不能静默结束。
 
@@ -36,7 +36,11 @@
 
 ## 发布与首次启用
 
-`.github/workflows/build-binaries.yml` 在 `main` 推送时构建 Linux x64 AppImage、macOS arm64 zip / dmg 及对应的 `latest-linux.yml` / `latest-mac.yml` 和 blockmap。版本使用 `1.0.<GitHub Actions run number>`，发布到可变的 `latest` Release；generic provider 指向该 Release 的下载地址。
+正式桌面更新包必须由发布 workflow 产出完整的 manifest 和 payload：Linux 只把**已发布的 AppImage**视为支持；macOS 至少需要 `latest-mac.yml`、zip、`app-update.yml` 以及稳定的正式证书签名。adhoc 或临时本机签名可以运行，不能替代 macOS 发布签名，也不能据此宣称可更新。UI 的新提交提示不等于可安装的新版本。
+
+发布 workflow 应使用官方 `macos-15`（Arm64）runner，并以更新专用测试 gate 阻止不完整发布；macOS 签名通过 `CSC_LINK` / `CSC_KEY_PASSWORD` 提供。macOS runner 不可用或证书未配置时必须明确告警并跳过 macOS 资产，不能上传未签名包，也不能阻断已经通过校验的 Linux 更新。manifest 必须引用实际存在的文件，并校验 SHA512 与 size；artifact 下载后还要再次验证，发布顺序先取并验证 metadata，再取 payload，失败时保留现有 Release，不删除已发布资产。2026-11-16 核查时 Release 仅有 Linux 资产，macOS runner 曾失败；这只是当时的线上状态，不是永久平台规则。
+
+平台能力由主进程根据配置、运行架构、AppImage 运行环境和 macOS 签名门槛判定。当前桌面发布目标只有 **macOS arm64** 和 **Linux x64 AppImage**；Windows、macOS Intel、Linux arm64 没有桌面 CI 包，不能在 UI 或文档中虚称支持。缺少目标包时必须明确显示平台 / 架构原因和官方 Release 链接。完成正式签名发布后，首次启用需要安装该正式包，不能用源码目录包替代。
 
 只有 CI 成功产出并发布了**当前平台可安装的包**，才有下载路径。macOS 还依赖系统认可的签名及安装条件；源码差异提示不能替代这些条件。
 
@@ -44,15 +48,30 @@
 
 ## 主要实现与验证边界
 
-| 文件 | 作用 |
-| --- | --- |
-| `apps/desktop/src/server/update-check.js` | GitHub commit 检查、缓存、单飞和失败保留 |
-| `apps/desktop/src/server/index.js` | 版本 / 安装活动只读接口 |
-| `apps/desktop/src/host/update-activity.js` | turn lease 检查、严格校验和阻塞原因 |
-| `apps/desktop/src/host/chat.js`、`chat-idle.js`、`terminals.js` | 从真实宿主状态和终端注册表导出活动情况 |
-| `apps/desktop/src/main/app-update.js` | 原生状态机、窗口授权、安装确认和二次检查 |
-| `apps/desktop/src/main/index.js` | 汇总原生窗口与页面状态，安装退出标志 |
-| `apps/desktop/src/preload/index.js` | 受限更新桥 |
-| `apps/desktop/src/renderer/src/AppUpdateAction.jsx`、`app-update.js` | 点击动作、模式说明、进度和错误反馈 |
+| 文件                                                                 | 作用                                     |
+| -------------------------------------------------------------------- | ---------------------------------------- |
+| `apps/desktop/src/server/update-check.js`                            | GitHub commit 检查、缓存、单飞和失败保留 |
+| `apps/desktop/src/server/index.js`                                   | 版本 / 安装活动只读接口                  |
+| `apps/desktop/src/host/update-activity.js`                           | turn lease 检查、严格校验和阻塞原因      |
+| `apps/desktop/src/host/chat.js`、`chat-idle.js`、`terminals.js`      | 从真实宿主状态和终端注册表导出活动情况   |
+| `apps/desktop/src/main/app-update.js`                                | 原生状态机、窗口授权、安装确认和二次检查 |
+| `apps/desktop/src/main/index.js`                                     | 汇总原生窗口与页面状态，安装退出标志     |
+| `apps/desktop/src/preload/index.js`                                  | 受限更新桥                               |
+| `apps/desktop/src/renderer/src/AppUpdateAction.jsx`、`app-update.js` | 点击动作、模式说明、进度和错误反馈       |
 
-针对性测试覆盖 Set 窗口集合、权限、点击动作、下载状态保留、活跃 / 未知状态拒绝、取消与确认期间出现新工作。模拟 updater 的测试不调用真实安装器，**不等于验证了真实 macOS / AppImage 替换、签名及重启链路**。
+针对性测试覆盖 Set 窗口集合、权限、点击动作、下载状态保留、活跃 / 未知状态拒绝、取消与确认期间出现新工作。在 `apps/desktop` 中可运行：
+
+```bash
+# 平台与期望版本显式给定，避免把另一平台或残留旧清单当成功
+node scripts/verify-update-assets.mjs dist mac 1.0.675
+npm test -- scripts/verify-update-assets.test.js src/main/app-update.test.js src/renderer/src/app-update.test.js
+
+# macOS：真实 Electron + preload IPC + MacUpdater + 本机 HTTP 更新源
+node scripts/test-app-update-e2e.mjs
+```
+
+期望版本应替换为本次构建版本；Linux 使用 `linux`，Windows 使用 `win`。资产校验覆盖清单引用、SHA-512、大小、路径逃逸及更新器必需文件类型。
+
+下载 E2E 使用独立的 `MICA_HOME` / userData / 端口和合成 ZIP，覆盖缺配置、正常下载、下载状态保留、忙 / 取消 / 远程窗口拦截、404、坏哈希拒绝与恢复、同版本 / 降级拒绝及 DMG-only 拒绝。测试不会调用原生 staging、`quitAndInstall`、签名或替换当前应用，临时数据结束后删除。**这些验证不等于真实 macOS / AppImage 替换、正式签名及重启链路验收。**
+
+官方边界参考：[Electron autoUpdater 的 macOS 签名要求](https://www.electronjs.org/docs/latest/api/auto-updater)、[GitHub-hosted runner 标签](https://docs.github.com/en/actions/reference/runners/github-hosted-runners)。

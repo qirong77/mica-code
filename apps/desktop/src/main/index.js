@@ -1,4 +1,14 @@
-import { app, autoUpdater as nativeAutoUpdater, BrowserWindow, dialog, globalShortcut, ipcMain, nativeTheme, screen, shell } from 'electron'
+import {
+  app,
+  autoUpdater as nativeAutoUpdater,
+  BrowserWindow,
+  dialog,
+  globalShortcut,
+  ipcMain,
+  nativeTheme,
+  screen,
+  shell
+} from 'electron'
 import { spawn } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync, statSync, watch } from 'node:fs'
 import { join } from 'node:path'
@@ -27,17 +37,22 @@ import { resolveLogDir } from '@packages/mica-config/brand.js'
 import { officialPluginManifests } from '@packages/mica-official-plugins/manifests.js'
 import { readDisabledPluginIds, resolvePluginStatePath } from '@packages/mica-plugin/PluginState.js'
 import { createPluginLaunchers } from './plugin-launchers.js'
-import {
-  EDITOR_WINDOW_CHANNEL,
-  createEditorWindows,
-  resolveEditorTarget
-} from './editor-window.js'
+import { EDITOR_WINDOW_CHANNEL, createEditorWindows, resolveEditorTarget } from './editor-window.js'
 import { isDevToolsShortcut } from './devtools-shortcut.js'
-import { CLIENT_CONTEXT_CHANNEL, createClientContextHandler, isClientSenderAllowed } from './client-context.js'
+import {
+  CLIENT_CONTEXT_CHANNEL,
+  createClientContextHandler,
+  isClientSenderAllowed
+} from './client-context.js'
 import { resolveMicaHome } from '@packages/mica-config/index.js'
 import { readPluginData, writePluginData } from '../host/plugin-data-store.js'
 import { autoUpdater } from 'electron-updater'
-import { createAppUpdateController, prepareMacInstaller } from './app-update.js'
+import {
+  createAppUpdateController,
+  hasMacUpdateSignature,
+  prepareMacInstaller,
+  resolveUpdateCapability
+} from './app-update.js'
 import { updateActivityBlockers } from '../host/update-activity.js'
 import { retainHiddenWindow } from './window-retention.js'
 
@@ -106,7 +121,9 @@ async function deliverDesktopIntent(intent) {
     let timer
     const accepted = await Promise.race([
       state.win.webContents.executeJavaScript(script).catch(() => false),
-      new Promise((resolve) => { timer = setTimeout(() => resolve(false), Math.max(0, deadline - Date.now())) })
+      new Promise((resolve) => {
+        timer = setTimeout(() => resolve(false), Math.max(0, deadline - Date.now()))
+      })
     ])
     clearTimeout(timer)
     if (accepted) return
@@ -167,7 +184,8 @@ const editorWindows = createEditorWindows({
   },
   backgroundColor: windowBackgroundColor,
   openExternal: (url) => shell.openExternal(url),
-  onError: (error) => logger('main').warn('editor-window', { message: error?.message || String(error) })
+  onError: (error) =>
+    logger('main').warn('editor-window', { message: error?.message || String(error) })
 })
 
 /** 打开（或端到前端已有的）编辑器窗口；校验过路径之后才到这里。 */
@@ -189,7 +207,10 @@ function isShellSender(event) {
 function stateOfSender(event) {
   const contents = event?.sender
   if (!contents) return null
-  return [...windows].find((item) => !item.win.isDestroyed() && item.win.webContents === contents) || null
+  return (
+    [...windows].find((item) => !item.win.isDestroyed() && item.win.webContents === contents) ||
+    null
+  )
 }
 
 async function readUpdateActivity() {
@@ -201,7 +222,9 @@ async function readUpdateActivity() {
     try {
       const dirty = await Promise.race([
         state.win.webContents.executeJavaScript('window.__micaHasUnsavedEdits?.()'),
-        new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('页面工作状态读取超时')), 1500) })
+        new Promise((_, reject) => {
+          timer = setTimeout(() => reject(new Error('页面工作状态读取超时')), 1500)
+        })
       ])
       if (typeof dirty !== 'boolean') throw new Error('页面尚未就绪，无法确认文件是否保存')
       if (dirty) unsaved += 1
@@ -216,13 +239,17 @@ async function readUpdateActivity() {
   })
   if (!response.ok) throw new Error(`运行时返回 HTTP ${response.status}`)
   const activity = await response.json()
-  return { blockers: updateActivityBlockers({
-    ...activity,
-    terminals: activity.terminals + (terminalHost?.sessions.list().filter((item) => item.running).length || 0),
-    browsers: browserHost?.manager.listBrowsers().length || 0,
-    editors: editorWindows.size,
-    unsaved
-  }) }
+  return {
+    blockers: updateActivityBlockers({
+      ...activity,
+      terminals:
+        activity.terminals +
+        (terminalHost?.sessions.list().filter((item) => item.running).length || 0),
+      browsers: browserHost?.manager.listBrowsers().length || 0,
+      editors: editorWindows.size,
+      unsaved
+    })
+  }
 }
 
 /* ------------------------------------------------------------------ 运行时 */
@@ -1138,34 +1165,59 @@ app.whenReady().then(async () => {
   // app-update.js 在主进程执行，但活动状态由运行时子进程维护。通过一个只读、同机的
   // 地址传递给更新控制器，安装前会再次读取，不能只相信 renderer 看到的当前页签状态。
   const clientHome = process.env.MICA_HOME || resolveMicaHome()
-  ipcMain.handle(CLIENT_CONTEXT_CHANNEL, createClientContextHandler({
-    isAllowedSender: (event) => isClientSenderAllowed(windows, event),
-    manifests: officialPluginManifests,
-    readDisabled: () => readDisabledPluginIds(),
-    readData: (pluginId) => readPluginData(clientHome, pluginId),
-    writeData: (pluginId, value, options) => writePluginData(clientHome, pluginId, value, options),
-    probe: probeRemoteRuntime,
-    // 卡片就在某个窗口里，切过去是换到那台运行时的窗口（页面不重载，没开过的才新开）
-    open: (url, event) => switchWindowTo(stateOfSender(event), url),
-    local: (event) => backToLocalPage(stateOfSender(event)),
-    localHost: () => localPageUrl
-  }))
+  ipcMain.handle(
+    CLIENT_CONTEXT_CHANNEL,
+    createClientContextHandler({
+      isAllowedSender: (event) => isClientSenderAllowed(windows, event),
+      manifests: officialPluginManifests,
+      readDisabled: () => readDisabledPluginIds(),
+      readData: (pluginId) => readPluginData(clientHome, pluginId),
+      writeData: (pluginId, value, options) =>
+        writePluginData(clientHome, pluginId, value, options),
+      probe: probeRemoteRuntime,
+      // 卡片就在某个窗口里，切过去是换到那台运行时的窗口（页面不重载，没开过的才新开）
+      open: (url, event) => switchWindowTo(stateOfSender(event), url),
+      local: (event) => backToLocalPage(stateOfSender(event)),
+      localHost: () => localPageUrl
+    })
+  )
+  const updateCapability = resolveUpdateCapability({
+    isDev: is.dev,
+    isPackaged: app.isPackaged,
+    updater: autoUpdater,
+    platform: process.platform,
+    architecture: process.arch,
+    hasUpdateConfig:
+      app.isPackaged &&
+      typeof process.resourcesPath === 'string' &&
+      existsSync(join(process.resourcesPath, 'app-update.yml')),
+    isAppImage: Boolean(process.env.APPIMAGE),
+    hasMacSignature: process.platform !== 'darwin' || hasMacUpdateSignature(app.getPath('exe'))
+  })
   appUpdater = createAppUpdateController({
     ipcMain,
     updater: autoUpdater,
     getWindows: () => windows,
     isDev: is.dev || !app.isPackaged,
+    capability: updateCapability,
     getActivity: readUpdateActivity,
-    prepareInstall: () => process.platform === 'darwin'
-      ? prepareMacInstaller({ nativeUpdater: nativeAutoUpdater, isReady: () => autoUpdater.squirrelDownloadedUpdate === true })
-      : Promise.resolve(),
-    onInstalling: (value) => { quitting = value },
+    prepareInstall: () =>
+      process.platform === 'darwin'
+        ? prepareMacInstaller({
+            nativeUpdater: nativeAutoUpdater,
+            isReady: () => autoUpdater.squirrelDownloadedUpdate === true
+          })
+        : Promise.resolve(),
+    onInstalling: (value) => {
+      quitting = value
+    },
     confirmInstall: async () => {
       const result = await dialog.showMessageBox({
         type: 'question',
         title: '更新 Mica Code',
         message: '现在重启并安装更新吗？',
-        detail: '将关闭应用的所有窗口并安装更新，完成后重新打开。会话历史会保留，但不会自动续跑上一轮任务。',
+        detail:
+          '将关闭应用的所有窗口并安装更新，完成后重新打开。会话历史会保留，但不会自动续跑上一轮任务。',
         buttons: ['取消', '重启更新'],
         defaultId: 0,
         cancelId: 0,
@@ -1188,7 +1240,9 @@ app.whenReady().then(async () => {
     manifests: officialPluginManifests,
     readDisabled: readDisabledPluginIds,
     statePath: resolvePluginStatePath(),
-    BrowserWindow, globalShortcut, screen,
+    BrowserWindow,
+    globalShortcut,
+    screen,
     pageUrl: localPageUrl,
     backgroundColor: windowBackgroundColor,
     deliver: deliverDesktopIntent,

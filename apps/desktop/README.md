@@ -42,16 +42,16 @@ bun run test -- packages/mica-agent/providers/piModelClient.test.ts
 
 以下命令在本目录执行。构建会产出新文件；运行中的应用何时重启由开发者决定。
 
-| 命令 | 结果 |
-| --- | --- |
-| `npm run build` | 并行构建并安装 CLI、构建 Electron 外壳/renderer、构建 Web 运行时 |
-| `npm run build:server` | 只构建 `out/server/index.mjs` |
-| `npm run build:app` | 完整构建、打包本机 `.app` 并执行本机快速签名 |
-| `npm run pack:app` | 将现有产物打包为应用目录，跳过 electron-builder 签名 |
-| `npm run sign:app` | 对现有 `.app` 执行本机签名；无证书时跳过 |
-| `npm run build:mac` | 完整构建并生成 macOS 发布包 |
-| `npm run build:win` / `build:linux` | 构建对应平台发布包 |
-| `npm run start:web` | 启动已有的 Web 运行时 |
+| 命令                                | 结果                                                                               |
+| ----------------------------------- | ---------------------------------------------------------------------------------- |
+| `npm run build`                     | 并行构建并安装 CLI、构建 Electron 外壳/renderer、构建 Web 运行时                   |
+| `npm run build:server`              | 只构建 `out/server/index.mjs`                                                      |
+| `npm run build:app`                 | 完整构建、打包本机 `.app` 并执行本机快速签名（`--dir` 可运行包，不是正式自更新包） |
+| `npm run pack:app`                  | 将现有产物打包为应用目录，跳过 electron-builder 签名（不保证 `app-update.yml`）    |
+| `npm run sign:app`                  | 对现有 `.app` 执行本机签名；无证书时跳过                                           |
+| `npm run build:mac`                 | 完整构建并生成 macOS 发布包                                                        |
+| `npm run build:win` / `build:linux` | 构建对应平台发布包                                                                 |
+| `npm run start:web`                 | 启动已有的 Web 运行时                                                              |
 
 `build` 会调用根目录的 `bun run build`，默认更新 `~/.local/lib/mica` 与 `~/.local/bin/mica`。保留发布版时使用根 README 中的独立安装目录。构建锁、macOS 签名与跨平台条件只在 [agent/build.md](../../agent/build.md) 维护。
 
@@ -67,17 +67,17 @@ npm run start:web -- --host 127.0.0.1 --port 8787 --no-share
 
 ## 源码边界
 
-| 路径 | 职责 |
-| --- | --- |
-| `src/host/` | 对话宿主、文件、Git、统计、工作区终端与持久化等业务 |
-| `src/server/index.js` | 托管页面，提供 `/api/invoke` 与 SSE，实施访问守卫 |
-| `src/main/` | Electron 容器、导航、窗口生命周期、浏览器/终端控制、系统检查 |
-| `src/preload/index.js` | 固定的 `window.micaClient` 客户端能力桥 |
-| `src/renderer/` | 页面、HTTP/SSE transport 与视图状态 |
-| `../../packages/mica-web-shared/` | 跨宿主的地址、主题、状态、展示和用量纯逻辑 |
-| `../../packages/mica-config-ui/` | 配置页及 Arco 共享控件 |
-| `../../packages/mica-editor/` | Notebook 与 Markdown 共用的隔离 Lexical 编辑器 |
-| `../../plugins/` | 清单驱动的产品能力及其桌面模块 |
+| 路径                              | 职责                                                         |
+| --------------------------------- | ------------------------------------------------------------ |
+| `src/host/`                       | 对话宿主、文件、Git、统计、工作区终端与持久化等业务          |
+| `src/server/index.js`             | 托管页面，提供 `/api/invoke` 与 SSE，实施访问守卫            |
+| `src/main/`                       | Electron 容器、导航、窗口生命周期、浏览器/终端控制、系统检查 |
+| `src/preload/index.js`            | 固定的 `window.micaClient` 客户端能力桥                      |
+| `src/renderer/`                   | 页面、HTTP/SSE transport 与视图状态                          |
+| `../../packages/mica-web-shared/` | 跨宿主的地址、主题、状态、展示和用量纯逻辑                   |
+| `../../packages/mica-config-ui/`  | 配置页及 Arco 共享控件                                       |
+| `../../packages/mica-editor/`     | Notebook 与 Markdown 共用的隔离 Lexical 编辑器               |
+| `../../plugins/`                  | 清单驱动的产品能力及其桌面模块                               |
 
 对话宿主使用 CLI 的 `mica app-server`，通过 stdio 交换 Codex v2 风格协议子集；浏览器页面使用 HTTP/SSE 访问 Web 运行时。两个接口的用途与支持范围见 [Headless 设计](../../docs/headless-design.md) 与 [客户端接入](../../docs/multica-runtime.md)。
 
