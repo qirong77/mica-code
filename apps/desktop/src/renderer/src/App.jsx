@@ -46,6 +46,7 @@ import { readAppUrl, sessionShareUrl, urlWithState } from './app-url'
 import { TextPrompt } from './text-prompt'
 import { copyText } from './transport'
 import { StatusBarAction } from './StatusBarAction'
+import { AppUpdateAction } from './AppUpdateAction'
 
 // 启动必需的三块留在入口：侧栏（会话列表）、对话视图、分支选择。
 // 其余视图各自带着自己的重依赖（FilesView→monaco、TerminalHost→xterm），
@@ -3201,23 +3202,26 @@ export default function App() {
               view === 'files' ? 'hidden' : 'flex'
             }`}
           >
-            {gitIsCurrent && git.status?.root ? (
-              <StatusBarAction
-                ref={branchButtonRef}
-                type="button"
-                title="切换或创建 Git 分支"
-                aria-haspopup="dialog"
-                aria-expanded={branchPickerOpen}
-                // 有路径时给分支名封顶并把宽度让给路径；没有路径就用满可用宽度。
-                className={`-ml-1.5 flex h-full items-center gap-1.5 px-1.5 mica-arco-row text-left ${
-                  activeCwd ? 'max-w-[45%] shrink-0' : 'min-w-0'
-                }`}
-                onClick={() => setBranchPickerOpen(true)}
-              >
-                <IconGitBranch size={13} className="shrink-0" />
-                <span className="truncate">{git.status.branch || 'detached'}</span>
-              </StatusBarAction>
-            ) : null}
+            <div className="flex min-w-0 items-center gap-1">
+              <AppUpdateAction />
+              {gitIsCurrent && git.status?.root ? (
+                <StatusBarAction
+                  ref={branchButtonRef}
+                  type="button"
+                  title="切换或创建 Git 分支"
+                  aria-haspopup="dialog"
+                  aria-expanded={branchPickerOpen}
+                  // 有路径时给分支名封顶并把宽度让给路径；没有路径就用满可用宽度。
+                  className={`-ml-1.5 flex h-full items-center gap-1.5 px-1.5 mica-arco-row text-left ${
+                    activeCwd ? 'max-w-[45%] shrink-0' : 'min-w-0'
+                  }`}
+                  onClick={() => setBranchPickerOpen(true)}
+                >
+                  <IconGitBranch size={13} className="shrink-0" />
+                  <span className="truncate">{git.status.branch || 'detached'}</span>
+                </StatusBarAction>
+              ) : null}
+            </div>
             {activeCwd && (
               <StatusBarAction
                 ref={cwdButtonRef}

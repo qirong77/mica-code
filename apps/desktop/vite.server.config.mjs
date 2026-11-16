@@ -1,6 +1,23 @@
 import { builtinModules } from 'node:module'
+import { execFileSync } from 'node:child_process'
 import { resolve } from 'node:path'
 import { defineConfig } from 'vite'
+
+const REPOSITORY_ROOT = resolve('../..')
+
+function readBuildCommit() {
+  const explicit = process.env.MICA_BUILD_COMMIT || process.env.GITHUB_SHA
+  if (explicit) return explicit
+  try {
+    return execFileSync('git', ['-C', REPOSITORY_ROOT, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim()
+  } catch {
+    return 'unknown'
+  }
+}
+
+function readBuildTime() {
+  return process.env.MICA_BUILD_TIME || new Date().toISOString()
+}
 
 /**
  * HTTP 服务端构建：把 src/server 入口连同 src/main 下的业务模块打成一个 Node ESM 包，
@@ -12,6 +29,10 @@ import { defineConfig } from 'vite'
 const external = [...builtinModules, ...builtinModules.map((name) => `node:${name}`), 'node-pty']
 
 export default defineConfig({
+  define: {
+    __MICA_BUILD_COMMIT__: JSON.stringify(readBuildCommit()),
+    __MICA_BUILD_TIME__: JSON.stringify(readBuildTime())
+  },
   plugins: [
     {
       name: 'text-import',

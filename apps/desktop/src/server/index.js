@@ -112,6 +112,7 @@ import { initializeDesktopProcessPath, stripContainerEnv } from '../host/desktop
 import { warmShellEnv } from '../host/shell-env.js'
 import { saveImageDataUrl } from '../host/chat-images.js'
 import { decodeDataUrl, saveAttachmentBytes } from '../host/attachments.js'
+import { defaultUpdateChecker, UPDATE_BUILD_TIME, UPDATE_COMMIT } from './update-check.js'
 
 // host 通道统一计时：一次调用超过阈值就记 slow，并累计到 slowReport。
 const invokeLog = logger('invoke')
@@ -1083,7 +1084,9 @@ function createRequestHandler({
           return sendJson(res, 200, {
             ok: true,
             app: 'mica-code-app',
-            access: accessPolicy.enabled ? 'password' : 'off'
+            access: accessPolicy.enabled ? 'password' : 'off',
+            commit: UPDATE_COMMIT,
+            buildTime: UPDATE_BUILD_TIME
           })
         }
 
@@ -1092,6 +1095,9 @@ function createRequestHandler({
           // 任意网页替访客静默请求本机），过了这一关的客户端一律是对等的完整客户端。
           const origin = verifyRequestOrigin(req)
           if (!origin.ok) return sendJson(res, origin.status, { ok: false, error: origin.error })
+          if (req.method === 'GET' && url.pathname === '/api/update/check') {
+            return sendJson(res, 200, await defaultUpdateChecker.check({ force: url.searchParams.get('force') === '1' }))
+          }
           if (req.method === 'POST' && url.pathname === '/api/invoke')
             return await handleInvoke(req, res)
           if (req.method === 'POST' && url.pathname === '/api/paste-image')
@@ -1105,6 +1111,8 @@ function createRequestHandler({
             return sendJson(res, 200, {
               platform: process.platform,
               homeDir: process.env.HOME || '',
+              commit: UPDATE_COMMIT,
+              buildTime: UPDATE_BUILD_TIME,
               // 当前绑定端口与分享视图的地址：页面用它拼分享链接（`shareBaseUrl` 在
               // access:info 里另有一份「别人能连到」的地址）。
               sharePath: SHARE_BASE_PATH,

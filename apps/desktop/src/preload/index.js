@@ -2,6 +2,7 @@
 const { contextBridge, ipcRenderer } = require('electron')
 const invoke = (operation, payload = {}) =>
   ipcRenderer.invoke('mica:client-context', operation, payload)
+const update = (action) => ipcRenderer.invoke('mica:app-update', action)
 
 if (process.isMainFrame) {
   contextBridge.exposeInMainWorld('micaClient', {
@@ -17,6 +18,17 @@ if (process.isMainFrame) {
       }),
     probe: (address) => invoke('probe', { address }),
     open: (url) => invoke('open', { url }),
-    local: () => invoke('local')
+    local: () => invoke('local'),
+    appUpdate: {
+      check: () => update('check'),
+      download: () => update('download'),
+      install: () => update('install'),
+      onStatus: (callback) => {
+        if (typeof callback !== 'function') return () => {}
+        const listener = (_event, status) => callback(status)
+        ipcRenderer.on('mica:update-status', listener)
+        return () => ipcRenderer.removeListener('mica:update-status', listener)
+      }
+    }
   })
 }

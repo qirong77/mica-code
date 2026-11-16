@@ -32,6 +32,8 @@ import { CLIENT_CONTEXT_CHANNEL, createClientContextHandler, isClientSenderAllow
 import { resolveMicaHome } from '@packages/mica-config/index.js'
 import { readPluginData, writePluginData } from '../host/plugin-data-store.js'
 import { retainHiddenWindow } from './window-retention.js'
+import { autoUpdater } from 'electron-updater'
+import { createAppUpdateController } from './app-update.js'
 
 /**
  * Electron 外壳。
@@ -78,6 +80,7 @@ applyBrowserRenderSwitch(app.commandLine, process.env)
 let runtime = null
 let quitting = false
 let pluginLaunchers = null
+let appUpdater = null
 
 /** Deliver native intents to the local editor, including when its window was hidden. */
 async function deliverDesktopIntent(intent) {
@@ -1027,6 +1030,13 @@ app.whenReady().then(async () => {
     local: () => backToLocalPage(null),
     localHost: () => localPageUrl
   }))
+  appUpdater = createAppUpdateController({
+    ipcMain,
+    updater: autoUpdater,
+    getWindows: () => windows,
+    isDev: is.dev
+  })
+  appUpdater.register()
   // 只开本机窗口：另一台机器上的服务器各占一个新窗口，由页面里「切换 Mica 服务器」当场开
   createWindow(localPageUrl, { primary: true })
   pluginLaunchers = createPluginLaunchers({
@@ -1061,6 +1071,7 @@ app.on('window-all-closed', (event) => {
 
 app.on('before-quit', () => {
   quitting = true
+  appUpdater?.dispose()
   app.setBadgeCount(0)
   if (process.platform === 'darwin' && app.dock) app.dock.setBadge('')
   for (const state of windows) stopUnreadWatcher(state)
