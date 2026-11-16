@@ -21,6 +21,7 @@ import {
   IconClipboard,
   IconCopy,
   IconDots,
+  IconExternalLink,
   IconFilePlus,
   IconFiles,
   IconFolderOpen,
@@ -156,7 +157,7 @@ function EmptyEditorWatermark() {
   )
 }
 
-function FileContextMenu({ menu, onAction, onClose, gitRoot }) {
+function FileContextMenu({ menu, onAction, onClose, gitRoot, canOpenWindow = false }) {
   const directory = menu.node.type === 'directory'
   // 只有一个仓库时才有「回退到已提交状态」这件事可说。这里不按路径前缀判断「这个目录在
   // 仓库里」：仓库根是 host 给的 realpath（macOS 上是 `/private/tmp/...`），而树里的路径
@@ -189,6 +190,10 @@ function FileContextMenu({ menu, onAction, onClose, gitRoot }) {
       ? [{ id: 'copy-relative-path', label: '复制相对路径', icon: IconClipboard }]
       : []),
     { id: 'reveal', label: '在文件管理器中显示', icon: IconFolderOpen },
+    // 只有桌面外壳开得了窗口：浏览器（手机、分享链接）里这一项不出现。
+    ...(canOpenWindow
+      ? [{ id: 'open-in-window', label: '在新窗口打开', icon: IconExternalLink }]
+      : []),
     {
       id: 'open-terminal',
       label: directory ? '在终端中打开' : '在终端中打开所在文件夹',
@@ -286,7 +291,8 @@ export const FilesView = forwardRef(function FilesView(
     gitLoading,
     gitBranch,
     onRefreshGit,
-    onOpenTerminal
+    onOpenTerminal,
+    onActivePathChange
   },
   ref
 ) {
@@ -1327,6 +1333,11 @@ export const FilesView = forwardRef(function FilesView(
           await window.mica.files.reveal(node.path)
           return
         }
+        // 新窗口由桌面外壳开（页面只递路径）：当前窗口保持不动，适合把一份文件摆到旁边看。
+        if (action === 'open-in-window') {
+          await window.micaClient.openEditorWindow(node.path)
+          return
+        }
         // 在编辑器底部终端里开一个 shell：目录直接进去，文件落到它所在的文件夹。
         if (action === 'open-terminal') {
           onOpenTerminal?.(node.type === 'directory' ? node.path : dirOf(node.path))
@@ -1687,6 +1698,11 @@ export const FilesView = forwardRef(function FilesView(
     })
   }, [activePath, tabs.length])
 
+  // 编辑器窗口的底栏要知道「现在看的是哪个文件」；主窗口不需要（它显示的是页面目录）。
+  useEffect(() => {
+    onActivePathChange?.(activePath || null)
+  }, [activePath, onActivePathChange])
+
   const handleTabKeyDown = useCallback(
     (event, path) => {
       if (['Enter', ' '].includes(event.key)) {
@@ -2045,6 +2061,7 @@ export const FilesView = forwardRef(function FilesView(
           menu={contextMenu}
           onAction={runFileAction}
           onClose={() => setContextMenu(null)}
+          canOpenWindow={typeof window.micaClient?.openEditorWindow === 'function'}
           /* 回退只需要「这个目录属于哪个仓库」：仓库根优先，拿不到就用页面目录，
              `git:discard-dir` 自己会往上找到仓库（与比较面板的 `cwd` 同一口径）。 */
           gitRoot={gitRepository?.root || gitCwd || null}

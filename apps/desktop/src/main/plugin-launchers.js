@@ -1,6 +1,5 @@
 import { watchFile, unwatchFile } from 'node:fs'
-import { stat } from 'node:fs/promises'
-import { isAbsolute } from 'node:path'
+import { resolveEditorTarget } from './editor-window.js'
 
 /** Native lifecycle for manifest-declared launchers. No session process is needed. */
 export function createPluginLaunchers({
@@ -13,6 +12,7 @@ export function createPluginLaunchers({
   pageUrl,
   backgroundColor,
   deliver,
+  openEditorWindow,
   platform = process.platform,
   onError = console.warn
 }) {
@@ -162,11 +162,9 @@ export function createPluginLaunchers({
       return {}
     }
     if (action === 'openPath') {
-      if (typeof path !== 'string' || !isAbsolute(path))
-        throw new Error('需要文件或文件夹的绝对路径')
-      const info = await stat(path)
-      if (!info.isFile() && !info.isDirectory()) throw new Error('只能打开文件或文件夹')
-      await deliver({ type: 'openPath', path })
+      // 搜索结果默认落在**新开的编辑器窗口**上：当前窗口（可能在对话里、可能连着别的
+      // 机器）保持不动，看文件是一件并行的事。
+      await openEditorWindow(await resolveEditorTarget(path))
     } else if (action === 'configure') {
       await deliver({ type: 'configurePlugin', pluginId })
     } else throw new Error('不支持的启动器动作')

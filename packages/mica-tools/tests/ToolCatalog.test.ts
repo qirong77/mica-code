@@ -1,13 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { getToolCatalog, registerRuntimeTool, unregisterRuntimeTool } from '../registry.js';
+import { getToolCatalog, getToolDefinitions, registerRuntimeTool, unregisterRuntimeTool } from '../registry.js';
 
 describe('tool catalog', () => {
-  it('groups the pty family under one key', () => {
+  it('does not register the removed PTY tools', () => {
     const catalog = getToolCatalog();
-    const pty = catalog.filter((tool) => tool.name.startsWith('pty_'));
-    expect(pty).toHaveLength(5);
-    expect(new Set(pty.map((tool) => tool.group?.key))).toEqual(new Set(['pty']));
-    expect(new Set(pty.map((tool) => tool.group?.label))).toEqual(new Set(['交互终端']));
+    const removedNames = ['pty_spawn', 'pty_send', 'pty_read', 'pty_wait', 'pty_kill'];
+    expect(catalog.some((tool) => removedNames.includes(tool.name))).toBe(false);
+    expect(getToolDefinitions().some((tool) => removedNames.includes(tool.name))).toBe(false);
   });
 
   it('leaves tools without a shared prefix ungrouped', () => {

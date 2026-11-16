@@ -37,6 +37,9 @@ const OPERATIONS = new Set(['context', 'read-data', 'write-data', 'probe', 'open
  * manifests is an array (or an async function returning one) of parsed manifests.
  * readDisabled() returns an iterable of disabled ids. Data results, including CAS
  * conflicts, pass through unchanged. Omitted expectedVersion stays omitted.
+ *
+ * `open(url, event)` / `local(event)` receive the IPC event because both act on **the window
+ * that asked** (switch / return in place), not on some window chosen by the shell.
  */
 export function createClientContextHandler({
   isAllowedSender,
@@ -99,11 +102,11 @@ export function createClientContextHandler({
           if (!target || !['http:', 'https:'].includes(target.protocol)) {
             throw new Error('Only HTTP and HTTPS URLs are supported')
           }
-          result = await open(body.url)
+          result = await open(body.url, event)
           break
         }
         case 'local':
-          result = await local()
+          result = await local(event)
           break
         case 'context':
           result = { localHost: await localHost() }

@@ -9,7 +9,7 @@ import { createClientContextApi } from './client-context'
  * 宿主换实现时插件不用改。
  *
  * `open` 反过来是纯页面能力：打开另一个运行时就是一次 `location.assign`，外壳接管它
- * 并弹出新窗口（见 src/main/index.js 的 will-navigate），浏览器里开新标签页。
+ * 并让当前窗口加载那个地址（见 src/main/index.js 的 will-navigate），浏览器里开新标签页。
  *
  * `action` 是「卡片要真的干一件事」：刷新一批数据、试连一次接口。页面里没有插件自己的
  * 代码，所以只能按清单里声明过的 key 请宿主去跑——执行它的是 `mica plugin-action`，
@@ -24,8 +24,9 @@ export function currentRuntimeAddress() {
 /**
  * 打开另一个运行时的地址。
  *
- * 外壳里交给主进程：`location.assign` 触发的导航会被 `will-navigate` 接管，改成弹出新
- * 窗口、本窗口不动。浏览器里开新标签页，被弹窗拦截时退回本标签页。依赖可注入，便于单测。
+ * 外壳里交给主进程：`location.assign` 触发的导航会被 `will-navigate` 接管，改成判定目标
+ * 后让当前窗口加载它（一个窗口，切换＝重载）；不是 Mica 运行时的地址交回系统浏览器。
+ * 浏览器里开新标签页，被弹窗拦截时退回本标签页。依赖可注入，便于单测。
  */
 export function openRuntimeTarget(url, { userAgent, open, assign } = {}) {
   const agent = userAgent ?? (typeof navigator === 'undefined' ? '' : navigator.userAgent)
@@ -112,7 +113,7 @@ export function createPluginHostApi(pluginId, session = null) {
       get: () => host.access(),
       set: (patch) => host.setAccess(patch)
     },
-    /** 打开另一个运行时：外壳里开新窗口，浏览器里开新标签页。 */
+    /** 打开另一个运行时：外壳里当前窗口加载它，浏览器里开新标签页。 */
     open: (url) => openRuntimeTarget(url),
     /**
      * 这个插件自己画在会话行上的标记（`session-annotations.json` 的 `options`）。

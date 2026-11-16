@@ -154,6 +154,22 @@
   color: inherit;
 }
 
+/* VS Code 行：[应用] → [文件/文件夹]。图标组和后一个图标贴紧、跟行状态一起变亮，
+   同一路径的两条记录只差行首这一段；目录列右对齐，所以两行仍然对齐到同一条右边。 */
+.global-search-row-editor {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 2px;
+  margin-right: -4px;
+  color: var(--color-fg-muted, var(--text-soft));
+}
+
+.global-search-row:hover .global-search-row-editor,
+.global-search-row[aria-selected='true'] .global-search-row-editor {
+  color: inherit;
+}
+
 .global-search-row-name {
   min-width: 0;
   flex: 0 1 auto;

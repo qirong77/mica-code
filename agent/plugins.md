@@ -223,15 +223,15 @@ macOS 浮窗只取键盘焦点、不连带唤起主应用；原生窗口策略�
 - 通过 `CommandRuntimeServices` / active proxy 注入依赖；耗时且改状态的命令走 exclusive task。
 - turn 运行中是否可执行由注册时的 `allowDuringTurn` 决定；exclusive task 期间仅 status、task、agents、new。
 
-## 工具与 PTY
+## 工具与程序化 PTY
 
 - `mica-tools` 是唯一 registry，产品工具优先经插件 `ctx.tools.register()`；新增工具继承 `MicaTool`，声明 schema、展示、错误格式与 `readOnly`。
 - 工具名一律 snake_case 全小写；历史遗留名登记在 `mica-common/toolNames.ts`，读取处统一过 `normalizeToolName`。
-- `readOnly` 分类受 `MicaTool.test.ts` 约束：纯查询为 true；写文件、patch、shell、kill、PTY、wait 为 false。
+- `readOnly` 分类受 `MicaTool.test.ts` 约束：纯查询为 true；写文件、patch、shell、kill、wait 为 false。
 - 执行类工具按「启动 / 等待 / 查看」拆开：`run_shell` 只跑前台命令（≤120s）；`background_tasks_start` 启动并立即返回 id；`wait_for` 只观察条件。
-- `overlappable: true`（`wait_for` / `pty_wait`）或 `canOverlap(input)`（`agent` 仅 await/join）表示可与同消息其余调用重叠；加入前确认无写副作用。
+- `overlappable: true`（`wait_for`）或 `canOverlap(input)`（`agent` 仅 await/join）表示可与同消息其余调用重叠；加入前确认无写副作用。
 - 只在会话里注册的工具（`agent`、`todo_write`、`session_peers`、`session_notes`、`harness_review`）在配置页/设置页由 `RUNTIME_TOOL_DESCRIPTORS` 兜底列出，改描述要同步 `runtimeToolDescriptors.test.ts`。每条描述带 `pluginId`：注册它的插件停用时 `getToolCatalog()` 跳过这一行。真正装配插件的宿主（TUI、`mica app-server`）在 setup 之前还会调 `micaTools.setRuntimeToolFallback(false)` 整块关掉兜底——那里注册表就是唯一事实来源，否则停用一个插件之后它的工具仍会被静态描述补回目录（用户在能力面板里看到「关掉了却还在」）。配置页 / 桌面设置页这些不加载插件的宿主保持开启。
-- PTY 由懒启动的 Node helper（`mica-pty/src/server.mjs`）承载；改 `server.mjs` 后跑 `bun run scripts/generate-pty-server-source.mjs` 同步 `ptyServerSource.ts`。
+- 程序化 PTY 会话由 `PtyManager` 懒启动的 Node helper（`mica-pty/src/server.mjs`）承载；改 `server.mjs` 后跑 `bun run scripts/generate-pty-server-source.mjs` 同步 `ptyServerSource.ts`。
 
 ### Todo
 

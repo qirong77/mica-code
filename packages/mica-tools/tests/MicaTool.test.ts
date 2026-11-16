@@ -115,11 +115,6 @@ describe('getToolDefinitions', () => {
         'background_tasks_start',
         'background_tasks_kill',
         'wait_for',
-        'pty_spawn',
-        'pty_send',
-        'pty_read',
-        'pty_wait',
-        'pty_kill',
       ]) {
         expect(isToolReadOnly(name), `${name} must NOT be read-only`).toBe(false);
       }

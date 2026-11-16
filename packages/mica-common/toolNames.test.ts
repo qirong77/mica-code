@@ -11,7 +11,7 @@ describe('normalizeToolName', () => {
   });
 
   it('keeps names that never changed', () => {
-    for (const name of ['read_file', 'run_shell', 'session_peers', 'pty_spawn', 'apply_patch']) {
+    for (const name of ['read_file', 'run_shell', 'session_peers', 'background_tasks_start', 'apply_patch']) {
       expect(normalizeToolName(name)).toBe(name);
     }
   });

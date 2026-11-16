@@ -261,7 +261,7 @@ export async function resolveNodePtyEntry(): Promise<string> {
   attempted.push('全局 npm / homebrew / nvm 目录: 未找到');
 
   throw new Error(
-    'PTY 工具不可用：未找到 node-pty 依赖。\n' +
+    'PTY 会话不可用：未找到 node-pty 依赖。\n' +
       '已尝试:\n' +
       attempted.map((line) => `  - ${line}`).join('\n') +
       '\n修复方式（任选其一）:\n' +

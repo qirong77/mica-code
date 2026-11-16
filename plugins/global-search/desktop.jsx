@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
-import { AlertCircle, File, Folder, Loader2, Search, Settings2, X } from 'lucide-react';
+import { AlertCircle, ArrowRight, File, Folder, Loader2, Search, Settings2, SquareCode, X } from 'lucide-react';
 import { ArcoAction, Input } from '@mica-config-ui/web';
 import './desktop.css';
 
 export const card = { width: 640 };
+
+const DEFAULT_EDITOR_APP = 'Visual Studio Code';
 
 function errorText(error) {
   return error instanceof Error ? error.message : String(error);
@@ -29,6 +31,19 @@ function displayPath(value, { parent = false, keep = 4 } = {}) {
   const parts = home.split('/').filter(Boolean);
   if (parts.length <= keep) return home;
   return `…/${parts.slice(-keep).join('/')}`;
+}
+
+/**
+ * 每条结果展开成两行（VsGo 的同一套路）：上面一行用 VS Code 打开，下面一行在 Mica 的
+ * **新编辑器窗口**里打开（当前窗口不动）。行首图标组就是两条记录的区别，键盘仍然逐行
+ * 移动——敲完关键词直接回车落在第一行，也就是 VS Code。
+ */
+export function buildRows(items, editor) {
+  return items.flatMap((item) => {
+    const mica = { key: `${item.path}::mica`, item, kind: 'mica' };
+    if (!editor?.available) return [mica];
+    return [{ key: `${item.path}::editor`, item, kind: 'editor' }, mica];
+  });
 }
 
 export function Launcher({ api, onClose }) {
@@ -158,21 +173,27 @@ export function Launcher({ api, onClose }) {
   };
 
   const items = result?.items ?? [];
+  const editor = result?.editor;
+  const editorLabel = editor?.app || DEFAULT_EDITOR_APP;
+  const rows = buildRows(items, editor);
   const blocked = loading || opening;
-  const openItem = async (item) => {
-    if (loading || openingRef.current || !item || !items.includes(item)) return;
+  const openItem = async (row) => {
+    if (loading || openingRef.current || !row || !rows.includes(row)) return;
+    const item = row.item;
     openingRef.current = true;
     setOpening(true);
     setError('');
     let opened = false;
     try {
-      checkResult(await launcher.openPath(item.path));
+      if (row.kind === 'editor') checkResult(await launcher.request('openEditor', { path: item.path }));
+      else checkResult(await launcher.openPath(item.path));
       opened = true;
       checkResult(await launcher.request('remember', { path: item.path }));
       await close();
     } catch (cause) {
       if (mounted.current) {
-        setError(`${opened ? '已在 Mica 打开，但无法记录最近打开：' : '无法打开：'}${errorText(cause)}`);
+        const failure = row.kind === 'editor' ? `无法用 ${editorLabel} 打开：` : '无法打开：';
+        setError(`${opened ? '已打开，但无法记录最近打开：' : failure}${errorText(cause)}`);
       }
     } finally {
       openingRef.current = false;
@@ -198,11 +219,11 @@ export function Launcher({ api, onClose }) {
     if (event.key === 'Enter' && event.target !== inputRef.current?.dom) return;
     event.preventDefault();
     event.stopPropagation();
-    if (blocked || !items.length) return;
-    if (event.key === 'Enter') void openItem(items[active]);
+    if (blocked || !rows.length) return;
+    if (event.key === 'Enter') void openItem(rows[active]);
     else if (event.key === 'Home') setActive(0);
-    else if (event.key === 'End') setActive(items.length - 1);
-    else setActive((value) => Math.max(0, Math.min(items.length - 1, value + (event.key === 'ArrowDown' ? 1 : -1))));
+    else if (event.key === 'End') setActive(rows.length - 1);
+    else setActive((value) => Math.max(0, Math.min(rows.length - 1, value + (event.key === 'ArrowDown' ? 1 : -1))));
   };
 
   const roots = result?.roots ?? [];
@@ -230,7 +251,7 @@ export function Launcher({ api, onClose }) {
           aria-autocomplete="list"
           aria-controls={listId}
           aria-expanded={items.length > 0}
-          aria-activedescendant={!blocked && items[active] ? `${listId}-${active}` : undefined}
+          aria-activedescendant={!blocked && rows[active] ? `${listId}-${active}` : undefined}
           autoComplete="off"
           spellCheck={false}
           onCompositionStart={() => {
@@ -295,6 +316,16 @@ export function Launcher({ api, onClose }) {
         </div>
       ) : null}
 
+      {editor && editor.available === false && items.length ? (
+        <div className="global-search-notice">
+          <AlertCircle size={13} aria-hidden="true" />
+          <span>没有找到 {editorLabel}，暂时只能用 Mica 编辑器打开。</span>
+          <ArcoAction className="shrink-0 whitespace-nowrap p-0" disabled={opening} onClick={() => void configure()}>
+            设置
+          </ArcoAction>
+        </div>
+      ) : null}
+
       {error ? (
         <div role="alert" className="global-search-notice is-error">
           <span>{error}</span>
@@ -310,28 +341,39 @@ export function Launcher({ api, onClose }) {
           aria-busy={loading}
           className="global-search-list"
         >
-          {items.map((item, index) => (
+          {rows.map((row, index) => (
             <li
-              key={item.path}
+              key={row.key}
               id={`${listId}-${index}`}
               role="option"
               aria-selected={active === index}
               aria-disabled={blocked || undefined}
+              aria-label={
+                row.kind === 'editor'
+                  ? `用 ${editorLabel} 打开 ${row.item.name}`
+                  : `在 Mica 编辑器窗口打开 ${row.item.name}`
+              }
               data-result-index={index}
-              title={item.path}
+              title={row.item.path}
               className="global-search-row"
               onMouseMove={() => setActive(index)}
               onMouseDown={(event) => event.preventDefault()}
               onClick={() => {
                 setActive(index);
-                void openItem(item);
+                void openItem(row);
               }}
             >
+              {row.kind === 'editor' ? (
+                <span className="global-search-row-editor" aria-hidden="true">
+                  <SquareCode size={14} />
+                  <ArrowRight size={12} />
+                </span>
+              ) : null}
               <span className="global-search-row-icon" aria-hidden="true">
-                {item.type === 'directory' ? <Folder size={14} /> : <File size={14} />}
+                {row.item.type === 'directory' ? <Folder size={14} /> : <File size={14} />}
               </span>
-              <span className="global-search-row-name">{item.name}</span>
-              <span className="global-search-row-path">{displayPath(item.path, { parent: true })}</span>
+              <span className="global-search-row-name">{row.item.name}</span>
+              <span className="global-search-row-path">{displayPath(row.item.path, { parent: true })}</span>
             </li>
           ))}
         </ul>

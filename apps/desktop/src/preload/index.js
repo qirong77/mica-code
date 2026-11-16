@@ -18,6 +18,8 @@ if (process.isMainFrame) {
       }),
     probe: (address) => invoke('probe', { address }),
     open: (url) => invoke('open', { url }),
+    // 在**新窗口**里打开一个文件/文件夹（编辑器窗口）。浏览器宿主没有窗口，页面自己判空。
+    openEditorWindow: (path) => ipcRenderer.invoke('mica:editor-window', { path }),
     local: () => invoke('local'),
     appUpdate: {
       check: () => update('check'),

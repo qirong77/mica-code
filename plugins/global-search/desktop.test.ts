@@ -3,7 +3,7 @@ import * as React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ArcoProvider, Input } from '@mica-config-ui/web';
-import { Launcher } from './desktop.jsx';
+import { Launcher, buildRows } from './desktop.jsx';
 
 const css = readFileSync(new URL('./desktop.css', import.meta.url), 'utf8');
 const inputSelector = '.global-search .global-search-input.arco-input';
@@ -96,5 +96,31 @@ describe('global search input styling', () => {
       color: 'var(--color-fg-muted, var(--text-soft))',
       opacity: '1',
     });
+  });
+});
+
+describe('result rows', () => {
+  const items = [
+    { path: '/root/中文 项目', name: '中文 项目', type: 'directory' },
+    { path: '/root/report.md', name: 'report.md', type: 'file' },
+  ];
+
+  it('pairs every result with a VS Code row first, keeping the Mica row at the same columns', () => {
+    const rows = buildRows(items, { app: 'Visual Studio Code', available: true });
+    expect(rows.map((row: any) => [row.kind, row.item.path])).toEqual([
+      ['editor', '/root/中文 项目'],
+      ['mica', '/root/中文 项目'],
+      ['editor', '/root/report.md'],
+      ['mica', '/root/report.md'],
+    ]);
+    expect(new Set(rows.map((row: any) => row.key)).size).toBe(rows.length);
+  });
+
+  it('falls back to a single row per result when no editor is installed', () => {
+    expect(buildRows(items, { app: 'Visual Studio Code', available: false }).map((row: any) => row.kind)).toEqual([
+      'mica',
+      'mica',
+    ]);
+    expect(buildRows(items, undefined).map((row: any) => row.kind)).toEqual(['mica', 'mica']);
   });
 });

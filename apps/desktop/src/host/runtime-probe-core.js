@@ -3,7 +3,7 @@
  *
  * 页面自己判断不了：`fetch('http://other:8787/api/health')` 受 CORS 限制读不到结果，所以
  * 探活由运行时代劳。地址规范化不在本地重写一份，直接用 `@packages/mica-web-shared` 的
- * `normalizeRuntimeAddress`——插件、桌面端开新窗口与这里必须对「`192.168.1.5` 补哪个端口」
+ * `normalizeRuntimeAddress`——插件、桌面端切换地址与这里必须对「`192.168.1.5` 补哪个端口」
  * 给出同一个答案。
  */
 

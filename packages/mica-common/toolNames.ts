@@ -1,6 +1,6 @@
 /**
  * 工具命名规则：一律 snake_case 全小写，与内置工具（`read_file`、`run_shell`、
- * `background_tasks_*`、`pty_*`）和 MCP 工具前缀保持一致。终端里模型对
+ * `background_tasks_*`）和 MCP 工具前缀保持一致。终端里模型对
  * `session_notes` 这类名字的猜测成本，明显低于 `SessionNotes`。
  *
  * 这里只登记历史遗留的大驼峰名字：改名后旧会话保存的能力开关、旧对话里的工具行

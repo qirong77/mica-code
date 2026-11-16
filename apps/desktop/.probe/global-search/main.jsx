@@ -32,7 +32,18 @@ let completeOpen
 const api = {
   launcher: {
     status: async () => ({ shortcut: 'Alt+Space', registered: true }),
-    request: async () => ({ items, roots: ['/Users/me/Desktop', '/Users/me/Downloads'] }),
+    // 第一行是 VS Code 行，所以 beginOpen 点中的就是它；让 openEditor 挂起，
+    // 才能像原来一样量打开中的禁用样式。
+    request: async (action) =>
+      action === 'openEditor'
+        ? new Promise((resolve) => {
+            completeOpen = resolve
+          })
+        : {
+            items,
+            roots: ['/Users/me/Desktop', '/Users/me/Downloads'],
+            editor: { app: 'Visual Studio Code', available: true }
+          },
     close: async () => ({}),
     configure: async () => ({}),
     // 通过真实「打开结果」状态检查禁用样式；只挂起假 API，不触碰本机文件。

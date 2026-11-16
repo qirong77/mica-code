@@ -97,8 +97,12 @@ if (quickButtonsDemo) {
 if (!quickButtonsDemo) {
   // 在等待运行时环境与共享状态的同时加载对应页面；首次渲染仍必须等状态快照。
   const params = new URLSearchParams(window.location.search)
+  // 编辑器窗口（`?editor=<路径>`）：外壳开的独立窗口，页面只画编辑器。
+  const editorTarget = params.get('editor') || ''
   const expectedView =
-    params.get('pluginLauncher') && !isSharePath(window.location.pathname)
+    editorTarget
+      ? 'editor'
+      : params.get('pluginLauncher') && !isSharePath(window.location.pathname)
       ? 'launcher'
       : isSharePath(window.location.pathname) && !readAppUrl(window.location.search).sessionId
         ? 'share'
@@ -107,7 +111,9 @@ if (!quickButtonsDemo) {
   const loadView = (view) => {
     if (!modules.has(view)) {
       const promise = (
-        view === 'launcher'
+        view === 'editor'
+          ? import('./EditorWindow')
+          : view === 'launcher'
           ? import('./PluginLauncher')
           : view === 'share'
             ? import('./ShareIndex')
@@ -136,7 +142,9 @@ if (!quickButtonsDemo) {
 
     const launcherId = params.get('pluginLauncher')
     const view =
-      launcherId && !api.shareView
+      editorTarget
+        ? 'editor'
+        : launcherId && !api.shareView
         ? 'launcher'
         : api.shareView && !readAppUrl(window.location.search).sessionId
           ? 'share'
@@ -152,7 +160,12 @@ if (!quickButtonsDemo) {
     startup.setTime('viewLoaded', loadedAt)
     startup.setView(view)
     const content =
-      view === 'launcher' ? (
+      view === 'editor' ? (
+        <>
+          <module.default path={editorTarget} />
+          <DesktopDialogHost />
+        </>
+      ) : view === 'launcher' ? (
         <module.PluginLauncher pluginId={launcherId} />
       ) : view === 'share' ? (
         <>

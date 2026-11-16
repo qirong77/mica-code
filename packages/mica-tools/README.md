@@ -28,21 +28,14 @@
 - `background_tasks_read`：读取后台任务输出与状态。
 - `background_tasks_kill`：终止仍在运行的后台任务。
 - `wait_for`：等外部条件成立（后台任务结束、进程退出、文件出现或变化、命令/HTTP/端口就绪、固定时长），超时返回可续等的 `wait_id`；可选 `reason` 说明为什么等（展示在客户端「等待中」列表）。除 `kind=command` 会重复执行探测命令外，它只观察、不启动任何东西，且可与同一条消息里其余调用并发执行。`kind=task` 只认 `background_tasks_start` 的 shell 任务，subagent 任务要用 `agent` 的 `operation=await/join`，也可与其他工具重叠执行；参数类错误（未知 task_id、非法正则、路径越权）立即返回 `failed`，不续等。
-- `pty_spawn`：在 PTY 中启动交互式终端程序。
-- `pty_send`：向 PTY 会话发送文本或命名按键。
-- `pty_read`：读取 PTY 会话输出。
-- `pty_wait`：等待 PTY 输出匹配、进程退出或静默。
-- `pty_kill`：终止 PTY 会话。
 - `web_fetch`：抓取 URL 内容。
 - `skill`：读取并调用本地 skill 指令。
 
 `web_search` 由 `plugins/web-search` 官方插件注册，工具名与内置工具同形。
 
-PTY 工具用于驱动交互式 TUI 程序做端到端验证。
-
 「启动 / 等待 / 查看」是三个独立动作：`run_shell` 只跑前台命令；需要后台时用
 `background_tasks_start` 启动，要结果时用 `wait_for(kind="task")` 等、用
-`background_tasks_read` 读。启动方式与采集方式分开，模型不必在一个参数里切换语义。node-pty 的 native binding 在 Bun 进程内不工作，因此 PTY 会话由懒启动的 Node 子进程承载（`packages/mica-pty/src/server.mjs`），通过 JSONL over stdio 通信；工具实现位于 `packages/mica-tools/pty/`，首次调用时动态加载 `packages/mica-pty/src/manager.js`（不经过 `mica-pty/index.js`，避免 Bun 进程加载 node-pty）。node-pty 缺失或 Node 不可用时工具降级报错，不影响其他功能。
+`background_tasks_read` 读。启动方式与采集方式分开，模型不必在一个参数里切换语义。
 
 ## 使用入口
 
@@ -82,7 +75,6 @@ const result = await micaTools.execute('read_file', { file_path: 'README.md' });
 - `ToolSkill.ts`：基于 skills 的工具调用。
 - `ToolWaitFor.ts`：等待外部条件成立（task/process/file/command/http/port/duration）。
 - `waitFor/`：`wait_for` 的条件与等待记录实现（`conditions.ts` 探测各 kind，`registry.ts` 记录活动等待与历史，`types.ts` 是归一化条件类型）。
-- `pty/`：PTY 工具（spawn/send/read/wait/kill）与懒加载 manager 桥接。
 - `ToolWebFetch.ts`：抓取网址内容。
 - `ToolWriteFile.ts`：写入与更新文件。
 - `types.ts`：模型侧工具定义类型。

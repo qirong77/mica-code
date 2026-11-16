@@ -17,6 +17,7 @@ function fixture({ occupied = false, load, platform = 'darwin' } = {}) {
   const bindings = new Map()
   const windows = []
   const delivered = []
+  const opened = []
   class Window extends EventEmitter {
     constructor(options) {
       super()
@@ -93,6 +94,9 @@ function fixture({ occupied = false, load, platform = 'darwin' } = {}) {
     deliver: async (intent) => {
       delivered.push(intent)
     },
+    openEditorWindow: async (target) => {
+      opened.push(target)
+    },
     onError: () => {}
   })
   cleanups.push(() => {
@@ -108,6 +112,7 @@ function fixture({ occupied = false, load, platform = 'darwin' } = {}) {
     windows,
     disabled,
     delivered,
+    opened,
     home,
     releaseShortcut: () => {
       shortcutOccupied = false
@@ -196,18 +201,19 @@ describe('manifest desktop launchers', () => {
     expect(ready.windows[0].visible).toBe(false)
   })
 
-  test('delivers an existing file to the editor before hiding; rejects missing or relative targets', async () => {
+  test('opens an editor window for an existing file before hiding; rejects missing or relative targets', async () => {
     const f = fixture()
     const path = join(f.home, '中文 file.txt')
     writeFileSync(path, 'hello')
     await f.control('show')
     await f.control('openPath', { path })
-    expect(f.delivered).toEqual([{ type: 'openPath', path }])
+    expect(f.opened).toEqual([path])
+    expect(f.delivered).toEqual([])
     expect(f.windows[0].visible).toBe(false)
     await expect(f.control('openPath', { path: 'relative.txt' })).rejects.toThrow('绝对路径')
     await expect(f.control('openPath', { path: join(f.home, 'missing') })).rejects.toThrow()
     await f.control('openPath', { path: f.home })
-    expect(f.delivered.at(-1).path).toBe(f.home)
+    expect(f.opened.at(-1)).toBe(f.home)
   })
 
   test('Escape only hides the panel; settings explicitly delivers to the main window', async () => {

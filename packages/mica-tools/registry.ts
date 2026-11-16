@@ -19,11 +19,6 @@ import { ToolKillTask } from './ToolKillTask.js';
 import { ToolReadImage } from './ToolReadImage.js';
 import { ToolWaitFor } from './ToolWaitFor.js';
 import type { ToolExecuteCallbacks, ToolInput, ToolSource } from './MicaTool.js';
-import { ToolPtySpawn } from './pty/ToolPtySpawn.js';
-import { ToolPtySend } from './pty/ToolPtySend.js';
-import { ToolPtyRead } from './pty/ToolPtyRead.js';
-import { ToolPtyWait } from './pty/ToolPtyWait.js';
-import { ToolPtyKill } from './pty/ToolPtyKill.js';
 import { RUNTIME_TOOL_DESCRIPTORS } from './runtimeToolDescriptors.js';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -64,12 +59,11 @@ export type ToolParameterEntry = {
 };
 
 /**
- * 工具族的显示名。只有真正同族的工具（共享名字前缀且不止一个成员，如 `pty_*`）才成组，
+ * 工具族的显示名。只有真正同族的工具（共享名字前缀且不止一个成员）才成组，
  * 其余工具一律平铺——它们之间没有共同的调用语义，硬凑成「文件 / 命令」这类类别反而
  * 让人看不出这个组到底改动了什么。新增族时在这里补中文名，缺省用前缀本身。
  */
 const TOOL_FAMILY_LABELS: Record<string, string> = {
-  pty: '交互终端',
   session: '会话自治',
   loop: '定时循环',
   background_tasks: '后台任务',
@@ -119,11 +113,6 @@ const builtinTools: MicaTool[] = [
   new ToolWaitFor(),
   new ToolWebFetch(),
   new ToolSkill(),
-  new ToolPtySpawn(),
-  new ToolPtySend(),
-  new ToolPtyRead(),
-  new ToolPtyWait(),
-  new ToolPtyKill(),
 ];
 
 let mcpTools: MicaTool[] = [];

@@ -188,7 +188,7 @@ test('sender identity is enforced by the handler for same-origin other windows a
   frame.url = `${ORIGIN}/`
   state.win.isDestroyed = () => true
   assert.equal((await handler(event, 'local')).ok, false)
-  assert.deepEqual(calls, [['local']])
+  assert.deepEqual(calls, [['local', event]])
 })
 
 test('accepts only six exact operation names, never paths or arbitrary channels', async () => {
@@ -310,9 +310,10 @@ test('runtime capabilities do not require data opt-in and return plain envelopes
   }
   assert.deepEqual(calls, [
     ['probe', 'server:3210'],
-    ['open', 'https://server.example/chat'],
-    ['open', 'http://server.example/chat'],
-    ['local'],
+    // 切换与回本机都落在发起请求的那个窗口上，所以 sender 事件一并交下去
+    ['open', 'https://server.example/chat', EVENT],
+    ['open', 'http://server.example/chat', EVENT],
+    ['local', EVENT],
     ['localHost']
   ])
 })

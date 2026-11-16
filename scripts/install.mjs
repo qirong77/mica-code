@@ -24,7 +24,7 @@ try {
   copyFileSync(outFile, packagedBinary);
   chmodSync(packagedBinary, 0o755);
 
-  // 复制 node-pty 运行时，让 PTY 工具不依赖用户机器上的 node_modules。
+  // 复制 node-pty 运行时，让程序化 PTY 会话不依赖用户机器上的 node_modules。
   // 旧版残留（如 sharp 时代的整个 node_modules）只清理 sharp，不再删 node-pty。
   const legacySharp = join(packageDir, 'node_modules', 'sharp');
   if (existsSync(legacySharp)) rmSync(legacySharp, { recursive: true, force: true });
@@ -35,7 +35,7 @@ try {
     chmodSpawnHelpers(ptyRoot, platform, process.arch);
   } catch (error) {
     console.log(
-      `Warning: node-pty staging skipped (${error instanceof Error ? error.message : String(error)}). PTY 工具将不可用。`,
+      `Warning: node-pty staging skipped (${error instanceof Error ? error.message : String(error)}). 程序化 PTY 会话将不可用。`,
     );
   }
 

@@ -1,11 +1,11 @@
 # mica-pty
 
-基于 [node-pty](https://github.com/microsoft/node-pty)（VS Code 终端同款底层库）的 PTY 能力包，包含两类能力：
+基于 [node-pty](https://github.com/microsoft/node-pty)（VS Code 终端同款底层库）的 PTY 能力包，提供两类可直接使用的 API：
 
 - **`PtyDriver`（测试驱动）**：Node ≥22 / vitest 环境下直接 import，用于驱动交互式 TUI 程序（如 mica 本体）做测试和验证。
-- **内置 `pty_*` 工具运行时**：mica 以 Bun 运行时内置 `pty_spawn`/`pty_send`/`pty_read`/`pty_wait`/`pty_kill` 工具。node-pty 的 native binding 在 Bun 进程内不工作（spawn 的进程不会输出、master fd 无效），因此 PTY 会话由懒启动的 **Node 子进程**（`src/server.mjs`）通过 JSONL over stdio 承载，Bun 主进程（`PtyManager`）只做 IPC 和输出缓冲。
+- **`PtyManager`（程序化会话管理器）**：面向需要从 Bun 代码管理 PTY 会话的调用方。node-pty 的 native binding 在 Bun 进程内不工作（spawn 的进程不会输出、master fd 无效），因此 PTY 会话由懒启动的 **Node 子进程**（`src/server.mjs`）通过 JSONL over stdio 承载，Bun 侧的 `PtyManager` 负责 IPC、会话状态和输出缓冲。
 
-> node-pty 只能在 Node 进程中加载。**不要从 `bun run` 代码里 import `PtyDriver` 或 `mica-pty/index.js`**（后者会 chain 到 node-pty）；生产代码应只通过 `@packages/mica-pty/src/manager.js` 使用内置工具运行时。
+> node-pty 只能在 Node 进程中加载。**不要从 `bun run` 代码里 import `PtyDriver` 或 `mica-pty/index.js`**（后者会 chain 到 node-pty）；Bun 代码需要管理 PTY 时，应直接从 `@packages/mica-pty/src/manager.js` 使用 `PtyManager`。
 
 ## 设计动机
 
@@ -52,13 +52,13 @@ await driver.close('SIGTERM', 3_000);
 - 独立脚本用 `node` 运行，或用 `npx tsx`（本项目未内置 tsx）。
 - **不要**从 `bun run` 的代码里 import `PtyDriver` 或 `index.ts`（会加载 node-pty）。
 
-## 内置 PTY 工具
+## `PtyManager`（程序化会话 API）
 
-mica 内置 `pty_spawn` / `pty_send` / `pty_read` / `pty_wait` / `pty_kill` 工具，agent 可以直接驱动交互式 TUI 程序。运行时链路：
+`PtyManager` 是 Bun-safe 的 PTY 会话管理器，供程序代码启动和管理交互式子进程。运行时链路：
 
 ```text
-pty_* 工具 (packages/mica-tools/pty/)
-  └─ 动态加载 PtyManager (packages/mica-pty/src/manager.ts，不 import node-pty)
+调用方
+  └─ PtyManager (packages/mica-pty/src/manager.ts，不 import node-pty)
        └─ 懒启动 node 子进程运行 src/server.mjs（JSONL over stdin/stdout）
             └─ node-pty 创建 PTY 会话，异步回传 data/exit 事件
 ```
@@ -72,7 +72,7 @@ pty_* 工具 (packages/mica-tools/pty/)
   6. 全局 npm / homebrew / nvm 目录。
      全部失败时报错会列出已尝试位置和修复方式。
 - `src/server.mjs` 是唯一真相源，`src/ptyServerSource.ts` 通过 `bun run scripts/generate-pty-server-source.mjs` 生成其 JSON 转义内嵌（`bun build --compile` 不支持 `?raw`），`tests/serverSource.test.ts` 校验同步。
-- node-pty 缺失或 `node` 不可用（可用 `MICA_PTY_NODE` 覆盖）时工具降级报错，不影响 mica 其他功能。
+- node-pty 缺失或 `node` 不可用（可用 `MICA_PTY_NODE` 覆盖）时 `PtyManager` 抛出带诊断信息的错误，不影响 mica 其他功能。
 
 ### 发布版自带 node-pty
 
@@ -86,7 +86,7 @@ node-pty 是 C++ 原生模块，无法打进 `bun build --compile` 的单文件�
 
 安装脚本（`scripts/install.sh` 与 `scripts/install.mjs`）把两者解压到 `~/.local/lib/mica/`，`~/.local/bin/mica` 只是 launcher。运行时 manager 从二进制目录向上即可找到 node-pty，**不再依赖用户机器上的 node_modules**。打包逻辑见 `scripts/package-release.mjs` 与 `scripts/stage-node-pty.mjs`。
 
-`PtyManager` 也可直接编程使用：
+`PtyManager` 的基本用法：
 
 ```ts
 import { PtyManager } from '@packages/mica-pty/src/manager.js';
@@ -99,7 +99,18 @@ console.log(manager.read(sessionId, { mode: 'tail' }).output);
 await manager.kill(sessionId);
 ```
 
-## API
+常用方法：
+
+- `spawn(argv, options)` — 启动 PTY 会话，返回 `{ sessionId, pid }`。`options` 支持 `cols`、`rows`、`cwd`、`env` 和 `name`。
+- `send(sessionId, data)` / `sendKey(sessionId, keyName)` — 写入原始文本或 `KEYS` 中的命名按键序列。
+- `resize(sessionId, cols, rows)` — 调整 PTY 窗口尺寸。
+- `read(sessionId, options)` — 读取 `PtyReadResult`；默认返回全部已缓存输出，可用 `mode: 'tail'` 和 `windowSize` 取尾部，并可用 `stripAnsi` / `clear` 控制结果和缓存。
+- `wait(sessionId, options)` — 等待输出匹配、进程退出、输出静默或超时，返回 `PtyWaitResult`。
+- `list()` / `sessionCount` — 查看当前会话信息和会话数量。
+- `kill(sessionId, signal, forceAfterMs)` — 终止会话，默认先发 `SIGTERM`，超时后升级为 `SIGKILL`。
+- `shutdown()` — 终止 helper 及其剩余会话并清理管理器状态。
+
+## `PtyDriver` API
 
 ### `PtyDriver.spawn(argv, options)`
 

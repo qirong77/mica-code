@@ -23,6 +23,10 @@ export const EditorWorkspace = forwardRef(function EditorWorkspace(
     onCompareBaseChange,
     onCompareHeadChange,
     onCornerResizeStart,
+    // 编辑器窗口（`EditorWindow`）用这两个：底栏右下角显示**当前文件路径**而不是
+    // 可点的目录，外面要知道这一刻文件是什么。
+    showFilePath = false,
+    onActivePathChange,
     onGitChanged
   },
   ref
@@ -41,6 +45,7 @@ export const EditorWorkspace = forwardRef(function EditorWorkspace(
   const [pathError, setPathError] = useState('')
   const [pathBusy, setPathBusy] = useState(false)
   const [localRecent, setLocalRecent] = useState([])
+  const [activePath, setActivePath] = useState(null)
   const mobile = useIsMobile()
   const { git, compareBase, compareHead, refresh, setCompareBase, setCompareHead } =
     useGitWorkspace(cwd, {
@@ -138,6 +143,15 @@ export const EditorWorkspace = forwardRef(function EditorWorkspace(
 
   const branch = git.status?.branch
   const branchLabel = branch || (git.status?.root ? 'detached' : null)
+  const reportActivePath = useCallback(
+    (path) => {
+      // 主窗口不关心活动文件（底栏显示的是页面目录），别为了这条回调让它多渲染一次。
+      if (!showFilePath && !onActivePathChange) return
+      setActivePath(path || null)
+      onActivePathChange?.(path || null)
+    },
+    [onActivePathChange, showFilePath]
+  )
   const openPathPicker = () => {
     setPathError('')
     setPicker('cwd')
@@ -164,6 +178,7 @@ export const EditorWorkspace = forwardRef(function EditorWorkspace(
         onGitCompareHeadChange={compare?.head ? onCompareHeadChange : setCompareHead}
         onRefreshGit={() => refresh({ quiet: true, refresh: true })}
         onOpenTerminal={openTerminalAt}
+        onActivePathChange={reportActivePath}
       />
       {/* 编辑器终端：Ctrl+` 呼出，右键文件树也能直接落到某个目录。手机上没它的位置。 */}
       <EditorTerminal ref={terminalRef} cwd={cwd} hidden={!visible || mobile} />
@@ -186,19 +201,31 @@ export const EditorWorkspace = forwardRef(function EditorWorkspace(
             <span className="truncate">{branchLabel}</span>
           </StatusBarAction>
         )}
-        <StatusBarAction
-          ref={cwdAnchorRef}
-          type="button"
-          className="ml-auto min-w-0 truncate text-right"
-          style={{ height: 24, paddingInline: 6, fontSize: 12 }}
-          title={cwd ? `${cwd}\n切换目录…` : '选择编辑器目录…'}
-          aria-label="切换编辑器目录"
-          aria-haspopup="dialog"
-          aria-expanded={picker === 'cwd'}
-          onClick={openPathPicker}
-        >
-          {cwd || '选择目录…'}
-        </StatusBarAction>
+        {showFilePath ? (
+          // 编辑器窗口：右下角就是「这个窗口在看哪个文件」，不再是切换目录的入口
+          // （这一页的目录由窗口自己的目标决定，换掉目录等于换一个窗口该干的事）。
+          <span
+            className="ml-auto min-w-0 truncate text-right"
+            style={{ paddingInline: 6, fontSize: 12 }}
+            title={activePath || cwd || ''}
+          >
+            {activePath || cwd || '未打开文件'}
+          </span>
+        ) : (
+          <StatusBarAction
+            ref={cwdAnchorRef}
+            type="button"
+            className="ml-auto min-w-0 truncate text-right"
+            style={{ height: 24, paddingInline: 6, fontSize: 12 }}
+            title={cwd ? `${cwd}\n切换目录…` : '选择编辑器目录…'}
+            aria-label="切换编辑器目录"
+            aria-haspopup="dialog"
+            aria-expanded={picker === 'cwd'}
+            onClick={openPathPicker}
+          >
+            {cwd || '选择目录…'}
+          </StatusBarAction>
+        )}
       </footer>
       {visible && picker === 'branch' && cwd && (
         <BranchPicker
@@ -212,7 +239,7 @@ export const EditorWorkspace = forwardRef(function EditorWorkspace(
           onClose={closePicker}
         />
       )}
-      {visible && picker === 'cwd' && (
+      {visible && !showFilePath && picker === 'cwd' && (
         <CwdPicker
           cwd={cwd || ''}
           recent={recent}

@@ -32,7 +32,7 @@ export type ProviderToolCallOutcome = {
  * other tool is a serial barrier of its own, so write/exec side effects keep
  * their declared order. Outcomes come back in the original call order.
  *
- * Calls declared overlappable (such as `wait_for`, `pty_wait`, or `agent await/join`)
+ * Calls declared overlappable (such as `wait_for` or `agent await/join`)
  * start when reached and overlap the calls that follow them; their outcome is
  * collected after every other call settled. Without that, a long poll would
  * block the work the model wanted to do while waiting.

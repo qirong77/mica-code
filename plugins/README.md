@@ -544,13 +544,14 @@ macOS 使用非激活式浮窗，唤出搜索时只接收键盘输入，不连�
 `{ request(action, input), dispose?() }`。宿主按插件只创建一个实例，并在停用时调用 `dispose`。
 `context` 提供 `pluginId`、`settings.get()`、`readData()` 和 `writeData(value, { expectedVersion })`，
 数据版本与现有插件数据 API 相同。插件前端通过 `api.launcher.request(action, input)` 调它；
-`status()` 读取快捷键注册状态，`retry()` 重试注册，`openPath(path)` 把文件/目录交给主窗口
-现有编辑器，`configure()` 打开本插件设置，`close()` 收起浮窗。后端模块、界面模块和清单
+`status()` 读取快捷键注册状态，`retry()` 重试注册，`openPath(path)` 让外壳新开一扇**编辑器窗口**
+（`?editor=<路径>`，主窗口不动；同一条路径只留一扇），`configure()` 打开本插件设置，`close()` 收起浮窗。后端模块、界面模块和清单
 按目录发现，宿主不登记具体插件的业务代码。与 `desktop.jsx` 一样，运行时安装的用户插件
 不支持这一构建期入口。
 
 [Global Search](global-search/README.md) 使用这个入口迁移 VsGo 的文件启动能力：
-Option + 空格唤起，搜索插件设置中配置的多个目录，文件和文件夹都在 Mica 编辑器打开。
+Option + 空格唤起，搜索插件设置中配置的多个目录；每条结果两行，第一行用 VS Code 打开、
+第二行在 Mica 的新编辑器窗口里打开。
 
 ### 侧栏入口（`entry`）
 
@@ -580,8 +581,9 @@ export function summary(api) { return api.currentHost() } // 可选：入口行�
   登记**——加一个桌面入口只改插件目录。
 - 模块拿到的 `api` 包括插件数据、当前会话及原生客户端能力。
 - 客户端能力：`currentTarget()` 保留完整页面入口（含中转机令牌），`client` 在普通浏览器为 null；
-  原生桌面提供 `client.context()` → `{ localHost }`、`client.probe(address)`、`client.open(url)`、
-  `client.local()`（恢复并聚焦原本机窗口），以及 `client.readData/writeData`（本机同一份插件数据，
+  原生桌面提供 `client.context()` → `{ localHost }`、`client.probe(address)`、`client.open(url)`
+  （在**发起请求的那个窗口**里加载它，不另开窗口）、`client.local()`（把同一个窗口带回本机页面），
+  以及 `client.readData/writeData`（本机同一份插件数据，
   读取版本及写入 `expectedVersion` 与下述数据 API 相同）。数据访问要求本机随包清单声明
   `desktop.clientData: true` 且插件未停用；远端页面不能靠自己的清单取得本机其它插件数据。
   能力由外壳的隔离 preload 提供固定的 `window.micaClient` 方法，不暴露通用 IPC；主进程逐次核对
@@ -591,7 +593,7 @@ export function summary(api) { return api.currentHost() } // 可选：入口行�
 - 插件数据：`currentHost()`（页面所在运行时的 origin）、`probe(address)`
   （探活一个地址，页面跨源读不到结果，由运行时代查）、`readData()` / `writeData(value, options?)`
   （插件自己的 `$MICA_HOME/plugin-data/<id>/data.json`，宿主不解析结构）、`open(url)`
-  （外壳里开新窗口、浏览器里开新标签页）、`access`（`get()` / `set({ enabled, password })`
+  （外壳里让当前窗口加载它、浏览器里开新标签页）、`access`（`get()` / `set({ enabled, password })`
   读写这台机器的远程访问策略——请求分派只存在于运行时进程，页面自己改不了）、
   `action(key)`（执行清单 `actions` 里声明过的一个动作，结果是 `{ ok, message?, link?, error? }`）。
 - 会话行标记：`annotations`（`read()` / `writeOptions(options)`）。插件用
