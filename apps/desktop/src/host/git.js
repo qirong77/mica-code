@@ -41,6 +41,7 @@ const gitLog = logger('git')
 const ADDED_FILE_CHUNK_SIZE = 64 * 1024
 const ADDED_FILE_WORKERS = 4
 let summaryScanId = 0
+// 两个入口共用仓库级限频：同一次扫描只留一条阶段诊断。
 const lastSummaryLogAt = new Map()
 const SUMMARY_LOG_INTERVAL_MS = 30_000
 const SUMMARY_DETAILS = Symbol('git-summary-details')
@@ -62,23 +63,28 @@ async function getSummary(cwd, { refresh = false, invalidate = false } = {}) {
     invalidate,
     diagnostics
   })
+  logSummaryDetail('summary-detail', root, summary, diagnostics, startedAt)
+  return summary
+}
+
+function logSummaryDetail(event, root, summary, diagnostics, startedAt) {
   const details = summary[SUMMARY_DETAILS]
   const elapsed = Date.now() - startedAt
   const previousLog = lastSummaryLogAt.get(root) || 0
   if (elapsed >= SLOW_MS && Date.now() - previousLog >= SUMMARY_LOG_INTERVAL_MS) {
     lastSummaryLogAt.set(root, Date.now())
-    gitLog.warn('summary-detail', {
+    gitLog.warn(event, {
       ms: elapsed,
       status: details?.status || 0,
       diff: details?.diff || 0,
       files: details?.files || summary.files.length,
       bytes: details?.bytes || 0,
+      cache: diagnostics.cache,
       cachewait: diagnostics.cachewait || 0,
       epoch: diagnostics.epoch,
       scanid: details?.scanid || 0
     })
   }
-  return summary
 }
 
 async function timedGit(root, args, details, field) {
@@ -257,13 +263,16 @@ async function getChangeCounts(cwd, { refresh = false, invalidate = false } = {}
     }
     const pending = { signature, epoch, promise: null }
     pending.promise = (async () => {
+      const diagnostics = { cache: 'uncached', epoch }
+      const startedAt = Date.now()
       // 与 `getSummary` 共用全树扫描，只把三个数字交出去；自动变化仍合并在途扫描。
       const summary = await cachedWorktreeRead(
         root,
         `summary:${base}`,
         () => readSummary(root, base),
-        { refresh, invalidate }
+        { refresh, invalidate, diagnostics }
       )
+      logSummaryDetail('change-counts-detail', root, summary, diagnostics, startedAt)
       const value = {
         root: summary.root,
         files: summary.files.length,

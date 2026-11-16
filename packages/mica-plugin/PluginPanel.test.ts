@@ -847,6 +847,28 @@ describe('normalizePluginPanelView menus', () => {
       }).menus,
     ).toBeUndefined();
   });
+
+  // 一条都点不开时，「为什么没有」就是这条菜单的全部内容：只带 note 也是合法菜单。
+  it('keeps a menu that is only a note (why there is nothing to pick)', () => {
+    expect(
+      normalizePluginPanelView({
+        title: 'x',
+        menus: { reviews: { columns: [], rows: [], note: '1 条记录点不开：目录已经不存在了' } },
+      }).menus?.reviews,
+    ).toEqual({ columns: [], rows: [], note: '1 条记录点不开：目录已经不存在了' });
+    expect(
+      normalizePluginPanelView({
+        title: 'x',
+        menus: {
+          reviews: {
+            columns: [{ key: 'project', label: '项目' }],
+            rows: [{ action: 'review.open', key: 'sass', cells: { project: { text: 'sass' } } }],
+            note: '只列现在点得开的',
+          },
+        },
+      }).menus?.reviews.note,
+    ).toBe('只列现在点得开的');
+  });
 });
 
 describe('normalizePluginPanelView shortcuts', () => {

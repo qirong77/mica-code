@@ -409,6 +409,9 @@ export function quickbarMenuItems(shortcut) {
  */
 export function quickbarMenuTable(view, menu) {
   const raw = menu ? view?.menus?.[menu] : null
+  // 「为什么没有可选项」由插件说：它知道是记录过期了还是这一轮还没记过，宿主只能写一句
+  // 「暂时没有可选项」，而那句话对正在找入口的人没有信息量。
+  const note = typeof raw?.note === 'string' ? raw.note.trim() : ''
   const columns = (Array.isArray(raw?.columns) ? raw.columns : []).filter(
     (column) =>
       typeof column?.key === 'string' &&
@@ -420,8 +423,10 @@ export function quickbarMenuTable(view, menu) {
     (row) =>
       typeof row?.action === 'string' && row.action && row?.cells && typeof row.cells === 'object'
   )
-  if (columns.length === 0 || rows.length === 0) return { columns: [], rows: [] }
-  return { columns, rows }
+  if (columns.length === 0 || rows.length === 0) {
+    return { columns: [], rows: [], ...(note ? { note } : {}) }
+  }
+  return { columns, rows, ...(note ? { note } : {}) }
 }
 
 /**

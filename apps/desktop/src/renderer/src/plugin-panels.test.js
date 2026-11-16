@@ -518,6 +518,18 @@ describe('quickbarMenuTable', () => {
       rows: [table.rows[0]]
     })
   })
+
+  // 「为什么一条都没有」只有插件知道（记录过期了、这一轮还没记过）。带出去，空菜单才不是
+  // 一句对谁都成立的「暂时没有可选项」。
+  test('插件给的说明跟着表格一起带出去，空表也带', () => {
+    expect(quickbarMenuTable({ menus: { reviews: { ...table, note: '目录已经不存在了' } } }, 'reviews'))
+      .toEqual({ columns: table.columns, rows: [table.rows[0]], note: '目录已经不存在了' })
+    expect(
+      quickbarMenuTable({ menus: { reviews: { columns: [], rows: [], note: '还没有记录' } } }, 'reviews')
+    ).toEqual({ columns: [], rows: [], note: '还没有记录' })
+    expect(quickbarMenuTable({ menus: { reviews: { columns: table.columns, rows: [], note: '  ' } } }, 'reviews'))
+      .toEqual({ columns: [], rows: [] })
+  })
 })
 
 describe('菜单缓存', () => {

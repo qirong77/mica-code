@@ -545,18 +545,15 @@ export function PluginQuickBar({
       }
       const result = await loadView(panel)
       if (!result || !isCurrent(panel)) return
-      const entry = result.error
-        ? {
-            table: { columns: [], rows: [] },
-            ready: true,
-            note: result.error,
-            failed: true
-          }
-        : {
-            table: quickbarMenuTable(result.view, shortcut.menu),
-            ready: true,
-            note: ''
-          }
+      const table = result.error
+        ? { columns: [], rows: [] }
+        : quickbarMenuTable(result.view, shortcut.menu)
+      const entry = {
+        table,
+        ready: true,
+        note: result.error || table.note || '',
+        ...(result.error ? { failed: true } : {})
+      }
       if (!result.error) writeMenuCache(cacheKey, entry)
       setMenuViews((current) => ({ ...current, [key]: entry }))
     },

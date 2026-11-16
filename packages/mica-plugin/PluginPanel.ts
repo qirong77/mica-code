@@ -424,6 +424,13 @@ export type PluginPanelShortcutState = {
 export type PluginPanelMenu = {
   columns: PluginPanelTableColumn[];
   rows: PluginPanelMenuRow[];
+  /**
+   * 没有可选项时说明为什么。
+   *
+   * 空菜单原本只有一句宿主的「暂时没有可选项」，而插件明明知道原因（记下的目标目录已经不
+   * 在了、这条会话还没记过）。这句话由插件给，宿主不猜。
+   */
+  note?: string;
 };
 
 export type PluginPanelMenuRow = {
@@ -1315,8 +1322,10 @@ function menuOf(input: unknown): PluginPanelMenu | null {
       return normalized;
     })
     .filter((entry): entry is PluginPanelTableColumn => entry !== null);
+  const note = text(raw.note, 400);
   const uniqueColumns = uniqueBy(columns, (column) => column.key);
-  if (uniqueColumns.length === 0) return null;
+  // 只有一句话、没有表的菜单是合法的：一条可点的记录都没有时，「为什么没有」就是全部内容。
+  if (uniqueColumns.length === 0) return note ? { columns: [], rows: [], note } : null;
   const rows = list(raw.rows)
     .slice(0, MAX_MENU_ITEMS)
     .map((entry) => {
@@ -1336,8 +1345,8 @@ function menuOf(input: unknown): PluginPanelMenu | null {
     })
     .filter((entry): entry is PluginPanelMenuRow => entry !== null);
   const uniqueRows = uniqueBy(rows, (row) => row.key);
-  if (uniqueRows.length === 0) return null;
-  return { columns: uniqueColumns, rows: uniqueRows };
+  if (uniqueRows.length === 0) return note ? { columns: [], rows: [], note } : null;
+  return { columns: uniqueColumns, rows: uniqueRows, ...(note ? { note } : {}) };
 }
 
 /** 动作入参的归一化：插件拿到的一定是干净的 `{ action, key?, values? }`。 */

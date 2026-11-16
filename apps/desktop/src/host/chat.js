@@ -53,6 +53,7 @@ import {
 import { resolveWarmAction } from './chat-warm'
 import { requestHostTask, settlePendingHostRequests } from './chat-host-requests'
 import { createPanelViewCache } from './chat-panel-cache'
+import { resolvePanelRunId } from './chat-panel-routing'
 import { createCompletedRunCache } from './chat-replay-cache'
 import { createSubagentDisplay } from './chat-subagent-display'
 import { unwrapHostResult } from './chat-capabilities'
@@ -2381,8 +2382,9 @@ export function registerChatIpc() {
 
   const requestPanelView = (event, payload, id, pluginId, actionFields = null) => {
     const timing = actionFields ? null : panelTiming.start()
-    const existing = !!runs.get(id)?.child?.stdin?.writable
-    const ensured = ensureCapabilityRun(id, event, {
+    const targetId = resolvePanelRunId(runs, id, payload?.sessionId)
+    const existing = !!runs.get(targetId)?.child?.stdin?.writable
+    const ensured = ensureCapabilityRun(targetId, event, {
       sessionId: payload?.sessionId,
       cwd: payload?.cwd
     })
@@ -2390,6 +2392,10 @@ export function registerChatIpc() {
       timing?.dispatched(null, existing)(false)
       return { ok: false, error: ensured.error }
     }
+    // The panel may have been opened from a different page than the one that
+    // owns this session's host. Its replies must go to the page that requested
+    // the current view/action, not the page that spawned the host.
+    ensured.run.sender = event.sender
     const finishTiming = timing?.dispatched(ensured.run, existing)
     const request = hostTaskRequest(
       ensured.run,
