@@ -117,7 +117,7 @@ MICA_CLI_PATH="$HOME/.local/bin/mica-dev/mica" npm run dev
 
 打开桌面应用后，在 Settings 配置模型并选择项目目录。桌面与终端默认共享 `~/.mica` 下的配置和会话。桌面会调用已安装的 CLI；修改 CLI 源码后，需要用相同的安装目录重新构建，并继续用 `MICA_CLI_PATH` 指向它。默认执行 `bun run build` 会更新 `~/.local/lib/mica` 和 `~/.local/bin/mica`，可能覆盖已有的发布版入口，还可能修改 shell 配置中的 PATH；上面的 `MICA_NO_RC=1` 避免改动 shell 配置。
 
-桌面端会在底部状态栏检查当前运行时对应的 `main` 最新提交；发现更新时显示「有新版本」。打包版通过 GitHub Release 的 Electron 更新包下载，下载完成后需要用户点击「重启更新」才会安装，不会后台打断正在运行的会话。源码 / 开发模式只提示并打开对应提交页，不会自动 `git pull` 覆盖工作区。实现和发布约束见 [`docs/desktop-auto-update.md`](docs/desktop-auto-update.md)。
+桌面端在底部状态栏提示 `main` 的新提交；可安装包已发布时，本机打包版点击后开始下载并显示进度或错误。安装前会检查所有会话、后台任务、终端及相关窗口，有工作未结束时拒绝重启并保留下载包；空闲后还需用户确认，不预约稍后自动重启。源码 / 开发模式及远程页面只展示更新说明和链接，不执行 `git pull` 或重启远程服务。桌面更新也不替换外置 CLI。实现、首次启用和真实安装验证边界见 [`docs/desktop-auto-update.md`](docs/desktop-auto-update.md)。
 
 需要独立浏览器工作区时，先停止桌面开发进程，或另开一个终端并进入 `apps/desktop`。`npm run build` 也会构建并安装 CLI，因此沿用相同的隔离目录：
 

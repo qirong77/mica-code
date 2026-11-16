@@ -2442,6 +2442,14 @@ export default function App() {
     () => view === 'files' && !!filesRef.current?.closeActive(),
     [view]
   )
+  useEffect(() => {
+    // Installer preflight asks every local page, not just the footer's current tab.
+    const hasUnsaved = () => Boolean(filesRef.current?.hasDirty())
+    window.__micaHasUnsavedEdits = hasUnsaved
+    return () => {
+      if (window.__micaHasUnsavedEdits === hasUnsaved) delete window.__micaHasUnsavedEdits
+    }
+  }, [])
   const canChangeBranch = useCallback(
     () =>
       filesRef.current?.hasDirty()

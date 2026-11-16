@@ -22,6 +22,7 @@ if (process.isMainFrame) {
     openEditorWindow: (path) => ipcRenderer.invoke('mica:editor-window', { path }),
     local: () => invoke('local'),
     appUpdate: {
+      status: () => update('status'),
       check: () => update('check'),
       download: () => update('download'),
       install: () => update('install'),

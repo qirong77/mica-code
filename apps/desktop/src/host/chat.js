@@ -40,6 +40,7 @@ import { forkSessionSnapshot } from './chat-session-actions'
 import {
   IDLE_MAX_KEEP,
   IDLE_REAP_MS,
+  isBusy as isChatHostBusy,
   isHostActivityRequest,
   noteHostMessageActivity,
   resolveIdleReap
@@ -1727,6 +1728,15 @@ export function countBusyChatHosts() {
     if (run.running || run.maintenance || run.aborting) busy += 1
   }
   return busy
+}
+
+/** Installation affects every resident host, including work outliving the parent turn. */
+export function chatUpdateActivity() {
+  let chats = 0
+  for (const [id, run] of runs) {
+    if (isChatHostBusy({ run, queuedCount: queuedRuns.values(id).length })) chats += 1
+  }
+  return { chats, commits: commitRuns.size }
 }
 
 /**

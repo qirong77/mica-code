@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, globalShortcut, ipcMain, nativeTheme, screen, shell } from 'electron'
+import { app, autoUpdater as nativeAutoUpdater, BrowserWindow, dialog, globalShortcut, ipcMain, nativeTheme, screen, shell } from 'electron'
 import { spawn } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync, statSync, watch } from 'node:fs'
 import { join } from 'node:path'
@@ -37,7 +37,8 @@ import { CLIENT_CONTEXT_CHANNEL, createClientContextHandler, isClientSenderAllow
 import { resolveMicaHome } from '@packages/mica-config/index.js'
 import { readPluginData, writePluginData } from '../host/plugin-data-store.js'
 import { autoUpdater } from 'electron-updater'
-import { createAppUpdateController } from './app-update.js'
+import { createAppUpdateController, prepareMacInstaller } from './app-update.js'
+import { updateActivityBlockers } from '../host/update-activity.js'
 
 /**
  * Electron 外壳。
@@ -191,6 +192,39 @@ function stateOfSender(event) {
   const contents = event?.sender
   if (!contents) return null
   return [...windows].find((item) => !item.win.isDestroyed() && item.win.webContents === contents) || null
+}
+
+async function readUpdateActivity() {
+  if (!runtime?.url) throw new Error('本机运行时尚未就绪')
+  let unsaved = 0
+  for (const state of windows) {
+    if (!state.local || state.win.isDestroyed()) continue
+    let timer
+    try {
+      const dirty = await Promise.race([
+        state.win.webContents.executeJavaScript('window.__micaHasUnsavedEdits?.()'),
+        new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('页面工作状态读取超时')), 1500) })
+      ])
+      if (typeof dirty !== 'boolean') throw new Error('页面尚未就绪，无法确认文件是否保存')
+      if (dirty) unsaved += 1
+    } finally {
+      clearTimeout(timer)
+    }
+  }
+  // Read the live runtime last, after awaiting page state, not a snapshot from before that wait.
+  const response = await fetch(`${runtime.url}/api/update/activity`, {
+    headers: { origin: runtime.url },
+    signal: AbortSignal.timeout(1500)
+  })
+  if (!response.ok) throw new Error(`运行时返回 HTTP ${response.status}`)
+  const activity = await response.json()
+  return { blockers: updateActivityBlockers({
+    ...activity,
+    terminals: activity.terminals + (terminalHost?.sessions.list().filter((item) => item.running).length || 0),
+    browsers: browserHost?.manager.listBrowsers().length || 0,
+    editors: editorWindows.size,
+    unsaved
+  }) }
 }
 
 /* ------------------------------------------------------------------ 运行时 */
@@ -1061,6 +1095,8 @@ app.whenReady().then(async () => {
   }
 
   localPageUrl = devPageUrl || runtime.url
+  // app-update.js 在主进程执行，但活动状态由运行时子进程维护。通过一个只读、同机的
+  // 地址传递给更新控制器，安装前会再次读取，不能只相信 renderer 看到的当前页签状态。
   const clientHome = process.env.MICA_HOME || resolveMicaHome()
   ipcMain.handle(CLIENT_CONTEXT_CHANNEL, createClientContextHandler({
     isAllowedSender: (event) => isClientSenderAllowed(windows, event),
@@ -1078,7 +1114,25 @@ app.whenReady().then(async () => {
     ipcMain,
     updater: autoUpdater,
     getWindows: () => windows,
-    isDev: is.dev
+    isDev: is.dev || !app.isPackaged,
+    getActivity: readUpdateActivity,
+    prepareInstall: () => process.platform === 'darwin'
+      ? prepareMacInstaller({ nativeUpdater: nativeAutoUpdater, isReady: () => autoUpdater.squirrelDownloadedUpdate === true })
+      : Promise.resolve(),
+    onInstalling: (value) => { quitting = value },
+    confirmInstall: async () => {
+      const result = await dialog.showMessageBox({
+        type: 'question',
+        title: '更新 Mica Code',
+        message: '现在重启并安装更新吗？',
+        detail: '将关闭应用的所有窗口并安装更新，完成后重新打开。会话历史会保留，但不会自动续跑上一轮任务。',
+        buttons: ['取消', '重启更新'],
+        defaultId: 0,
+        cancelId: 0,
+        noLink: true
+      })
+      return result.response === 1
+    }
   })
   appUpdater.register()
   // 页面自己的「在新窗口打开」（文件树右键、编辑器顶栏）：只有自家窗口能要这一步，

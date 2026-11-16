@@ -387,6 +387,11 @@ export function setNotifyServer(server) {
   notifyServer = server
 }
 
+// Even an idle shell can own background jobs; keep update checks conservative without spawning ps.
+export function countUpdateTerminals() {
+  return sessions.size
+}
+
 export function registerTerminalIpc() {
   ipcMain.handle('terminal:create', (event, payload = {}) => {
     const id = payload.id

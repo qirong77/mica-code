@@ -32,8 +32,9 @@ import {
 } from '../host/remote-access-core.js'
 import { readRemoteAccessPolicy, setRemoteAccessPort } from '../host/remote-access.js'
 import { createNotifyServer } from '../host/notifyServer.js'
-import { disposeAllTerminals, registerTerminalIpc, setNotifyServer } from '../host/terminals.js'
+import { countUpdateTerminals, disposeAllTerminals, registerTerminalIpc, setNotifyServer } from '../host/terminals.js'
 import {
+  chatUpdateActivity,
   describeChatHosts,
   disposeAllChatRuns,
   registerChatIpc,
@@ -41,6 +42,7 @@ import {
   sessionExists,
   setChatNotifyServer
 } from '../host/chat.js'
+import { countUpdateLeases } from '../host/update-activity.js'
 import { disposeLoops, registerLoopIpc, setLoopBroadcaster, setLoopRunner } from '../host/loops.js'
 import {
   registerBrowserControlIpc,
@@ -1097,6 +1099,18 @@ function createRequestHandler({
           if (!origin.ok) return sendJson(res, origin.status, { ok: false, error: origin.error })
           if (req.method === 'GET' && url.pathname === '/api/update/check') {
             return sendJson(res, 200, await defaultUpdateChecker.check({ force: url.searchParams.get('force') === '1' }))
+          }
+          if (req.method === 'GET' && url.pathname === '/api/update/activity') {
+            // 更新器在主进程里，模型宿主在这个运行时子进程里；安装前由主进程再次读取
+            // 这个只读快照，避免 renderer 的页签状态已经过期却直接 quitAndInstall。
+            const activity = chatUpdateActivity()
+            const leases = countUpdateLeases(join(resolveMicaHome(), 'sessions', '.turn-locks'))
+            return sendJson(res, 200, {
+              ok: true,
+              ...activity,
+              chats: Math.max(activity.chats, leases),
+              terminals: countUpdateTerminals()
+            })
           }
           if (req.method === 'POST' && url.pathname === '/api/invoke')
             return await handleInvoke(req, res)

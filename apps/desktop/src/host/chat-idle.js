@@ -72,7 +72,7 @@ function activityAt(run) {
   return Number.isFinite(at) ? at : 0
 }
 
-function isBusy(entry) {
+export function isBusy(entry) {
   const run = entry?.run
   if (!run) return true
   // 维护窗口（轮内的模型摘要、轮次之外的空闲压缩）同样算「在干活」：这段时间宿主

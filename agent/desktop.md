@@ -24,6 +24,7 @@
 - `package.json` 的 `dependencies` 只放主进程/运行时真正 require 的包；renderer 依赖全部归 `devDependencies`。
 - `electron.vite.config.mjs` 的 `resolve.dedupe: ['react', 'react-dom']` 不能删。
 - `tablerIconDeepImports()` 只影响 build，新增图标无需同步清单。
+- 更新入口在 `AppUpdateAction`，安装状态机在 `main/app-update.js`；窗口集合是 `Set`，授权复用 `isClientSenderAllowed`（主框架 / origin）并额外限制本机页面。`status` 与定时检查不能覆盖已下载 / 下载中状态。安装前由主进程读 `/api/update/activity` 和原生窗口、页面未保存状态，空闲后确认、确认后再检查；忙或未知时拒绝，不强杀、不预约自动重启。活动判据复用 `chat-idle.js` 的 `isBusy`，涵盖队列、BTW 和后台任务，不能只用 `countBusyChatHosts()`。源码 / 远程页面不直接安装；桌面包不更新外置 CLI，完整边界见 `docs/desktop-auto-update.md`。
 - 页面根节点必须套 `renderer/src/ErrorBoundary.jsx`。按需视图统一用 `renderer/src/lazy-view.jsx` 的 `lazyView(loader, name)`：校验导出、局部捕获失败，重试时重建 lazy 实例；外层仍由 `Suspense` 提供加载占位，单个视图失败不能卸掉整个对话页面。
 - 运行时启动即 `stripContainerEnv()`；受控浏览器与终端 socket 只在 `will-quit` 关闭。
 - 同一时刻只起一个 Electron 实例；验证时串行。
