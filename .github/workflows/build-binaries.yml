@@ -139,6 +139,10 @@ jobs:
     # 不让其它项目的失败阻断这条发布链路。
     needs: []
     runs-on: ${{ matrix.runner }}
+    # macOS runner availability is independent from the Linux package. Keep a
+    # successful Linux updater artifact publishable when the mac job is queued
+    # or cancelled by GitHub capacity.
+    continue-on-error: ${{ matrix.command == 'mac' }}
     strategy:
       fail-fast: false
       matrix:
