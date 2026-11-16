@@ -582,7 +582,8 @@ export function summary(api) { return api.currentHost() } // 可选：入口行�
 - 模块拿到的 `api` 包括插件数据、当前会话及原生客户端能力。
 - 客户端能力：`currentTarget()` 保留完整页面入口（含中转机令牌），`client` 在普通浏览器为 null；
   原生桌面提供 `client.context()` → `{ localHost }`、`client.probe(address)`、`client.open(url)`
-  （在**发起请求的那个窗口**里加载它，不另开窗口）、`client.local()`（把同一个窗口带回本机页面），
+  （切到那台运行时的窗口：已开着的直接换显示、页面不重载，没开过的才新开）、
+  `client.local()`（切回本机窗口），
   以及 `client.readData/writeData`（本机同一份插件数据，
   读取版本及写入 `expectedVersion` 与下述数据 API 相同）。数据访问要求本机随包清单声明
   `desktop.clientData: true` 且插件未停用；远端页面不能靠自己的清单取得本机其它插件数据。

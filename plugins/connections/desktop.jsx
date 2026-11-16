@@ -37,8 +37,8 @@ function isOrdinaryWebAddress(value) {
 /**
  * Connections 的卡片：连接到另一台机器上的 Mica 运行时。
  *
- * 页面由哪台运行时托管就代表在用哪台，所以「切过去」= 让这个窗口打开那个地址：外壳里
- * 当前窗口重新加载成那台机器的界面（不另开窗口），浏览器里开新标签页。桌面端清单始终
+ * 页面由哪台运行时托管就代表在用哪台，所以「切过去」= 切到那台运行时的窗口：桌面外壳里
+ * 每台运行时各有一个常驻窗口，切换只是换显示、页面不重载，浏览器里开新标签页。桌面端清单始终
  * 来自启动客户端的本机（`api.client`），切到远程后也是同一份清单；浏览器则从当前运行时
  * 读插件数据。
  *
@@ -268,7 +268,7 @@ export default function ConnectionsCard({ api, onClose }) {
     <div className="mica-config-ui is-embed">
       <h2 className="mb-1 text-sm font-semibold text-fg-max">Connections</h2>
       <p className="mb-2.5 text-[11px] leading-4 text-fg-muted">
-        连接到另一台机器上的 Mica 运行时，文件、终端、会话都来自那台机器（切换时这个窗口会重新加载）。
+        连接到另一台机器上的 Mica 运行时，文件、终端、会话都来自那台机器（切换会保留各台的页面状态）。
       </p>
 
       <div className="mb-2.5 rounded-sm border border-line bg-overlay-subtle">

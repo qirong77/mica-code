@@ -39,6 +39,7 @@ import { readPluginData, writePluginData } from '../host/plugin-data-store.js'
 import { autoUpdater } from 'electron-updater'
 import { createAppUpdateController, prepareMacInstaller } from './app-update.js'
 import { updateActivityBlockers } from '../host/update-activity.js'
+import { retainHiddenWindow } from './window-retention.js'
 
 /**
  * Electron 外壳。
@@ -46,8 +47,8 @@ import { updateActivityBlockers } from '../host/update-activity.js'
  * 应用的主体是一个 Web 页面：由 `src/server` 的运行时（out/server/index.mjs）
  * 托管，同一个地址也能被局域网里的浏览器直接访问。这个进程只做三件事：
  * 拉起运行时、装载页面、补上只有容器才能提供的原生体验（dock 徽标等）。切换 Mica
- * 服务器在这里体现为**当前窗口换一个地址重新加载**——只有一个窗口，页面的 origin
- * 就是此刻在用的那台服务器。
+ * 服务器在这里体现为**换到那台运行时的窗口**——每台一个常驻窗口、同时只显示一个，
+ * 切走的页面留在内存里不重载，页面的 origin 就是它自己那台服务器。
  *
  * 页面里的 `window.mica` 始终由 renderer 的 transport 通过 HTTP + SSE 建立。
  * 只有客户端专属能力走受限 preload，不把运行时业务或通用 IPC 暴露给页面。
@@ -91,22 +92,14 @@ let appUpdater = null
 /**
  * Deliver native intents to the local editor, including when its window was hidden.
  *
- * 只有一个窗口，而它此刻可能正停在别的运行时上：意图只有本机页面接得住，所以先把窗口
- * 带回本机页面再交给它——否则「打开文件」会被交给那台机器的界面，做的是另一台机器的事。
+ * 意图只有本机页面接得住，而这会儿正显示的多半是另一台机器的窗口：把本机窗口端到前面
+ * （远程窗口的页面原样留着），再交给它——否则「打开文件」会被交给那台机器的界面。
  */
 async function deliverDesktopIntent(intent) {
-  const existing =
-    (lastFocusedWindow && !lastFocusedWindow.win.isDestroyed() && lastFocusedWindow) ||
-    [...windows].find((item) => !item.win.isDestroyed()) ||
-    null
-  let state = existing
-  if (!state) {
-    state = createWindow(localPageUrl)
-  } else {
-    showWindow(state)
-    // 已经在本机页面上就别再重载一次（新建的窗口本来就正加载本机页面）
-    if (localPageUrl && state.server !== originOf(localPageUrl)) await loadPage(state, localPageUrl)
-  }
+  const state = localWindow() || createWindow(localPageUrl, { primary: true })
+  presentWindow(state, lastFocusedWindow)
+  // 本机窗口只装本机页面；万一它被页面导航带走（跨源跳转已被拦截），先拉回来再投递
+  if (localPageUrl && state.server !== originOf(localPageUrl)) await loadPage(state, localPageUrl)
   const script = `(() => typeof window.__micaDesktopAction === 'function' ? window.__micaDesktopAction(${JSON.stringify(intent)}) : false)()`
   const deadline = Date.now() + 6000
   while (Date.now() < deadline && !state.win.isDestroyed()) {
@@ -144,7 +137,12 @@ let systemHost = null
 /** 「本机」页面地址（dev 下是 Vite dev server），⇧⌘M 与默认端口上的回环目标都回到它 */
 let localPageUrl = ''
 /**
- * 应用只有一个窗口（启动时那个，关闭时只隐藏）。它当前显示哪台运行时由自己持有：
+ * 每台运行时一个窗口，**同时只有一个可见**：切换服务器是把目标窗口端到前面、把当前窗口
+ * 收起来，页面留在内存里不重载（来回切是瞬回）。本机窗口是启动时那个，隐藏但不回收；
+ * 远程窗口隐藏两小时后释放 renderer（见 `window-retention.js`）。
+ *
+ * 每份窗口状态持有它自己那台：
+ * - `key`：窗口身份（中转机按 `origin + t`，其余按 origin），切换时靠它找已有窗口
  * - `server`/`local`：窗口当前显示的 origin，以及它是不是本机运行时（did-navigate 更新）
  * - `apiUrl`/`unread`/`stopBadgeWatcher`：未读徽标订阅跟着这个窗口当前那台走
  * - `title`/`suffix`：标题拼成「<页面标题> — <服务器>」，让用户一眼知道连的是哪台
@@ -333,11 +331,11 @@ async function resolveRuntime({ pageFromDevServer }) {
 /* ------------------------------------------------------------ 切换 Mica 服务器 */
 
 /**
- * 页面可以切到另一台机器上的 Mica 运行时 —— 页面侧就是一次 `location.assign`，外壳
- * 接管它并在**同一个窗口**里加载那个地址（切过去、也切得回来，都是这一次重载）。外壳
- * 在这里做三件页面做不到的事：确认目标地址上确实是一台 Mica 运行时（页面跨源 fetch
- * 读不到结果）、把窗口状态（标题后缀、徽标订阅）换成新的那台、把不认识的跳转仍交回
- * 系统浏览器。
+ * 页面可以切到另一台机器上的 Mica 运行时 —— 页面侧就是一次 `location.assign`。外壳接管
+ * 它：那台已经有窗口就把窗口端到前面（页面不重载，来回切是瞬回），没有才探活并新开一个。
+ * 同时只有一个窗口可见，切走只是把当前窗口收起来，页面状态留在内存里。外壳在这里做页面
+ * 做不到的事：确认目标地址上确实是一台 Mica 运行时（跨源 fetch 读不到结果）、维护窗口
+ * 状态（标题后缀、徽标订阅）、把不认识的跳转交回系统浏览器。
  */
 
 function originOf(value) {
@@ -415,8 +413,8 @@ const BOOT_PROBE_INTERVAL_MS = 500
  * 每次加载结束后确认页面真的起来了，没起来就地重载 —— 实测重载是有效的恢复手段。
  * 不做的话用户只能自己想到按 ⌘R，而「点远程那行」只会把那块黑屏再端到前面一次。
  *
- * 「重载只做一次」记的是**哪个地址**已经重载过，不是次数：这个窗口会随切换服务器换地址
- * 反复装不同的页面，一次失败就用掉全局次数的话，之后切到别的机器就再也不会自救了。
+ * 「重载只做一次」记的是**哪个地址**已经重载过，不是次数：窗口会在页面内换路径（同一台
+ * 服务器的不同会话），一次失败就用掉全局次数的话，之后换个页面就再也不会自救了。
  */
 function watchPageBoot(state, initialUrl) {
   let reloadedFor = ''
@@ -509,8 +507,50 @@ function relayEntryKey(value) {
   }
 }
 
+/** 窗口身份：中转机按入口（origin + t）认，同一台中转机后面的机器各算一个；其余按 origin。 */
+function windowKey(value) {
+  return relayEntryKey(value) || originOf(value)
+}
+
+/** 已经装着这台运行时的窗口。 */
+function windowForKey(key) {
+  if (!key) return null
+  return [...windows].find((item) => !item.win.isDestroyed() && item.key === key) || null
+}
+
+/** 本机页面那个窗口：`local` 由 did-navigate 置位，还没导航完时按 server origin 认。 */
+function localWindow() {
+  const origin = originOf(localPageUrl)
+  const found = origin
+    ? [...windows].find((item) => !item.win.isDestroyed() && (item.local || item.server === origin))
+    : null
+  if (found) return found
+  return primaryWindow && !primaryWindow.win.isDestroyed() ? primaryWindow : null
+}
+
 /**
- * 页面请求切到另一个地址：在**这个窗口**里加载它（复用窗口，不另开），其余交回系统浏览器。
+ * 把 `next` 端到前面、把 `previous` 收进后台（页面留在内存里，不重载）。
+ * 新窗口还在装第一份页面时等它 ready-to-show 再交班，中间不留「一个窗口都没有」的空档。
+ */
+function presentWindow(next, previous) {
+  if (!next || next.win.isDestroyed()) return
+  const retire = () => {
+    if (!previous || previous === next || previous.win.isDestroyed()) return
+    previous.win.hide()
+  }
+  if (!next.win.isVisible() && next.win.webContents.isLoadingMainFrame()) {
+    next.win.once('ready-to-show', retire)
+    return
+  }
+  retire()
+  showWindow(next)
+  lastFocusedWindow = next
+  refreshBadge()
+}
+
+/**
+ * 切到 `target` 那台运行时：已经有窗口就只是换显示（页面不重载），没有才探活并新开一个。
+ * 不是 Mica 运行时的地址仍交回系统浏览器。
  */
 async function switchWindowTo(state, target) {
   const origin = originOf(target)
@@ -519,11 +559,18 @@ async function switchWindowTo(state, target) {
   // 知道约定地址。先探活会连到恰好占着 8787 的那个实例上，那不是「本机」。（dev 下
   // 本机页面在 Vite dev server 上，这条分支把它换回本机页面地址。）
   if (origin && origin === loopbackRuntimeUrl() && localPageUrl) {
-    await loadInWindow(state, localPageUrl)
+    presentWindow(localWindow() || createWindow(localPageUrl, { primary: true }), state)
     return
   }
   if (!origin) {
     shell.openExternal(target)
+    return
+  }
+  // 那台已经开着：直接端出来。窗口本身就是「它确实是一台 Mica 运行时」的证据，不必再
+  // 探活一次 —— 每次切换都多等一趟往返，正是来回切觉得卡的来源之一。
+  const existing = windowForKey(windowKey(target))
+  if (existing) {
+    presentWindow(existing, state)
     return
   }
   // 探活与打开都用**完整入口**：带 `?t=` 的中转机链接丢了查询串就只是一台没人认识的域名，
@@ -533,22 +580,14 @@ async function switchWindowTo(state, target) {
     shell.openExternal(target)
     return
   }
-  await loadInWindow(state, probe.url)
-}
-
-/** 窗口还在就地在它里面加载，没有窗口（都关掉了）才重建一个。 */
-async function loadInWindow(state, url) {
-  if (!state || state.win.isDestroyed()) {
-    createWindow(url)
-    return
-  }
-  await loadPage(state, url)
+  presentWindow(createWindow(probe.url), state)
 }
 
 /** 窗口落在哪台运行时上：标题后缀与未读徽标订阅都跟着它 */
 function syncWindowServer(state, target) {
   const origin = originOf(target)
   const local = Boolean(localPageUrl) && origin === originOf(localPageUrl)
+  state.key = windowKey(target)
   state.server = origin
   state.local = local
   state.entryKey = relayEntryKey(target)
@@ -569,21 +608,13 @@ function syncWindowServer(state, target) {
 }
 
 /**
- * 回到本机（⇧⌘M）：把当前窗口带回本机页面重新加载。已经在本机页面上就只是端到前面——
- * 那一下重载会白丢页面里正在编辑的东西。切过去的那台可能跑着更旧的 bundle（页面里根本
- * 没有切换入口），回程只能由壳提供。
+ * 回到本机（⇧⌘M）：本机窗口端到前面，切走的那台原样留在后台。已经在本机页面上时就
+ * 只是端到前面，不做多余的重载。切过去的那台可能跑着更旧的 bundle（页面里根本没有
+ * 切换入口），回程只能由壳提供。
  */
 function backToLocalPage(state) {
   if (!localPageUrl) return
-  if (!state || state.win.isDestroyed()) {
-    createWindow(localPageUrl)
-    return
-  }
-  if (state.local) {
-    showWindow(state)
-    return
-  }
-  void loadPage(state, localPageUrl)
+  presentWindow(localWindow() || createWindow(localPageUrl, { primary: true }), state)
 }
 
 /* ---------------------------------------------------------------- 原生体验 */
@@ -766,10 +797,10 @@ function toggleDevTools(contents) {
 }
 
 /**
- * 开窗口装载 `url`。应用只有一个窗口（启动时那个本机窗口）：关掉它只是隐藏，应用继续
- * 留在 dock 里；切换服务器是让这个窗口换地址重新加载，不再另开。
+ * 开一个窗口装载 `url`。`primary` 是启动时那个本机窗口：关掉它只是隐藏（应用继续留在
+ * dock 里）。其余窗口是各台远程运行时，切走时隐藏、页面保活两小时后释放 renderer。
  */
-function createWindow(url) {
+function createWindow(url, { primary = false } = {}) {
   const isMac = process.platform === 'darwin'
   const win = new BrowserWindow({
     width: 1280,
@@ -797,6 +828,9 @@ function createWindow(url) {
 
   const state = {
     win,
+    primary,
+    // 窗口身份：切换服务器靠它找回「这台已经开着」
+    key: windowKey(url),
     server: originOf(url),
     clientOrigin: originOf(url),
     // 中转机入口的窗口身份（origin + t）；直连别的机器时为空
@@ -809,7 +843,8 @@ function createWindow(url) {
     suffix: ''
   }
   windows.add(state)
-  if (!primaryWindow) primaryWindow = state
+  if (primary) primaryWindow = state
+  else retainHiddenWindow(win)
 
   if (isMac) {
     win.setSheetOffset(HEADER_HEIGHT_PX)
@@ -823,6 +858,11 @@ function createWindow(url) {
     if (quitting) return
     event.preventDefault()
     win.hide()
+    // 关掉的是一台远程服务器：本机窗口还在就回到本机，别让用户以为整个应用一起关了
+    if (!primary) {
+      const local = primaryWindow && !primaryWindow.win.isDestroyed() ? primaryWindow : null
+      if (local && !local.win.isVisible()) void enterWindow(local)
+    }
   })
 
   win.on('closed', () => {
@@ -849,8 +889,8 @@ function createWindow(url) {
 
   win.webContents.on('will-navigate', (event, target) => {
     // 窗口自己那台上的跳转（含本机页面内部）直接放行 —— 同一台服务器换个路径不是
-    // 「切换服务器」，不该重载。其余交给 switchWindowTo 判断：另一台 mica 在当前
-    // 窗口里加载，普通链接仍给系统浏览器。
+    // 「切换服务器」，不该重载。其余交给 switchWindowTo 判断：另一台 mica 切到它自己
+    // 那个窗口（这个窗口留在后台原样不动），普通链接仍给系统浏览器。
     const origin = originOf(target)
     if (origin && (origin === state.server || origin === originOf(localPageUrl))) return
     event.preventDefault()
@@ -1105,7 +1145,7 @@ app.whenReady().then(async () => {
     readData: (pluginId) => readPluginData(clientHome, pluginId),
     writeData: (pluginId, value, options) => writePluginData(clientHome, pluginId, value, options),
     probe: probeRemoteRuntime,
-    // 卡片就在某个窗口里，切过去是让**那个窗口**换地址（而不是另开一个）
+    // 卡片就在某个窗口里，切过去是换到那台运行时的窗口（页面不重载，没开过的才新开）
     open: (url, event) => switchWindowTo(stateOfSender(event), url),
     local: (event) => backToLocalPage(stateOfSender(event)),
     localHost: () => localPageUrl
@@ -1142,8 +1182,8 @@ app.whenReady().then(async () => {
     await openEditorWindow(payload?.path)
     return { ok: true }
   })
-  // 只开这一个窗口：切到别的机器是让它换地址重新加载
-  createWindow(localPageUrl)
+  // 启动时只有本机这一个窗口；切到别的机器时那台会自己开一个，切回来只是换显示
+  createWindow(localPageUrl, { primary: true })
   pluginLaunchers = createPluginLaunchers({
     manifests: officialPluginManifests,
     readDisabled: readDisabledPluginIds,
@@ -1167,7 +1207,7 @@ app.whenReady().then(async () => {
       void enterWindow(state)
       return
     }
-    if (localPageUrl) createWindow(localPageUrl)
+    if (localPageUrl) createWindow(localPageUrl, { primary: true })
   })
 })
 
