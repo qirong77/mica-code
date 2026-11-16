@@ -268,6 +268,17 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # 校验脚本用 bun 跑（它按 apps/desktop 的 node_modules 解析 js-yaml）
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      # 这个 job 只需要校验器那一个依赖，不为它装整套 desktop 依赖
+      - name: Install verifier dependency
+        working-directory: apps/desktop
+        run: npm install --no-save --no-package-lock --no-audit --no-fund js-yaml
+
       - name: Download Linux desktop updater package
         uses: actions/download-artifact@v4
         with:
