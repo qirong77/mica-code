@@ -2013,6 +2013,16 @@ async function handleCodexRequest(
       ctx.writeResponse(result);
       return;
     }
+    case MICA_METHODS.askActivity: {
+      const askId = paramString(params, 'askId');
+      const active = params.active === true;
+      const result = ctx.asks?.activity({ askId: askId ?? '', active }) ?? {
+        ok: false,
+        error: '当前宿主没有可交互的提问',
+      };
+      ctx.writeResponse(result);
+      return;
+    }
     case MICA_METHODS.askAnswer: {
       // 只是把答案交给那个正在等的工具：工具在同一次迭代里继续，不发起新的 turn。
       // 因此这里立刻回包，不占请求循环——`turn/interrupt` 这些必须排得进来。

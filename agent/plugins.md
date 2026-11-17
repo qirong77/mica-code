@@ -92,7 +92,7 @@ Capabilities 可按插件查看实际工具、技能和提示词贡献。工具�
 
 ### ask（问用户一个问题，等一个回答）
 
-- `ctx.ask.request(question, { signal })` 把一道选择题交给客户端：`title` 一句话问题、`detail` 补充说明、`options`（`id` / `label` / `description`，最多 8 个）、可选的 `multiple` / `timeoutMs` / `summary`。自由输入框（`custom`）**没有开关、永远画**：选项是模型想的，想不全时用户必须有地方说自己的答案；插件能收窄的只有「画不画选项」。答案 `{ optionIds, custom?, cancelled, reason }`，`reason` 取 `answered` / `cancelled` / `timeout` / `aborted`。
+- `ctx.ask.request(question, { signal })` 把一道选择题交给客户端：`title` 一句话问题、`detail` 补充说明、`options`（`id` / `label` / `description`，最多 8 个）、可选的 `multiple` / `timeoutMs` / `summary`。自由输入框（`custom`）**没有开关、永远画**：选项是模型想的，想不全时用户必须有地方说自己的答案；插件能收窄的只有「画不画选项」。客户端显示超时倒计时；用户在自由输入框编辑时，倒计时与宿主实际超时一起暂停，停止编辑后恢复。答案 `{ optionIds, custom?, cancelled, reason }`，`reason` 取 `answered` / `cancelled` / `timeout` / `aborted`。
 - **它在工具里 await 到用户点选为止，然后回到同一次迭代**——不追加消息、不开新一轮，所以「选完之后直接继续」不需要任何投递机制。改写/中止由传进去的 `AbortSignal` 结束（工具拿到的 `callbacks.signal`），宿主会同时撤掉那张卡片。
 - 选项上的 `prompt` / `command` 不进客户端，只回到插件手里：前者是「选中后要做什么」的一段指令，后者是要当场执行的命令。真正执行命令的是插件（`ask` 只负责问答），所以「用户点一下就跑脚本」这条路径由插件自己实现并负责把它写进用户看得见的地方。
 - 超时不是错误：拿到的仍是 `cancelled` + `reason: 'timeout'`，插件自己决定退化成什么。
@@ -182,7 +182,7 @@ macOS 浮窗只取键盘焦点、不连带唤起主应用；原生窗口策略�
 
 ### 前端模块的 api
 
-整页宿主另外提供 `api.ui.Markdown`，复用聊天视图的流式 Markdown 展示，不让插件引入第二套解析 / 排版。跨会话操作用 `api.sessions`（无 chat/stats 通道时为 null）：`list({limit})`、`history(sessionId)`、`send({sessionId,cwd,prompt,clientMessageId?})`、`abort(sessionId)`、`status/isRunning(sessionId)`，以及 `onEvent/onExit/onQueueError/onQueueState/onRunStarted` 订阅。宿主从共享工作区解析实际 nodeId，事件按 sessionId 对外归属并保留 nodeId / sequence，发送只透传调用方正文，不追加插件上下文。历史和运行态不是原子快照：读取前暂存事件，按 sequence / 轮次边界合并，异步队列拒绝按 clientMessageId 恢复输入；remoteRunning 属于其它进程，不能冒充可停止的本地 run。
+整页宿主另外提供 `api.ui.Markdown`，复用聊天视图的流式 Markdown 展示，不让插件引入第二套解析 / 排版。跨会话操作用 `api.sessions`（无 chat/stats 通道时为 null）：`create({cwd?})`（仅能创建会话的桌面宿主提供，返回一条尚未持久化的草稿句柄）、`list({limit})`、`history(sessionId)`、`send({sessionId,cwd,prompt,clientMessageId?})`、`abort(sessionId)`、`status/isRunning(sessionId)`，以及 `onEvent/onExit/onQueueError/onQueueState/onRunStarted` 订阅。新草稿先以工作区 node id 作为稳定句柄，第一条消息仍经同一个 Mica app-server 绑定真实 session id，不会另起一条模型链路。宿主从共享工作区解析实际 nodeId，事件按 sessionId 对外归属并保留 nodeId / sequence，发送只透传调用方正文，不追加插件上下文。历史和运行态不是原子快照：读取前暂存事件，按 sequence / 轮次边界合并，异步队列拒绝按 clientMessageId 恢复输入；remoteRunning 属于其它进程，不能冒充可停止的本地 run。
 
 原生桌面另提供 `api.currentTarget()`（完整页面入口，保留中转机 `t` 身份）与 `api.client`：
 `context()` 返回 `{ localHost }`（客户端实际本机页面地址），`readData/writeData` 访问本机插件数据，

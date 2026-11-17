@@ -1,4 +1,5 @@
 import type {
+  MicaAskActivityParams,
   MicaAskAnswerParams,
   MicaAskPending,
   MicaAskSnapshot,
@@ -33,6 +34,8 @@ export type PluginAskHost = {
    * 页面据此收掉卡片。
    */
   answer(params: MicaAskAnswerParams): { ok: true } | { ok: false; error: string };
+  /** 用户在自由输入框里编辑时暂停 / 恢复这道题的超时。 */
+  activity(params: MicaAskActivityParams): { ok: true } | { ok: false; error: string };
   /** 宿主收尾：还在等的问题一律按「宿主停了」结束，别把一个永远不会有人回答的卡片留在页面上。 */
   dispose(): void;
 };
@@ -55,6 +58,9 @@ type Pending = {
   question: PluginAskQuestion;
   resolve(answer: PluginAskAnswer): void;
   timer: NodeJS.Timeout | null;
+  timeoutRemainingMs: number;
+  timeoutUpdatedAt: number;
+  timeoutPaused: boolean;
   /** 已经结束（回答 / 超时 / 被撤掉 / 被抢占）时不再接受新的回答。 */
   settled: boolean;
   /** 结束时要摘掉的 abort 监听：不摘的话一轮里问几次就在同一个 signal 上累积几个闭包。 */
@@ -111,6 +117,31 @@ export function createPluginAskBroker(options: PluginAskBrokerOptions): PluginAs
     }
   };
 
+  const publishTimeoutState = (pending: Pending): void => {
+    pending.ask.timeoutRemainingMs = pending.timeoutRemainingMs;
+    pending.ask.timeoutPaused = pending.timeoutPaused;
+    pending.ask.timeoutUpdatedAt = new Date(pending.timeoutUpdatedAt).toISOString();
+    publish();
+  };
+
+  const scheduleTimeout = (pending: Pending): void => {
+    if (pending.timer) clearTimeout(pending.timer);
+    pending.timer = null;
+    if (pending.timeoutPaused) return;
+    if (pending.timeoutRemainingMs <= 0) {
+      finish({ optionIds: [], cancelled: true, reason: 'timeout' });
+      return;
+    }
+    pending.timer = setTimeout(() => {
+      const elapsed = Date.now() - pending.timeoutUpdatedAt;
+      pending.timeoutRemainingMs = Math.max(0, pending.timeoutRemainingMs - elapsed);
+      pending.timeoutUpdatedAt = Date.now();
+      finish({ optionIds: [], cancelled: true, reason: 'timeout' });
+    }, pending.timeoutRemainingMs);
+    // 纯等待不该把宿主进程按在事件循环上退出不了：它自己会随着会话收尾被清掉。
+    pending.timer.unref?.();
+  };
+
   /** 把提问挂到当前槽位上并起超时。调用方保证槽位是空的，并且已经校验过形状。 */
   const open = (
     pluginId: string,
@@ -119,6 +150,8 @@ export function createPluginAskBroker(options: PluginAskBrokerOptions): PluginAs
     resolve: (answer: PluginAskAnswer) => void,
   ): Pending => {
     const display = resolvePluginAskDisplay(normalized);
+    const timeoutMs = normalized.timeoutMs ?? DEFAULT_PLUGIN_ASK_TIMEOUT_MS;
+    const now = Date.now();
     const ask: MicaAskPending = {
       id: `ask_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
       pluginId,
@@ -135,6 +168,10 @@ export function createPluginAskBroker(options: PluginAskBrokerOptions): PluginAs
       ...(passive ? { passive: true } : {}),
       summary: pluginAskSummary(normalized),
       askedAt: new Date().toISOString(),
+      timeoutMs,
+      timeoutRemainingMs: timeoutMs,
+      timeoutPaused: false,
+      timeoutUpdatedAt: new Date(now).toISOString(),
     };
 
     const pending: Pending = {
@@ -142,16 +179,14 @@ export function createPluginAskBroker(options: PluginAskBrokerOptions): PluginAs
       question: normalized,
       resolve,
       timer: null,
+      timeoutRemainingMs: timeoutMs,
+      timeoutUpdatedAt: now,
+      timeoutPaused: false,
       settled: false,
     };
     current = pending;
 
-    const timeoutMs = normalized.timeoutMs ?? DEFAULT_PLUGIN_ASK_TIMEOUT_MS;
-    pending.timer = setTimeout(() => {
-      finish({ optionIds: [], cancelled: true, reason: 'timeout' });
-    }, timeoutMs);
-    // 纯等待不该把宿主进程按在事件循环上退出不了：它自己会随着会话收尾被清掉。
-    pending.timer.unref?.();
+    scheduleTimeout(pending);
 
     // 侧栏信号先落盘再推界面：用户在别的会话里看到「等你选」点进来时，卡片应该已经在了。
     // 这两步失败时槽位必须退回去：留下来就是一个「占着位置、界面上却什么都没有」的问题，
@@ -293,6 +328,37 @@ export function createPluginAskBroker(options: PluginAskBrokerOptions): PluginAs
         cancelled: false,
         reason: 'answered',
       });
+      return { ok: true };
+    },
+    activity(params) {
+      const pending = current;
+      if (!pending || pending.settled) {
+        return { ok: false, error: '这个问题已经不需要回答了' };
+      }
+      if (typeof params.askId === 'string' && params.askId && params.askId !== pending.ask.id) {
+        return { ok: false, error: '操作的不是当前这个问题' };
+      }
+
+      if (params.active === true) {
+        if (pending.timeoutPaused) return { ok: true };
+        if (pending.timer) clearTimeout(pending.timer);
+        pending.timer = null;
+        pending.timeoutRemainingMs = Math.max(
+          0,
+          pending.timeoutRemainingMs - Math.max(0, Date.now() - pending.timeoutUpdatedAt),
+        );
+        pending.timeoutUpdatedAt = Date.now();
+        pending.timeoutPaused = true;
+        publishTimeoutState(pending);
+        if (pending.timeoutRemainingMs <= 0) finish({ optionIds: [], cancelled: true, reason: 'timeout' });
+        return { ok: true };
+      }
+
+      if (!pending.timeoutPaused) return { ok: true };
+      pending.timeoutPaused = false;
+      pending.timeoutUpdatedAt = Date.now();
+      publishTimeoutState(pending);
+      scheduleTimeout(pending);
       return { ok: true };
     },
     dispose() {

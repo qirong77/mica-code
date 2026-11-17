@@ -10,7 +10,7 @@ import {
 } from 'electron'
 import { spawn } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync, statSync, watch } from 'node:fs'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import { resolveBrowserSocketPath, startBrowserHost } from './browser/browser-host.js'
@@ -65,6 +65,11 @@ import { PAGE_STATE_PROBE, createBootGuard } from './page-boot.js'
  */
 
 const RUNTIME_ENTRY = join(__dirname, '../server/index.mjs')
+
+// 开发 / 探针实例必须能和用户正在运行的桌面端并存：除了 MICA_HOME 与端口，
+// 还要把 Electron 自己的 userData（socket、ui-state、Chromium 数据）隔离开。
+const userDataOverride = process.env.MICA_DESKTOP_USER_DATA?.trim()
+if (userDataOverride) app.setPath('userData', resolve(userDataOverride))
 
 /**
  * 一份「外部进程读得到」的页面产物目录。

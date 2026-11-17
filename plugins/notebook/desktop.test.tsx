@@ -17,7 +17,8 @@ describe('Notebook AI entry', () => {
     const onOpenChange = vi.fn();
     const onFocusedChange = vi.fn();
     const button = NotebookChatButton({ open, focused, onOpenChange, onFocusedChange });
-    expect(button.props.children).toBe('AI 对话');
+    expect(button.props.children).toBeUndefined();
+    expect(button.props.icon).toBeTruthy();
     expect(button.props['aria-expanded']).toBe(visible);
     expect(button.props.pressed).toBe(visible);
     expect(button.props['aria-label']).toBe(visible ? '收起 AI 对话' : '打开 AI 对话');
@@ -38,7 +39,7 @@ describe('Notebook AI entry', () => {
       expect(html).toContain('notebook-bar-actions');
       expect(html).toContain('notebook-ai-button');
       expect(html).toContain('aria-label="打开 AI 对话"');
-      expect(html).toContain('AI 对话</span>');
+      expect(html).not.toContain('AI 对话</span>');
     } finally {
       vi.unstubAllGlobals();
     }

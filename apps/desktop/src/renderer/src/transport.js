@@ -384,6 +384,12 @@ function createWebApi(env) {
           ...(custom ? { custom } : {}),
           ...(cancelled === true ? { cancelled: true } : {})
         }),
+      askActivity: (id, { askId, active } = {}) =>
+        invoke('chat:ask-activity', {
+          id,
+          askId,
+          active: active === true
+        }),
       compact: (sessionId, mode = 'model') => invoke('chat:compact', { sessionId, mode }),
       checkCwd: (cwd) => invoke('chat:check-cwd', { cwd }),
       // 换工作目录：有宿主的会话由宿主 chdir + 落盘（下一轮就生效），没宿主的

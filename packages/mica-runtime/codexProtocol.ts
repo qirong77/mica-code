@@ -276,6 +276,14 @@ export type MicaAskPending = {
   /** 会话列表里那句提示（「等你选方案」）。 */
   summary: string;
   askedAt: string;
+  /** 本次提问配置的总等待时长，供客户端展示倒计时。 */
+  timeoutMs: number;
+  /** 从 `timeoutUpdatedAt` 起尚未消耗的等待时长。 */
+  timeoutRemainingMs: number;
+  /** 用户正在编辑自由输入时暂停超时。 */
+  timeoutPaused: boolean;
+  /** `timeoutRemainingMs` 的时间基准。 */
+  timeoutUpdatedAt: string;
 };
 
 export type MicaAskPresentation = 'dock' | 'modal';
@@ -317,6 +325,12 @@ export type MicaAskAnswerParams = {
    * 是停下来还是按推荐项继续；被动提问则只是把卡片收掉。
    */
   cancelled?: boolean;
+};
+
+/** 用户正在提问卡片的自由输入框里编辑。 */
+export type MicaAskActivityParams = {
+  askId: string;
+  active: boolean;
 };
 
 export const MICA_PLUGIN_SETTINGS_NOTIFICATIONS = {
@@ -660,6 +674,8 @@ export const MICA_METHODS = {
    * 把那张卡片收掉——用户点的可能是一个已经没人等的问题。
    */
   askAnswer: 'mica/ask/answer',
+  /** 暂停 / 恢复提问卡片的超时倒计时，不会开始新一轮。 */
+  askActivity: 'mica/ask/activity',
   /**
    * 读本会话的插件设置：哪些插件声明了可按会话覆盖的项、每项的字段描述、
    * 全局默认值、本会话已覆盖的值。

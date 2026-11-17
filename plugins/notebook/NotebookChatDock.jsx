@@ -1,54 +1,15 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Check,
-  ChevronDown,
   Clipboard,
-  MessageSquare,
   PanelLeftClose,
-  RefreshCw,
-  Search,
   Send,
+  Sparkles,
   Square,
 } from 'lucide-react';
-import { Button, Input, ArcoPopover, MenuList, MenuItem } from '@mica-config-ui/web';
+import { Button } from '@mica-config-ui/web';
 
 import { createNotebookChat } from './chat-controller';
-
-const CHAT_SESSION_KEY = 'mica.notebook.chat-session';
-
-function readStoredSession() {
-  try {
-    return window.localStorage.getItem(CHAT_SESSION_KEY) || '';
-  } catch {
-    return '';
-  }
-}
-
-function writeStoredSession(id) {
-  try {
-    if (id) window.localStorage.setItem(CHAT_SESSION_KEY, id);
-    else window.localStorage.removeItem(CHAT_SESSION_KEY);
-  } catch {
-    // localStorage 只影响下次默认会话，不影响当前对话。
-  }
-}
-
-function sessionPath(cwd) {
-  if (!cwd) return '';
-  const parts = String(cwd).split('/').filter(Boolean);
-  return parts.slice(-2).join('/') || cwd;
-}
-
-function sessionTime(value) {
-  if (!value) return '';
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return '';
-  const elapsed = Date.now() - date.getTime();
-  if (elapsed < 60_000) return '刚刚';
-  if (elapsed < 3_600_000) return `${Math.max(1, Math.floor(elapsed / 60_000))} 分钟前`;
-  if (elapsed < 86_400_000) return `${Math.floor(elapsed / 3_600_000)} 小时前`;
-  return date.toLocaleDateString(undefined, { month: 'numeric', day: 'numeric' });
-}
 
 function messageText(message, Markdown) {
   if (!message.text) return message.streaming ? '正在思考…' : '';
@@ -56,13 +17,13 @@ function messageText(message, Markdown) {
 }
 
 /**
- * Notebook 侧边对话：只消费宿主提供的 app-server 会话能力。
- * 这里不拼接笔记正文，也不加任何 system / user prompt；textarea 的内容就是发给会话的内容。
+ * Notebook 侧边对话：每次展开都创建一条新的 Mica 会话，只消费宿主提供的
+ * app-server 会话能力。这里不拼接笔记正文，也不加任何 system / user prompt；
+ * textarea 的内容就是发给会话的内容。
  */
 export function NotebookChatDock({ api, open = true, onClose }) {
   const sessionsApi = api?.sessions;
   const Markdown = api?.ui?.Markdown;
-  const [sessions, setSessions] = useState([]);
   const [state, setState] = useState({
     sessionId: '',
     messages: [],
@@ -75,19 +36,12 @@ export function NotebookChatDock({ api, open = true, onClose }) {
     status: '',
   });
   const { sessionId, messages, draft, running, stopping } = state;
-  const [query, setQuery] = useState('');
-  const [picker, setPicker] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [listError, setListError] = useState('');
   const [copyError, setCopyError] = useState('');
   const [copiedId, setCopiedId] = useState('');
   const [atBottom, setAtBottom] = useState(true);
   const [width, setWidth] = useState(null);
   const control = useRef(null);
-  const savedSession = useRef(readStoredSession());
-  const initialized = useRef(false);
   const mounted = useRef(false);
-  const listRequest = useRef(0);
   const pinned = useRef(true);
   const log = useRef(null);
   const composer = useRef(null);
@@ -95,6 +49,7 @@ export function NotebookChatDock({ api, open = true, onClose }) {
   const resize = useRef(null);
   const panel = useRef(null);
   const opened = useRef(false);
+  const conversationRequest = useRef(0);
 
   useEffect(() => {
     mounted.current = true;
@@ -104,20 +59,12 @@ export function NotebookChatDock({ api, open = true, onClose }) {
     }
     return () => {
       mounted.current = false;
-      initialized.current = false;
-      listRequest.current += 1;
+      conversationRequest.current += 1;
       clearTimeout(copyTimer.current);
       control.current?.dispose();
       control.current = null;
     };
   }, [sessionsApi]);
-
-  const active = sessions.find((item) => item.id === sessionId) || null;
-  const filtered = useMemo(() => {
-    const needle = query.trim().toLowerCase();
-    if (!needle) return sessions;
-    return sessions.filter((item) => `${item.title} ${item.cwd || ''}`.toLowerCase().includes(needle));
-  }, [query, sessions]);
 
   const scrollToBottom = useCallback((smooth = false) => {
     const node = log.current;
@@ -126,45 +73,55 @@ export function NotebookChatDock({ api, open = true, onClose }) {
     setAtBottom(true);
   }, []);
 
-  const refresh = useCallback(async () => {
-    if (!sessionsApi) return;
-    const request = ++listRequest.current;
-    setLoading(true);
-    setListError('');
+  const startConversation = useCallback(async () => {
+    const request = ++conversationRequest.current;
+    if (!sessionsApi?.create || !control.current) {
+      setState((current) => ({
+        ...current,
+        loading: false,
+        error: '当前页面没有创建 Mica 会话的能力，请从桌面端打开笔记本。',
+      }));
+      return;
+    }
+    setState((current) => ({
+      ...current,
+      sessionId: '',
+      messages: [],
+      draft: '',
+      loading: true,
+      error: '',
+      status: '正在准备新的 Mica 会话…',
+    }));
     try {
-      // 搜索基于完整会话列表，不把第 81 条以后的会话藏掉。
-      const rows = await sessionsApi.list({ limit: 10000 });
-      if (request === listRequest.current && mounted.current) setSessions(Array.isArray(rows) ? rows : []);
+      const created = await sessionsApi.create();
+      if (request !== conversationRequest.current || !mounted.current) return;
+      if (!created?.id) throw new Error('Mica 会话创建失败');
+      await control.current.select(created.id, created.cwd);
     } catch (cause) {
-      if (request === listRequest.current && mounted.current) setListError(cause?.message || String(cause));
-    } finally {
-      if (request === listRequest.current && mounted.current) setLoading(false);
+      if (request === conversationRequest.current && mounted.current) {
+        setState((current) => ({
+          ...current,
+          loading: false,
+          error: cause?.message || String(cause),
+          status: '',
+        }));
+      }
     }
   }, [sessionsApi]);
 
-  // 在笔记页里预热一次目录。打开面板用已有结果，不为一次点击先显示等待文字。
   useEffect(() => {
-    void refresh();
-  }, [refresh]);
-
-  useEffect(() => {
-    if (!open || !control.current || initialized.current || !sessions.length) return;
-    initialized.current = true;
-    const id =
-      savedSession.current && sessions.some((row) => row.id === savedSession.current)
-        ? savedSession.current
-        : sessions[0]?.id || '';
-    if (id) {
-      writeStoredSession(id);
-      void control.current.select(id, sessions.find((row) => row.id === id)?.cwd);
+    if (!open) {
+      opened.current = false;
+      conversationRequest.current += 1;
+      return;
     }
-  }, [open, sessions]);
-
-  useEffect(() => {
-    if (!open) setPicker(false);
-    else if (opened.current) void control.current?.refresh();
-    if (open) opened.current = true;
-  }, [open]);
+    if (!opened.current) {
+      opened.current = true;
+      void startConversation();
+    } else {
+      void control.current?.refresh();
+    }
+  }, [open, startConversation]);
 
   useEffect(() => {
     if (!open) return undefined;
@@ -202,17 +159,6 @@ export function NotebookChatDock({ api, open = true, onClose }) {
     node.style.height = `${Math.min(Math.max(node.scrollHeight, 70), 150)}px`;
   }, [draft, open]);
 
-  const choose = (id) => {
-    pinned.current = true;
-    setAtBottom(true);
-    setCopyError('');
-    if (id !== sessionId) void control.current?.select(id, sessions.find((row) => row.id === id)?.cwd);
-    writeStoredSession(id);
-    setPicker(false);
-    setQuery('');
-    composer.current?.focus();
-  };
-
   const send = () => {
     pinned.current = true;
     setAtBottom(true);
@@ -238,9 +184,9 @@ export function NotebookChatDock({ api, open = true, onClose }) {
         ref={panel}
         className="notebook-chat"
         style={width ? { '--notebook-chat-width': `${width}px` } : undefined}
-        aria-label="对话"
+        aria-label="AI 对话"
         onKeyDown={(event) => {
-          if (event.key === 'Escape' && !picker && event.target.tagName !== 'TEXTAREA') {
+          if (event.key === 'Escape' && event.target.tagName !== 'TEXTAREA') {
             event.stopPropagation();
             onClose();
           }
@@ -288,101 +234,15 @@ export function NotebookChatDock({ api, open = true, onClose }) {
           }}
         />
         <header className="notebook-chat-head">
-          <ArcoPopover
-            trigger="click"
-            position="br"
-            className="notebook-chat-picker-popover"
-            escToClose
-            popupVisible={picker}
-            onVisibleChange={(visible) => {
-              setPicker(visible);
-              if (!visible) setQuery('');
-            }}
-            triggerProps={{ showArrow: false }}
-            content={
-              <div className="notebook-chat-picker-panel" role="dialog" aria-label="选择会话">
-                <Input
-                  autoFocus
-                  prefix={<Search size={14} />}
-                  value={query}
-                  placeholder="搜索标题或目录"
-                  aria-label="搜索标题或目录"
-                  onChange={setQuery}
-                  onKeyDown={(event) => {
-                    if (event.key === 'ArrowDown') {
-                      event.preventDefault();
-                      event.currentTarget
-                        .closest('[role="dialog"]')
-                        ?.querySelector('[role="menuitemcheckbox"]')
-                        ?.focus();
-                    }
-                  }}
-                />
-                <div className="notebook-chat-picker-summary">
-                  <span>{query ? `${filtered.length} 条匹配` : `${sessions.length} 条会话`}</span>
-                  <span>在原会话继续</span>
-                </div>
-                <MenuList className="notebook-chat-list" aria-label="Mica 会话" onClose={() => setPicker(false)}>
-                  {loading && !sessions.length && (
-                    <div className="notebook-chat-skeleton" aria-label="加载会话列表">
-                      <i />
-                      <i />
-                    </div>
-                  )}
-                  {!loading && !filtered.length && (
-                    <p className="notebook-chat-empty">{query ? '没有匹配的会话' : '还没有会话，请先在 Mica 创建'}</p>
-                  )}
-                  {filtered.slice(0, 100).map((item) => (
-                    <MenuItem
-                      key={item.id}
-                      selected={item.id === sessionId}
-                      className="notebook-chat-option"
-                      onClick={() => choose(item.id)}
-                    >
-                      <span className="notebook-chat-option-copy" title={`${item.title}\n${item.cwd || item.id}`}>
-                        <span className="notebook-chat-option-title">
-                          <span>{item.title}</span>
-                          {item.id === sessionId && <Check size={12} />}
-                        </span>
-                        <small>
-                          <span>{sessionPath(item.cwd)}</span>
-                          <span>{sessionTime(item.updatedAt)}</span>
-                        </small>
-                      </span>
-                    </MenuItem>
-                  ))}
-                </MenuList>
-                {filtered.length > 100 && <small>显示前 100 条，输入关键词可查找全部会话。</small>}
-              </div>
-            }
-          >
-            <span className="notebook-chat-picker-anchor">
-              {' '}
-              <Button
-                variant="ghost"
-                className="notebook-chat-picker-toggle mica-arco-row"
-                title={active ? `${active.title}\n${active.cwd || sessionId}` : '选择会话'}
-                aria-label="选择会话"
-                aria-expanded={picker}
-              >
-                <MessageSquare size={14} />
-                <span className="notebook-chat-picker-copy">
-                  <span className="notebook-chat-title">
-                    {active?.title || (sessionId ? '已选择会话' : '选择会话')}
-                  </span>
-                </span>
-                <ChevronDown size={13} />
-              </Button>
+          <div className="notebook-chat-heading">
+            <span className="notebook-chat-heading-icon" aria-hidden="true">
+              <Sparkles size={16} strokeWidth={1.7} />
             </span>
-          </ArcoPopover>
-          <Button
-            variant="ghost"
-            icon={<RefreshCw size={14} />}
-            title="刷新会话列表"
-            aria-label="刷新会话列表"
-            disabled={loading || !sessionsApi}
-            onClick={() => void refresh()}
-          />
+            <span className="notebook-chat-heading-copy">
+              <strong>AI 对话</strong>
+              <small>新的 Mica 会话</small>
+            </span>
+          </div>
           <Button
             variant="ghost"
             icon={<PanelLeftClose size={15} />}
@@ -392,12 +252,8 @@ export function NotebookChatDock({ api, open = true, onClose }) {
           />
         </header>
         <div className={`notebook-chat-session-strip ${running ? 'is-running' : ''}`}>
-          <span>{running ? '正在运行' : state.loading ? '同步中' : sessionId ? '当前会话' : '未选择会话'}</span>
-          {active?.cwd && (
-            <span className="notebook-chat-cwd" title={active.cwd}>
-              {sessionPath(active.cwd)}
-            </span>
-          )}
+          <span>{running ? 'Mica 正在运行' : state.loading ? '正在准备会话' : sessionId ? '独立新会话' : '等待会话'}</span>
+          <span className="notebook-chat-session-note">内容原样发送</span>
         </div>
         <div
           className="notebook-chat-log"
@@ -410,21 +266,26 @@ export function NotebookChatDock({ api, open = true, onClose }) {
           }}
         >
           <div className="notebook-chat-messages">
-            {!sessionsApi && <p className="notebook-chat-empty">这个宿主没有提供 app-server 会话能力。</p>}
-            {sessionsApi && !sessionId && <p className="notebook-chat-empty">先选择一条会话，然后就能在这里继续聊。</p>}
-            {sessionsApi && sessionId && !state.loading && !messages.length && !state.error && (
-              <p className="notebook-chat-empty">这条会话还没有对话。</p>
+            {!sessionsApi && <p className="notebook-chat-empty">这个宿主没有提供 Mica 会话能力。</p>}
+            {sessionsApi && state.loading && !messages.length && (
+              <div className="notebook-chat-welcome is-loading" aria-label="准备新的 Mica 会话">
+                <span className="notebook-chat-welcome-icon"><Sparkles size={19} /></span>
+                <strong>正在准备新的对话</strong>
+                <span>会话会由 Mica 的进程运行。</span>
+              </div>
             )}
-            {state.loading && !messages.length && (
-              <div className="notebook-chat-skeleton" aria-label="加载对话记录">
-                <i />
-                <i />
-                <i />
+            {sessionsApi && sessionId && !state.loading && !messages.length && !state.error && (
+              <div className="notebook-chat-welcome">
+                <span className="notebook-chat-welcome-icon"><Sparkles size={19} /></span>
+                <strong>开始一段新对话</strong>
+                <span>直接输入问题，Mica 会在独立会话中回答。</span>
               </div>
             )}
             {messages.map((item) => (
               <div key={item.id} className={`notebook-chat-message is-${item.role}`}>
-                <div className="notebook-chat-message-meta">{item.role === 'user' ? '你' : 'Mica'}</div>
+                <div className="notebook-chat-message-meta">
+                  {item.role === 'user' ? '你' : <><Sparkles size={11} /> Mica</>}
+                </div>
                 <div className="notebook-chat-text">
                   {messageText(item, item.role === 'assistant' ? Markdown : null)}
                 </div>
@@ -456,26 +317,26 @@ export function NotebookChatDock({ api, open = true, onClose }) {
             回到底部
           </Button>
         )}
-        {(state.error || listError || copyError) && (
+        {(state.error || copyError) && (
           <div className="notebook-chat-notice is-error" role="alert">
-            <span>{state.error || listError || copyError}</span>
+            <span>{state.error || copyError}</span>
             <Button
               variant="ghost"
               size="compact"
               onClick={() => {
                 setCopyError('');
-                if (listError) void refresh();
-                else void control.current?.refresh();
+                void control.current?.refresh();
               }}
             >
-              重试读取
+              重试
             </Button>
           </div>
         )}
         {state.status &&
           state.status !== '正在回答…' &&
           state.status !== '正在发送…' &&
-          state.status !== '正在读取…' && (
+          state.status !== '正在读取…' &&
+          state.status !== '正在准备新的 Mica 会话…' && (
             <div className="notebook-chat-notice" role="status">
               {state.status}
             </div>
@@ -484,9 +345,9 @@ export function NotebookChatDock({ api, open = true, onClose }) {
           <textarea
             ref={composer}
             value={draft}
-            placeholder={sessionId ? '输入消息…（Enter 发送，Shift+Enter 换行）' : '先选择一条会话'}
+            placeholder={sessionId ? '输入消息…（Enter 发送，Shift+Enter 换行）' : '正在准备新的会话…'}
             aria-label="消息内容"
-            disabled={!sessionId || !sessionsApi}
+            disabled={!sessionId || !sessionsApi || state.loading}
             rows={3}
             onChange={(event) => control.current?.setDraft(event.target.value)}
             onKeyDown={(event) => {
@@ -504,7 +365,7 @@ export function NotebookChatDock({ api, open = true, onClose }) {
                   ? '正在停止…'
                   : running
                     ? 'Mica 正在回答'
-                    : '内容原样发送，不会附加笔记'}
+                    : '消息会原样交给 Mica'}
             </span>
             <Button
               variant={running ? 'danger-ghost' : 'accent'}

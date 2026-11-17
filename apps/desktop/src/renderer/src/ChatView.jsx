@@ -81,6 +81,7 @@ import { protectEmphasisAutolinks, remarkAutolinkPunctuation } from './chat-auto
 import { ComposerImageStrip, resolveImageSource } from './composer-images'
 import { pasteIntoComposer } from './composer-paste'
 import { formatLogElapsed, turnLogHeadSummary } from './chat-tool-display'
+import { askRemainingMs, formatAskCountdown } from './chat-ask'
 import { ReasoningRow, ToolActivityRow } from './chat-tool-views'
 import {
   groupActivityRounds,
@@ -624,12 +625,43 @@ function QueueDock({ items, onRecall, recallingId, running }) {
 //
 // 位置有两种：默认挂在输入框上方（和排队行同一个位置，都是「这一轮卡在这里」的东西）；
 // `presentation: 'modal'` 时铺一层遮罩居中显示，用于需要打断注意力的事情。
-export function AskDock({ ask, submitting, onSubmit, onCancel }) {
+function AskCountdown({ ask }) {
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    setNow(Date.now())
+    const timer = window.setInterval(() => setNow(Date.now()), 250)
+    return () => window.clearInterval(timer)
+  }, [ask?.id, ask?.timeoutPaused, ask?.timeoutRemainingMs, ask?.timeoutUpdatedAt])
+  if (!ask || !Number.isFinite(Number(ask.timeoutRemainingMs ?? ask.timeoutMs))) return null
+  const remaining = askRemainingMs(ask, now)
+  return (
+    <span
+      className={`chat-ask-countdown${ask.timeoutPaused ? ' is-paused' : ''}`}
+      role="status"
+      aria-live="polite"
+      title={ask.timeoutPaused ? '你正在输入，倒计时已暂停' : '未输入时继续倒计时'}
+    >
+      {ask.timeoutPaused ? '已暂停 · ' : '剩余 '}
+      {formatAskCountdown(remaining)}
+    </span>
+  )
+}
+
+export function AskDock({ ask, submitting, onSubmit, onCancel, onActivity }) {
   const [selected, setSelected] = useState([])
   const [custom, setCustom] = useState('')
+  const typingTimerRef = useRef(null)
+  const typingAskIdRef = useRef(null)
   useEffect(() => {
     setSelected([])
     setCustom('')
+    typingAskIdRef.current = ask?.id || null
+    return () => {
+      if (typingTimerRef.current) window.clearTimeout(typingTimerRef.current)
+      typingTimerRef.current = null
+      if (typingAskIdRef.current) onActivity?.({ askId: typingAskIdRef.current, active: false })
+      typingAskIdRef.current = null
+    }
   }, [ask?.id])
   // 元素开关要在提前 return 之前算出来（下面那个 effect 依赖它），否则 ask 从无到有时
   // 两次渲染的 hook 数量不同，React 会直接抛错。
@@ -687,6 +719,20 @@ export function AskDock({ ask, submitting, onSubmit, onCancel }) {
   const picked = ask.options.filter((option) => selected.includes(option.id))
   const pickedText = picked.map((option) => option.label).join('、')
   const summaryText = pickedText || custom.trim()
+  const handleCustomChange = (value) => {
+    setCustom(value)
+    if (!ask || !onActivity) return
+    typingAskIdRef.current = ask.id
+    onActivity({ askId: ask.id, active: true })
+    if (typingTimerRef.current) window.clearTimeout(typingTimerRef.current)
+    typingTimerRef.current = window.setTimeout(() => {
+      typingTimerRef.current = null
+      if (typingAskIdRef.current === ask.id) {
+        onActivity({ askId: ask.id, active: false })
+        typingAskIdRef.current = null
+      }
+    }, 800)
+  }
 
   const card = (
     <section
@@ -707,6 +753,7 @@ export function AskDock({ ask, submitting, onSubmit, onCancel }) {
             {ask.options.length} 个方案 · {multiple ? '可多选' : '单选'}
           </span>
         ) : null}
+        <AskCountdown ask={ask} />
         <span className="chat-ask-spacer" aria-hidden="true" />
         {display.dismiss ? (
           <ArcoAction iconOnly
@@ -757,7 +804,7 @@ export function AskDock({ ask, submitting, onSubmit, onCancel }) {
           value={custom}
           placeholder={display.options ? '或者直接说你的想法…' : '写下来…'}
           disabled={submitting}
-          onChange={setCustom}
+          onChange={handleCustomChange}
           onKeyDown={(event) => {
             if (event.key !== 'Enter' || event.nativeEvent.isComposing) return
             if (!canSubmit) return
@@ -6853,6 +6900,16 @@ export function ChatView({
     [appendNotice, askSubmitting, nodeId, pendingAsk]
   )
 
+  const updateAskActivity = useCallback(
+    ({ askId, active }) => {
+      if (!nodeId || !askId) return
+      void window.mica.chat
+        .askActivity(nodeId, { askId, active: active === true })
+        .catch(() => {})
+    },
+    [nodeId]
+  )
+
   // 关掉卡片 = 明确「不用了」，与「选了空」不同：阻塞中的工具会收到 cancelled，
   // 自己决定停下来还是按推荐项继续。
   const cancelAsk = useCallback(
@@ -7706,6 +7763,7 @@ export function ChatView({
             submitting={askSubmitting}
             onSubmit={submitAsk}
             onCancel={cancelAsk}
+            onActivity={updateAskActivity}
           />
           <ComposerImageStrip
             text={input}

@@ -4,8 +4,6 @@ import {
   ChevronDown,
   ChevronRight,
   Download,
-  Eye,
-  EyeOff,
   FilePlus2,
   FileText,
   Focus,
@@ -14,7 +12,7 @@ import {
   FolderOpen,
   FolderPlus,
   Menu,
-  MessageSquare,
+  Sparkles,
   MoreHorizontal,
   PanelLeftClose,
   Pencil,
@@ -170,7 +168,7 @@ export function NotebookChatButton({ open, focused, onOpenChange, onFocusedChang
   return (
     <Button
       variant={visible ? 'primary' : 'ghost'}
-      icon={<MessageSquare size={16} strokeWidth={1.6} />}
+      icon={<Sparkles size={16} strokeWidth={1.7} />}
       className="notebook-ai-button"
       title={visible ? '收起 AI 对话' : '打开 AI 对话'}
       aria-label={visible ? '收起 AI 对话' : '打开 AI 对话'}
@@ -180,9 +178,7 @@ export function NotebookChatButton({ open, focused, onOpenChange, onFocusedChang
         if (!visible) onFocusedChange(false);
         onOpenChange(!visible);
       }}
-    >
-      AI 对话
-    </Button>
+    />
   );
 }
 
@@ -198,7 +194,6 @@ export default function NotebookPage({ api }) {
   const [menu, setMenu] = useState(null);
   const [newMenu, setNewMenu] = useState(false);
   const [railOpen, setRailOpen] = useState(() => !window.matchMedia('(max-width: 760px)').matches);
-  const [outlineOpen, setOutlineOpen] = useState(() => !window.matchMedia('(max-width: 1100px)').matches);
   const [layout, setLayout] = useState(() => ({
     mobile: window.innerWidth <= 760,
     overlay: window.innerWidth <= 1100,
@@ -271,7 +266,7 @@ export default function NotebookPage({ api }) {
     [index, expanded, query, trash],
   );
   const railOverlay = layout.mobile && railOpen && !focused;
-  const outlineOverlay = layout.overlay && outlineOpen && !focused && !chatOpen && !!active;
+  const outlineOverlay = layout.overlay && !focused && !chatOpen && !!active;
 
   const save = useCallback(
     async (target = current.current) => {
@@ -525,7 +520,6 @@ export default function NotebookPage({ api }) {
       layoutRef.current = next;
       setLayout(next);
       if (next.mobile && !previous.mobile) setRailOpen(false);
-      if (next.overlay && !previous.overlay) setOutlineOpen(false);
     });
     if (pageRoot.current) observer.observe(pageRoot.current);
     return () => observer.disconnect();
@@ -557,12 +551,11 @@ export default function NotebookPage({ api }) {
     const escape = (event) => {
       if (event.key !== 'Escape' || event.defaultPrevented || dialog || menu || newMenu) return;
       if (focused) setFocused(false);
-      else if (layout.overlay && outlineOpen) setOutlineOpen(false);
       else if (layout.mobile && railOpen) setRailOpen(false);
     };
     window.addEventListener('keydown', escape);
     return () => window.removeEventListener('keydown', escape);
-  }, [focused, dialog, menu, newMenu, outlineOpen, railOpen, layout]);
+  }, [focused, dialog, menu, newMenu, railOpen, layout]);
 
   // iframe 内的点击不冒泡到宿主；焦点进入编辑器时也要收起宿主的菜单。
   useEffect(() => {
@@ -592,7 +585,6 @@ export default function NotebookPage({ api }) {
   const jump = (target) => {
     if (!activeId || !ready.current || loadedNote.current !== activeId) return;
     bridge.current?.navigate(activeId, target);
-    if (layoutRef.current.overlay) setOutlineOpen(false);
   };
 
   const toggleFolder = (id) =>
@@ -1152,7 +1144,6 @@ export default function NotebookPage({ api }) {
                       onClick={() => {
                         setFocused(false);
                         setRailOpen(true);
-                        if (layoutRef.current.overlay) setOutlineOpen(false);
                       }}
                     />
                     {active && (
@@ -1163,12 +1154,6 @@ export default function NotebookPage({ api }) {
                   </div>
                 )}
                 <div className="notebook-bar-actions" ref={barActions}>
-                  <NotebookChatButton
-                    open={chatOpen}
-                    focused={focused}
-                    onOpenChange={setChatOpen}
-                    onFocusedChange={setFocused}
-                  />
                   {active && (
                     <>
                       <Button
@@ -1250,6 +1235,12 @@ export default function NotebookPage({ api }) {
                       />
                     </>
                   )}
+                  <NotebookChatButton
+                    open={chatOpen}
+                    focused={focused}
+                    onOpenChange={setChatOpen}
+                    onFocusedChange={setFocused}
+                  />
                 </div>
               </div>
               <iframe
@@ -1316,27 +1307,11 @@ export default function NotebookPage({ api }) {
               ) : null}
             </div>
             <NotebookChatDock api={api} open={chatOpen && !focused} onClose={() => setChatOpen(false)} />
-            {active && outlineOpen && !focused && !chatOpen && (
+            {active && !focused && !chatOpen && (
               <>
-                <button
-                  type="button"
-                  className="notebook-outline-mask"
-                  tabIndex={-1}
-                  aria-label="关闭大纲浮层"
-                  onClick={() => setOutlineOpen(false)}
-                />
                 <aside ref={outlinePanel} className="notebook-outline" aria-label="文档大纲">
                   <header>
                     <strong>大纲</strong>
-                    <Button
-                      variant="ghost"
-                      size="compact"
-                      className="notebook-outline-eye"
-                      icon={<EyeOff size={14} />}
-                      title="收起大纲"
-                      aria-label="收起大纲"
-                      onClick={() => setOutlineOpen(false)}
-                    />
                   </header>
                   <nav className="notebook-outline-list" aria-label="当前笔记的标题">
                     {!outline.items.length && (
@@ -1362,37 +1337,6 @@ export default function NotebookPage({ api }) {
                   </nav>
                 </aside>
               </>
-            )}
-            {/* 收起态的刻度条：标题按顺序标在右侧，当前标题高亮，悬停时出现眼睛按钮展开。 */}
-            {active && !outlineOpen && !focused && !chatOpen && outline.items.length > 0 && (
-              <aside className="notebook-outline-rail" aria-label="文档大纲（已收起）">
-                <Button
-                  variant="ghost"
-                  className="notebook-outline-eye"
-                  icon={<Eye size={14} />}
-                  title="展开大纲"
-                  aria-label="展开大纲"
-                  onClick={() => {
-                    setFocused(false);
-                    setOutlineOpen(true);
-                  }}
-                />
-                <div className="notebook-outline-track">
-                  {outline.items.map((item, index) => (
-                    <button
-                      key={item.key}
-                      type="button"
-                      className={`notebook-outline-mark ${item.key === outline.activeKey ? 'is-active' : ''}`}
-                      style={{ top: `${((index + 0.5) / outline.items.length) * 100}%`, '--heading-level': item.level }}
-                      title={item.text || '未命名标题'}
-                      aria-label={item.text || '未命名标题'}
-                      aria-current={item.key === outline.activeKey ? 'location' : undefined}
-                      disabled={busy}
-                      onClick={() => jump({ heading: item.key })}
-                    />
-                  ))}
-                </div>
-              </aside>
             )}
           </div>
         </main>

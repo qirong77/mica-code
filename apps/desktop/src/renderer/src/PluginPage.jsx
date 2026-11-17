@@ -32,7 +32,7 @@ function PluginMarkdown(props) {
  *
  * 这里不认识任何具体插件：页面标题来自清单，内容来自插件目录的 `desktop.jsx`。
  */
-export function PluginPage({ entry, onClose, standalone = false }) {
+export function PluginPage({ entry, onClose, onCreateSession, standalone = false }) {
   const isMobile = useIsMobile()
   const beforeClose = useMemo(() => new Set(), [entry.id])
   const closing = useRef(false)
@@ -72,7 +72,7 @@ export function PluginPage({ entry, onClose, standalone = false }) {
 
   const api = useMemo(
     () => ({
-      ...createPluginHostApi(entry.id),
+      ...createPluginHostApi(entry.id, null, { createSession: onCreateSession }),
       ui: { Markdown: PluginMarkdown },
       page: {
         beforeClose(handler) {
@@ -97,7 +97,7 @@ export function PluginPage({ entry, onClose, standalone = false }) {
         setSearch: setPageSearch
       }
     }),
-    [entry.id, beforeClose, pagePath, setPageSearch]
+    [entry.id, beforeClose, onCreateSession, pagePath, setPageSearch]
   )
   const Page = entry.module.Page ?? entry.module.default
   const close = async () => {

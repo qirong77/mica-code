@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { MicaAskSnapshot } from '@packages/mica-runtime/index.js';
 import { createPluginAskBroker } from './PluginAskBroker.js';
 
@@ -69,6 +69,32 @@ describe('createPluginAskBroker', () => {
     expect(latest(notifications)).toBeNull();
     expect(marks).toEqual(['等你选入口', null]);
   }, 5000);
+
+  it('pauses the real timeout while the user is typing', async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date('2026-01-01T00:00:00.000Z'));
+      const { host, notifications } = createHarness();
+      const pending = host.forPlugin('ask').request({ ...question, timeoutMs: 1000 });
+      const askId = latest(notifications)!.id;
+
+      vi.advanceTimersByTime(200);
+      expect(host.activity({ askId, active: true })).toEqual({ ok: true });
+      expect(latest(notifications)).toMatchObject({ timeoutRemainingMs: 800, timeoutPaused: true });
+
+      vi.advanceTimersByTime(5000);
+      expect(latest(notifications)).toMatchObject({ timeoutRemainingMs: 800, timeoutPaused: true });
+
+      expect(host.activity({ askId, active: false })).toEqual({ ok: true });
+      expect(latest(notifications)).toMatchObject({ timeoutRemainingMs: 800, timeoutPaused: false });
+      vi.advanceTimersByTime(799);
+      expect(latest(notifications)).not.toBeNull();
+      vi.advanceTimersByTime(1);
+      await expect(pending).resolves.toEqual({ optionIds: [], cancelled: true, reason: 'timeout' });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 
   it('aborts when the tool is cancelled, without waiting for the timeout', async () => {
     const { host, marks } = createHarness();

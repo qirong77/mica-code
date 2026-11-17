@@ -2679,6 +2679,18 @@ export function registerChatIpc() {
     }
   )
 
+  // 用户正在提问卡片的自由输入框里编辑：只暂停 / 恢复这道题的超时，不开始新一轮。
+  ipcMain.handle('chat:ask-activity', async (_event, { id, askId, active } = {}) => {
+    const run = runs.get(id)
+    if (!run) return { ok: false, error: '这条会话没有在等回答' }
+    return unwrapHostResult(
+      await hostTaskRequest(run, 'mica/ask/activity', {
+        askId: typeof askId === 'string' ? askId : '',
+        active: active === true
+      })
+    )
+  })
+
   ipcMain.handle('chat:models', () => listModels())
 
   ipcMain.handle('chat:roles', () => listRoles())

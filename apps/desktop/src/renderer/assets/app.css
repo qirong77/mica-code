@@ -2928,6 +2928,24 @@ html[data-appearance='light'] .chat-markdown code:not(pre code) {
   font-size: 10.5px;
 }
 
+.chat-ask-countdown {
+  flex: none;
+  padding: 2px 6px;
+  border: 1px solid color-mix(in srgb, var(--color-ask) 34%, var(--color-line));
+  border-radius: 999px;
+  color: var(--color-ask);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.chat-ask-countdown.is-paused {
+  border-color: color-mix(in srgb, var(--color-ask) 52%, var(--color-line));
+  background: color-mix(in srgb, var(--color-ask) 12%, transparent);
+}
+
 .chat-ask-spacer {
   flex: 1;
 }

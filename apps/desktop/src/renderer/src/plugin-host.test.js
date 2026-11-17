@@ -87,9 +87,9 @@ describe('plugin host read-only web API', () => {
     const standalone = readFileSync(new URL('./PluginPageWindow.jsx', import.meta.url), 'utf8')
     expect(page).toContain('pluginPagePath(entry.id, entry.page.route)')
     expect(page).toContain('`${pagePath}${next}`')
-    expect(standalone).toContain('matchesPluginPagePath(window.location.pathname, pluginId, plugin.desktopPage.route)')
+    expect(standalone).toContain('matchesPluginPagePath(window.location.pathname, pluginId, plugin.desktopPage?.route)')
     expect(standalone).toContain("plugin?.state !== 'enabled'")
-    expect(standalone).toContain('!plugin.desktopPage')
+    expect(standalone).toContain('!(plugin.desktopPage || plugin.desktopLauncher)')
   })
 })
 
@@ -225,6 +225,29 @@ describe('plugin host cross-session chat API', () => {
     await expect(api.sessions.send({ sessionId: 's1', prompt: '   ' })).rejects.toThrow(
       '消息内容为空'
     )
+  })
+
+  test('creates a fresh draft and routes its first message through the draft node', async () => {
+    const starts = []
+    hostWith({
+      start: async (payload) => {
+        starts.push(payload)
+        return { ok: true }
+      }
+    })
+    const api = createPluginHostApi('sample', null, {
+      createSession: async () => ({ id: 'draft-1', cwd: null })
+    })
+    expect(await api.sessions.create()).toMatchObject({ id: 'draft-1', title: '新对话' })
+    expect(await api.sessions.history('draft-1')).toEqual([])
+    await api.sessions.send({ sessionId: 'draft-1', prompt: '直接发送' })
+    expect(starts).toEqual([{
+      id: 'draft-1',
+      sessionId: null,
+      cwd: null,
+      prompt: '直接发送',
+      maxTurns: 9999
+    }])
   })
 
   test('sorts before limiting without mutating the host list and rejects malformed rows', async () => {

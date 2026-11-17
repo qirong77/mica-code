@@ -58,7 +58,7 @@ export function openRuntimeTarget(url, { userAgent, open, assign } = {}) {
  * 交给插件 `desktop.jsx` 的那份 api。`pluginId` 由宿主注入，插件不必自己拼——它也
  * 拼不对：配置与独立文档都落在 `$MICA_HOME/plugin-data/<id>/` 下。
  */
-export function createPluginHostApi(pluginId, session = null) {
+export function createPluginHostApi(pluginId, session = null, { createSession } = {}) {
   const host = window.mica?.pluginHost
   const chat = window.mica?.chat
   const stats = window.mica?.stats
@@ -67,6 +67,12 @@ export function createPluginHostApi(pluginId, session = null) {
   // sessionId 的 queue-error；不创建/改写工作区，也不启动额外的会话宿主。
   const nodeSessions = new Map()
   const sessionNodes = new Map()
+  // A plugin page can create a brand-new Mica draft without owning a ChatView.
+  // Keep its node id as the stable UI key until the first turn assigns the real
+  // persisted session id. This avoids making a second host by sending through
+  // the persisted id before the renderer has bound the node.
+  const draftSessions = new Set()
+  const draftSessionIds = new Map()
   const rememberNode = (nodeId, sessionId) => {
     if (!nodeId || !sessionId) return
     const previous = nodeSessions.get(nodeId)
@@ -81,10 +87,18 @@ export function createPluginHostApi(pluginId, session = null) {
       payload?.event?.sessionID ||
       nodeSessions.get(payload?.id) ||
       payload?.id
+    if (payload?.id && draftSessions.has(payload.id)) {
+      if (payload?.sessionId) draftSessionIds.set(payload.id, payload.sessionId)
+      rememberNode(payload.id, payload.sessionId || payload.id)
+      return payload.id
+    }
     rememberNode(payload?.id, sessionId)
     return sessionId
   }
+  const actualSessionId = (sessionId) =>
+    draftSessions.has(sessionId) ? draftSessionIds.get(sessionId) || '' : sessionId
   const resolveNode = async (sessionId) => {
+    if (draftSessions.has(sessionId)) return sessionId
     // 独立插件页也读同一份工作区，刷新后尚未收到任何事件时仍能附着主界面的 run。
     const snapshot = await window.mica?.uiState?.get?.()
     const nodes = snapshot?.workspace?.nodes
@@ -108,7 +122,7 @@ export function createPluginHostApi(pluginId, session = null) {
   const sessionStatus = async (sessionId) => {
     if (!sessionId) return null
     const nodeId = await resolveNode(sessionId)
-    const state = await chat.isRunning(nodeId, sessionId)
+    const state = await chat.isRunning(nodeId, actualSessionId(sessionId) || null)
     if (typeof state?.running !== 'boolean') throw new Error('会话状态响应无效')
     return { ...state, nodeId, sessionId }
   }
@@ -266,6 +280,27 @@ export function createPluginHostApi(pluginId, session = null) {
     sessions:
       chat && stats
         ? {
+            /**
+             * Create an empty Mica draft for a plugin-owned conversation.
+             * The renderer callback creates the same node that the main chat
+             * uses; the first send then starts the normal Mica app-server.
+             */
+            create: async (options = {}) => {
+              if (typeof createSession !== 'function')
+                throw new Error('当前页面不能创建 Mica 会话，请从桌面端打开笔记本')
+              const result = await createSession({
+                cwd: typeof options?.cwd === 'string' && options.cwd.trim() ? options.cwd.trim() : null
+              })
+              const id = typeof result === 'string' ? result : result?.id
+              if (!id) throw new Error('Mica 会话创建失败')
+              draftSessions.add(id)
+              return {
+                id,
+                title: typeof result?.title === 'string' && result.title ? result.title : '新对话',
+                cwd: result?.cwd || null,
+                updatedAt: null
+              }
+            },
             /** 最近的会话（按更新时间倒序），只带页面挑会话需要的字段。 */
             list: async (options = {}) => {
               const result = await stats.listSessions({})
@@ -294,7 +329,9 @@ export function createPluginHostApi(pluginId, session = null) {
             /** 这条会话的对话正文（用户与助手），思考与工具过程不进列表。 */
             history: async (sessionId) => {
               if (!sessionId) return []
-              const rows = await chat.history(sessionId)
+              const persisted = actualSessionId(sessionId)
+              if (!persisted) return []
+              const rows = await chat.history(persisted)
               if (!Array.isArray(rows)) throw new Error('会话历史响应无效')
               return rows
                 .filter(
@@ -311,7 +348,7 @@ export function createPluginHostApi(pluginId, session = null) {
               const id = await resolveNode(sessionId)
               return chat.start({
                 id,
-                sessionId,
+                sessionId: actualSessionId(sessionId) || null,
                 cwd: cwd || null,
                 prompt: text,
                 ...(clientMessageId ? { clientMessageId } : {}),

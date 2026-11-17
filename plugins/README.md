@@ -27,7 +27,7 @@
 编辑器是共享包 `packages/mica-editor`（笔记用其富文本模式，配置页 Role / Skill 用同一份运行时的 Markdown 模式），第三方依赖固定版本从 CDN 运行时加载；数据在 `plugin-data/notebook/data.json` 与 `documents/<id>.json`。首次打开需要 CDN 网络。
 具体能力、限制与开发方式见 [Notebook](./notebook/README.md)。
 
-Notebook 的右侧对话经通用 `api.sessions` 复用已有 app-server 会话，输入原样透传、不附加笔记上下文；Markdown 展示由整页宿主提供 `api.ui.Markdown`。Notebook MCP 的 `set_markdown` / `append_markdown` / `prepend_markdown` 把 Markdown 确定性转换为原生富文本，保留原有 CAS 与复杂文档保护边界，返回大纲、结构统计与降级警告。
+Notebook 的右侧对话每次展开都经通用 `api.sessions` 创建一条新的 app-server 会话，输入原样透传、不预填或附加笔记上下文；Markdown 展示由整页宿主提供 `api.ui.Markdown`。Notebook MCP 的 `set_markdown` / `append_markdown` / `prepend_markdown` 把 Markdown 确定性转换为原生富文本，保留原有 CAS 与复杂文档保护边界，返回大纲、结构统计与降级警告。
 
 ## 目录结构
 

@@ -1535,7 +1535,7 @@ export default function App() {
         typeof options.groupId === 'string' && options.groupId ? options.groupId : null
       // 复用已经存在的空草稿：连点 New Session 会攒出一摞没输入过任何内容的空会话
       // （判定见 pickReusableDraft），已经有一个空的就切过去，不再造第二个。
-      if (!resumeSessionId) {
+      if (!resumeSessionId && !options.forceNew) {
         const reusable = pickReusableDraft(current, {
           drafts: uiStateKeys().drafts,
           cwd,
@@ -2356,6 +2356,17 @@ export default function App() {
       // 返回节点 id：插件要「在新会话里跑一段提示词」时，得知道把那次启动交给哪个节点
       // （见 ChatView 的 launchPluginSession）。
       return createTerminal({ cwd: cwd || recentChatCwd() || null })
+    },
+    [createTerminal]
+  )
+  // 独立插件页也可以开一条真正的 Mica 草稿。页面不会被关掉，插件自己的对话面板
+  // 直接通过 node id 发第一条消息，仍然由同一个 ChatView / app-server 承载。
+  const createPluginPageSession = useCallback(
+    ({ cwd = null } = {}) => {
+      const targetCwd = cwd || recentChatCwd() || null
+      setView('chat')
+      const id = createTerminal({ cwd: targetCwd, forceNew: true })
+      return id ? { id, cwd: targetCwd, title: '新对话' } : null
     },
     [createTerminal]
   )
@@ -3344,7 +3355,13 @@ export default function App() {
         </div>
       )}
       {/* 插件的整页视图：与配置页同一层，盖住整个窗口，左上角返回对话。 */}
-      {pluginPage && <PluginPage entry={pluginPage} onClose={closePluginPage} />}
+      {pluginPage && (
+        <PluginPage
+          entry={pluginPage}
+          onClose={closePluginPage}
+          onCreateSession={createPluginPageSession}
+        />
+      )}
     </>
   )
 }
