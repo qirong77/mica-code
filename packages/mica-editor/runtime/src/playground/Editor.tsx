@@ -36,6 +36,7 @@ import TableFitNestedTablePlugin from './plugins/TableFitNestedTablePlugin';
 import TableScrollShadowPlugin from './plugins/TableScrollShadowPlugin';
 import ToolbarPlugin from './plugins/ToolbarPlugin';
 import ContentEditable from './ui/ContentEditable';
+import MarkdownTableLayoutPlugin from '../markdown/markdownTableLayout';
 
 export default function Editor(): JSX.Element {
   const {
@@ -132,11 +133,12 @@ export default function Editor(): JSX.Element {
               </div>
             </div>
             {hasFitNestedTables ? <TableFitNestedTablePlugin /> : null}
-            <TableCellResizer />
+            <TableCellResizer initializeColumnWidths={false} />
             <TableClipboardPlugin />
             <MarkdownPastePlugin />
             <TableControlsPlugin />
             <TableScrollShadowPlugin />
+            <MarkdownTableLayoutPlugin />
             <ExcalidrawPlugin />
             {floatingAnchorElem && (
               <>

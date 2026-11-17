@@ -67,8 +67,9 @@ function readWidths(editor: LexicalEditor) {
   return editor.getEditorState().read(() => $table().getColWidths());
 }
 
-function layoutFixture(initialWidth = 600) {
+function layoutFixture(initialWidth = 600, savedWidths?: number[]) {
   const {editor, root} = createTableEditor();
+  if (savedWidths) editor.update(() => $table().setColWidths(savedWidths), {discrete: true});
   let width = initialWidth;
   root.style.padding = '0 30px';
   Object.defineProperty(root, 'clientWidth', {get: () => width, configurable: true});
@@ -119,6 +120,14 @@ describe('runtime-only table layout', () => {
     await flush();
     expect(readWidths(editor)).toEqual([100, 300, 200]);
     expect(root.querySelector('table')?.style.width).toBe('601px');
+  });
+
+  it('fits a table saved with the resizer auto-seed instead of keeping it', async () => {
+    const {editor, flush} = layoutFixture(600, Array(3).fill(92));
+    await flush();
+    const widths = readWidths(editor);
+    expect(widths?.reduce((sum, width) => sum + width, 0)).toBe(539);
+    expect(new Set(widths).size).toBeGreaterThan(1);
   });
 
   it('waits for a hidden visual editor to become measurable', async () => {

@@ -59,6 +59,15 @@ function sameWidths(left: readonly number[] | undefined, right: readonly number[
   return !!left && left.length === right.length && left.every((width, index) => width === right[index]);
 }
 
+/**
+ * Every column the same width is what `initializeColumnWidths` seeded into new
+ * tables, and notes saved before tables were laid out carry that seed as real
+ * column widths. It records no layout intent, so it is fitted like a fresh table.
+ */
+function isUniformSeed(widths: readonly number[]): boolean {
+  return widths.length > 1 && widths.every(width => width === widths[0]);
+}
+
 function contentWidth(element: HTMLElement): number {
   const style = element.ownerDocument.defaultView?.getComputedStyle(element);
   return element.clientWidth - (parseFloat(style?.paddingLeft || '') || 0) - (parseFloat(style?.paddingRight || '') || 0);
@@ -90,6 +99,9 @@ export function registerMarkdownTableLayout(editor: LexicalEditor): () => void {
         const key = table.getKey();
         let widths = table.getColWidths();
         const previous = automatic.get(key);
+        // A table this plugin has never laid out and whose columns are all equal
+        // carries the resizer's auto-seed instead of a layout the reader chose.
+        if (widths && !previous && isUniformSeed(widths)) widths = undefined;
         if (widths && previous && !sameWidths(widths, previous.widths)) automatic.delete(key);
         if (!widths || (previous && sameWidths(widths, previous.widths) && Math.abs(previous.available - available) >= 1)) {
           const rows = table.getChildren().filter($isTableRowNode).slice(0, 200).map(row => row.getChildren().filter($isTableCellNode).map(cell => cell.getTextContent()));
