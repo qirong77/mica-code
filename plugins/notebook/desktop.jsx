@@ -17,6 +17,7 @@ import {
   MoreHorizontal,
   PanelLeftClose,
   Pencil,
+  Plug,
   Plus,
   Presentation,
   RefreshCw,
@@ -39,6 +40,7 @@ import {
   SelectMenu,
 } from '@mica-config-ui/web';
 import { Modal } from '../../packages/mica-config-ui/web/components/Modal';
+import { pluginMcpPath, pluginMcpServerName } from '../../packages/mica-plugin/PluginMcp';
 import { createNotebookController, NotebookConflictError } from './controller';
 import {
   createNode,
@@ -184,6 +186,8 @@ export default function NotebookPage({ api }) {
   const [busy, setBusy] = useState(false);
   const [frameState, setFrameState] = useState('loading');
   const [frameKey, setFrameKey] = useState(0);
+  const [mcpOpen, setMcpOpen] = useState(false);
+  const [copied, setCopied] = useState('');
   const iframe = useRef(null);
   const pageRoot = useRef(null);
   const rail = useRef(null);
@@ -204,6 +208,10 @@ export default function NotebookPage({ api }) {
   const tree = useRef(null);
   const actions = useRef({});
   const creating = useRef(false);
+  // 深链（`/plugins/pages/notebook?note=<id>`）：首屏要打开的是这一篇，而不是第一篇。
+  // 只在挂载时取一次——之后地址由页面自己按当前笔记改写。
+  const deepLink = useRef(null);
+  if (deepLink.current === null) deepLink.current = api.page?.search?.() ?? {};
   const token = useMemo(() => createNodeId(), [frameKey]);
   const controller = useMemo(() => createNotebookController({ host: api, onIndex: setIndex }), [api]);
   const writer = useMemo(() => createNotebookWriter(controller), [controller]);
@@ -217,6 +225,23 @@ export default function NotebookPage({ api }) {
   );
   const active = index.nodes.find((node) => node.id === activeId && !node.trashedAt);
   const selected = index.nodes.find((node) => node.id === selectedId);
+  // MCP：笔记本跑在 Mica 运行时里，AI 客户端要的就是这台机器上的同一个端口。
+  const mcpServer = pluginMcpServerName('notebook');
+  const mcpUrl = `${api.currentHost?.() ?? ''}${pluginMcpPath('notebook')}`;
+  const mcpConfig = JSON.stringify(
+    { mcpServers: { [mcpServer]: { type: 'http', url: mcpUrl } } },
+    null,
+    2,
+  );
+  const copyText = useCallback(async (text, key) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(key);
+      setTimeout(() => setCopied((value) => (value === key ? '' : value)), 1400);
+    } catch (cause) {
+      setError(message(cause));
+    }
+  }, []);
   const visible = useMemo(
     () => flattenVisibleTree(index, { expanded, query, showTrash: trash }),
     [index, expanded, query, trash],
@@ -324,6 +349,8 @@ export default function NotebookPage({ api }) {
             setOutline(emptyOutline());
             loadedNote.current = null;
             await loadEditor(draft);
+            // 地址跟着当前笔记走：复制出去、刷新页面都还落在这一篇上。
+            api.page?.setSearch?.({ note: id });
             if (layoutRef.current.mobile) setRailOpen(false);
           },
         );
@@ -333,7 +360,7 @@ export default function NotebookPage({ api }) {
         setBusy(false);
       }
     },
-    [controller, flush, loadEditor, lifecycle],
+    [api, controller, flush, loadEditor, lifecycle],
   );
 
   actions.current = { flush, openNote, save, loadEditor };
@@ -347,8 +374,15 @@ export default function NotebookPage({ api }) {
         if (!alive) return;
         setExpanded(new Set(result.nodes.filter((node) => node.kind === 'folder').map((node) => node.id)));
         setLoaded(true);
-        const first = result.nodes.find((node) => node.kind === 'note' && !node.trashedAt);
-        if (first) await actions.current.openNote(first.id);
+        // 地址里点名的那一篇优先（深链 / 刷新 / 收藏）；它被删了或者不存在就退回第一篇。
+        const requested = deepLink.current?.note;
+        const target =
+          (requested &&
+            result.nodes.find(
+              (node) => node.id === requested && node.kind === 'note' && !node.trashedAt,
+            )) ||
+          result.nodes.find((node) => node.kind === 'note' && !node.trashedAt);
+        if (target) await actions.current.openNote(target.id);
       })
       .catch((cause) => {
         if (alive) {
@@ -1002,17 +1036,29 @@ export default function NotebookPage({ api }) {
               <ShieldCheck size={12} />
               本地存储
             </span>
-            <Button
-              variant="ghost"
-              size="compact"
-              icon={trash ? <BookOpen size={13} /> : <Trash2 size={13} />}
-              onClick={() => {
-                setTrash(!trash);
-                setQuery('');
-              }}
-            >
-              {trash ? '返回笔记' : '最近删除'}
-            </Button>
+            <div className="notebook-rail-footer-actions">
+              {/* MCP 的地址与客户端配置放在页面上：它属于这个笔记本，不属于设置页。 */}
+              <Button
+                variant="ghost"
+                size="compact"
+                icon={<Plug size={13} />}
+                title="查看笔记本的 MCP 接口"
+                onClick={() => setMcpOpen(true)}
+              >
+                MCP
+              </Button>
+              <Button
+                variant="ghost"
+                size="compact"
+                icon={trash ? <BookOpen size={13} /> : <Trash2 size={13} />}
+                onClick={() => {
+                  setTrash(!trash);
+                  setQuery('');
+                }}
+              >
+                {trash ? '返回笔记' : '最近删除'}
+              </Button>
+            </div>
           </div>
         </aside>
         {railOpen && (
@@ -1318,6 +1364,42 @@ export default function NotebookPage({ api }) {
           </div>
         </main>
       </div>
+      {mcpOpen && (
+        <Modal title="Notebook MCP" onClose={() => setMcpOpen(false)} portal>
+          <div className="notebook-mcp">
+            <p>
+              AI 客户端可以按这个地址读写这台机器上的笔记本：先读目录，再按 node_id 读正文，
+              写回时带上版本号。它只在 Mica 运行时里可用，应用关掉就连不上。
+            </p>
+            <div className="notebook-mcp-field">
+              <span>接口地址</span>
+              <div className="notebook-mcp-value">
+                <code>{mcpUrl}</code>
+                <Button variant="ghost" size="compact" onClick={() => void copyText(mcpUrl, 'url')}>
+                  {copied === 'url' ? '已复制' : '复制'}
+                </Button>
+              </div>
+            </div>
+            <div className="notebook-mcp-field">
+              <span>客户端配置</span>
+              <pre className="notebook-mcp-code">{mcpConfig}</pre>
+              <div className="notebook-mcp-actions">
+                <Button
+                  variant="ghost"
+                  size="compact"
+                  onClick={() => void copyText(mcpConfig, 'config')}
+                >
+                  {copied === 'config' ? '已复制' : '复制配置'}
+                </Button>
+              </div>
+            </div>
+            <p className="notebook-mcp-hint">
+              桌面端与 Web 应用会自动注入这份配置，不用手填；TUI 与 <code>mica exec</code>{' '}
+              里没有自动注入，需要把它加进 MCP 配置。
+            </p>
+          </div>
+        </Modal>
+      )}
       {dialog && dialog.type !== 'rename' && (
         <Modal title={dialog.title} onClose={() => !busy && setDialog(null)} portal>
           <div className="notebook-dialog">

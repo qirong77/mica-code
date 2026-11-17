@@ -78,6 +78,7 @@ import { createPluginMcpRuntime } from '../host/plugin-mcp-runtime.js'
 import { createPluginMcpHandler } from '../host/plugin-mcp.js'
 import { setPluginMcpCatalog } from '../host/plugin-mcp-config.js'
 import { createPluginMcpRoute } from './plugin-mcp-route.js'
+import { servePluginPage } from './plugin-page-route.js'
 import { officialPluginManifests } from '@packages/mica-official-plugins/manifests.js'
 import { readDisabledPluginIds } from '@packages/mica-plugin/PluginState.js'
 import { resolveMicaHome } from '@packages/mica-config/index.js'
@@ -85,6 +86,7 @@ import {
   DEFAULT_RUNTIME_PORT,
   RUNTIME_PORT_ENV,
   SHARE_BASE_PATH,
+  isPluginPagePath,
   isSharePath,
   isTerminalPagePath,
   parseRuntimePort,
@@ -1153,6 +1155,12 @@ function createRequestHandler({
         // 页面通过同源 /remote/terminal/* 读写终端，所以窗口只需要运行时地址。
         if (isTerminalPagePath(url.pathname)) {
           return await serveStatic(req, res, rendererRoot, '/terminal.html')
+        }
+        // 插件整页：`/plugins/pages/<id>` 是一个真地址（可复制、可收藏、手机上也能直接开），
+        // 内容是同一份渲染层产物，由页面按 pathname 决定画哪个插件页。深路径要靠注入的
+        // 根基路径才取得到资源，所以它不走通用静态回退。
+        if (isPluginPagePath(url.pathname)) {
+          return await servePluginPage(req, res, rendererRoot)
         }
         // 页面产物：`/share` 与 `/mica-web` 都是别名，剥掉服务前缀后走同一份静态资源。
         // 产物里的资源引用是相对的（`./assets/x.js`），从 `/mica-web/`、`/share/` 下取时会

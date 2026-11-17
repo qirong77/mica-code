@@ -6,6 +6,8 @@
  *
  * - `/` 与 `/mica-web` —— 完整应用（页面产物）；`/mica-web` 是显式名字，两处内容完全相同
  * - `/share` —— 分享视图：`/share?session=<id>` 打开某条会话，`/share` 本身是分享链接列表
+ * - `/plugins/pages/<id>` —— 插件整页（清单 `desktop.page`）：一个可独立打开、可复制、
+ *   可收藏的地址，页面内容仍是同一份渲染层产物（按路径决定画哪个插件页）
  * - `/terminal-control` —— 终端控制窗口的页面（独立入口 `terminal.html`，窗口由 Electron
  *   主进程创建，页面通过同源 `/remote/terminal/*` 读写真实终端）
  * - `/remote/control/*` —— 受控浏览器（主进程的窗口服务挂在 Unix socket 上，由运行时转发，
@@ -24,6 +26,9 @@ export const APP_BASE_PATH = '/mica-web';
 
 /** 分享视图的基路径。它只是「少画一个侧栏」的呈现差别，不是权限边界。 */
 export const SHARE_BASE_PATH = '/share';
+
+/** 插件整页的基路径；一篇插件的页面地址是 `/plugins/pages/<插件 id>`。 */
+export const PLUGIN_PAGES_BASE_PATH = '/plugins/pages';
 
 /** 终端控制窗口的页面路径：主进程窗口加载运行时上的这个地址。 */
 export const TERMINAL_PAGE_PATH = '/terminal-control';
@@ -67,6 +72,38 @@ export function isSharePath(pathname: unknown): boolean {
 /** 是不是终端控制窗口的页面。 */
 export function isTerminalPagePath(pathname: unknown): boolean {
   return normalizePathname(pathname) === TERMINAL_PAGE_PATH;
+}
+
+/**
+ * 插件整页的地址。插件 id 就是清单里的 `id`（`notebook`、`user.foo`），
+ * 路径按 URL 段编码，所以带点号 / 下划线的用户插件 id 也能原样往返。
+ */
+export function pluginPagePath(id: string): string {
+  return `${PLUGIN_PAGES_BASE_PATH}/${encodeURIComponent(String(id ?? '').trim())}`;
+}
+
+/** 是不是插件整页的地址（只认 `/plugins/pages/<id>` 这一层，不认更深的子路径）。 */
+export function isPluginPagePath(pathname: unknown): boolean {
+  return readPluginPageId(pathname) !== null;
+}
+
+/**
+ * 从地址里取出插件 id：`/plugins/pages/notebook?note=…` → `notebook`。
+ * 不是插件页、或者 id 形状不合法（可能带路径穿越）时返回 null。
+ */
+export function readPluginPageId(pathname: unknown): string | null {
+  const value = normalizePathname(pathname);
+  if (!value.startsWith(`${PLUGIN_PAGES_BASE_PATH}/`)) return null;
+  const rest = value.slice(PLUGIN_PAGES_BASE_PATH.length + 1);
+  if (!rest || rest.includes('/')) return null;
+  let id: string;
+  try {
+    id = decodeURIComponent(rest);
+  } catch {
+    return null;
+  }
+  // 与 mica-plugin 的清单 id 同一套形状：字母数字开头，只含字母数字与 `._-`。
+  return /^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(id) ? id : null;
 }
 
 /** 是不是应用页面（根路径或它下面的子路径，以及 `/mica-web` 这个显式名字）。 */

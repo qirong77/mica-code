@@ -23,14 +23,18 @@ export {
 } from './runtime-address.js';
 export {
   APP_BASE_PATH,
+  PLUGIN_PAGES_BASE_PATH,
   SHARE_BASE_PATH,
   TERMINAL_CONTROL_PREFIX,
   TERMINAL_PAGE_PATH,
   isAppPath,
+  isPluginPagePath,
   isSharePath,
   isTerminalPagePath,
   isUnderBasePath,
   normalizePathname,
+  pluginPagePath,
+  readPluginPageId,
   terminalControlPath,
   toAssetPath,
 } from './app-paths.js';

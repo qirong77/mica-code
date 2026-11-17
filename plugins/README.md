@@ -636,6 +636,12 @@ export function summary(api) { return api.currentHost() } // 可选：入口行�
 `icon` 不受影响。没有 `entry` 的整页插件没有那一行可点，入口只有配置页插件详情里那枚
 「打开…」按钮（由宿主打开，所以只对随包插件出现）。
 
+**整页同时是一个真地址**：`/plugins/pages/<插件 id>`（`mica-web-shared` 的 `pluginPagePath`）
+由运行时提供同一份产物，渲染层按 pathname 直接画这一页——所以应用里点开、浏览器里打开、
+手机上（口令对了之后）打开都是同一个页面、同一份插件数据。宿主在窗口顶部那条拖动条上显示
+这个地址并支持复制；页面内换内容（例如笔记换了一篇）用 `api.page.setSearch({ note })` 同步，
+刷新、收藏、发给别人都会回到同一处。
+
 ### 输入框控件（`composer`）
 
 插件想把一个控件放进**对话输入框的动作区**（录音、扫码这类「往草稿里加东西」的动作）时，
@@ -1074,6 +1080,12 @@ Capabilities 会显示当前会话各插件的工具、技能与提示词来源�
 
 整页可以注册 `api.page.beforeClose(async () => boolean)`，返回 `false` 阻止宿主返回按钮关闭，
 返回的取消函数用于卸载。保存失败不应通过关闭页面静默丢弃内容。
+
+同一份 `api.page` 还回答「我在哪」：`search()` 是打开页面那一刻的查询参数（深链，没带就是空
+对象），`setSearch(values)` 把页面当前的定位写回地址栏（值为空／null 的键会被丢掉），`url(values)`
+按同样规则拼出可复制的完整地址。从应用里打开时只改地址栏那一行（应用自己的地址不能被插件页顶掉），
+独立打开时连浏览器地址一起改写，刷新后仍落在同一处。**插件不自己拼 `/plugins/pages/...`**：
+路径只由宿主与 `mica-web-shared` 决定。
 
 需要隔离第三方运行时的随包插件可提供 `web-build.mjs` 的 default `async build({ outDir })`。
 桌面通用构建器发现后输出到 `plugin-web/<id>/`；此静态目录开放跨源读取以支持 opaque-origin

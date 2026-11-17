@@ -49,6 +49,7 @@ import { autoUpdater } from 'electron-updater'
 import { createAppUpdateController, resolveUpdateCapability } from './app-update.js'
 import { updateActivityBlockers } from '../host/update-activity.js'
 import { retainHiddenWindow } from './window-retention.js'
+import { PAGE_STATE_PROBE, createBootGuard } from './page-boot.js'
 
 /**
  * Electron 外壳。
@@ -394,22 +395,6 @@ function showWindow(state) {
   state.win.focus()
 }
 
-/**
- * 页面此刻是什么状态：
- * - `booted`：脚本跑过、`window.mica` 已装上（正常）
- * - `error-page`：页面自己渲染的可读失败提示（运行时没起来），别去打扰它
- * - `blank`：空白 —— 新建窗口首次加载偶发失败时就是这个样子：导航其实「成功」了，
- *   `did-finish-load` 照常触发、`document.readyState` 也是 complete，但页面停在
- *   空白状态，窗口只剩自己的底色（`#0e0e0e`），看上去就是一块黑屏
- *
- * 这种状态只有问渲染层才知道（`executeJavaScript` 走页面主世界，不需要 preload）。
- */
-const PAGE_STATE_PROBE = `(() => {
-  if (typeof window.mica === 'object') return 'booted'
-  const root = document.getElementById('root')
-  return root && root.children.length > 0 ? 'error-page' : 'blank'
-})()`
-
 async function pageState(state) {
   const contents = state.win.webContents
   if (state.win.isDestroyed() || contents.isDestroyed() || contents.isCrashed()) return 'blank'
@@ -434,11 +419,13 @@ const BOOT_PROBE_INTERVAL_MS = 500
  * 每次加载结束后确认页面真的起来了，没起来就地重载 —— 实测重载是有效的恢复手段。
  * 不做的话用户只能自己想到按 ⌘R，而「点远程那行」只会把那块黑屏再端到前面一次。
  *
- * 「重载只做一次」记的是**哪个地址**已经重载过，不是次数：窗口会在页面内换路径（同一台
- * 服务器的不同会话），一次失败就用掉全局次数的话，之后换个页面就再也不会自救了。
+ * 重载与提示都按**地址**记额度（`page-boot.js`），不是按次数：窗口会在页面内换路径（同一台
+ * 服务器的不同会话），一次失败就用掉全局次数的话，之后换个页面就再也不会自救了。反过来
+ * 同一个地址只提示一次——中转机的「暂时不可用」页自己每 5 秒重载一次，每次都重新探测，
+ * 不设门槛就会一直弹「页面加载失败」。
  */
 function watchPageBoot(state, initialUrl) {
-  let reloadedFor = ''
+  const guard = createBootGuard()
   let probing = false
   const currentUrl = () => {
     try {
@@ -449,13 +436,14 @@ function watchPageBoot(state, initialUrl) {
   }
 
   const reload = (reason, target = currentUrl()) => {
-    if (!target || reloadedFor === target) {
+    const action = guard.next(target)
+    if (action === 'ignore') return
+    if (action === 'report') {
       console.warn(`[mica-code-app] 页面仍然无法启动（${reason}）`, target)
       // 重载也救不回来，只能如实告诉用户 —— 否则窗口就停在黑屏上，一句话都没有
       if (!state.win.isDestroyed()) dialog.showErrorBox('页面加载失败', `${target}\n\n${reason}`)
       return
     }
-    reloadedFor = target
     console.warn(`[mica-code-app] 页面未能启动，重新加载（${reason}）`, target)
     void loadPage(state, target)
   }
@@ -469,7 +457,11 @@ function watchPageBoot(state, initialUrl) {
         await new Promise((resolvePromise) => setTimeout(resolvePromise, BOOT_PROBE_INTERVAL_MS))
         // 已经开了新一轮加载（比如上面刚重载过），交给它自己那一次探测
         if (state.win.isDestroyed() || state.win.webContents.isLoading()) return
-        if ((await pageState(state)) !== 'blank') return
+        if ((await pageState(state)) !== 'blank') {
+          // 页面起来了：这个地址的自救额度还回去，之后再出问题还能重载、还能再报一次
+          guard.recovered()
+          return
+        }
       }
       reload('探测超时')
     } finally {

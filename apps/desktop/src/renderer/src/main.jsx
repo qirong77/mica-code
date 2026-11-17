@@ -16,7 +16,8 @@ import {
   THEME_UI_STATE_KEY,
   DEFAULT_RUNTIME_URL,
   isLoopbackRuntime,
-  isSharePath
+  isSharePath,
+  readPluginPageId
 } from '@packages/mica-web-shared/index.js'
 import { readAppUrl } from './app-url'
 import { createDesktopConfigWebClient } from './config-web'
@@ -99,25 +100,31 @@ if (!quickButtonsDemo) {
   const params = new URLSearchParams(window.location.search)
   // 编辑器窗口（`?editor=<路径>`）：外壳开的独立窗口，页面只画编辑器。
   const editorTarget = params.get('editor') || ''
-  const expectedView =
-    editorTarget
-      ? 'editor'
+  // 插件整页（`/plugins/pages/<插件 id>`）：同一份产物按路径画某个插件的整页，
+  // 所以它既是应用里点开的那一屏，也是一个可以复制、收藏、在浏览器里直接打开的地址。
+  const pluginPageTarget = readPluginPageId(window.location.pathname) || ''
+  const expectedView = editorTarget
+    ? 'editor'
+    : pluginPageTarget
+      ? 'pluginPage'
       : params.get('pluginLauncher') && !isSharePath(window.location.pathname)
-      ? 'launcher'
-      : isSharePath(window.location.pathname) && !readAppUrl(window.location.search).sessionId
-        ? 'share'
-        : 'app'
+        ? 'launcher'
+        : isSharePath(window.location.pathname) && !readAppUrl(window.location.search).sessionId
+          ? 'share'
+          : 'app'
   const modules = new Map()
   const loadView = (view) => {
     if (!modules.has(view)) {
       const promise = (
         view === 'editor'
           ? import('./EditorWindow')
-          : view === 'launcher'
-          ? import('./PluginLauncher')
-          : view === 'share'
-            ? import('./ShareIndex')
-            : import('./App')
+          : view === 'pluginPage'
+            ? import('./PluginPageWindow')
+            : view === 'launcher'
+              ? import('./PluginLauncher')
+              : view === 'share'
+                ? import('./ShareIndex')
+                : import('./App')
       ).then(
         (module) => ({ module, loadedAt: window.performance.now() }),
         (error) => ({ error })
@@ -141,14 +148,15 @@ if (!quickButtonsDemo) {
     subscribeUiState(() => syncThemeFromUiState(uiStateKeys()[THEME_UI_STATE_KEY]))
 
     const launcherId = params.get('pluginLauncher')
-    const view =
-      editorTarget
-        ? 'editor'
+    const view = editorTarget
+      ? 'editor'
+      : pluginPageTarget
+        ? 'pluginPage'
         : launcherId && !api.shareView
-        ? 'launcher'
-        : api.shareView && !readAppUrl(window.location.search).sessionId
-          ? 'share'
-          : 'app'
+          ? 'launcher'
+          : api.shareView && !readAppUrl(window.location.search).sessionId
+            ? 'share'
+            : 'app'
     const { module, error, loadedAt } = await loadView(view)
     if (error) {
       console.error('加载页面资源失败', error)
@@ -163,6 +171,12 @@ if (!quickButtonsDemo) {
       view === 'editor' ? (
         <>
           <module.default path={editorTarget} />
+          <DesktopDialogHost />
+        </>
+      ) : view === 'pluginPage' ? (
+        <>
+          <NotificationHost />
+          <module.default pluginId={pluginPageTarget} />
           <DesktopDialogHost />
         </>
       ) : view === 'launcher' ? (

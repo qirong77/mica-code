@@ -1,0 +1,62 @@
+/* The Markdown source is already in the document, so this only offers the
+   styling: it floats over the paste, never pushes layout, and uses the same
+   tokens as the editor's other popovers. */
+.markdown-paste-prompt {
+  position: absolute;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  max-width: min(440px, calc(100% - 16px));
+  box-sizing: border-box;
+  padding: 5px 6px 5px 11px;
+  border: 1px solid var(--color-line-soft, #e2e5ec);
+  border-radius: 8px;
+  background: var(--color-panel, #fff);
+  box-shadow: var(--notebook-popup-shadow, 0 4px 18px rgb(16 20 28 / 16%));
+  color: var(--color-fg-soft, #5e687b);
+  font: 12px/1.5 var(--notebook-font-family, var(--chat-font-family, system-ui, sans-serif));
+  white-space: nowrap;
+  user-select: none;
+}
+
+.markdown-paste-prompt-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.markdown-paste-prompt-action {
+  flex: none;
+  height: 24px;
+  margin-left: 6px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--color-fg-soft, #5e687b);
+  font: inherit;
+  cursor: pointer;
+}
+
+.markdown-paste-prompt-action:hover {
+  background: var(--color-active, rgb(16 20 28 / 6%));
+  color: var(--color-fg-strong, #20242b);
+}
+
+.markdown-paste-prompt-action.is-primary {
+  margin-left: 10px;
+  background: var(--color-primary-light-1, rgb(66 105 194 / 10%));
+  color: var(--color-accent, #4269c2);
+  font-weight: 500;
+}
+
+.markdown-paste-prompt-action.is-primary:hover {
+  background: var(--color-primary-light-2, rgb(66 105 194 / 18%));
+  color: var(--color-accent, #4269c2);
+}
+
+.markdown-paste-prompt-action:focus-visible {
+  outline: 2px solid var(--color-accent, #4269c2);
+  outline-offset: 1px;
+}

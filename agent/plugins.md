@@ -145,6 +145,8 @@ macOS 浮窗只取键盘焦点、不连带唤起主应用；原生窗口策略�
 
 同一个 `desktop.jsx` 若在清单里另外声明 `desktop.page`（`{ "page": { "title": "排期" } }`），点这一行不进浮层而是打开整页：宿主把它渲染在 `renderer/src/PluginPage.jsx` 里（盖住整窗、顶部一条 `← 返回对话` + 标题，内容是插件模块自己的组件，props 同样是 `{ api }`），`App.jsx` 用 `pluginPage` 状态承接、清掉浮层的悬停展开——时间轴、看板这类要整屏宽高的界面走这条，浮层的 320px 放不下。
 
+整页是一个**真地址**：运行时把 `/plugins/pages/<插件 id>`（`mica-web-shared` 的 `pluginPagePath` / `readPluginPageId`）回成同一份渲染层产物，浏览器与手机口令进来后打开它就是这一页；`server/plugin-page-route.js` 只做一件事——在深路径下补 `<base href="/">`，因为产物里的资源是相对地址（Electron 也走 `file://`），否则 `/plugins/pages/assets/*` 会 404。`main.jsx` 按 pathname 选 `pluginPage` 视图（`PluginPageWindow.jsx` 按 id 现取模块），`PluginPage` 在拖动条上显示可复制的地址。页面内换内容（笔记换一篇）用 `api.page.setSearch(values)`：从应用里打开只改地址栏那一行，独立打开时连 `history.replaceState` 一起改，刷新与分享都落在同一处；`api.page.search()` 读回深链参数。插件不自己拼这段路径，也不在 `desktop.jsx` 里读 `location`。
+
 `entry` 是**可选**的：只声明 `desktop.page`、不写 `entry` 的插件不占侧栏 / 顶栏位置，整页从配置页插件详情里那枚「打开…」按钮进（`PluginsPage` 的 `onOpenPluginPage`，由宿主按 id 现取模块并打开——`renderer/src/plugin-entries.js` 的 `loadPluginPageEntry`，所以同样只对随包插件有效）。`session-tags` 走这条：打标签在会话行右键与 `/tags`，重编标签表才需要那张页面，不必常驻侧栏。
 
 **输入框控件**由清单 `desktop.composer: true` + 同一个 `desktop.jsx` 的 `Composer` 命名导出组成：宿主在 `renderer/src/PluginComposerControls.jsx` 里按插件 id 挂到输入框动作区（「+」之前），props 是 `{ api, isMobile, appendText, onOpenSettings }`。`appendText` 只追加进**当前草稿**（不覆盖已输入内容、不发送），实现在 `ChatView.appendComposerText`；控件拿到的 `api.panelAction(action, values)` 与 `desktop.panel` 的动作是同一条会话级通路（`chat:plugin-panel-action`），所以插件只写一份 `ctx.desktop.panel(...)` 就能同时服务面板与输入框；`api.uploadAttachment(file)` 走 `/api/attachment`（与「添加附件」同一目录），只把临时素材落盘、**不**插路径。与 `entry` / `page` 一样只对随包插件生效，理由相同：页面是构建期打的包。

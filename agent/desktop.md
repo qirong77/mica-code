@@ -41,12 +41,12 @@
 - 同一 session 在所有页面是同一 node、run、终端；`dedupeSessionNodes` 合并重复页签。
 - 默认 `0.0.0.0:8787`，没有账号体系，只有一道可选的口令；README 保留风险说明。非回环（且不在 `MICA_DESKTOP_TRUSTED_CLIENTS` 里）的连接**只公开别人手上那条分享链接**：`/share?session=<存在的会话>`，其余页面、`/remote/*`、`/mcp/*` 回 404 或登录页，**`/api/*` 没有凭据也回 404/401**（它等于整台机器）。唯一例外是探活指纹 `GET /api/health`（只回 `{ ok, app, access }`）：侧栏 Connections 连另一台机器必须先探通它，`access` 说明对方要不要口令，没开时由卡片直接给出可操作的提示而不是打开一个 404 窗口。路径分类唯一实现在 `host/access-core.js` 的 `classifyRemotePath`，放行判定在 `host/remote-access-core.js` 的 `remoteAccessDecision`，不要另写第二份白名单。
 - 端口常量唯一出口 `mica-web-shared/runtime-port.js`；页面路径约定唯一出口 `app-paths.ts`。
-- 单端口路由：`/`、`/mica-web`、`/share`、`/terminal-control`、`/mcp/browser`、`/mcp/terminal`、`/plugin/<id>/mcp`、`/api/*`、`/remote/control/*`、`/remote/terminal/*`。编辑器与评审都还是主应用里的视图，不占额外页面；编辑器**窗口**也只是 `/` 加 `?editor=<绝对路径>`（见下文「编辑器窗口」），不是新路径。
+- 单端口路由：`/`、`/mica-web`、`/share`、`/terminal-control`、`/plugins/pages/<插件 id>`、`/mcp/browser`、`/mcp/terminal`、`/plugin/<id>/mcp`、`/api/*`、`/remote/control/*`、`/remote/terminal/*`。编辑器与评审都还是主应用里的视图，不占额外页面；编辑器**窗口**也只是 `/` 加 `?editor=<绝对路径>`（见下文「编辑器窗口」），不是新路径。
 - 独立插件 MCP 的声明与契约见 `plugins.md` 的「MCP 与 Skills」。`server/index.js` 只扫描随包 `plugins/*/mcp.ts` 并装配通用 runtime/route；端点在 remoteGate 后再过 Host/Origin，`/plugin/*` 未命中一律 404。运行时发布实际可用目录给会话配置与 `/` 补全，纯 Web 无受控 socket 时插件 MCP 仍可独立工作；启停名单按文件监听缓存，不为每次工具调用重新扫描目录或起子进程。
 - 受控浏览器与终端服务走 `userData` 下的 Unix socket；`apps/config-web` 是独立宿主（默认 13987）。
 - `shareView` 只影响呈现，不是权限边界；`access-core.js` 校验 Origin / Host 防跨站与 DNS rebinding。
 - 分享地址用 `access:info.shareBaseUrl`，不以本机 `location.origin` 兜底；链接形如 `/share?session=<id>`。
-- 切换服务器：页面 origin 即当前服务器。外壳让**每台运行时各有一个窗口、同时只显示一个**——切换是把目标窗口端到前面、把当前窗口收起来，页面留在内存里**不重载**（来回切是瞬回），没有「当前窗口换地址」这一步，也不做代理或跨源 API 层。窗口身份是 `origin`，中转机入口按 `origin + t` 区分同一个中转机后面的不同机器；已经有窗口就直接切、**不再探活**（窗口本身就是「它确实是一台运行时」的证据，每次切换多等一趟往返正是卡顿来源）。没开过的才先探活（`probeRuntime`，探活与打开都用**完整入口**）：中转机链接丢了 `?t=` 只是台没人认识的域名，外壳把它当外链交给系统浏览器；探通了新开一个窗口，窗口状态（`server`/`local`、标题后缀、未读订阅）跟着那台走。远程窗口隐藏后保活两小时再释放 renderer（`window-retention.js`），本机窗口隐藏不回收；Local 与 ⇧⌘M 切回本机窗口，关掉远程窗口会回到本机窗口。客户端能力的 open / local 必须按**发起请求的窗口**落地（`client-context` 把 IPC event 交给主进程，`stateOfSender` 找回那份窗口状态），不能替它另挑一个窗口。每个窗口的加载失败自动重载按地址各记一次（`reloadedFor`）。
+- 切换服务器：页面 origin 即当前服务器。外壳让**每台运行时各有一个窗口、同时只显示一个**——切换是把目标窗口端到前面、把当前窗口收起来，页面留在内存里**不重载**（来回切是瞬回），没有「当前窗口换地址」这一步，也不做代理或跨源 API 层。窗口身份是 `origin`，中转机入口按 `origin + t` 区分同一个中转机后面的不同机器；已经有窗口就直接切、**不再探活**（窗口本身就是「它确实是一台运行时」的证据，每次切换多等一趟往返正是卡顿来源）。没开过的才先探活（`probeRuntime`，探活与打开都用**完整入口**）：中转机链接丢了 `?t=` 只是台没人认识的域名，外壳把它当外链交给系统浏览器；探通了新开一个窗口，窗口状态（`server`/`local`、标题后缀、未读订阅）跟着那台走。远程窗口隐藏后保活两小时再释放 renderer（`window-retention.js`），本机窗口隐藏不回收；Local 与 ⇧⌘M 切回本机窗口，关掉远程窗口会回到本机窗口。客户端能力的 open / local 必须按**发起请求的窗口**落地（`client-context` 把 IPC event 交给主进程，`stateOfSender` 找回那份窗口状态），不能替它另挑一个窗口。每个窗口的加载失败自动重载与提示都按地址各记一次（`page-boot.js` 的 `createBootGuard`，页面真起来后额度还回去）：同一个地址只重载一次、只弹一次「页面加载失败」——中转机在目标机器离线时给的是每 5 秒自己重载一次的「暂时不可用」页，不设这道门槛就会一直弹窗。判空白的`PAGE_STATE_PROBE` 也只认「窗口里真的什么都没有」：不是 Mica 页面但自己渲染了内容的静态页（中转机的不可用页 / 口令页 / 选机器页）算页面在显示东西，不去重载也不弹框。
 - 运行时里的用户终端面板与主进程终端控制是两套，不复用会话。
 - 终端里手跑的 `mica` 一轮结束时按**那条 PTY** 记未读（`host/notifyServer.js`，terminalId 是 `<终端条目 id>:<pane>`），main 的 dock 徽标数的是它的总数。标记已读必须用回这个 terminalId：按条目拼一个 `<条目 id>:mica` 会打到不存在的终端上，未读永远清不掉（徽标点不掉的来源）。PTY 级状态归并成条目视图只给界面用（`renderer/src/notify-state.js`），清未读只能对未读的那条 PTY 发；对话底部终端（点标签、在面板里敲字/滚动、焦点回到窗口时它就在屏幕上）与编辑器终端都要发出这条「看过了」的信号，否则那条会话的提醒除了重开终极端口没有别的出路。
 - 两处**提示音**都在 `renderer/src/notification-sound.js`（WebAudio 现场合成，不带音频文件，`unlockAudio()` 在第一次手势时唤醒）：一轮结束是两声上行（`completed`），插件抛出选择题是下行再重复一遍（`ask`，与前者刻意反着，听一耳朵能区分）。结束音挂在 PTY 的 `turn.completed` 上（`App.jsx` 的 `useNotifications`），问句音挂在 `chat:ask` 上（`useAskChime`，按 `ask.id` 去重，宿主重推同一道题不再响）。两者都不看窗口是否在前台——提醒的意义就在于用户可能正在别处。
@@ -166,6 +166,8 @@
 - 父子关系（`parentSessionId`）是会话树的唯一事实来源，只改渲染顺序，**不区分来源**：sidecar 子会话、fork 分支与手动拖出来的层级共用这一个字段，侧栏不给它们加标签或图标。父行在前、紧跟它的子树（`session-nesting.js` 的 `nestSessions`），父会话不在当前分区时子会话当顶层，环与自指都退化成顶层。折叠状态是页面内 Set，父行折叠时用 `mergeRowStates` 代显子行状态；子行继承父行的分区与搜索命中，也不参与手动排序——拖到会话行正中＝成为它的子会话（拖进自己的子树会被拒），拖到别处＝先解除父子关系再换分区。写盘走 `stats:set-session-parent`（`host/session-parent.js`）：空闲时独占 turn lease 改文件；这一轮正在跑（lease 被别人持有）时明确拒绝，提示本轮结束后再调整。读前读后比较文件身份不是跨进程 CAS，不能绕过 lease 整文件覆盖，否则会吞掉宿主刚保存的新对话。`parentSessionId` 固定写在 `snapshot` 之前（头部读取靠这个位置判成环），`updatedAt` 不动，否则调整层级会把会话顶到 Recent 最前面。
 - 会话搜索共用 `mica-web-shared/session-search.ts`；正文搜索每会话最多 20k 字符，默认最近 3 日、最多 600 个候选，截断须告知。
 - 上下文统计按整条消息 JSON 估算并排除媒体 payload；compact / rewind 后用 staleInput 说明。
+
+插件整页各自是一个可复制、可收藏的地址（`/plugins/pages/<插件 id>`，路由与 `api.page` 见 `plugins.md`），窗口顶部那条拖动条上显示的就是它：桌面应用窗口没有别的地址栏，复制这一枚是把这一页带出去的唯一入口。
 
 ## 侧栏入口与整页设置
 

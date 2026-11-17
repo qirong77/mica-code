@@ -305,10 +305,18 @@
   display: inline-flex;
   align-items: center;
   gap: 5px;
+  /* 一行里现在有三个入口：存储说明不折行，动作靠右 */
+  white-space: nowrap;
 }
 .notebook-rail-footer .ui-button {
   font-size: 11px;
   gap: 5px;
+}
+/* 三个入口（MCP / 最近删除 / 存储说明）挤在同一行：说明留在左边，动作靠右排。 */
+.notebook-rail-footer-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
 }
 .notebook-main {
   flex: 1;
@@ -654,6 +662,66 @@
   display: flex;
   justify-content: flex-end;
   gap: 8px;
+}
+/* MCP 弹窗：一段说明 + 两个可复制的值。地址与配置用等宽字体，长行折行不横向滚。 */
+.notebook-mcp {
+  display: grid;
+  gap: 16px;
+  padding: 8px 0 0;
+}
+.notebook-mcp p {
+  margin: 0;
+  line-height: 1.8;
+}
+.notebook-mcp-field {
+  display: grid;
+  gap: 8px;
+}
+.notebook-mcp-field > span {
+  font-size: 11px;
+  color: var(--color-fg-muted);
+}
+.notebook-mcp-value {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border: 1px solid var(--color-line-soft);
+  border-radius: 8px;
+  background: var(--color-canvas);
+}
+.notebook-mcp-value code,
+.notebook-mcp-code {
+  min-width: 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--color-fg-strong);
+  overflow-wrap: anywhere;
+}
+.notebook-mcp-value code {
+  flex: 1;
+}
+.notebook-mcp-code {
+  margin: 0;
+  padding: 8px;
+  border: 1px solid var(--color-line-soft);
+  border-radius: 8px;
+  background: var(--color-canvas);
+  white-space: pre-wrap;
+}
+.notebook-mcp-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+.notebook-mcp-hint {
+  font-size: 11px;
+  color: var(--color-fg-muted);
+}
+.notebook-mcp-hint code {
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: var(--color-accent-subtle);
 }
 .mica-menu-popover .notebook-dialog {
   gap: 12px;
