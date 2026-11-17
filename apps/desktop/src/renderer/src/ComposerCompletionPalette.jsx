@@ -5,14 +5,11 @@ import { IconCommand } from '@tabler/icons-react'
  * 输入框上方的补全候选浮层（`@` 文件 / `/` skill）。
  *
  * 只负责展示与选中回调，选中后怎么改写输入框由 ChatView 决定——这里不执行任何动作。
- * 每行是「名称 | 说明 | 类型 | 来源」四列：名称按内容取宽且永不压缩（它是扫描目标），
- * 说明吃掉剩余宽度、放不下就省略号截断（浮层跟着输入框走，窄的时候只剩名称也是可用的），
- * 最右两枚小标记分别回答两个不同的问题——「这是哪一类」（skill / MCP）与「它从哪来」
- * （内置 / 插件 xxx / .mica/skills / config.json），后者悬停看完整位置。
+ * 能力补全以卡片展示名称、说明、类型和来源；文件补全仍保留紧凑列表。
  * 名称与说明里命中查询的字符都会高亮（`highlights` / `descriptionHighlights` 是下标数组）。
  *
  * 滚动只发生在候选列表（`.chat-command-palette-body`）上：标题行与键位提示固定在顶部，
- * 键盘上下移动时由这里把当前行滚进视野，鼠标滚轮照常可用。
+ * 键盘上下移动时由这里把当前卡片滚进视野，鼠标滚轮照常可用。
  */
 export default function ComposerCompletionPalette({
   title,
@@ -26,6 +23,7 @@ export default function ComposerCompletionPalette({
 }) {
   const bodyRef = useRef(null)
   const items = options || []
+  const isCapabilities = Boolean(onFilter)
 
   useEffect(() => {
     const body = bodyRef.current
@@ -40,24 +38,32 @@ export default function ComposerCompletionPalette({
   }, [activeIndex, items.length])
 
   return (
-    <div className="chat-command-palette chat-completion-palette">
+    <div
+      className={`chat-command-palette chat-completion-palette${isCapabilities ? ' is-capabilities' : ''}`}
+    >
       <div className="chat-command-palette-title">
         <IconCommand size={12} /> {title}
         {items.length > 0 && <span className="chat-command-palette-count">{items.length} 项</span>}
-        {onFilter && <div className="chat-completion-filters" aria-label="补全类型筛选">
-          {[['skill', 'skill'], ['mcp', 'MCP'], ['prompt', 'plugins']].map(([kind, label]) => (
-            <button
-              key={kind}
-              type="button"
-              aria-pressed={filter === kind}
-              className={filter === kind ? 'is-active' : ''}
-              onMouseDown={(event) => event.preventDefault()}
-              onClick={() => onFilter(filter === kind ? null : kind)}
-            >
-              {label}
-            </button>
-          ))}
-        </div>}
+        {onFilter && (
+          <div className="chat-completion-filters" aria-label="补全类型筛选">
+            {[
+              ['skill', 'skill'],
+              ['mcp', 'MCP'],
+              ['prompt', 'plugins']
+            ].map(([kind, label]) => (
+              <button
+                key={kind}
+                type="button"
+                aria-pressed={filter === kind}
+                className={filter === kind ? 'is-active' : ''}
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => onFilter(filter === kind ? null : kind)}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        )}
         <span>↑↓ 选择 · Enter/Tab 插入 · Esc 关闭</span>
       </div>
       <div ref={bodyRef} className="chat-command-palette-body" role="listbox" aria-label={title}>
@@ -76,21 +82,52 @@ export default function ComposerCompletionPalette({
             onMouseDown={(event) => event.preventDefault()}
             onClick={() => onSelect(item)}
           >
-            <HighlightedLabel text={item.label} highlights={item.highlights} />
-            <span className="chat-command-description">
-              <HighlightedText
-                text={item.description || ''}
-                highlights={item.descriptionHighlights}
-              />
-            </span>
-            <CompletionKindTag kind={item.kind} />
-            {item.source && (
-              <span
-                className={`chat-command-source is-${item.source.kind}`}
-                title={item.source.detail || undefined}
-              >
-                {item.source.label}
-              </span>
+            {isCapabilities ? (
+              <>
+                <CompletionCardIcon kind={item.kind} />
+                <span className="chat-completion-card-content">
+                  <HighlightedLabel text={item.label} highlights={item.highlights} />
+                  <span className="chat-command-description">
+                    <HighlightedText
+                      text={item.description || ''}
+                      highlights={item.descriptionHighlights}
+                    />
+                  </span>
+                </span>
+                <span className="chat-completion-card-index">
+                  {String(index + 1).padStart(2, '0')}
+                </span>
+                <span className="chat-completion-card-meta">
+                  <CompletionKindTag kind={item.kind} />
+                  {item.source && (
+                    <span
+                      className={`chat-command-source is-${item.source.kind}`}
+                      title={item.source.detail || undefined}
+                    >
+                      {item.source.label}
+                    </span>
+                  )}
+                </span>
+              </>
+            ) : (
+              <>
+                <HighlightedLabel text={item.label} highlights={item.highlights} />
+                <span className="chat-command-description">
+                  <HighlightedText
+                    text={item.description || ''}
+                    highlights={item.descriptionHighlights}
+                  />
+                </span>
+                <CompletionKindTag kind={item.kind} />
+                {item.source && (
+                  <span
+                    className={`chat-command-source is-${item.source.kind}`}
+                    title={item.source.detail || undefined}
+                  >
+                    {item.source.label}
+                  </span>
+                )}
+              </>
             )}
           </button>
         ))}
@@ -106,6 +143,17 @@ export default function ComposerCompletionPalette({
  * `file` 不画标记——那里一整屏都是文件，标一排「file」只是噪声。
  */
 const COMPLETION_KIND_LABELS = { skill: 'skill', mcp: 'MCP', prompt: 'plugins' }
+
+const COMPLETION_CARD_MARKS = { skill: 'S', mcp: 'M', prompt: 'P' }
+
+function CompletionCardIcon({ kind }) {
+  const mark = COMPLETION_CARD_MARKS[kind] || '·'
+  return (
+    <span aria-hidden="true" className={`chat-completion-card-icon is-${kind || 'unknown'}`}>
+      {mark}
+    </span>
+  )
+}
 
 function CompletionKindTag({ kind }) {
   const label = COMPLETION_KIND_LABELS[kind]

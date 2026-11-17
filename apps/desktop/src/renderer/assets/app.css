@@ -3460,7 +3460,7 @@ html[data-appearance='light'] .chat-markdown code:not(pre code) {
   color: color-mix(in srgb, var(--color-fg-max) 72%, transparent);
 }
 
-/* 输入框补全（@ 文件 / / skill）：左侧全宽候选，[名称][说明] 两列 */
+/* 输入框补全（@ 文件 / / skill）：卡片网格，名称与说明分层，类型 / 来源收进卡片脚注。 */
 .chat-completion-palette {
   /* skill 可能上百条：给到能看见八九行的高度，剩下的靠列表自己滚 */
   max-height: min(330px, 46vh);
@@ -3471,15 +3471,40 @@ html[data-appearance='light'] .chat-markdown code:not(pre code) {
 }
 
 .chat-completion-palette:has(.chat-completion-filters) {
-  height: min(330px, 46vh);
+  max-height: min(420px, 56vh);
+  height: min(420px, 56vh);
 }
 
-.chat-completion-palette .chat-command-palette-body > button:not(.arco-btn) {
-  /* 名称 | 说明 | 类型 | 来源：名称按内容取宽但不被压缩（min 0 允许它在极窄时自己截断），
-     说明吃剩余宽度，两枚标记靠右。列数必须与每行的子元素一一对应——多出来的子元素会
-     掉到第二行、自己占满整行，这就是浮层看起来「歪了」的样子。 */
+.chat-completion-palette:not(.is-capabilities) .chat-command-palette-body > button:not(.arco-btn) {
   grid-template-columns: minmax(0, auto) minmax(0, 1fr) auto auto;
   gap: 10px;
+}
+
+.chat-completion-palette.is-capabilities .chat-command-palette-body > button:not(.arco-btn) {
+  position: relative;
+  min-height: 92px;
+  grid-template-columns: 29px minmax(0, 1fr) auto;
+  grid-template-rows: auto 1fr auto;
+  align-items: start;
+  gap: 0 9px;
+  margin: 0;
+  padding: 11px 12px;
+  border: 1px solid color-mix(in srgb, var(--color-fg-max) 9%, transparent);
+  border-radius: 7px;
+  background: var(--color-panel-hi);
+  text-align: left;
+  transition:
+    border-color var(--motion-fast),
+    background var(--motion-fast),
+    box-shadow var(--motion-fast);
+}
+
+.chat-completion-palette.is-capabilities .chat-command-palette-body > button:not(.arco-btn):hover,
+.chat-completion-palette.is-capabilities
+  .chat-command-palette-body
+  > button:not(.arco-btn).chat-command-active {
+  border-color: color-mix(in srgb, var(--color-accent) 55%, transparent);
+  background: color-mix(in srgb, var(--color-accent-subtle) 70%, var(--color-panel-hi));
 }
 
 .chat-completion-palette code {
@@ -3490,8 +3515,84 @@ html[data-appearance='light'] .chat-markdown code:not(pre code) {
   white-space: nowrap;
 }
 
+.chat-completion-palette.is-capabilities .chat-command-palette-body {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-content: start;
+  gap: 8px;
+  padding: 7px;
+}
+
+.chat-completion-palette.is-capabilities .chat-select-empty {
+  grid-column: 1 / -1;
+}
+
+.chat-completion-card-icon {
+  display: grid;
+  width: 29px;
+  height: 29px;
+  grid-row: 1 / span 2;
+  place-items: center;
+  border-radius: 7px;
+  background: var(--color-overlay-strong);
+  color: var(--color-fg-soft);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.chat-completion-card-icon.is-mcp {
+  background: color-mix(in srgb, var(--color-info) 17%, transparent);
+  color: var(--color-info-soft);
+}
+
+.chat-completion-card-icon.is-prompt {
+  background: var(--color-accent-subtle);
+  color: var(--color-accent);
+}
+
+.chat-completion-card-content {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 5px;
+}
+
+.chat-completion-card-content > code {
+  display: block;
+  max-width: 100%;
+  color: var(--color-fg-max);
+}
+
 .chat-completion-palette .chat-command-description {
   color: var(--color-fg-dim);
+}
+
+.chat-completion-palette.is-capabilities .chat-command-description {
+  display: -webkit-box;
+  overflow: hidden;
+  white-space: normal;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.chat-completion-card-index {
+  color: var(--color-fg-faint);
+  font-size: 9px;
+  line-height: 1.4;
+}
+
+.chat-completion-card-meta {
+  display: flex;
+  min-width: 0;
+  grid-column: 2 / -1;
+  align-items: center;
+  gap: 5px;
+  margin-top: 9px;
+}
+
+.chat-completion-card-meta .chat-command-source {
+  max-width: 150px;
 }
 
 /* 名称里命中查询的字符（CLI 的文件补全同样高亮这一段） */
@@ -3501,10 +3602,17 @@ html[data-appearance='light'] .chat-markdown code:not(pre code) {
   color: var(--color-fg-max);
 }
 
+/* 浮层较窄时卡片退回单列；文件补全不受影响。 */
+@container (max-width: 560px) {
+  .chat-completion-palette.is-capabilities .chat-command-palette-body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 /* 窄输入框：说明挤到只剩几个字符反而更难读，只留名称；键位提示同样会折成好几行 */
 @container (max-width: 300px) {
   .chat-completion-palette .chat-command-description,
-.chat-completion-palette .chat-command-palette-title > span {
+  .chat-completion-palette .chat-command-palette-title > span {
     display: none;
   }
 }
