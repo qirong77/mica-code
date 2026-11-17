@@ -2,7 +2,7 @@ import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
 /**
- * 插件整页（`/plugins/pages/<插件 id>`）。
+ * 插件整页（默认地址或清单声明的 `/plugins/<id>/<route>`）。
  *
  * 页面产物只有一份：应用里点开插件页、浏览器打开这个地址、手机上（口令对了之后）打开
  * 这个地址，走的都是同一份 index.html + 同一个渲染层入口，由页面按 pathname 决定画哪个
@@ -25,11 +25,16 @@ export function withRootBase(html) {
 }
 
 /** 回应插件整页请求；产物目录里没有 index.html 时抛出，由调用方转成 500。 */
-export async function servePluginPage(req, res, rendererRoot) {
+export async function servePluginPage(req, res, rendererRoot, allowed = () => true) {
   const html = await readFile(join(rendererRoot, 'index.html'), 'utf8')
+  if (!allowed()) {
+    res.writeHead(404, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
+    res.end(JSON.stringify({ ok: false, error: '没有这个插件页面' }))
+    return
+  }
   res.writeHead(200, {
     'content-type': 'text/html; charset=utf-8',
     'cache-control': 'no-store'
   })
-  res.end(withRootBase(html))
+  res.end(req.method === 'HEAD' ? undefined : withRootBase(html))
 }

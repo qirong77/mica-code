@@ -1,5 +1,6 @@
 import { isElectronShell } from './shell-env'
 import { createClientContextApi } from './client-context'
+import { pluginWebPath } from '@packages/mica-plugin/PluginWeb.js'
 
 /**
  * 插件的前端模块能用的宿主能力。
@@ -129,6 +130,40 @@ export function createPluginHostApi(pluginId, session = null) {
   }
   return {
     pluginId,
+    web: {
+      /** A same-origin read, not a write-capable invoke alias or arbitrary URL fetch. */
+      async read(query, params = {}, { signal } = {}) {
+        const path = pluginWebPath(pluginId, query)
+        if (!params || typeof params !== 'object' || Array.isArray(params)) throw new Error('插件只读查询参数必须是字符串对象')
+        const entries = Object.entries(params)
+        if (entries.length > 16) throw new Error('插件只读查询参数过多')
+        const search = new URLSearchParams()
+        for (const [key, value] of entries) {
+          if (!key || key.length > 64 || typeof value !== 'string' || value.length > 2048) throw new Error('插件只读查询参数无效或过长')
+          search.set(key, value)
+        }
+        const encoded = search.toString()
+        if (encoded.length > 8191) throw new Error('插件只读查询参数过长')
+        const response = await fetch(`${path}${encoded ? `?${encoded}` : ''}`, {
+          method: 'GET', credentials: 'same-origin', mode: 'same-origin', redirect: 'error',
+          cache: 'no-store', headers: { accept: 'application/json' }, signal
+        })
+        let body
+        try { body = await response.json() }
+        catch (error) {
+          if (signal?.aborted) throw signal.reason ?? error
+          throw new Error('插件只读接口响应无效')
+        }
+        if (!response.ok || body?.ok !== true) {
+          const error = new Error(typeof body?.error === 'string' ? body.error : `插件只读查询失败（HTTP ${response.status}）`)
+          error.status = response.status
+          error.code = typeof body?.code === 'string' ? body.code : 'query_failed'
+          throw error
+        }
+        if (!Object.hasOwn(body, 'result')) throw new Error('插件只读接口响应无效')
+        return body.result
+      }
+    },
     /** Optional local metadata; failures never block the user's operation. */
     experience: (event, fields = {}) => {
       try { void Promise.resolve(host?.experience?.(pluginId, event, fields)).catch(() => {}) } catch { /* optional observation */ }

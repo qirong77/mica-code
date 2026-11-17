@@ -13,7 +13,7 @@
 
 [Long Reply Digest](reply-digest/README.md) 在成功回合结束后识别过长的 Agent 回复，先展示运行中摘要卡，再调用模型并原位更新简短摘要；失败或取消会停止运行态，各轮摘要分别保留，短回复不会额外调用模型。
 
-[Harness Review](harness-review/README.md) 记录运行轨迹并聚合问题候选，工具错误与健康率共用分类并标出数据覆盖缺口；条件命令链无法确定非零退出来源时记为未知，不当成功或已确认工具故障。评估按历史追加，验证后的新证据提醒复核但不自动宣判回归。用户纠正独立持久化，仅由下一次同会话主运行消费。它不自动修改代码、提示词或记忆，也不把运行完成当成验收通过。
+[Harness Review](harness-review/README.md) 记录运行轨迹并聚合问题候选，工具错误与健康率共用分类并标出数据覆盖缺口；同端口的 `/plugins/harness-review/console` 是 Arco 只读运行控制台，也可从插件详情打开。条件命令链无法确定非零退出来源时记为未知，不当成功或已确认工具故障。评估按历史追加，验证后的新证据提醒复核但不自动宣判回归。用户纠正独立持久化，仅由下一次同会话主运行消费。它不自动修改代码、提示词或记忆，也不把运行完成当成验收通过。
 
 所有插件（含用户插件和一次性动作）自动接入宿主的 `operation.start/finish` 元数据日志，覆盖工具/命令、面板/动作、菜单、后台 tick、数据、hook 与装配/释放；独立 MCP/launcher 不依赖主对话轨迹。内部步骤可调用 `ctx.operations?.run('固定操作名', task, { signal })`。禁止传正文、命令、路径、地址或异常原文；处理器完成不代表业务验收。随包页面/卡片/启动器的实际曝光与点击由共享容器记录，预取和轮询不算曝光。
 
@@ -50,6 +50,7 @@ plugins/<id>/
 | `author`          | 否   | 作者                                                                                                                                                                       |
 | `main`            | 否   | 入口文件，默认 `index.js`；必须在插件目录内                                                                                                                                |
 | `mcp`             | 否   | `true` 声明随包 `mcp.ts` 独立模块，挂到应用现有端口 `/plugin/<id>/mcp`，默认关闭；见「独立 MCP」 |
+| `web`             | 否   | `true` 声明随包 `web.ts` 只读查询目录，由应用同端口托管 `/plugins/<id>/api/<query>`；见「只读 Web 查询」 |
 | `assets`          | 否   | 随插件分发的资源（样式、文档、图标），同样不许跳出版块目录                                                                                                                 |
 | `dependencies`    | 否   | 需要先 setup 的插件 id                                                                                                                                                     |
 | `required`        | 否   | setup 失败是否中断启动；用户插件默认 `false`                                                                                                                               |
@@ -409,6 +410,41 @@ export default function createMcp(ctx: PluginMcpContext): PluginMcpHandler {
   `/` 补全也能发现它们。已运行宿主的连接目录仍是启动时快照；重新启用插件后需重新连接或新起宿主。
   TUI、`mica exec` 和外部客户端可以手配相同 URL，但应用运行时必须在线。
 
+## 只读 Web 查询
+
+不属于某条会话的控制台数据，用清单 `"web": true` 和随包 `web.ts` 的
+`default createWeb(context)` 声明；宿主在既有 HTTP 端口托管，不启动 `plugin-action`
+或会话进程，也不把任意 HTTP handler、请求头、重定向和文件目录交给插件：
+
+```ts
+import type { PluginWebContext, PluginWebHandler } from '@packages/mica-plugin/index.js';
+
+export default function createWeb(ctx: PluginWebContext): PluginWebHandler {
+  return {
+    queries: {
+      snapshot: async (params, { signal }) => {
+        signal.throwIfAborted();
+        // 按白名单校验 params，仅返回有界 JSON；这里不写文件、不调用模型。
+        return { version: 1, plugin: ctx.pluginId };
+      },
+    },
+  };
+}
+```
+
+- 上下文只有插件身份/版本、插件数据根与配置根路径、只读设置和随包清单的 id/name/version
+  目录。它不是 Node 插件代码的沙箱，但宿主不会注入 shell、agent、会话或任意 channel。
+- 固定路由 **`GET /plugins/<id>/api/<query>`**，只认查询目录自己的固定键。参数、并发、
+  时间、序列化后的 JSON 字节数均受限；超时和断连通过 `AbortSignal` 传给查询。长扫描须在
+  迭代/IO 边界检查 signal，不能只用 `Promise.race` 提前回包后继续无限计算。
+- 页面用 **`api.web.read(query, params?, { signal }?)`** 读取同源 JSON，失败 reject；不经
+  `/api/invoke` 另开授权别名。宿主自动记录固定查询名及终态元数据，不复制输入输出。
+- 模块按随包目录懒加载、缓存及合并初始化；停用/退出时释放，读取前后复核启停。未知
+  `/plugins/*` 明确 404，不回落到 SPA。整个命名空间继承完整访问口令、Host/Origin 校验，
+  分享 cookie 不放行，也不开放 CORS。当前不动态导入用户插件的 Web 代码。
+- 查询自己负责业务缓存和数据投影；接口只读，不得借 GET 执行清理、重建、导出或写评估。
+  新路径不会自动进入 Mobile Relay 的转发目录；直连与中转可用性要分别验证。
+
 ## 内置 skill
 
 随插件分发的 skill 在清单里声明目录（相对插件目录），宿主负责读进来——**插件不用写代码，
@@ -640,11 +676,18 @@ export function summary(api) { return api.currentHost() } // 可选：入口行�
 `icon` 不受影响。没有 `entry` 的整页插件没有那一行可点，入口只有配置页插件详情里那枚
 「打开…」按钮（由宿主打开，所以只对随包插件出现）。
 
-**整页同时是一个真地址**：`/plugins/pages/<插件 id>`（`mica-web-shared` 的 `pluginPagePath`）
+**整页同时是一个真地址**：默认 `/plugins/pages/<插件 id>`（`mica-web-shared` 的 `pluginPagePath`）
 由运行时提供同一份产物，渲染层按 pathname 直接画这一页——所以应用里点开、浏览器里打开、
 手机上（口令对了之后）打开都是同一个页面、同一份插件数据。宿主在窗口顶部那条拖动条上显示
 这个地址并支持复制；页面内换内容（例如笔记换了一篇）用 `api.page.setSearch({ note })` 同步，
 刷新、收藏、发给别人都会回到同一处。
+
+可选的 `desktop.page.route` 注册本插件命名空间内的单段名字，例如
+`"desktop": { "page": { "title": "运行控制台", "route": "console" } }` 生成
+`/plugins/<插件 id>/console`。路由不能包含斜杠、点段或占用保留名字；只认清单声明的
+canonical 地址，不另保留该插件的默认地址别名。宿主生成页面内可复制地址与深链，插件不
+自己拼路径；没有 route 的现有页面不变。服务器按清单、随包模块和启停状态核对，不能只靠
+前端隐藏入口授权。
 
 ### 输入框控件（`composer`）
 

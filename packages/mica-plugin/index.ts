@@ -294,6 +294,8 @@ export type { PublishedPluginRole } from './PluginRoles.js';
 export type { PluginContext } from './PluginContext.js';
 export type { PluginLauncherContext, PluginLauncherHandler } from './PluginLauncher.js';
 export type { PluginMcpContext, PluginMcpHandler, PluginMcpTool } from './PluginMcp.js';
+export type { PluginWebContext, PluginWebHandler } from './PluginWeb.js';
+export { isPluginWebQuery, pluginWebPath } from './PluginWeb.js';
 export { PLUGIN_MCP_PREFIX, pluginMcpId, pluginMcpPath, pluginMcpServerName } from './PluginMcp.js';
 export type {
   PluginFileMentionItem,
@@ -345,6 +347,7 @@ export type {
   PluginDesktopApi,
   PluginDesktopEntry,
   PluginDesktopLauncher,
+  PluginDesktopPage,
   PluginDesktopRequirements,
   PluginEntryPlacement,
   PluginSkillDefinition,

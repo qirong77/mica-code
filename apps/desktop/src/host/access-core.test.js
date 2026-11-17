@@ -131,6 +131,13 @@ describe('isTrustedClientAddress', () => {
 })
 
 describe('classifyRemotePath', () => {
+  it('classifies every plugin page/API path before generic asset extensions', () => {
+    for (const pathname of ['/plugins', '/plugins/pages/demo', '/plugins/demo/console', '/plugins/demo/api/summary', '/plugins/demo/api/summary.json', '/plugins/demo/secret.txt', '/%70lugins/demo/api/summary.json']) {
+      expect(classifyRemotePath(pathname)).toBe('other')
+    }
+    expect(classifyRemotePath('/assets/plugin-console.json')).toBe('asset')
+  })
+
   it('marks the share view as its own class', () => {
     expect(classifyRemotePath('/share')).toBe('share')
     expect(classifyRemotePath('/share/')).toBe('share')

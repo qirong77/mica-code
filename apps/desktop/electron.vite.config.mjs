@@ -106,6 +106,8 @@ export default defineConfig({
     server: {
       proxy: {
         '/api': { target: `http://127.0.0.1:${runtimePort}`, changeOrigin: false },
+        // Keep pages on Vite for HMR; only the read-only API subtree is proxied.
+        '^/plugins/[a-z0-9][a-z0-9._-]*/api(?:/|$)': { target: `http://127.0.0.1:${runtimePort}`, changeOrigin: false },
         // dev 下的终端窗口页面（/terminal.html）也从 Vite 加载，它访问的
         // /remote/terminal/* 必须落到运行时，再由运行时代理到主进程
         '/remote': { target: `http://127.0.0.1:${runtimePort}`, changeOrigin: false }

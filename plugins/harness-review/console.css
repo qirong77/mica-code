@@ -1,0 +1,384 @@
+@import '@arco-design/web-react/es/Card/style/index.css' layer(mica-arco);
+@import '@arco-design/web-react/es/Statistic/style/index.css' layer(mica-arco);
+@import '@arco-design/web-react/es/Tabs/style/index.css' layer(mica-arco);
+@import '@arco-design/web-react/es/Descriptions/style/index.css' layer(mica-arco);
+@import '@arco-design/web-react/es/Skeleton/style/index.css' layer(mica-arco);
+
+.harness-console-shell {
+  height: 100%;
+  min-height: 0;
+  padding: 16px;
+  box-sizing: border-box;
+  container-type: inline-size;
+  container-name: harness-console;
+  color: var(--color-fg);
+  background: var(--color-canvas);
+  font:
+    13px/1.5 -apple-system,
+    BlinkMacSystemFont,
+    'PingFang SC',
+    sans-serif;
+}
+
+.harness-console-shell .page-frame,
+.harness-console-shell .page-panel {
+  min-height: 0;
+}
+
+.harness-console-shell .page-frame {
+  height: 100%;
+}
+
+.harness-console-shell .page-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  overflow: hidden;
+}
+
+.harness-page-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.harness-generated-at,
+.harness-muted,
+.harness-note,
+.harness-count-meta {
+  color: var(--color-fg-muted);
+  font-size: 11px;
+}
+
+.harness-inline-error {
+  flex: none;
+}
+
+.harness-console-skeleton {
+  display: grid;
+  gap: 12px;
+  padding: 12px 2px;
+  overflow: hidden;
+}
+
+.harness-tabs {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.harness-tabs .arco-tabs-content,
+.harness-tabs .arco-tabs-content-animated,
+.harness-tabs .arco-tabs-pane {
+  min-height: 0;
+}
+
+.harness-tabs .arco-tabs-content {
+  flex: 1;
+  overflow: hidden;
+}
+
+.harness-tabs .arco-tabs-content-animated {
+  height: 100%;
+}
+
+.harness-tabs .arco-tabs-content-inner,
+.harness-tabs .arco-tabs-content-item-active {
+  height: 100%;
+  min-height: 0;
+}
+
+.harness-tabs .arco-tabs-pane {
+  height: 100%;
+  overflow: auto;
+  padding: 2px 2px 18px;
+}
+
+.harness-tab-content {
+  display: grid;
+  align-content: start;
+  gap: 12px;
+  min-width: 0;
+}
+
+.harness-kpis,
+.harness-two-columns {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.harness-kpis {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.harness-kpi .arco-statistic {
+  min-height: 56px;
+}
+
+.harness-kpi .arco-statistic-value,
+.harness-source-grid strong,
+.harness-inline-stats strong,
+.harness-progress-grid strong {
+  color: var(--color-fg-strong);
+}
+
+.harness-kpi .harness-muted {
+  display: block;
+  margin-top: 4px;
+}
+
+.harness-source-grid,
+.harness-inline-stats,
+.harness-progress-grid,
+.harness-coverage-grid {
+  display: grid;
+  gap: 8px;
+}
+
+.harness-source-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.harness-source-grid > div,
+.harness-inline-stats > div,
+.harness-progress-grid > div {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.harness-source-grid span,
+.harness-progress-grid span {
+  color: var(--color-fg-muted);
+  font-size: 12px;
+}
+
+.harness-inline-stats {
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+}
+
+.harness-inline-stats strong {
+  padding-left: 2px;
+  font-variant-numeric: tabular-nums;
+}
+
+.harness-progress-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.harness-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.harness-filters .arco-input-wrapper {
+  min-width: min(300px, 100%);
+  flex: 1;
+}
+
+.harness-name-button {
+  max-width: 100%;
+  overflow: hidden;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.harness-detail-card {
+  border-color: var(--color-line-strong);
+}
+
+.harness-cell-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  min-width: 0;
+  gap: 4px;
+}
+
+.harness-cell-stack > strong,
+.harness-cell-stack > small {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.harness-cell-stack > small {
+  color: var(--color-fg-muted);
+  font-size: 11px;
+}
+
+.harness-detail-copy {
+  display: grid;
+  grid-template-columns: 90px minmax(0, 1fr);
+  gap: 7px 12px;
+  margin-top: 12px;
+  color: var(--color-fg-muted);
+}
+
+.harness-detail-copy strong,
+.harness-evidence-list > strong {
+  color: var(--color-fg-strong);
+}
+
+.harness-detail-copy p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.harness-evidence-list {
+  display: grid;
+  gap: 5px;
+  margin-top: 12px;
+  color: var(--color-fg-muted);
+}
+
+.harness-evidence-list span {
+  overflow-wrap: anywhere;
+  font-size: 12px;
+}
+
+.harness-note {
+  margin: 0;
+  line-height: 1.6;
+}
+
+.harness-note + .data-table-scope {
+  margin-top: 4px;
+}
+
+.harness-coverage-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.harness-coverage-metric {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.harness-coverage-metric strong {
+  color: var(--color-fg-strong);
+  font-size: 16px;
+  font-variant-numeric: tabular-nums;
+}
+
+.harness-coverage-metric span {
+  color: var(--color-fg-muted);
+  font-size: 12px;
+}
+
+.harness-coverage-metric small {
+  color: var(--color-fg-faint);
+  font-size: 11px;
+}
+
+.harness-flag-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 12px;
+}
+
+.harness-warning-list {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  color: var(--color-fg-muted);
+  overflow-wrap: anywhere;
+}
+
+.harness-warning-list > li {
+  display: grid;
+  grid-template-columns: 8px minmax(0, 1fr);
+  gap: 6px;
+}
+
+.harness-warning-list > li::before {
+  content: '•';
+}
+
+@layer mica-arco {
+  .harness-console-shell .arco-card {
+    background: var(--color-panel);
+    border-color: var(--color-line-soft);
+  }
+
+  .harness-console-shell .arco-card-head {
+    border-bottom-color: var(--color-line-soft);
+  }
+
+  .harness-console-shell .arco-card-head-title {
+    color: var(--color-fg-strong);
+    font-weight: 600;
+  }
+
+  .harness-console-shell .arco-tabs-header {
+    flex: none;
+    border-bottom-color: var(--color-line-soft);
+  }
+
+  .harness-console-shell .arco-descriptions-item-label,
+  .harness-console-shell .arco-descriptions-item-value {
+    border-bottom-color: var(--color-line-soft);
+  }
+}
+
+@container harness-console (max-width: 650px) {
+  .harness-console-shell .page-head {
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .harness-page-actions {
+    justify-content: flex-start;
+  }
+}
+
+@container page (max-width: 900px) {
+  .harness-kpis {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .harness-progress-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@container page (max-width: 650px) {
+  .harness-console-shell .page-head {
+    align-items: flex-start;
+  }
+
+  .harness-page-actions {
+    justify-content: flex-start;
+  }
+
+  .harness-two-columns,
+  .harness-kpis,
+  .harness-coverage-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .harness-inline-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .harness-source-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .harness-detail-copy {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 2px;
+  }
+}

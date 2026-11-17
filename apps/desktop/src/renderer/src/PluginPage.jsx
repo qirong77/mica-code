@@ -40,7 +40,7 @@ export function PluginPage({ entry, onClose, standalone = false }) {
   const [search, setSearch] = useState(() => (standalone ? window.location.search : ''))
   const searchRef = useRef(search)
   searchRef.current = search
-  const pagePath = pluginPagePath(entry.id)
+  const pagePath = pluginPagePath(entry.id, entry.page.route)
   const address = `${window.location.origin}${pagePath}${search}`
 
   /**

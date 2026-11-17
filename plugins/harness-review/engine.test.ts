@@ -2,8 +2,10 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { realpathSync } from 'node:fs';
+import fsPromises from 'node:fs/promises';
 import { appendFile, mkdtemp, mkdir, readFile, readdir, rm, stat, symlink, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
+import { syncBuiltinESMExports } from 'node:module';
 import { join, resolve } from 'node:path';
 import { test, vi, type TestContext } from 'vitest';
 import type { AgentObservationEvent, PluginStatusFile } from '@packages/mica-plugin/index.js';
@@ -1616,7 +1618,7 @@ test('failure lines and tool identity win over unrelated examples; rebuilt categ
   const cwd = resolve('workspace-failure-lines');
   const run = runner(recorder, { cwd });
   run.start();
-  assert.equal(CLASSIFIER_VERSION, 10);
+  assert.equal(CLASSIFIER_VERSION, 11);
   const samples = [
     {
       name: 'memory',
@@ -3246,6 +3248,126 @@ test('concurrent recorder rotation keeps both hosts events in a consistent snaps
   assert.deepEqual(errors, []);
   assert.ok((await stat(join(root, 'plugin-events.jsonl'))).size < 4 * 1024 * 1024);
   assert.ok((await stat(join(root, 'plugin-events.1.jsonl'))).size > 4 * 1024 * 1024);
+});
+
+test('read-only review does not flush/reclaim or create missing directories and locks', async (t) => {
+  const { temporary, root, recorder } = await fixture(t);
+  vi.stubEnv('MICA_LOG_DIR', join(temporary, 'missing-logs'));
+  t.onTestFinished(() => vi.unstubAllEnvs());
+  const flush = vi.spyOn(recorder, 'flush');
+  const reclaim = vi.spyOn(recorder, 'reclaim');
+  const report = await recorder.review(undefined, { readOnly: true });
+  assert.equal(report.runs.length, 0);
+  assert.equal(report.coverage.directoryReadFailed, false);
+  assert.equal(flush.mock.calls.length, 0);
+  assert.equal(reclaim.mock.calls.length, 0);
+  await assert.rejects(stat(root), { code: 'ENOENT' });
+  assert.deepEqual(await readdir(temporary), []);
+  flush.mockRestore();
+  reclaim.mockRestore();
+});
+
+test('read-only plugin-event snapshot retries across rotation instead of counting an inode twice', async (t) => {
+  const { root, recorder } = await fixture(t);
+  await mkdir(root, { recursive: true });
+  const row = (pluginId: string) =>
+    `${JSON.stringify({ at, pluginId, taskId: 'poll', failures: 1, error: 'failed' })}\n`;
+  const current = join(root, 'plugin-events.jsonl');
+  const rotated = join(root, 'plugin-events.1.jsonl');
+  await writeFile(rotated, row('old'));
+  await writeFile(current, row('middle'));
+  const originalOpen = fsPromises.open;
+  let rotations = 0;
+  const spy = vi.spyOn(fsPromises, 'open').mockImplementation(async (...args: Parameters<typeof fsPromises.open>) => {
+    if (args[0] === current && rotations++ === 0) {
+      await fsPromises.rename(current, rotated);
+      await writeFile(current, row('new'));
+    }
+    return originalOpen(...args);
+  });
+  syncBuiltinESMExports();
+  t.onTestFinished(() => {
+    spy.mockRestore();
+    syncBuiltinESMExports();
+  });
+  const report = await recorder.review(undefined, { readOnly: true });
+  assert.deepEqual(Object.fromEntries(report.pluginFailures.map((item) => [item.pluginId, item.count])), {
+    middle: 1,
+    new: 1,
+  });
+  assert.ok(!report.warnings.some((item) => /unstable snapshot/.test(item)));
+  await assert.rejects(stat(join(root, 'plugin-events.lock')), { code: 'ENOENT' });
+});
+
+test('continuously rotating plugin events are omitted with an explicit warning after bounded retries', async (t) => {
+  const { root, recorder } = await fixture(t);
+  await mkdir(root, { recursive: true });
+  const current = join(root, 'plugin-events.jsonl');
+  const rotated = join(root, 'plugin-events.1.jsonl');
+  const row = (n: number) => `${JSON.stringify({ at, pluginId: `sample-${n}`, taskId: 'poll', failures: 1 })}\n`;
+  await writeFile(rotated, row(0));
+  await writeFile(current, row(1));
+  const originalOpen = fsPromises.open;
+  let rotations = 0;
+  const spy = vi.spyOn(fsPromises, 'open').mockImplementation(async (...args: Parameters<typeof fsPromises.open>) => {
+    if (args[0] === current) {
+      await fsPromises.rename(current, rotated);
+      await writeFile(current, row(++rotations + 1));
+    }
+    return originalOpen(...args);
+  });
+  syncBuiltinESMExports();
+  t.onTestFinished(() => {
+    spy.mockRestore();
+    syncBuiltinESMExports();
+  });
+  const report = await recorder.review(undefined, { readOnly: true });
+  assert.equal(rotations, 3);
+  assert.deepEqual(report.pluginFailures, []);
+  assert.ok(report.warnings.some((item) => /all 3 read attempts.*unstable snapshot/.test(item)));
+});
+
+test('AbortError in summary/trace reads propagates rather than being counted as a corrupt file', async (t) => {
+  const { recorder } = await fixture(t);
+  const recorded = runner(recorder);
+  recorded.start();
+  recorded.finish();
+  await recorder.flush();
+  const originalRead = fsPromises.readFile;
+  const spy = vi.spyOn(fsPromises, 'readFile').mockImplementation(((
+    ...args: Parameters<typeof fsPromises.readFile>
+  ) => {
+    if (String(args[0]).endsWith('events.jsonl')) return Promise.reject(new DOMException('cancelled', 'AbortError'));
+    return originalRead(...args);
+  }) as typeof fsPromises.readFile);
+  syncBuiltinESMExports();
+  t.onTestFinished(() => {
+    spy.mockRestore();
+    syncBuiltinESMExports();
+  });
+  await assert.rejects(recorder.review(undefined, { readOnly: true, signal: new AbortController().signal }), {
+    name: 'AbortError',
+  });
+});
+
+test('already aborted and in-progress read-only plugin scans propagate cancellation', async (t) => {
+  const { recorder, root } = await fixture(t);
+  const first = new AbortController();
+  first.abort();
+  await assert.rejects(recorder.review(undefined, { readOnly: true, signal: first.signal }), { name: 'AbortError' });
+  await mkdir(root, { recursive: true });
+  await writeFile(
+    join(root, 'plugin-events.jsonl'),
+    `${JSON.stringify({ at, pluginId: 'sample', taskId: 'poll', failures: 3 })}\n`,
+  );
+  const controller = new AbortController();
+  const read = (
+    recorder as unknown as { readPluginEventFiles(warnings: string[], signal: AbortSignal): Promise<unknown> }
+  ).readPluginEventFiles.bind(recorder);
+  const promise = read([], controller.signal);
+  controller.abort();
+  await assert.rejects(promise, { name: 'AbortError' });
+  await assert.rejects(stat(join(root, 'plugin-events.lock')), { code: 'ENOENT' });
 });
 
 test('hook failures are recorded like background tasks, with a lower-bound count', async (t) => {

@@ -112,21 +112,33 @@ export async function writeAssessment(root: string, assessment: FindingAssessmen
   }
 }
 
-async function readJson(path: string): Promise<unknown> {
+function rethrowAbort(error: unknown, signal?: AbortSignal): void {
+  if (error instanceof Error && error.name === 'AbortError') throw error;
+  signal?.throwIfAborted();
+}
+
+async function readJson(path: string, signal?: AbortSignal): Promise<unknown> {
+  signal?.throwIfAborted();
   const file = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
   try {
+    signal?.throwIfAborted();
     const info = await file.stat();
+    signal?.throwIfAborted();
     if (!info.isFile()) throw new Error('Invalid assessment file path');
     if (info.size > MAX_FILE_BYTES) throw new Error('Assessment exceeds size limit');
     const buffer = Buffer.alloc(MAX_FILE_BYTES + 1);
     let size = 0;
     while (size < buffer.length) {
+      signal?.throwIfAborted();
       const { bytesRead } = await file.read(buffer, size, buffer.length - size, size);
+      signal?.throwIfAborted();
       if (bytesRead === 0) break;
       size += bytesRead;
     }
     if (size > MAX_FILE_BYTES) throw new Error('Assessment exceeds size limit');
-    return JSON.parse(buffer.toString('utf8', 0, size)) as unknown;
+    const value = JSON.parse(buffer.toString('utf8', 0, size)) as unknown;
+    signal?.throwIfAborted();
+    return value;
   } finally {
     await file.close();
   }
@@ -136,7 +148,13 @@ function compareText(a: string, b: string): number {
   return a < b ? -1 : a > b ? 1 : 0;
 }
 
-export async function readAssessments(root: string, id: string, warnings: string[]): Promise<FindingAssessment[]> {
+export async function readAssessments(
+  root: string,
+  id: string,
+  warnings: string[],
+  signal?: AbortSignal,
+): Promise<FindingAssessment[]> {
+  signal?.throwIfAborted();
   const key = assessmentKey(id);
   const base = resolve(root);
   const decisions = join(base, 'decisions');
@@ -144,17 +162,23 @@ export async function readAssessments(root: string, id: string, warnings: string
   try {
     for (const path of [base, decisions]) {
       if (!(await lstat(path)).isDirectory()) throw new Error('Invalid assessment directory path');
+      signal?.throwIfAborted();
     }
     try {
       await lstat(join(decisions, `${key}.json`));
+      signal?.throwIfAborted();
       warnings.push(
         `Legacy decision ${id}: single-file decisions are no longer supported; run /evolution run to migrate.`,
       );
     } catch (error) {
+      rethrowAbort(error, signal);
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
     }
     if (!(await lstat(directory)).isDirectory()) throw new Error('Invalid assessment directory path');
-    const entries = (await readdir(directory, { withFileTypes: true }))
+    signal?.throwIfAborted();
+    const files = await readdir(directory, { withFileTypes: true });
+    signal?.throwIfAborted();
+    const entries = files
       .filter((entry) => entry.name.endsWith('.json'))
       .sort((a, b) => compareText(a.name, b.name));
     if (entries.length > MAX_HISTORY) {
@@ -166,9 +190,15 @@ export async function readAssessments(root: string, id: string, warnings: string
     const order = (a: (typeof history)[number], b: (typeof history)[number]) =>
       Date.parse(a.assessment.updatedAt) - Date.parse(b.assessment.updatedAt) || compareText(a.file, b.file);
     for (const entry of entries) {
+      if (signal) {
+        signal.throwIfAborted();
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        signal.throwIfAborted();
+      }
       try {
         if (!JSON_FILE.test(entry.name) || !entry.isFile()) throw new Error('Invalid assessment file path');
-        const assessment = await readJson(join(directory, entry.name));
+        const assessment = await readJson(join(directory, entry.name), signal);
+        signal?.throwIfAborted();
         if (!isFindingAssessment(assessment) || assessment.id !== id)
           throw new Error('Invalid finding assessment schema');
         history.push({ file: entry.name, assessment });
@@ -177,11 +207,15 @@ export async function readAssessments(root: string, id: string, warnings: string
           history.shift();
         }
       } catch (error) {
+        rethrowAbort(error, signal);
         warnings.push(`Unreadable assessment ${id}/${entry.name}: ${String(error)}`);
       }
     }
-    return history.sort(order).map(({ assessment }) => assessment);
+    const result = history.sort(order).map(({ assessment }) => assessment);
+    signal?.throwIfAborted();
+    return result;
   } catch (error) {
+    rethrowAbort(error, signal);
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
       warnings.push(`Unreadable assessment history ${id}: ${String(error)}`);
     }

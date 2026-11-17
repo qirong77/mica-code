@@ -1,7 +1,8 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { realpathSync } from 'node:fs';
-import { appendFile, chmod, mkdir, readFile, readdir, rename, rm, stat, unlink, writeFile } from 'node:fs/promises';
+import { constants, realpathSync } from 'node:fs';
+import { appendFile, chmod, lstat, mkdir, open, readFile, readdir, rename, rm, stat, unlink, writeFile } from 'node:fs/promises';
 import { resolve, join, relative } from 'node:path';
+import { setImmediate as yieldImmediate } from 'node:timers/promises';
 import { acquireProcessLock } from '@packages/mica-common/processLock.js';
 import type { AgentObservationEvent, PluginObservationEvent, PluginStatusFile } from '@packages/mica-plugin/index.js';
 import {
@@ -18,6 +19,22 @@ import { LogEvidenceReader, type LogEvidence } from './log-evidence.js';
 export type { FindingStatus } from './assessments.js';
 
 export type CaptureOptions = { captureContent: boolean; maxEventChars: number; maxEventsPerRun: number };
+export type ReviewOptions = { readOnly?: boolean; signal?: AbortSignal };
+
+function checkReviewAbort(signal?: AbortSignal): void {
+  if (signal?.aborted) throw new DOMException('Harness review was cancelled.', 'AbortError');
+}
+
+function rethrowReviewAbort(error: unknown, signal?: AbortSignal): void {
+  checkReviewAbort(signal);
+  if (error instanceof Error && error.name === 'AbortError') throw error;
+}
+
+async function reviewCheckpoint(signal?: AbortSignal): Promise<void> {
+  checkReviewAbort(signal);
+  if (signal) await yieldImmediate(undefined, { signal });
+  checkReviewAbort(signal);
+}
 /**
  * 问题推导规则的版本。改了 classify / 退出码白名单 / 重复调用判定就加一：
  * 宿主据此重算 findings 与派生错误计数，不动用量、耗时和人工结论。
@@ -1016,6 +1033,11 @@ function canonicalArgs(args: string): string {
 }
 function boundedText(value: unknown, max = 1000): string {
   return textOf(value).slice(0, max);
+}
+
+/** The console uses the recorder's redaction rules before applying its own short-text budget. */
+export function consoleText(value: unknown, max = 320): string {
+  return boundedText(typeof value === 'string' ? value : '', max).replace(/[\u0000-\u001f\u007f]/g, ' ');
 }
 function positive(value: number | undefined, fallback: number, max: number): number {
   return Number.isFinite(value) ? Math.max(0, Math.min(max, Math.floor(value!))) : fallback;
@@ -2184,31 +2206,84 @@ export class HarnessRecorder {
     }
   }
 
-  private async readPluginEventFiles(warnings: string[]): Promise<{ name: string; text: string }[]> {
-    try {
-      await stat(this.root);
-      return await this.withPluginEventsLock(async () => {
+  private async readPluginEventFiles(
+    warnings: string[],
+    signal?: AbortSignal,
+  ): Promise<{ name: string; text: string }[]> {
+    const names = [PLUGIN_EVENTS_ROTATED, PLUGIN_EVENTS_FILE];
+    const signature = async (name: string): Promise<string | null> => {
+      checkReviewAbort(signal);
+      try {
+        const info = await lstat(join(this.root, name));
+        if (!info.isFile()) throw new Error('Plugin event path is not a regular file');
+        return fileSignature(info);
+      } catch (error) {
+        rethrowReviewAbort(error, signal);
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+        throw error;
+      }
+    };
+    // No writer lock: a GET must not create a directory/lock, wait on a stale
+    // writer or count the same inode through both names during rotation.
+    for (let attempt = 0; attempt < 3; attempt++) {
+      await reviewCheckpoint(signal);
+      try {
+        const before = await Promise.all(names.map(signature));
         const files: { name: string; text: string }[] = [];
-        for (const name of [PLUGIN_EVENTS_ROTATED, PLUGIN_EVENTS_FILE]) {
+        const notes: string[] = [];
+        let changed = false;
+        for (const [index, name] of names.entries()) {
+          checkReviewAbort(signal);
+          if (before[index] === null) continue;
+          const handle = await open(join(this.root, name), constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
           try {
-            const info = await stat(join(this.root, name));
+            const info = await handle.stat();
+            if (!info.isFile() || fileSignature(info) !== before[index]) {
+              changed = true;
+              break;
+            }
             if (info.size > MAX_PLUGIN_EVENTS_READ_BYTES) {
-              warnings.push(`${name} exceeds the plugin event size limit; its failures were not counted.`);
+              notes.push(`${name} exceeds the plugin event size limit; its failures were not counted.`);
               continue;
             }
-            files.push({ name, text: await readFile(join(this.root, name), 'utf8') });
-          } catch (error) {
-            if ((error as NodeJS.ErrnoException).code !== 'ENOENT')
-              warnings.push(`Unreadable ${name}: ${boundedText(String(error))}`);
+            // Read the observed length, not an unbounded readFile while another
+            // host appends. A short read or any signature change retries both files.
+            const buffer = Buffer.alloc(info.size);
+            let size = 0;
+            while (size < buffer.length) {
+              await reviewCheckpoint(signal);
+              const { bytesRead } = await handle.read(buffer, size, Math.min(128 * 1024, buffer.length - size), size);
+              if (!bytesRead) break;
+              size += bytesRead;
+            }
+            if (size !== info.size || before[index] !== fileSignature(await handle.stat())) {
+              changed = true;
+              break;
+            }
+            files.push({ name, text: buffer.toString('utf8') });
+          } finally {
+            await handle.close();
           }
         }
+        const after = await Promise.all(names.map(signature));
+        checkReviewAbort(signal);
+        if (changed || before.some((value, index) => value !== after[index])) continue;
+        // A hard link (or a rotation observed halfway through) must not duplicate evidence.
+        if (before[0] && before[1] && before[0].split(':').slice(0, 2).join(':') === before[1].split(':').slice(0, 2).join(':')) {
+          warnings.push('Plugin event files refer to the same file; the snapshot was omitted to avoid duplicate counts.');
+          return [];
+        }
+        warnings.push(...notes);
         return files;
-      });
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT')
-        warnings.push(`Unreadable plugin event snapshot: ${boundedText(String(error))}`);
-      return [];
+      } catch (error) {
+        rethrowReviewAbort(error, signal);
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue;
+        warnings.push('Unreadable plugin event snapshot; its failures were not counted.');
+        return [];
+      }
     }
+    warnings.push('Plugin event files changed during all 3 read attempts (append/rotation); the unstable snapshot was omitted, not counted twice.');
+    return [];
   }
 
   /**
@@ -2220,15 +2295,17 @@ export class HarnessRecorder {
   private async readPluginFailures(
     warnings: string[],
     eventTimes?: Map<string, Set<number>>,
+    signal?: AbortSignal,
   ): Promise<PluginFailureSummary[]> {
     const groups = new Map<string, PluginFailureSummary>();
     // 详细写盘被合并：一个每 30 秒失败一次的任务，一小时可能只留 12 行，真实失败 120 次。
     // 事件自带累计数，最后取「行数」与「累计数最大值」中大的那个，才不会低估。
     const reported = new Map<string, number>();
-    // Rotation and both reads share a lock: never read the same file twice across a rename.
-    for (const { name, text } of await this.readPluginEventFiles(warnings)) {
+    for (const { name, text } of await this.readPluginEventFiles(warnings, signal)) {
       let corrupt = 0;
+      let index = 0;
       for (const line of text.split('\n')) {
+        if (index++ % 128 === 0) await reviewCheckpoint(signal);
         if (!line.trim()) continue;
         let item: { at?: unknown; pluginId?: unknown; taskId?: unknown; error?: unknown; failures?: unknown };
         try {
@@ -2669,20 +2746,24 @@ export class HarnessRecorder {
    * runs stay `running` forever and inflate the report's active-run warnings. Reclaim those
    * whose capturing process is gone; a run owned by this process is always left alone.
    */
-  async reclaim(): Promise<number> {
+  async reclaim(signal?: AbortSignal): Promise<number> {
+    checkReviewAbort(signal);
     await this.flush();
+    checkReviewAbort(signal);
     let entries: string[] = [];
     try {
       entries = (await readdir(join(this.root, 'runs'), { withFileTypes: true }))
         .filter((entry) => entry.isDirectory())
         .slice(0, MAX_SCANNED_RUNS)
         .map((entry) => entry.name);
-    } catch {
+    } catch (error) {
+      rethrowReviewAbort(error, signal);
       // Best-effort cleanup: an unreadable root must never fail the review itself.
       return 0;
     }
     let reclaimed = 0;
     for (const id of entries) {
+      await reviewCheckpoint(signal);
       const file = join(this.root, 'runs', id, 'summary.json');
       let summary: RunSummary;
       let writtenAt = 0;
@@ -2692,10 +2773,11 @@ export class HarnessRecorder {
         writtenAt = info.mtimeMs;
         const indexed = this.summaryIndex.get(id, fileSignature(info));
         if (indexed && indexed.outcome !== 'running') continue;
-        summary = JSON.parse(await readFile(file, 'utf8')) as RunSummary;
+        summary = JSON.parse(await readFile(file, { encoding: 'utf8', signal })) as RunSummary;
         if (!validSummary(summary, id)) continue;
         this.relocate(summary);
-      } catch {
+      } catch (error) {
+        rethrowReviewAbort(error, signal);
         continue;
       }
       if (summary.outcome !== 'running') continue;
@@ -2710,16 +2792,19 @@ export class HarnessRecorder {
       summary.reclaimedAt = at;
       summary.updatedAt = at;
       try {
+        checkReviewAbort(signal);
         await this.atomic(file, JSON.stringify(summary, null, 2));
         reclaimed++;
       } catch (error) {
+        rethrowReviewAbort(error, signal);
         this.onError(error);
       }
     }
     return reclaimed;
   }
 
-  private async projectRun(summary: RunSummary, loadedSignature?: string): Promise<RunProjection> {
+  private async projectRun(summary: RunSummary, loadedSignature?: string, signal?: AbortSignal): Promise<RunProjection> {
+    checkReviewAbort(signal);
     let signature = '';
     const signatureOf = async () => {
       const summarySignature = fileSignature(await stat(join(this.root, 'runs', summary.id, 'summary.json')));
@@ -2729,7 +2814,8 @@ export class HarnessRecorder {
     };
     try {
       signature = await signatureOf();
-    } catch {
+    } catch (error) {
+      rethrowReviewAbort(error, signal);
       /* missing traces are reported below */
     }
     const cached = signature ? this.runIndex.get(summary.id, signature) : undefined;
@@ -2748,6 +2834,7 @@ export class HarnessRecorder {
       tools: [],
     };
     const finish = async (): Promise<RunProjection> => {
+      checkReviewAbort(signal);
       Object.assign(result, {
         findings: summary.findings,
         toolErrors: summary.toolErrors,
@@ -2758,15 +2845,19 @@ export class HarnessRecorder {
       // Cache only derived metadata, not events, input, tool results or errors.
       if (signature && summary.outcome !== 'running') {
         try {
-          if (signature === (await signatureOf())) this.runIndex.set(summary.id, signature, result);
-        } catch {
+          if (signature === (await signatureOf())) {
+            checkReviewAbort(signal);
+            this.runIndex.set(summary.id, signature, result);
+          }
+        } catch (error) {
+          rethrowReviewAbort(error, signal);
           /* raced removal */
         }
       }
       return result;
     };
     const timestamps = new Map<number, string>();
-    const events = await inspectTrace(summary, warnings, timestamps);
+    const events = await inspectTrace(summary, warnings, timestamps, signal);
     const observed = new Map<string, Set<number>>();
     const state = derivationState(summary, events?.length ?? 0);
     state.onFinding = (id, seq) => {
@@ -2776,7 +2867,10 @@ export class HarnessRecorder {
     };
     // Replay uncapped occurrence signals, not only the first MAX_EVIDENCE
     // references. Even partial traces can confirm the events actually present.
-    if (events) for (const event of events) this.replay(state, event, memory);
+    if (events) for (const [index, event] of events.entries()) {
+      if (index % 128 === 0) await reviewCheckpoint(signal);
+      this.replay(state, event, memory);
+    }
     const recordTimes = (): void => {
       for (const candidate of summary.findings) {
         const eligible =
@@ -2799,8 +2893,10 @@ export class HarnessRecorder {
     // existing health coverage or cross-run input classification.
     const healthState = derivationState(summary, events.length);
     healthState.toolTally = new Map();
-    for (const event of events)
+    for (const [index, event] of events.entries()) {
+      if (index % 128 === 0) await reviewCheckpoint(signal);
       if (event.type === 'tool:call' || event.type === 'tool:result') this.replay(healthState, event, memory);
+    }
     const unknown = (healthState.unknownResults ?? 0) + healthState.pending.size;
     result.unknown = unknown;
     // Ambiguous exits are classified as unknown, rather than missing trace data.
@@ -2848,9 +2944,17 @@ export class HarnessRecorder {
     return finish();
   }
 
-  async review(cwd?: string): Promise<ReviewReport> {
-    await this.flush();
-    const reclaimed = await this.reclaim();
+  async review(cwd?: string, options: ReviewOptions = {}): Promise<ReviewReport> {
+    const { signal } = options;
+    checkReviewAbort(signal);
+    // A console read must not flush, reclaim dead runs or acquire write locks.
+    let reclaimed = 0;
+    if (!options.readOnly) {
+      await this.flush();
+      checkReviewAbort(signal);
+      reclaimed = await this.reclaim(signal);
+    }
+    checkReviewAbort(signal);
     const now = Date.now();
     const windowStart = now - 24 * 60 * 60 * 1000;
     const generatedAt = new Date(now).toISOString();
@@ -2885,6 +2989,7 @@ export class HarnessRecorder {
         );
       entries = candidates.slice(0, MAX_SCANNED_RUNS).map((entry) => ({ id: entry.name }));
     } catch (error) {
+      rethrowReviewAbort(error, signal);
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
         coverage.directoryReadFailed = true;
         warnings.push(`Cannot list runs: ${boundedText(String(error))}`);
@@ -2893,6 +2998,7 @@ export class HarnessRecorder {
     const headers: { id: string; startedAt: string; cwd?: string; outcome: Outcome }[] = [];
     this.summaryIndex.retain(new Set(entries.map((entry) => entry.id)));
     for (const entry of entries) {
+      await reviewCheckpoint(signal);
       const file = join(this.root, 'runs', entry.id, 'summary.json');
       try {
         const info = await stat(file);
@@ -2900,7 +3006,7 @@ export class HarnessRecorder {
         const signature = fileSignature(info);
         let header = this.summaryIndex.get(entry.id, signature);
         if (!header) {
-          const summary = JSON.parse(await readFile(file, 'utf8')) as RunSummary;
+          const summary = JSON.parse(await readFile(file, { encoding: 'utf8', signal })) as RunSummary;
           if (!validSummary(summary, entry.id) || !tracesOwnRun(summary.traceFile, entry.id))
             throw new Error('invalid summary schema');
           header = {
@@ -2912,6 +3018,7 @@ export class HarnessRecorder {
         }
         if (!filter || (header.cwd && canonicalCwd(header.cwd) === filter)) headers.push({ id: entry.id, ...header });
       } catch (error) {
+        rethrowReviewAbort(error, signal);
         coverage.unreadableSummaries++;
         warnings.push(
           `Unreadable or corrupt run ${entry.id}: ${boundedText(error instanceof Error ? error.message : error)}`,
@@ -2926,12 +3033,13 @@ export class HarnessRecorder {
     this.runIndex.retain(new Set(selected.map((entry) => entry.id)));
     let scannedRuns = 0;
     for (const entry of selected) {
+      await reviewCheckpoint(signal);
       scannedRuns++;
       const file = join(this.root, 'runs', entry.id, 'summary.json');
       try {
         const info = await stat(file);
         if (info.size > 4_000_000) throw new Error('summary exceeds size limit');
-        const summary = JSON.parse(await readFile(file, 'utf8')) as RunSummary;
+        const summary = JSON.parse(await readFile(file, { encoding: 'utf8', signal })) as RunSummary;
         if (!validSummary(summary, entry.id) || !tracesOwnRun(summary.traceFile, entry.id))
           throw new Error('invalid summary schema');
         this.relocate(summary);
@@ -2958,6 +3066,7 @@ export class HarnessRecorder {
             `Run ${summary.id} omitted ${summary.droppedEvents} trace events at its capture limit; summary counters include them. Evidence without a stored event is marked unavailable.`,
           );
       } catch (error) {
+        rethrowReviewAbort(error, signal);
         coverage.unreadableSummaries++;
         warnings.push(
           `Unreadable or corrupt run ${entry.id}: ${boundedText(error instanceof Error ? error.message : error)}`,
@@ -2970,7 +3079,8 @@ export class HarnessRecorder {
     for (const summary of [...runs].sort(
       (a, b) => a.startedAt.localeCompare(b.startedAt) || a.id.localeCompare(b.id),
     )) {
-      const projection = await this.projectRun(summary, summarySignatures.get(summary.id));
+      await reviewCheckpoint(signal);
+      const projection = await this.projectRun(summary, summarySignatures.get(summary.id), signal);
       warnings.push(...projection.warnings);
       summary.findings = projection.findings;
       summary.toolErrors = projection.toolErrors;
@@ -3005,7 +3115,7 @@ export class HarnessRecorder {
     const delegation = summarizeDelegation(runs, warnings);
     const helpers = summarizeHelpers(runs, warnings);
     const pluginTimes = new Map<string, Set<number>>();
-    const pluginFailures = await this.readPluginFailures(warnings, pluginTimes);
+    const pluginFailures = await this.readPluginFailures(warnings, pluginTimes, signal);
     const derivationCoverage: DerivationCoverage = {
       limitedRuns: 0,
       callObservationsNotTracked: 0,
@@ -3013,6 +3123,7 @@ export class HarnessRecorder {
       unknownRuns: 0,
     };
     for (const run of runs) {
+      checkReviewAbort(signal);
       if (!run.derivationDrops) {
         derivationCoverage.unknownRuns++;
         continue;
@@ -3031,7 +3142,8 @@ export class HarnessRecorder {
         `${derivationCoverage.unknownRuns} run(s) lack derivation-limit counters, so previous overflow is unknown; run harness-review rebuild to recompute trace-backed findings before treating the absence of findings as evidence of none.`,
       );
     const merged = new Map<string, ReviewFinding>();
-    for (const run of runs)
+    for (const run of runs) {
+      await reviewCheckpoint(signal);
       for (const candidate of run.findings) {
         const times = findingTimes.get(run.id)!.get(candidate.id)!;
         const existing = merged.get(candidate.id);
@@ -3043,9 +3155,11 @@ export class HarnessRecorder {
         mergeFindingTiming(existing, times);
         existing.evidence.push(...candidate.evidence.slice(0, Math.max(0, MAX_EVIDENCE - existing.evidence.length)));
       }
+    }
     // 插件常驻任务的失败不属于任何一条 run（没有 runId、也没有 cwd），但同样要进
     // `merged`：人工判断按 id 落在 decisions/ 里，不经过合并的条目就永远点不动。
     for (const failure of pluginFailures) {
+      checkReviewAbort(signal);
       if (failure.count < PLUGIN_FAILURE_FINDING_COUNT) continue;
       const id = pluginFailureId(failure.pluginId, failure.taskId);
       const times = [...(pluginTimes.get(id) ?? [])];
@@ -3075,7 +3189,9 @@ export class HarnessRecorder {
       });
     }
     for (const finding of merged.values()) {
-      const assessments = await readAssessments(this.root, finding.id, warnings);
+      await reviewCheckpoint(signal);
+      const assessments = await readAssessments(this.root, finding.id, warnings, signal);
+      checkReviewAbort(signal);
       const decision = assessments.at(-1);
       if (!decision) continue;
       finding.status = decision.status;
@@ -3125,6 +3241,8 @@ export class HarnessRecorder {
       const finishes = runs.flatMap((run) => (run.finishedAt ? [Date.parse(run.finishedAt)] : []));
       if (finishes.length) coverage.latestRunFinishedAt = new Date(Math.max(...finishes)).toISOString();
     }
+    const logEvidence = await this.logs.read(undefined, signal);
+    checkReviewAbort(signal);
     return {
       version: 1,
       generatedAt,
@@ -3142,7 +3260,7 @@ export class HarnessRecorder {
       delegation,
       helpers,
       pluginFailures,
-      logEvidence: await this.logs.read(),
+      logEvidence,
       toolHealth: toolHealthRows(toolTally),
       toolHealthCoverage,
       derivationCoverage,
@@ -3874,7 +3992,9 @@ async function inspectTrace(
   summary: RunSummary,
   warnings: string[],
   timestamps?: Map<number, string>,
+  signal?: AbortSignal,
 ): Promise<StoredEvent[] | null> {
+  checkReviewAbort(signal);
   const evidence = summary.findings.flatMap((finding) => finding.evidence);
   const bySeq = new Map<number, Evidence[]>();
   for (const item of evidence) {
@@ -3889,12 +4009,13 @@ async function inspectTrace(
       warnings.push(`Run ${summary.id} trace exceeds the 20 MB inspection limit; integrity was not checked.`);
       return null;
     }
-    const text = await readFile(summary.traceFile, 'utf8');
+    const text = await readFile(summary.traceFile, { encoding: 'utf8', signal });
     const lines = text.split('\n');
     if (lines.at(-1) === '') lines.pop();
     let previous = 0;
     const events: StoredEvent[] = [];
     for (let index = 0; index < lines.length; index++) {
+      if (index % 128 === 0) await reviewCheckpoint(signal);
       try {
         const event = JSON.parse(lines[index]) as StoredEvent;
         if (
@@ -3911,7 +4032,8 @@ async function inspectTrace(
         events.push(event);
         timestamps?.set(event.seq, event.timestamp);
         for (const item of bySeq.get(event.seq) ?? []) item.available = true;
-      } catch {
+      } catch (error) {
+        rethrowReviewAbort(error, signal);
         warnings.push(`Run ${summary.id} has a corrupt trace at line ${index + 1}.`);
         return null;
       }
@@ -3923,7 +4045,8 @@ async function inspectTrace(
       return null;
     }
     return events;
-  } catch {
+  } catch (error) {
+    rethrowReviewAbort(error, signal);
     warnings.push(`Run ${summary.id} has a missing or unreadable trace: ${summary.traceFile}`);
     return null;
   }

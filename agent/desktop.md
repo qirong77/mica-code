@@ -41,7 +41,7 @@
 - 同一 session 在所有页面是同一 node、run、终端；`dedupeSessionNodes` 合并重复页签。
 - 默认 `0.0.0.0:8787`，没有账号体系，只有一道可选的口令；README 保留风险说明。非回环（且不在 `MICA_DESKTOP_TRUSTED_CLIENTS` 里）的连接**只公开别人手上那条分享链接**：`/share?session=<存在的会话>`，其余页面、`/remote/*`、`/mcp/*` 回 404 或登录页，**`/api/*` 没有凭据也回 404/401**（它等于整台机器）。唯一例外是探活指纹 `GET /api/health`（只回 `{ ok, app, access }`）：侧栏 Connections 连另一台机器必须先探通它，`access` 说明对方要不要口令，没开时由卡片直接给出可操作的提示而不是打开一个 404 窗口。路径分类唯一实现在 `host/access-core.js` 的 `classifyRemotePath`，放行判定在 `host/remote-access-core.js` 的 `remoteAccessDecision`，不要另写第二份白名单。
 - 端口常量唯一出口 `mica-web-shared/runtime-port.js`；页面路径约定唯一出口 `app-paths.ts`。
-- 单端口路由：`/`、`/mica-web`、`/share`、`/terminal-control`、`/plugins/pages/<插件 id>`、`/mcp/browser`、`/mcp/terminal`、`/plugin/<id>/mcp`、`/api/*`、`/remote/control/*`、`/remote/terminal/*`。编辑器与评审都还是主应用里的视图，不占额外页面；编辑器**窗口**也只是 `/` 加 `?editor=<绝对路径>`（见下文「编辑器窗口」），不是新路径。
+- 单端口路由：`/`、`/mica-web`、`/share`、`/terminal-control`、`/plugins/pages/<插件 id>`（声明 `desktop.page.route` 时为 `/plugins/<id>/<route>`）、`/plugins/<id>/api/<query>`、`/mcp/browser`、`/mcp/terminal`、`/plugin/<id>/mcp`、`/api/*`、`/remote/control/*`、`/remote/terminal/*`。插件页面/只读查询的通用契约见 `plugins.md`，`/plugins/*` 在资源扩展名分类之前归私有，不能凭 `.json` 或 share-cookie 访问，也不回落到 SPA。编辑器与评审都还是主应用里的视图，不占额外页面；编辑器**窗口**也只是 `/` 加 `?editor=<绝对路径>`（见下文「编辑器窗口」），不是新路径。
 - 独立插件 MCP 的声明与契约见 `plugins.md` 的「MCP 与 Skills」。`server/index.js` 只扫描随包 `plugins/*/mcp.ts` 并装配通用 runtime/route；端点在 remoteGate 后再过 Host/Origin，`/plugin/*` 未命中一律 404。运行时发布实际可用目录给会话配置与 `/` 补全，纯 Web 无受控 socket 时插件 MCP 仍可独立工作；启停名单按文件监听缓存，不为每次工具调用重新扫描目录或起子进程。
 - 独立插件 MCP/launcher 与页面数据操作用通用 `mica-diagnostics/operation.ts` 记录开始/终态/耗时/固定结果码，返回 `{ok:false}` 与 `isError` 同样算失败，不复制输入输出；launcher request 的第三参数 `{signal}` 继承 HTTP 调用方取消，单个调用取消不销毁共享后端。受控 MCP 的 action timeoutMs 带传输余量透传到 socket（至少 30s），SDK/HTTP 取消必须真正结算等待并关闭请求。
 - 随包页面/卡片/启动器共享 `PluginSurface` 采集实际可见曝光与控件激活，放在 Suspense 内容内，不统计加载占位。visibility-v2 不可用时不推断曝光；前端只发固定元数据，宿主从清单绑定身份/版本。`plugin-host:experience` 不是执行动作通道，不接受标题、文档 key、URL 或自由文本。
@@ -169,7 +169,7 @@
 - 会话搜索共用 `mica-web-shared/session-search.ts`；正文搜索每会话最多 20k 字符，默认最近 3 日、最多 600 个候选，截断须告知。
 - 上下文统计按整条消息 JSON 估算并排除媒体 payload；compact / rewind 后用 staleInput 说明。
 
-插件整页各自是一个可复制、可收藏的地址（`/plugins/pages/<插件 id>`，路由与 `api.page` 见 `plugins.md`），窗口顶部那条拖动条上显示的就是它：桌面应用窗口没有别的地址栏，复制这一枚是把这一页带出去的唯一入口。
+插件整页各自是一个可复制、可收藏的地址（默认 `/plugins/pages/<插件 id>` 或清单声明的 `/plugins/<id>/<route>`，路由与 `api.page` 见 `plugins.md`），窗口顶部那条拖动条上显示的就是它：桌面应用窗口没有别的地址栏，复制这一枚是把这一页带出去的唯一入口。
 
 ## 侧栏入口与整页设置
 

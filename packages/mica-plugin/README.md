@@ -113,6 +113,32 @@ export default function setup(context: PluginContext) {
 `micaPlugin.Plugin` 这个基类只用于宿主进程内直接装配的内置插件（例如 TUI 的
 `BuiltInCommandsPlugin`）；文件插件不需要、也不会被包成 class。
 
+### 独立只读 Web 查询与页面地址
+
+随包清单 `web: true` 声明 `web.ts` 的 default `createWeb(context)`，宿主在主 HTTP runtime
+现有端口挂载 `GET /plugins/<id>/api/<query>`，不启动会话、子进程或额外服务。
+
+- `PluginWebContext`：`pluginId`、`pluginVersion`、`paths.config`（MICA_HOME）、
+  `paths.data`（该插件的数据目录）、只读 `settings.get()`，以及仅含随包清单
+  `id/name/version` 的只读 `catalog`；不提供 raw req/res、任意 channel 或其它插件设置。
+- `PluginWebHandler`：固定 own-property `queries` 表与可选 `dispose()`；每个查询签名
+  `(params: Readonly<Record<string,string>>, { signal: AbortSignal }) => unknown | Promise<unknown>`。
+  查询必须只读，遵守取消信号；实例懒加载合并，初始化失败可重试，停用/退出时释放。
+  单次 HTTP 调用取消不释放其它读取共用的 handler。
+- `isPluginWebQuery(query)` 与 `pluginWebPath(id, query)` 提供纯浏览器安全的名称及端点约定。
+  页面用 `api.web.read(query, params?, { signal }?)` 同源带凭据读取；HTTP/JSON 错误明确 reject，
+  不支持任意 URL、跨源或通过 `/api/invoke` 绕过边界。
+- 只接受 GET，Host/Origin 校验对本机请求同样生效；只读查询每次最多 16 个字符串参数、
+  key 64 字符、值 2048 字符、查询串 8 KiB，拒绝重复参数与请求体。单次读取时限 15 秒，
+  最多 16 个 HTTP 等待、8 个执行中查询、每插件最多 4 个，整个 JSON 响应上限 1 MiB。
+  超时/断连信号传到查询，HTTP 等待立即结算；忽略取消的实际任务在结束前仍占并发槽。
+- 清单 `desktop.page.route?: string` 可选 1–64 位字母数字、下划线或短横线，不能为
+  `api` / `pages`。声明后页面仅使用 `/plugins/<id>/<route>`；省略则为 `/plugins/pages/<id>`。
+  `PluginDesktopPage` 与配置页投影保留这个字段；页面 URL 和 `api.page.setSearch` 由宿主生成。
+  路径语法不等于授权，HTTP 和独立页面都精确核对清单及启停状态，页面模块只从随包目录加载。
+- `/plugins/*` 未命中一律 404，不作为 SPA/静态资源回退，也不向 share-cookie 开放。
+  查询观察使用 `surface: 'page'` 和固定查询名，不复制输入输出；成功读取不代表业务验收。
+
 ### 独立插件 MCP
 
 清单 `mcp: true` 声明随包 `mcp.ts` 的独立接口，由应用运行时挂在同一端口的

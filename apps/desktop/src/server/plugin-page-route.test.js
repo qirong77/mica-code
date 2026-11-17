@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test'
-import { mkdtempSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { servePluginPage, withRootBase } from './plugin-page-route.js'
@@ -31,6 +31,17 @@ function response() {
 }
 
 describe('plugin page route', () => {
+  it('rechecks authorization after the asynchronous HTML read before responding', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mica-plugin-page-recheck-'))
+    try {
+      writeFileSync(join(dir, 'index.html'), INDEX)
+      const res = response()
+      await servePluginPage({ method: 'GET' }, res, dir, () => false)
+      expect(res.status).toBe(404)
+      expect(res.body).not.toContain('root')
+    } finally { rmSync(dir, { recursive: true, force: true }) }
+  })
+
   it('pins relative asset urls to the product root', () => {
     const html = withRootBase(INDEX)
     // 深路径 `/plugins/pages/notebook` 下 `./assets/x.js` 会解析到

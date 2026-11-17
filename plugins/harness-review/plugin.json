@@ -2,13 +2,15 @@
   "id": "harness-review",
   "name": "Harness Review",
   "icon": "heart-pulse",
-  "version": "0.1.0",
-  "description": "自动记录 agent 运行轨迹，聚合工具失败与重复调用，生成有证据的复盘报告并记录人工评估。",
+  "version": "0.2.0",
+  "description": "自动记录运行与插件日志，提供同端口的 Arco 运行控制台、有证据的复盘报告与人工评估记录。",
   "author": "Mica Code",
   "main": "index.ts",
   "assets": ["README.md"],
   "priority": 30,
   "mica": { "apiVersion": 1 },
+  "web": true,
+  "desktop": { "page": { "title": "运行控制台", "route": "console" } },
   "requires": ["hooks", "session", "commands", "tools", "settings", "ui", "actions", "events"],
   "actions": [
     {

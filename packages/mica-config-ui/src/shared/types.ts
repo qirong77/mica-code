@@ -500,6 +500,7 @@ export type ConfigWebPluginDesktopEntry = {
 /** 侧栏入口打开的整页视图（清单 `desktop.page`）：宿主只画标题，内容来自插件模块。 */
 export type ConfigWebPluginDesktopPage = {
   title: string;
+  route?: string;
 };
 
 /** 配置页上的一个动作按钮：清单声明文案，插件执行。 */

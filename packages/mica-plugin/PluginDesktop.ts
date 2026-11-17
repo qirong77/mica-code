@@ -129,6 +129,8 @@ export function isPluginEntryPlacement(value: unknown): value is PluginEntryPlac
 export type PluginDesktopPage = {
   /** 页面顶部显示的标题；清单没写时用 `entry.label`，没有入口时用插件名。 */
   title: string;
+  /** 自定义单段地址 /plugins/<id>/<route>；省略时使用 /plugins/pages/<id>。 */
+  route?: string;
 };
 
 /**

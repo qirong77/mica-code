@@ -9,6 +9,17 @@ const TAIL_BYTES = 128 * 1024;
 const MAX_BYTES = 4 * 1024 * 1024;
 const MAX_ROWS = 2048;
 const MAX_GROUPS = 100;
+function rethrowAbort(error: unknown, signal?: AbortSignal): void {
+  if (error instanceof Error && error.name === 'AbortError') throw error;
+  signal?.throwIfAborted();
+}
+
+async function checkpoint(signal: AbortSignal): Promise<void> {
+  signal.throwIfAborted();
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  signal.throwIfAborted();
+}
+
 const token = (value: unknown, max = 80): string | undefined =>
   typeof value === 'string' && value.length <= max && /^[a-zA-Z0-9][a-zA-Z0-9:._+-]*$/.test(value) ? value : undefined;
 const scalar = (value: unknown): number | undefined =>
@@ -202,7 +213,8 @@ function project(raw: unknown): Row | undefined {
 export class LogEvidenceReader {
   private readonly cache = new ProjectionIndex<FileProjection>(64, 4 * 1024 * 1024);
 
-  async read(directory = resolveLogDir()): Promise<LogEvidence> {
+  async read(directory = resolveLogDir(), signal?: AbortSignal): Promise<LogEvidence> {
+    signal?.throwIfAborted();
     const coverage: LogEvidence['coverage'] = {
       candidateFiles: 0,
       scannedFiles: 0,
@@ -228,12 +240,15 @@ export class LogEvidenceReader {
     };
     let names: string[];
     try {
-      names = (await readdir(directory, { withFileTypes: true }))
+      const entries = await readdir(directory, { withFileTypes: true });
+      signal?.throwIfAborted();
+      names = entries
         .filter((e) => e.isFile() && /^[A-Za-z0-9._-]+\.jsonl$/.test(e.name))
         .map((e) => e.name)
         .sort()
         .reverse();
     } catch (error) {
+      rethrowAbort(error, signal);
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') coverage.unreadableFiles++;
       return result;
     }
@@ -241,24 +256,32 @@ export class LogEvidenceReader {
     // File mtime only selects log tails, never Agent runs.
     const candidates = await Promise.all(
       names.slice(0, 512).map(async (name) => {
+        signal?.throwIfAborted();
         try {
-          return { name, modified: (await stat(join(directory, name))).mtimeMs };
-        } catch {
+          const info = await stat(join(directory, name));
+          signal?.throwIfAborted();
+          return { name, modified: info.mtimeMs };
+        } catch (error) {
+          rethrowAbort(error, signal);
           return { name, modified: 0 };
         }
       }),
     );
+    signal?.throwIfAborted();
     candidates.sort((a, b) => b.modified - a.modified || a.name.localeCompare(b.name));
     const keys = new Set<string>();
     const rows: Row[] = [];
     for (const { name } of candidates.slice(0, MAX_FILES)) {
+      if (signal) await checkpoint(signal);
       if (coverage.inspectedBytes >= MAX_BYTES) break;
       const path = join(directory, name);
       keys.add(path);
       try {
         const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
         try {
+          signal?.throwIfAborted();
           const info = await handle.stat();
+          signal?.throwIfAborted();
           if (!info.isFile()) continue;
           const length = Math.min(info.size, TAIL_BYTES, MAX_BYTES - coverage.inspectedBytes);
           const start = info.size - length;
@@ -267,6 +290,7 @@ export class LogEvidenceReader {
           if (!projection) {
             const buffer = Buffer.alloc(length);
             const { bytesRead } = await handle.read(buffer, 0, length, start);
+            signal?.throwIfAborted();
             let text = buffer.subarray(0, bytesRead).toString('utf8');
             projection = { rows: [], malformed: 0, ignored: 0, partialLines: 0, rowLimitReached: false };
             // Starting mid-line always discards the first fragment (even if it looks valid).
@@ -279,7 +303,9 @@ export class LogEvidenceReader {
               text = text.slice(0, text.lastIndexOf('\n') + 1);
               projection.partialLines++;
             }
+            let lineIndex = 0;
             for (const line of text.split('\n')) {
+              if (signal && lineIndex++ % 128 === 0) await checkpoint(signal);
               if (!line.trim()) continue;
               if (projection.rows.length >= MAX_ROWS) {
                 projection.rowLimitReached = true;
@@ -289,13 +315,17 @@ export class LogEvidenceReader {
                 const row = project(JSON.parse(line));
                 if (row) projection.rows.push(row);
                 else projection.ignored++;
-              } catch {
+              } catch (error) {
+                rethrowAbort(error, signal);
                 projection.malformed++;
               }
             }
-            if (signature === `${fileSignature(await handle.stat())}:${start}:${length}`)
+            const after = await handle.stat();
+            signal?.throwIfAborted();
+            if (signature === `${fileSignature(after)}:${start}:${length}`)
               this.cache.set(path, signature, projection);
           }
+          signal?.throwIfAborted();
           coverage.scannedFiles++;
           coverage.inspectedBytes += length;
           if (start > 0) coverage.truncatedFiles++;
@@ -307,11 +337,12 @@ export class LogEvidenceReader {
         } finally {
           await handle.close();
         }
-      } catch {
+      } catch (error) {
+        rethrowAbort(error, signal);
         coverage.unreadableFiles++;
       }
+      signal?.throwIfAborted();
     }
-    this.cache.retain(keys);
     coverage.omittedFiles = Math.max(0, names.length - coverage.scannedFiles - coverage.unreadableFiles);
     const groups = new Map<string, number>();
     const seen = new Set<string>();
@@ -332,11 +363,17 @@ export class LogEvidenceReader {
       latest = -Infinity;
     const operationKey = (row: Row) => `${row.pid}:${row.plugin}:${row.operationId}`;
     const terminals = new Map<string, Row>();
-    for (const row of rows) if (row.kind === 'operation' && row.event === 'operation.finish') {
-      const key = operationKey(row);
-      if (!terminals.has(key) || terminals.get(key)!.at <= row.at) terminals.set(key, row);
-    }
+    let rowIndex = 0;
     for (const row of rows) {
+      if (signal && rowIndex++ % 128 === 0) await checkpoint(signal);
+      if (row.kind === 'operation' && row.event === 'operation.finish') {
+        const key = operationKey(row);
+        if (!terminals.has(key) || terminals.get(key)!.at <= row.at) terminals.set(key, row);
+      }
+    }
+    rowIndex = 0;
+    for (const row of rows) {
+      if (signal && rowIndex++ % 128 === 0) await checkpoint(signal);
       earliest = Math.min(earliest, row.at);
       latest = Math.max(latest, row.at);
       if (row.kind === 'memory' && row.level && row.event) {
@@ -420,6 +457,8 @@ export class LogEvidenceReader {
       coverage.earliestAt = new Date(earliest).toISOString();
       coverage.latestAt = new Date(latest).toISOString();
     }
+    signal?.throwIfAborted();
+    this.cache.retain(keys);
     return result;
   }
 }

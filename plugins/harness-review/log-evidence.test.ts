@@ -4,12 +4,16 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test, vi } from 'vitest';
 import { HarnessRecorder } from './engine.js';
+import { ProjectionIndex } from './derived-index.js';
 import { LogEvidenceReader } from './log-evidence.js';
 import { LIST_MAX_CHARS, summarizeList } from './list.js';
 
 async function fixture(t: { onTestFinished: (fn: () => Promise<void>) => void }) {
   const directory = await mkdtemp(join(tmpdir(), 'mica-harness-log-evidence-'));
+  vi.stubEnv('MICA_LOG_DIR', directory);
+  vi.stubEnv('MICA_HOME', join(directory, 'home'));
   t.onTestFinished(async () => {
+    vi.unstubAllEnvs();
     await rm(directory, { recursive: true, force: true });
   });
   return directory;
@@ -230,4 +234,71 @@ test('review, list and Markdown report expose the same isolated log evidence wit
   expect(markdown).toContain('## Log evidence');
   expect(markdown).toContain('peakRssMB');
   expect(markdown).toContain('99');
+});
+
+test('aborted reads reject before IO and on a warm cache hit without poisoning the cached projection', async (t) => {
+  const dir = await fixture(t);
+  await writeFile(join(dir, 'sample.jsonl'), line({ scope: 'mem', event: 'sample', rss: 120, pid: 12 }));
+  const reader = new LogEvidenceReader();
+  const expected = await reader.read();
+  const reason = new DOMException('cancelled cache read', 'AbortError');
+  const controller = new AbortController();
+  controller.abort(reason);
+  await expect(reader.read(undefined, controller.signal)).rejects.toBe(reason);
+
+  const active = new AbortController();
+  const originalGet = ProjectionIndex.prototype.get;
+  const get = vi.spyOn(ProjectionIndex.prototype, 'get').mockImplementationOnce(function (
+    this: ProjectionIndex<unknown>,
+    key,
+    signature,
+  ) {
+    const value = originalGet.call(this, key, signature);
+    expect(value).toBeDefined();
+    active.abort(reason);
+    return value;
+  });
+  t.onTestFinished(() => get.mockRestore());
+  const parse = vi.spyOn(JSON, 'parse');
+  t.onTestFinished(() => parse.mockRestore());
+  await expect(reader.read(undefined, active.signal)).rejects.toBe(reason);
+  expect(get).toHaveBeenCalledTimes(1);
+  expect(await reader.read()).toEqual(expected);
+  expect(parse).not.toHaveBeenCalled();
+});
+
+test('log scanning yields to cancellation mid-file and never caches a partial projection', async (t) => {
+  const dir = await fixture(t);
+  await writeFile(join(dir, 'sample.jsonl'), line({ scope: 'mem', event: 'sample', rss: 120, pid: 12 }).repeat(400));
+  const reader = new LogEvidenceReader();
+  const controller = new AbortController();
+  const reason = new DOMException('cancelled scanning', 'AbortError');
+  const originalParse = JSON.parse;
+  let parsed = 0;
+  const parse = vi.spyOn(JSON, 'parse').mockImplementation((text) => {
+    if (++parsed === 1) setImmediate(() => controller.abort(reason));
+    return originalParse(text);
+  });
+  t.onTestFinished(() => parse.mockRestore());
+  await expect(reader.read(undefined, controller.signal)).rejects.toBe(reason);
+  expect(parsed).toBeGreaterThan(0);
+  expect(parsed).toBeLessThan(400);
+  parse.mockRestore();
+  const report = await reader.read();
+  expect(report.memory[0].samples).toBe(400);
+  expect(report.coverage).toMatchObject({ scannedFiles: 1, malformedLines: 0, unreadableFiles: 0 });
+});
+
+test('AbortError thrown during log JSON projection is not swallowed as malformed data', async (t) => {
+  const dir = await fixture(t);
+  await writeFile(join(dir, 'sample.jsonl'), line(operation()));
+  const reader = new LogEvidenceReader();
+  const reason = new DOMException('JSON read cancelled', 'AbortError');
+  const parse = vi.spyOn(JSON, 'parse').mockImplementationOnce(() => {
+    throw reason;
+  });
+  t.onTestFinished(() => parse.mockRestore());
+  await expect(reader.read()).rejects.toBe(reason);
+  parse.mockRestore();
+  expect((await reader.read()).operations[0].finishes).toBe(1);
 });

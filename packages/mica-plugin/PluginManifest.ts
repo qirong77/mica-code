@@ -26,6 +26,7 @@ import {
 } from './PluginDesktop.js';
 import type { PluginSessionMenuItem } from './PluginSessionMenu.js';
 import { readPluginCompletions, type PluginCompletion } from './PluginCompletions.js';
+import { isPluginPageRoute } from '@packages/mica-web-shared/app-paths.js';
 
 /**
  * 插件包的清单（`plugin.json`）。
@@ -68,6 +69,8 @@ export type PluginManifest = {
   main: string;
   /** 随包独立 MCP 模块 mcp.ts，挂载到应用现有端口的 /plugin/<id>/mcp。 */
   mcp?: boolean;
+  /** 随包只读 web.ts 模块，挂载到现有端口的 /plugins/<id>/api/<query>。 */
+  web?: boolean;
   /** 除入口与清单外随插件一起分发的资源文件，相对插件目录。 */
   assets: string[];
   /** 必须在之前 setup 的插件 id。 */
@@ -275,6 +278,9 @@ export function parsePluginManifest(input: unknown): PluginManifestParseResult {
   if (input.mcp !== undefined && typeof input.mcp !== 'boolean') {
     return { ok: false, error: 'mcp 必须是布尔值' };
   }
+  if (input.web !== undefined && typeof input.web !== 'boolean') {
+    return { ok: false, error: 'web 必须是布尔值' };
+  }
 
   const dependencies = readStringList(input.dependencies, 'dependencies');
   if (!dependencies.ok) return dependencies;
@@ -301,6 +307,9 @@ export function parsePluginManifest(input: unknown): PluginManifestParseResult {
 
   const desktop = readDesktop(input.desktop, name);
   if (!desktop.ok) return desktop;
+  if (id === 'pages' && desktop.value.page?.route !== undefined) {
+    return { ok: false, error: '插件 id pages 不能声明自定义页面 route：该前缀由宿主保留' };
+  }
 
   const status = readStatus(input.status);
   if (!status.ok) return status;
@@ -328,6 +337,7 @@ export function parsePluginManifest(input: unknown): PluginManifestParseResult {
       author,
       main,
       mcp: input.mcp === true,
+      ...(input.web !== undefined ? { web: input.web } : {}),
       assets: assets.value,
       dependencies: dependencies.value,
       required: input.required === true,
@@ -462,7 +472,19 @@ function readDesktop(
     }
   | { ok: false; error: string } {
   if (input === undefined) {
-    return { ok: true, value: { checks: [], entry: null, page: null, composer: false, clientData: false, launcher: null, panel: null, sessionMenu: [] } };
+    return {
+      ok: true,
+      value: {
+        checks: [],
+        entry: null,
+        page: null,
+        composer: false,
+        clientData: false,
+        launcher: null,
+        panel: null,
+        sessionMenu: [],
+      },
+    };
   }
   if (!isRecord(input)) return { ok: false, error: 'desktop 必须是对象' };
 
@@ -499,7 +521,16 @@ function readDesktop(
     if (!page.ok) return page;
     return {
       ok: true,
-      value: { checks, entry: null, page: page.value, composer, clientData, launcher: launcher.value, panel: panel.value, sessionMenu: sessionMenu.value },
+      value: {
+        checks,
+        entry: null,
+        page: page.value,
+        composer,
+        clientData,
+        launcher: launcher.value,
+        panel: panel.value,
+        sessionMenu: sessionMenu.value,
+      },
     };
   }
   if (!isRecord(rawEntry)) return { ok: false, error: 'desktop.entry 必须是对象' };
@@ -537,7 +568,7 @@ function readDesktop(
 /**
  * `desktop.page`：把入口做成整页而不是悬停卡片。
  *
- * 只关心标题：页面长什么样是插件的事，宿主只画外面那层壳（返回、标题、拖动条）。
+ * 标题与可选地址来自清单；页面长什么样是插件的事。
  * `true` 是最常见的写法，等价于「标题取侧栏那一行」；没有侧栏入口时取插件名。
  */
 function readDesktopPage(
@@ -554,7 +585,10 @@ function readDesktopPage(
     return { ok: false, error: 'desktop.page.title 必须是字符串' };
   }
   const title = typeof rawTitle === 'string' && rawTitle.trim() ? rawTitle.trim() : entryLabel;
-  return { ok: true, value: { title } };
+  if (input.route !== undefined && !isPluginPageRoute(input.route)) {
+    return { ok: false, error: 'desktop.page.route 必须为 1–64 位字母数字、下划线或短横线，不能是 api / pages' };
+  }
+  return { ok: true, value: { title, ...(input.route !== undefined ? { route: input.route } : {}) } };
 }
 
 /** Launcher 必须声明标题；尺寸只接受有限数字，再限制到宿主支持的窗口范围。 */
@@ -758,7 +792,10 @@ function readPanelShortcuts(input: unknown): { ok: true; value: PluginPanelShort
     if (!label) return { ok: false, error: 'desktop.panel.shortcuts 项缺少 label' };
     const id = entry.id;
     if (id !== undefined && !isValidPluginPanelShortcutId(id)) {
-      return { ok: false, error: `desktop.panel.shortcuts「${label}」的 id 必须为 1–64 位小写字母、数字、点、下划线或短横线，且以字母或数字开头` };
+      return {
+        ok: false,
+        error: `desktop.panel.shortcuts「${label}」的 id 必须为 1–64 位小写字母、数字、点、下划线或短横线，且以字母或数字开头`,
+      };
     }
     if (typeof id === 'string') {
       if (ids.has(id)) return { ok: false, error: `desktop.panel.shortcuts 的 id 重复：${id}` };

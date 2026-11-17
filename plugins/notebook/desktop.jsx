@@ -1,4 +1,4 @@
-import { cloneElement, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { cloneElement, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   BookOpen,
   ChevronDown,
@@ -161,6 +161,28 @@ function NoteMenu({ node, open, onOpen, onClose, onAction, extraRows, trigger, p
       <MenuSeparator />
       <MenuRow action="delete" label="移到最近删除" Icon={Trash2} variant="danger-ghost" onSelect={onAction} />
     </PopoverMenu>
+  );
+}
+
+/** 会话能力不依赖某篇笔记；入口始终可见，也能从专注模式重新打开面板。 */
+export function NotebookChatButton({ open, focused, onOpenChange, onFocusedChange }) {
+  const visible = open && !focused;
+  return (
+    <Button
+      variant={visible ? 'primary' : 'ghost'}
+      icon={<MessageSquare size={16} strokeWidth={1.6} />}
+      className="notebook-ai-button"
+      title={visible ? '收起 AI 对话' : '打开 AI 对话'}
+      aria-label={visible ? '收起 AI 对话' : '打开 AI 对话'}
+      aria-expanded={visible}
+      pressed={visible}
+      onClick={() => {
+        if (!visible) onFocusedChange(false);
+        onOpenChange(!visible);
+      }}
+    >
+      AI 对话
+    </Button>
   );
 }
 
@@ -1140,95 +1162,95 @@ export default function NotebookPage({ api }) {
                     )}
                   </div>
                 )}
-                {active && (
-                  <div className="notebook-bar-actions" ref={barActions}>
-                    <Button
-                      variant="ghost"
-                      icon={<MessageSquare size={16} strokeWidth={1.6} />}
-                      title={chatOpen ? '收起对话' : '对话'}
-                      aria-label={chatOpen ? '收起对话' : '对话'}
-                      pressed={chatOpen}
-                      onClick={() => setChatOpen(!chatOpen)}
-                    />
-                    <Button
-                      variant="ghost"
-                      icon={<Presentation size={16} strokeWidth={1.6} />}
-                      title="演示"
-                      aria-label="演示"
-                      disabled={busy || frameState !== 'ready'}
-                      onMouseDown={(event) => event.preventDefault()}
-                      onClick={() => bridge.current?.action(active.id, 'present')}
-                    />
-                    <Button
-                      variant="ghost"
-                      icon={<SlidersHorizontal size={16} strokeWidth={1.6} />}
-                      title="样式设置"
-                      aria-label="样式设置"
-                      disabled={busy || frameState !== 'ready'}
-                      onMouseDown={(event) => event.preventDefault()}
-                      onClick={() => bridge.current?.action(active.id, 'style')}
-                    />
-                    <Button
-                      variant="ghost"
-                      icon={<Focus size={16} />}
-                      title={focused ? '退出专注' : '专注写作'}
-                      aria-label={focused ? '退出专注' : '专注写作'}
-                      pressed={focused}
-                      onClick={() => setFocused(!focused)}
-                    />
-                    <NoteMenu
-                      node={active}
-                      open={menu?.id === active.id && menu.source === 'header'}
-                      onOpen={() => {
-                        if (busy || creating.current) return;
-                        setNewMenu(false);
-                        setDialog(null);
-                        setMenu({ id: active.id, source: 'header' });
-                      }}
-                      onClose={() => {
-                        if (!busy) {
-                          setMenu(null);
+                <div className="notebook-bar-actions" ref={barActions}>
+                  <NotebookChatButton
+                    open={chatOpen}
+                    focused={focused}
+                    onOpenChange={setChatOpen}
+                    onFocusedChange={setFocused}
+                  />
+                  {active && (
+                    <>
+                      <Button
+                        variant="ghost"
+                        icon={<Presentation size={16} strokeWidth={1.6} />}
+                        title="演示"
+                        aria-label="演示"
+                        disabled={busy || frameState !== 'ready'}
+                        onMouseDown={(event) => event.preventDefault()}
+                        onClick={() => bridge.current?.action(active.id, 'present')}
+                      />
+                      <Button
+                        variant="ghost"
+                        icon={<SlidersHorizontal size={16} strokeWidth={1.6} />}
+                        title="样式设置"
+                        aria-label="样式设置"
+                        disabled={busy || frameState !== 'ready'}
+                        onMouseDown={(event) => event.preventDefault()}
+                        onClick={() => bridge.current?.action(active.id, 'style')}
+                      />
+                      <Button
+                        variant="ghost"
+                        icon={<Focus size={16} />}
+                        title={focused ? '退出专注' : '专注写作'}
+                        aria-label={focused ? '退出专注' : '专注写作'}
+                        pressed={focused}
+                        onClick={() => setFocused(!focused)}
+                      />
+                      <NoteMenu
+                        node={active}
+                        open={menu?.id === active.id && menu.source === 'header'}
+                        onOpen={() => {
+                          if (busy || creating.current) return;
+                          setNewMenu(false);
                           setDialog(null);
+                          setMenu({ id: active.id, source: 'header' });
+                        }}
+                        onClose={() => {
+                          if (!busy) {
+                            setMenu(null);
+                            setDialog(null);
+                          }
+                        }}
+                        onAction={(action) => runAction(active, action)}
+                        form={menu?.id === active.id && menu.source === 'header' ? localForm : null}
+                        position="bl"
+                        extraRows={
+                          <>
+                            <MenuRow
+                              action="download"
+                              label="下载 JSON"
+                              Icon={Download}
+                              onSelect={() => void downloadActive()}
+                            />
+                            <MenuRow
+                              action="focus"
+                              label={focused ? '退出专注' : '专注写作'}
+                              Icon={Focus}
+                              onSelect={() => {
+                                setMenu(null);
+                                setFocused(!focused);
+                              }}
+                            />
+                          </>
                         }
-                      }}
-                      onAction={(action) => runAction(active, action)}
-                      form={menu?.id === active.id && menu.source === 'header' ? localForm : null}
-                      position="bl"
-                      extraRows={
-                        <>
-                          <MenuRow
-                            action="download"
-                            label="下载 JSON"
-                            Icon={Download}
-                            onSelect={() => void downloadActive()}
-                          />
-                          <MenuRow
-                            action="focus"
-                            label={focused ? '退出专注' : '专注写作'}
-                            Icon={Focus}
-                            onSelect={() => {
-                              setMenu(null);
-                              setFocused(!focused);
-                            }}
-                          />
-                        </>
-                      }
-                      trigger={
-                        /* 开合由浮层的 onVisibleChange 驱动，按钮自己不切换状态。 */
-                        <span className="notebook-menu-anchor">
-                          <Button
-                            variant="ghost"
-                            icon={<MoreHorizontal size={16} />}
-                            title="笔记操作"
-                            aria-label="笔记操作"
-                            pressed={menu?.id === active.id && menu.source === 'header'}
-                            onClick={() => {}}
-                          />
-                        </span>
-                      }
-                    />
-                  </div>
-                )}
+                        trigger={
+                          /* 开合由浮层的 onVisibleChange 驱动，按钮自己不切换状态。 */
+                          <span className="notebook-menu-anchor">
+                            <Button
+                              variant="ghost"
+                              icon={<MoreHorizontal size={16} />}
+                              title="笔记操作"
+                              aria-label="笔记操作"
+                              pressed={menu?.id === active.id && menu.source === 'header'}
+                              onClick={() => {}}
+                            />
+                          </span>
+                        }
+                      />
+                    </>
+                  )}
+                </div>
               </div>
               <iframe
                 key={frameKey}

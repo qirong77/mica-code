@@ -146,7 +146,7 @@ macOS 浮窗只取键盘焦点、不连带唤起主应用；原生窗口策略�
 
 同一个 `desktop.jsx` 若在清单里另外声明 `desktop.page`（`{ "page": { "title": "排期" } }`），点这一行不进浮层而是打开整页：宿主把它渲染在 `renderer/src/PluginPage.jsx` 里（盖住整窗、顶部一条 `← 返回对话` + 标题，内容是插件模块自己的组件，props 同样是 `{ api }`），`App.jsx` 用 `pluginPage` 状态承接、清掉浮层的悬停展开——时间轴、看板这类要整屏宽高的界面走这条，浮层的 320px 放不下。
 
-整页是一个**真地址**：运行时把 `/plugins/pages/<插件 id>`（`mica-web-shared` 的 `pluginPagePath` / `readPluginPageId`）回成同一份渲染层产物，浏览器与手机口令进来后打开它就是这一页；`server/plugin-page-route.js` 只做一件事——在深路径下补 `<base href="/">`，因为产物里的资源是相对地址（Electron 也走 `file://`），否则 `/plugins/pages/assets/*` 会 404。`main.jsx` 按 pathname 选 `pluginPage` 视图（`PluginPageWindow.jsx` 按 id 现取模块），`PluginPage` 在拖动条上显示可复制的地址。页面内换内容（笔记换一篇）用 `api.page.setSearch(values)`：从应用里打开只改地址栏那一行，独立打开时连 `history.replaceState` 一起改，刷新与分享都落在同一处；`api.page.search()` 读回深链参数。插件不自己拼这段路径，也不在 `desktop.jsx` 里读 `location`。
+整页是一个**真地址**：缺省 `/plugins/pages/<插件 id>`，清单可用 `desktop.page.route` 注册 `/plugins/<插件 id>/<route>`（非保留单段，路径生成与候选解析唯一在 `mica-web-shared` 的 `pluginPagePath` / `readPluginPageId`）。声明 route 后只认该 canonical 地址，不另留默认别名。运行时按随包清单、模块和启停精确核对后回同一份渲染层产物；`server/plugin-page-route.js` 补 `<base href="/">`，避免深路径下的相对资源 404。`main.jsx` 按 pathname 选 `pluginPage` 视图（`PluginPageWindow.jsx` 再核对清单并按 id 取模块），`PluginPage` 在拖动条上显示可复制的地址。页面内换内容（笔记换一篇）用 `api.page.setSearch(values)`：从应用里打开只改地址栏那一行，独立打开时连 `history.replaceState` 一起改，刷新与分享都落在同一处；`api.page.search()` 读回深链参数。插件不自己拼这段路径，也不在 `desktop.jsx` 里读 `location`。
 
 `entry` 是**可选**的：只声明 `desktop.page`、不写 `entry` 的插件不占侧栏 / 顶栏位置，整页从配置页插件详情里那枚「打开…」按钮进（`PluginsPage` 的 `onOpenPluginPage`，由宿主按 id 现取模块并打开——`renderer/src/plugin-entries.js` 的 `loadPluginPageEntry`，所以同样只对随包插件有效）。`session-tags` 走这条：打标签在会话行右键与 `/tags`，重编标签表才需要那张页面，不必常驻侧栏。
 
@@ -259,6 +259,8 @@ macOS 浮窗只取键盘焦点、不连带唤起主应用；原生窗口策略�
 - 最新、官方、API、价格、法规这类可变事实先联网查证；无法查证时明确说明。
 
 ### 独立文档与隔离页面资源
+
+随包插件可声明 `web: true` 并提供 `web.ts` 的 `default createWeb(context)`；契约在 `mica-plugin/PluginWeb.ts`。上下文仅含身份/版本、数据与配置根、只读设置及随包清单元数据，返回固定 `queries` 目录与可选 `dispose`。应用运行时懒载、合并初始化并按启停/退出释放，固定托管 `GET /plugins/<id>/api/<query>`；前端只通过 `api.web.read(query, params, { signal })` 访问，不另开 `/api/invoke` 别名。读取前后复核授权，参数/并发/时间/序列化后字节预算受限，超时/断连传取消；查询须配合中止并自行缓存有界投影，GET 不做维护写入。命名空间在 remoteGate 后过 Host/Origin，未知路径 404、不作 SPA 回退，不开放 share-cookie/CORS；该接口不是 Node 代码沙箱，也不自动穿透 Mobile Relay。Harness Review 控制台是首个使用方，复用只读聚合，不回收僵尸运行或导出报告。
 
 前端 `api.documents.read(key)` / `write(key,value,{expectedVersion})` 使用现有 plugin-host 数据通道的可选 `key`，落在插件 `documents/<key>.json`（6 MiB，严格损坏检查、路径标识校验、CAS 与原子写）；无 `key` 的 `data.json` 保持 256 KiB。整页 `api.page.beforeClose(handler)` 可在返回前等待保存，`false` 保持页面。
 

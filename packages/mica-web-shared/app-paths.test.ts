@@ -5,10 +5,12 @@ import {
   TERMINAL_PAGE_PATH,
   isAppPath,
   isPluginPagePath,
+  isPluginPageRoute,
   isSharePath,
   isTerminalPagePath,
   isUnderBasePath,
   normalizePathname,
+  matchesPluginPagePath,
   pluginPagePath,
   readPluginPageId,
   toAssetPath,
@@ -113,6 +115,30 @@ describe('isUnderBasePath', () => {
 });
 
 describe('plugin pages', () => {
+  it('builds and parses a custom single-segment page route', () => {
+    expect(pluginPagePath('demo', 'console')).toBe('/plugins/demo/console');
+    expect(readPluginPageId('/plugins/demo/console')).toBe('demo');
+    expect(readPluginPageId('/plugins/user.demo/Console_2-')).toBe('user.demo');
+    expect(matchesPluginPagePath('/plugins/demo/console', 'demo', 'console')).toBe(true);
+    expect(matchesPluginPagePath('/plugins/demo/console/', 'demo', 'console')).toBe(true);
+    expect(matchesPluginPagePath('/plugins/pages/demo', 'demo', 'console')).toBe(false);
+    expect(matchesPluginPagePath('/plugins/demo/other', 'demo', 'console')).toBe(false);
+    expect(matchesPluginPagePath('/plugins/demo/console', 'demo')).toBe(false);
+    expect(matchesPluginPagePath('/plugins//demo/console', 'demo', 'console')).toBe(false);
+  });
+
+  it('rejects reserved, nested, encoded and traversal routes before building an address', () => {
+    for (const route of ['', 'api', 'API', 'pages', '..', '.', '../console', 'a/b', 'a.b', '%2e%2e', 'has space', 'a'.repeat(65)]) {
+      expect(isPluginPageRoute(route)).toBe(false);
+      expect(() => pluginPagePath('demo', route)).toThrow('route');
+    }
+    for (const path of ['/plugins/demo/api', '/plugins/demo/pages', '/plugins/demo/api/summary', '/plugins/demo/console/extra', '/plugins/demo/%2e%2e', '/plugins/demo/a%2fb']) {
+      expect(readPluginPageId(path)).toBeNull();
+    }
+    expect(() => pluginPagePath('../demo')).toThrow('id');
+    expect(readPluginPageId('/plugins/demo..x/console')).toBeNull();
+  });
+
   it('builds a readable address per plugin id', () => {
     expect(pluginPagePath('notebook')).toBe('/plugins/pages/notebook');
     // 用户插件 id 带点号，编码后仍是一个路径段，读回来是同一个 id。

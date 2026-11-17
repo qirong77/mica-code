@@ -1,8 +1,10 @@
 import { createHash, randomUUID } from 'node:crypto';
+import fsPromises from 'node:fs/promises';
 import { chmod, lstat, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
+import { syncBuiltinESMExports } from 'node:module';
 import { join } from 'node:path';
-import { expect, test, type TestContext } from 'vitest';
+import { expect, test, vi, type TestContext } from 'vitest';
 import {
   assessmentKey,
   isFindingAssessment,
@@ -252,3 +254,69 @@ test('missing assessment storage is empty without warnings', async (t) => {
   expect(await readAssessments(root, id, warnings)).toEqual([]);
   expect(warnings).toEqual([]);
 });
+
+test('assessment scans propagate cancellation between files rather than returning a partial history', async (t) => {
+  const { root, directory } = await fixture(t);
+  await mkdir(directory, { recursive: true });
+  await Promise.all(
+    Array.from({ length: 10 }, (_, i) => writeFile(join(directory, `${i}.json`), JSON.stringify(assessment()))),
+  );
+  const reason = new DOMException('cancelled history scan', 'AbortError');
+  const controller = new AbortController();
+  const warnings: string[] = [];
+  const originalParse = JSON.parse;
+  let parsed = 0;
+  const parse = vi.spyOn(JSON, 'parse').mockImplementation((text) => {
+    if (++parsed === 1) setImmediate(() => controller.abort(reason));
+    return originalParse(text);
+  });
+  t.onTestFinished(() => parse.mockRestore());
+  await expect(readAssessments(root, id, warnings, controller.signal)).rejects.toBe(reason);
+  expect(parsed).toBe(1);
+  expect(warnings).toEqual([]);
+  parse.mockRestore();
+  expect(await readAssessments(root, id, warnings)).toHaveLength(10);
+  await expect(readAssessments(root, id, warnings, controller.signal)).rejects.toBe(reason);
+  expect(warnings).toEqual([]);
+});
+
+for (const mode of ['signal', 'AbortError'] as const) {
+  test(`assessment JSON reads propagate ${mode} and close the file without warnings`, async (t) => {
+    const { root, directory } = await fixture(t);
+    await writeAssessment(root, assessment());
+    const reason = new DOMException('cancelled JSON read', 'AbortError');
+    const controller = new AbortController();
+    const originalOpen = fsPromises.open;
+    let closed = false;
+    const spy = vi.spyOn(fsPromises, 'open').mockImplementation(async (...args: Parameters<typeof fsPromises.open>) => {
+      const handle = await originalOpen(...args);
+      if (String(args[0]).startsWith(directory)) {
+        const originalRead = handle.read.bind(handle);
+        vi.spyOn(handle, 'read').mockImplementationOnce((async (...readArgs: Parameters<typeof handle.read>) => {
+          if (mode === 'AbortError') throw reason;
+          const result = await originalRead(...readArgs);
+          controller.abort(reason);
+          return result;
+        }) as typeof handle.read);
+        const originalClose = handle.close.bind(handle);
+        vi.spyOn(handle, 'close').mockImplementation(async () => {
+          await originalClose();
+          closed = true;
+        });
+      }
+      return handle;
+    });
+    syncBuiltinESMExports();
+    t.onTestFinished(() => {
+      spy.mockRestore();
+      syncBuiltinESMExports();
+    });
+    const warnings: string[] = [];
+    await expect(readAssessments(root, id, warnings, controller.signal)).rejects.toBe(reason);
+    expect(warnings).toEqual([]);
+    expect(closed).toBe(true);
+    spy.mockRestore();
+    syncBuiltinESMExports();
+    expect(await readAssessments(root, id, warnings)).toEqual([assessment()]);
+  });
+}

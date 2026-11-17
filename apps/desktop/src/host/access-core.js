@@ -308,6 +308,9 @@ export function classifyRemotePath(pathname) {
   if (value === '/api/health') return 'health'
   // 只认 `/api/`：`/api` 本身没有处理器，会落到「SPA 回退成 index.html」上
   if (value.startsWith('/api/')) return 'api'
+  // Plugin pages and JSON queries stay private even with an asset suffix.
+  // A share-scope cookie cannot authorize /plugins/x/api/status.json.
+  if (value === '/plugins' || value.startsWith('/plugins/')) return 'other'
   if (isAssetPath(value)) return 'asset'
   return 'other'
 }

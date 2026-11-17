@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
 import { loadPluginPageEntry } from './plugin-entries'
 import { PluginPage } from './PluginPage'
+import { readPluginsDetails } from './plugins-details'
+import { matchesPluginPagePath } from '@packages/mica-web-shared/app-paths.js'
 
 /**
  * 独立打开的插件整页（`/plugins/pages/<插件 id>`）。
@@ -16,7 +18,13 @@ export default function PluginPageWindow({ pluginId }) {
   useEffect(() => {
     let alive = true
     setState('loading')
-    void loadPluginPageEntry(pluginId)
+    void readPluginsDetails()
+      .then((plugins) => {
+        const plugin = plugins.find((item) => item?.id === pluginId)
+        if (plugin?.state !== 'enabled' || !plugin.desktopPage ||
+          !matchesPluginPagePath(window.location.pathname, pluginId, plugin.desktopPage.route)) return null
+        return loadPluginPageEntry(pluginId)
+      })
       .then((loaded) => {
         if (!alive) return
         if (!loaded) {

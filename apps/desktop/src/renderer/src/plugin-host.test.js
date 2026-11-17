@@ -1,7 +1,9 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
 import { createPluginHostApi } from './plugin-host.js'
+import { readFileSync } from 'node:fs'
 
 const originalWindow = globalThis.window
+const originalFetch = globalThis.fetch
 let calls
 let snapshot
 let result
@@ -27,8 +29,68 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  globalThis.fetch = originalFetch
   if (originalWindow === undefined) delete globalThis.window
   else globalThis.window = originalWindow
+})
+
+describe('plugin host read-only web API', () => {
+  test('uses a fixed same-origin credentialed GET and forwards the caller signal', async () => {
+    const requests = []
+    globalThis.fetch = async (url, options) => {
+      requests.push({ url, options })
+      return { ok: true, status: 200, json: async () => ({ ok: true, result: { count: 3 } }) }
+    }
+    const controller = new AbortController()
+    const result = await createPluginHostApi('sample').web.read('summary', { filter: 'a & b' }, { signal: controller.signal, url: 'https://other.invalid' })
+    expect(result).toEqual({ count: 3 })
+    expect(requests).toEqual([{
+      url: '/plugins/sample/api/summary?filter=a+%26+b',
+      options: { method: 'GET', credentials: 'same-origin', mode: 'same-origin', redirect: 'error', cache: 'no-store', headers: { accept: 'application/json' }, signal: controller.signal }
+    }])
+  })
+
+  test('rejects arbitrary query URLs and invalid or unbounded params without fetching', async () => {
+    let fetched = 0
+    globalThis.fetch = async () => { fetched += 1; throw new Error('must-not-fetch') }
+    const api = createPluginHostApi('sample').web
+    for (const query of ['', 'https://other.invalid', '../secret', 'summary?channel=x', '__proto__', 'a'.repeat(65)]) await expect(api.read(query)).rejects.toThrow()
+    for (const params of [null, [], { count: 3 }, { text: 'x'.repeat(2049) }, Object.fromEntries(Array.from({ length: 17 }, (_, i) => [`p${i}`, '1']))]) {
+      await expect(api.read('summary', params)).rejects.toThrow()
+    }
+    expect(fetched).toBe(0)
+  })
+
+  test('rejects HTTP and structured server errors instead of returning successful-looking empty data', async () => {
+    const api = createPluginHostApi('sample').web
+    globalThis.fetch = async () => ({ ok: false, status: 504, json: async () => ({ ok: false, code: 'timeout', error: '查询超时' }) })
+    await expect(api.read('summary')).rejects.toMatchObject({ message: '查询超时', status: 504, code: 'timeout' })
+    globalThis.fetch = async () => ({ ok: true, status: 200, json: async () => ({ ok: false, error: '查询失败' }) })
+    await expect(api.read('summary')).rejects.toThrow('查询失败')
+    globalThis.fetch = async () => ({ ok: true, status: 200, json: async () => ({ ok: true }) })
+    await expect(api.read('summary')).rejects.toThrow('响应无效')
+    globalThis.fetch = async () => ({ ok: true, status: 200, json: async () => { throw new Error('HTML') } })
+    await expect(api.read('summary')).rejects.toThrow('响应无效')
+  })
+
+  test('preserves AbortError when cancellation happens while reading the JSON body', async () => {
+    const controller = new AbortController()
+    globalThis.fetch = async () => ({ ok: true, status: 200, json: async () => {
+      controller.abort(new DOMException('cancelled', 'AbortError'))
+      throw controller.signal.reason
+    } })
+    await expect(createPluginHostApi('sample').web.read('summary', {}, { signal: controller.signal })).rejects.toMatchObject({ name: 'AbortError' })
+  })
+
+  test('uses the manifest route for page URLs/search and checks exact standalone page declarations', () => {
+    const page = readFileSync(new URL('./PluginPage.jsx', import.meta.url), 'utf8')
+    const standalone = readFileSync(new URL('./PluginPageWindow.jsx', import.meta.url), 'utf8')
+    expect(page).toContain('pluginPagePath(entry.id, entry.page.route)')
+    expect(page).toContain('`${pagePath}${next}`')
+    expect(standalone).toContain('matchesPluginPagePath(window.location.pathname, pluginId, plugin.desktopPage.route)')
+    expect(standalone).toContain("plugin?.state !== 'enabled'")
+    expect(standalone).toContain('!plugin.desktopPage')
+  })
 })
 
 describe('plugin host local data API', () => {

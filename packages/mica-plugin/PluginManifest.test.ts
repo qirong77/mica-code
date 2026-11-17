@@ -9,11 +9,16 @@ describe('shortcut ids', () => {
   const parse = (shortcuts: unknown[]) => parsePluginManifest(base({ desktop: { panel: { shortcuts } } }));
 
   it('preserves optional ids and accepts legacy shortcuts', () => {
-    const result = parse([{ id: 'check-1', label: '检查', action: 'check' }, { label: '设置', section: '设置' }]);
-    expect(result.ok).toBe(true);
-    if (result.ok) expect(result.manifest.desktopPanel?.shortcuts).toEqual([
-      { id: 'check-1', label: '检查', action: 'check' }, { label: '设置', section: '设置' },
+    const result = parse([
+      { id: 'check-1', label: '检查', action: 'check' },
+      { label: '设置', section: '设置' },
     ]);
+    expect(result.ok).toBe(true);
+    if (result.ok)
+      expect(result.manifest.desktopPanel?.shortcuts).toEqual([
+        { id: 'check-1', label: '检查', action: 'check' },
+        { label: '设置', section: '设置' },
+      ]);
     expect(parse([{ id: 'a'.repeat(64), label: '检查', action: 'check' }]).ok).toBe(true);
   });
 
@@ -21,7 +26,10 @@ describe('shortcut ids', () => {
     for (const id of ['', ' ', 'UPPER', 'has space', '_start', 'a'.repeat(65), null, 1]) {
       expect(parse([{ id, label: '检查', action: 'check' }]).ok).toBe(false);
     }
-    const duplicate = parse([{ id: 'same', label: '一', action: 'a' }, { id: 'same', label: '二', menu: 'b' }]);
+    const duplicate = parse([
+      { id: 'same', label: '一', action: 'a' },
+      { id: 'same', label: '二', menu: 'b' },
+    ]);
     expect(duplicate.ok).toBe(false);
     if (!duplicate.ok) expect(duplicate.error).toContain('重复');
   });
@@ -73,40 +81,37 @@ describe('parsePluginManifest desktop checks', () => {
 });
 
 describe('parsePluginManifest desktop composer', () => {
-  it.each([
-    undefined,
-    {},
-    { entry: {} },
-    { page: true },
-    { composer: false },
-    { entry: {}, composer: false },
-  ])('defaults composer to false unless explicitly enabled: %j', (desktop) => {
-    const result = parsePluginManifest(base({ desktop }));
-    expect(result.ok).toBe(true);
-    if (result.ok) expect(result.manifest.desktopComposer).toBe(false);
-  });
+  it.each([undefined, {}, { entry: {} }, { page: true }, { composer: false }, { entry: {}, composer: false }])(
+    'defaults composer to false unless explicitly enabled: %j',
+    (desktop) => {
+      const result = parsePluginManifest(base({ desktop }));
+      expect(result.ok).toBe(true);
+      if (result.ok) expect(result.manifest.desktopComposer).toBe(false);
+    },
+  );
 
-  it.each([
-    { composer: true },
-    { composer: true, entry: { label: 'Controls' } },
-    { composer: true, page: true },
-  ])('accepts composer independently of desktop entries and pages: %j', (desktop) => {
-    const result = parsePluginManifest(base({ desktop }));
-    expect(result.ok).toBe(true);
-    if (result.ok) expect(result.manifest.desktopComposer).toBe(true);
-  });
+  it.each([{ composer: true }, { composer: true, entry: { label: 'Controls' } }, { composer: true, page: true }])(
+    'accepts composer independently of desktop entries and pages: %j',
+    (desktop) => {
+      const result = parsePluginManifest(base({ desktop }));
+      expect(result.ok).toBe(true);
+      if (result.ok) expect(result.manifest.desktopComposer).toBe(true);
+    },
+  );
 
   it('preserves other desktop capabilities alongside composer', () => {
-    const result = parsePluginManifest(base({
-      desktop: {
-        composer: true,
-        checks: ['accessibility'],
-        entry: { label: 'Controls', placement: 'header' },
-        page: true,
-        panel: { label: 'Panel' },
-        sessionMenu: [{ label: 'Copy', action: 'copy' }],
-      },
-    }));
+    const result = parsePluginManifest(
+      base({
+        desktop: {
+          composer: true,
+          checks: ['accessibility'],
+          entry: { label: 'Controls', placement: 'header' },
+          page: true,
+          panel: { label: 'Panel' },
+          sessionMenu: [{ label: 'Copy', action: 'copy' }],
+        },
+      }),
+    );
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.manifest).toMatchObject({
@@ -132,7 +137,8 @@ describe('parsePluginManifest desktop composer', () => {
 
 describe('parsePluginManifest desktop client data', () => {
   it.each([undefined, {}, { entry: {} }, { composer: true }, { clientData: false }])(
-    'defaults client data access to false: %j', (desktop) => {
+    'defaults client data access to false: %j',
+    (desktop) => {
       const result = parsePluginManifest(base({ desktop }));
       expect(result.ok).toBe(true);
       if (result.ok) expect(result.manifest.desktopClientData).toBe(false);
@@ -140,7 +146,8 @@ describe('parsePluginManifest desktop client data', () => {
   );
 
   it.each([{ clientData: true }, { clientData: true, entry: {}, page: true, composer: true }])(
-    'accepts explicit client data access independently of desktop UI: %j', (desktop) => {
+    'accepts explicit client data access independently of desktop UI: %j',
+    (desktop) => {
       const result = parsePluginManifest(base({ desktop }));
       expect(result.ok).toBe(true);
       if (result.ok) expect(result.manifest.desktopClientData).toBe(true);
@@ -148,9 +155,11 @@ describe('parsePluginManifest desktop client data', () => {
   );
 
   it.each([null, 'true', 'false', '', 0, 1, [], {}].map((clientData) => ({ clientData })))(
-    'rejects nonboolean client data declarations: %j', ({ clientData }) => {
+    'rejects nonboolean client data declarations: %j',
+    ({ clientData }) => {
       expect(parsePluginManifest(base({ desktop: { clientData } }))).toEqual({
-        ok: false, error: 'desktop.clientData 必须是布尔值',
+        ok: false,
+        error: 'desktop.clientData 必须是布尔值',
       });
     },
   );
@@ -173,25 +182,37 @@ describe('parsePluginManifest desktop launcher', () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.manifest.desktopLauncher).toEqual({
-      title: '全局搜索', shortcut: 'Alt+Space', width: 720, height: 480,
+      title: '全局搜索',
+      shortcut: 'Alt+Space',
+      width: 720,
+      height: 480,
     });
     expect(result.manifest.desktopEntry).toBeNull();
   });
 
   it('preserves custom options alongside other desktop capabilities', () => {
-    const result = parsePluginManifest(base({ desktop: {
-      launcher: { title: ' Search ', shortcut: ' CommandOrControl+K ', width: 900, height: 600 },
-      entry: { label: 'Tools' }, page: true, composer: true,
-      checks: ['accessibility'], panel: true,
-      sessionMenu: [{ label: 'Copy', action: 'copy' }],
-    } }));
+    const result = parsePluginManifest(
+      base({
+        desktop: {
+          launcher: { title: ' Search ', shortcut: ' CommandOrControl+K ', width: 900, height: 600 },
+          entry: { label: 'Tools' },
+          page: true,
+          composer: true,
+          checks: ['accessibility'],
+          panel: true,
+          sessionMenu: [{ label: 'Copy', action: 'copy' }],
+        },
+      }),
+    );
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.manifest).toMatchObject({
       desktopLauncher: { title: 'Search', shortcut: 'CommandOrControl+K', width: 900, height: 600 },
       desktopEntry: { label: 'Tools', placement: 'sidebar' },
-      desktopPage: { title: 'Tools' }, desktopComposer: true,
-      desktopChecks: ['accessibility'], desktopPanel: { label: 'Demo' },
+      desktopPage: { title: 'Tools' },
+      desktopComposer: true,
+      desktopChecks: ['accessibility'],
+      desktopPanel: { label: 'Demo' },
       desktopSessionMenu: [{ label: 'Copy', action: 'copy' }],
     });
   });
@@ -204,36 +225,44 @@ describe('parsePluginManifest desktop launcher', () => {
   ])('clamps dimensions to supported bounds: %j', ({ width, height, expectedWidth, expectedHeight }) => {
     const result = parse({ title: 'Search', width, height });
     expect(result.ok).toBe(true);
-    if (result.ok) expect(result.manifest.desktopLauncher).toMatchObject({
-      width: expectedWidth, height: expectedHeight,
-    });
+    if (result.ok)
+      expect(result.manifest.desktopLauncher).toMatchObject({
+        width: expectedWidth,
+        height: expectedHeight,
+      });
   });
 
   it.each([null, true, false, 'Search', 0, []].map((launcher) => ({ launcher })))(
-    'rejects nonobject launcher declarations: %j', ({ launcher }) => {
+    'rejects nonobject launcher declarations: %j',
+    ({ launcher }) => {
       expect(parse(launcher)).toEqual({ ok: false, error: 'desktop.launcher 必须是对象' });
     },
   );
 
   it.each([undefined, null, '', '  ', true, 1, [], {}].map((title) => ({ title })))(
-    'requires a nonempty title: %j', ({ title }) => {
+    'requires a nonempty title: %j',
+    ({ title }) => {
       expect(parse({ title })).toEqual({ ok: false, error: 'desktop.launcher.title 必须是非空字符串' });
     },
   );
 
   it.each([null, '', '  ', true, 1, [], {}].map((shortcut) => ({ shortcut })))(
-    'rejects invalid shortcuts: %j', ({ shortcut }) => {
+    'rejects invalid shortcuts: %j',
+    ({ shortcut }) => {
       expect(parse({ title: 'Search', shortcut })).toEqual({
-        ok: false, error: 'desktop.launcher.shortcut 必须是非空字符串',
+        ok: false,
+        error: 'desktop.launcher.shortcut 必须是非空字符串',
       });
     },
   );
 
   for (const field of ['width', 'height'] as const) {
     it.each([null, '720', true, [], {}, NaN, Infinity, -Infinity].map((value) => ({ value })))(
-      `rejects invalid ${field}: %j`, ({ value }) => {
+      `rejects invalid ${field}: %j`,
+      ({ value }) => {
         expect(parse({ title: 'Search', [field]: value })).toEqual({
-          ok: false, error: `desktop.launcher.${field} 必须是有限数字`,
+          ok: false,
+          error: `desktop.launcher.${field} 必须是有限数字`,
         });
       },
     );
@@ -248,9 +277,7 @@ describe('parsePluginManifest desktop entry', () => {
   });
 
   it('moves the entry into the top bar when the manifest asks for placement: header', () => {
-    const result = parsePluginManifest(
-      base({ desktop: { entry: { label: 'Schedule', placement: 'header' } } }),
-    );
+    const result = parsePluginManifest(base({ desktop: { entry: { label: 'Schedule', placement: 'header' } } }));
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.manifest.desktopEntry).toEqual({ label: 'Schedule', placement: 'header' });
@@ -258,9 +285,7 @@ describe('parsePluginManifest desktop entry', () => {
   });
 
   it('rejects an unknown placement instead of quietly drawing the entry elsewhere', () => {
-    const result = parsePluginManifest(
-      base({ desktop: { entry: { label: 'Schedule', placement: 'titlebar' } } }),
-    );
+    const result = parsePluginManifest(base({ desktop: { entry: { label: 'Schedule', placement: 'titlebar' } } }));
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error).toContain('placement');
   });
@@ -276,9 +301,7 @@ describe('parsePluginManifest desktop entry', () => {
   });
 
   it('keeps entry and checks independent under the same desktop section', () => {
-    const result = parsePluginManifest(
-      base({ desktop: { checks: ['accessibility'], entry: { label: '连接' } } }),
-    );
+    const result = parsePluginManifest(base({ desktop: { checks: ['accessibility'], entry: { label: '连接' } } }));
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.manifest.desktopChecks).toEqual(['accessibility']);
@@ -303,10 +326,53 @@ describe('parsePluginManifest desktop entry', () => {
 });
 
 describe('parsePluginManifest desktop page', () => {
+  it('reserves the pages namespace when declaring a custom route', () => {
+    const result = parsePluginManifest(base({ id: 'pages', desktop: { page: { route: 'console' } } }));
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toContain('宿主保留');
+  });
+  it('preserves a custom route independently of the entry and read-only module', () => {
+    const result = parsePluginManifest(base({ web: true, desktop: { page: { title: 'Console', route: 'console' } } }));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.manifest.desktopPage).toEqual({ title: 'Console', route: 'console' });
+    expect(result.manifest.web).toBe(true);
+    expect(result.manifest.desktopEntry).toBeNull();
+  });
+
+  it('rejects unsafe and reserved page routes rather than silently selecting the default', () => {
+    for (const route of [
+      null,
+      true,
+      1,
+      '',
+      'api',
+      'pages',
+      'API',
+      '..',
+      '../console',
+      'a.b',
+      'a/b',
+      'a\\b',
+      'a'.repeat(65),
+    ]) {
+      const result = parsePluginManifest(base({ desktop: { page: { route } } }));
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.error).toContain('desktop.page.route');
+    }
+  });
+
+  it('only accepts an explicit boolean web declaration', () => {
+    for (const web of [null, 'true', 1, [], {}]) {
+      expect(parsePluginManifest(base({ web }))).toEqual({ ok: false, error: 'web 必须是布尔值' });
+    }
+    const result = parsePluginManifest(base({ web: false }));
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.manifest.web).toBe(false);
+  });
+
   it('turns the entry into a full page when desktop.page is declared', () => {
-    const result = parsePluginManifest(
-      base({ desktop: { entry: { label: 'Schedule' }, page: { title: '排期' } } }),
-    );
+    const result = parsePluginManifest(base({ desktop: { entry: { label: 'Schedule' }, page: { title: '排期' } } }));
     expect(result.ok).toBe(true);
     if (result.ok) expect(result.manifest.desktopPage).toEqual({ title: '排期' });
   });
@@ -335,7 +401,9 @@ describe('parsePluginManifest desktop page', () => {
 
 describe('parsePluginManifest desktop panel', () => {
   it('reads the panel label and the roles it is bound to', () => {
-    const result = parsePluginManifest(base({ desktop: { panel: { label: '需求开发', roles: ['需求开发', ' 辅助 '] } } }));
+    const result = parsePluginManifest(
+      base({ desktop: { panel: { label: '需求开发', roles: ['需求开发', ' 辅助 '] } } }),
+    );
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.manifest.desktopPanel).toEqual({
@@ -451,9 +519,7 @@ describe('parsePluginManifest desktop panel', () => {
       base({
         desktop: {
           panel: {
-            shortcuts: [
-              { label: '打开', action: 'open', style: { icon: 'globe', color: 'accent', iconOnly: true } },
-            ],
+            shortcuts: [{ label: '打开', action: 'open', style: { icon: 'globe', color: 'accent', iconOnly: true } }],
           },
         },
       }),
@@ -477,9 +543,7 @@ describe('parsePluginManifest desktop panel', () => {
   });
 
   it('rejects a shortcut that could not do anything when clicked', () => {
-    const noTarget = parsePluginManifest(
-      base({ desktop: { panel: { shortcuts: [{ label: '立刻检查' }] } } }),
-    );
+    const noTarget = parsePluginManifest(base({ desktop: { panel: { shortcuts: [{ label: '立刻检查' }] } } }));
     expect(noTarget.ok).toBe(false);
     if (!noTarget.ok) expect(noTarget.error).toContain('action、section、items 或 menu');
 
@@ -525,9 +589,7 @@ describe('parsePluginManifest desktop panel', () => {
   });
 
   it('rejects a menu entry that has both or neither target', () => {
-    const empty = parsePluginManifest(
-      base({ desktop: { panel: { shortcuts: [{ label: '频道', items: [] }] } } }),
-    );
+    const empty = parsePluginManifest(base({ desktop: { panel: { shortcuts: [{ label: '频道', items: [] }] } } }));
     expect(empty.ok).toBe(false);
 
     const both = parsePluginManifest(
@@ -554,9 +616,10 @@ describe('parsePluginManifest desktop panel', () => {
       base({ desktop: { panel: { shortcuts: [{ label: '设置', section: '需求描述', menu: 'description' }] } } }),
     );
     expect(result.ok).toBe(true);
-    if (result.ok) expect(result.manifest.desktopPanel?.shortcuts).toEqual([
-      { label: '设置', section: '需求描述', menu: 'description' },
-    ]);
+    if (result.ok)
+      expect(result.manifest.desktopPanel?.shortcuts).toEqual([
+        { label: '设置', section: '需求描述', menu: 'description' },
+      ]);
 
     // 只有 section + menu 这一种组合说得通；再带 action 或 items 就回到「猜意思」。
     const withAction = parsePluginManifest(
@@ -807,7 +870,8 @@ describe('parsePluginManifest desktop session menu', () => {
   // 写错的值静默落到默认位置，等于作者以为生效了其实没有
   it('rejects an unknown position', () => {
     expect(
-      parsePluginManifest(base({ desktop: { sessionMenu: [{ label: '压缩', action: 'quick', position: 'first' }] } })).ok,
+      parsePluginManifest(base({ desktop: { sessionMenu: [{ label: '压缩', action: 'quick', position: 'first' }] } }))
+        .ok,
     ).toBe(false);
     expect(
       parsePluginManifest(base({ desktop: { sessionMenu: [{ label: '压缩', action: 'quick', position: 1 }] } })).ok,
@@ -839,15 +903,17 @@ describe('parsePluginManifest desktop session menu', () => {
   // 与清单顶层的 icon 同一套字符集：名字要能被界面当键查，写中文或路径没有意义
   it('rejects an icon name outside kebab-case', () => {
     for (const icon of ['Eraser', '快速', 'a/b', 42]) {
-      expect(parsePluginManifest(base({ desktop: { sessionMenu: [{ label: '压缩', action: 'quick', icon }] } })).ok).toBe(
-        false,
-      );
+      expect(
+        parsePluginManifest(base({ desktop: { sessionMenu: [{ label: '压缩', action: 'quick', icon }] } })).ok,
+      ).toBe(false);
     }
   });
 
   // 与顶层 icon 一致：空字符串等于没写，回落到插件图标
   it('treats an empty icon as not declared', () => {
-    const result = parsePluginManifest(base({ desktop: { sessionMenu: [{ label: '压缩', action: 'quick', icon: '' }] } }));
+    const result = parsePluginManifest(
+      base({ desktop: { sessionMenu: [{ label: '压缩', action: 'quick', icon: '' }] } }),
+    );
     expect(result.ok).toBe(true);
     if (result.ok) expect(result.manifest.desktopSessionMenu).toEqual([{ label: '压缩', action: 'quick' }]);
   });
@@ -883,7 +949,11 @@ describe('parsePluginManifest desktop session menu', () => {
 
 describe('parsePluginManifest MCP', () => {
   it('only opts into a standalone MCP module when explicitly enabled', () => {
-    for (const [input, enabled] of [[{}, false], [{ mcp: false }, false], [{ mcp: true }, true]] as const) {
+    for (const [input, enabled] of [
+      [{}, false],
+      [{ mcp: false }, false],
+      [{ mcp: true }, true],
+    ] as const) {
       const result = parsePluginManifest(base(input));
       expect(result.ok).toBe(true);
       if (result.ok) expect(result.manifest.mcp).toBe(enabled);

@@ -79,6 +79,8 @@ import { createPluginMcpHandler } from '../host/plugin-mcp.js'
 import { withPluginLauncherRequest } from '../host/plugin-launcher-runtime.js'
 import { setPluginMcpCatalog } from '../host/plugin-mcp-config.js'
 import { createPluginMcpRoute } from './plugin-mcp-route.js'
+import { createPluginWebRuntime } from '../host/plugin-web-runtime.js'
+import { createPluginWebRoute } from './plugin-web-route.js'
 import { servePluginPage } from './plugin-page-route.js'
 import { officialPluginManifests } from '@packages/mica-official-plugins/manifests.js'
 import { readDisabledPluginIds } from '@packages/mica-plugin/PluginState.js'
@@ -87,7 +89,6 @@ import {
   DEFAULT_RUNTIME_PORT,
   RUNTIME_PORT_ENV,
   SHARE_BASE_PATH,
-  isPluginPagePath,
   isSharePath,
   isTerminalPagePath,
   parseRuntimePort,
@@ -875,21 +876,40 @@ export async function startDesktopServer(options = {}) {
     home,
     readDisabled: () => disabledPlugins
   })
-  const syncPluginMcp = () => {
+  const pluginWebLoaders = new Map()
+  for (const [file, load] of Object.entries(import.meta.glob('../../../../plugins/*/web.ts'))) {
+    const match = /\/([^/]+)\/web\.ts$/.exec(file)
+    if (match) pluginWebLoaders.set(match[1], load)
+  }
+  const pluginWebRuntime = createPluginWebRuntime({
+    manifests: officialPluginManifests,
+    loaders: pluginWebLoaders,
+    home,
+    readDisabled: () => disabledPlugins
+  })
+  const syncPluginRuntimes = () => {
     disabledPlugins = readDisabledPluginIds({ path: pluginStatePath })
     void pluginMcpRuntime.sync().catch((error) => runtimeLog.error('plugin-mcp:sync-failed', { error }))
+    void pluginWebRuntime.sync().catch(() => runtimeLog.error('plugin-web:sync-failed', { code: 'sync_failed' }))
   }
-  watchFile(pluginStatePath, { interval: 400, persistent: false }, syncPluginMcp)
+  watchFile(pluginStatePath, { interval: 400, persistent: false }, syncPluginRuntimes)
   setPluginMcpCatalog(() => officialPluginManifests.filter((manifest) => pluginMcpRuntime.has(manifest.id)))
   const pluginMcpRoute = createPluginMcpRoute({
     runtime: pluginMcpRuntime,
     handle: createPluginMcpHandler({ runtime: pluginMcpRuntime }),
     verifyOrigin: verifyRequestOrigin
   })
+  const pluginWebRoute = createPluginWebRoute({
+    runtime: pluginWebRuntime,
+    manifests: officialPluginManifests,
+    readDisabled: () => disabledPlugins,
+    verifyOrigin: verifyRequestOrigin,
+    servePage: (req, res, allowed) => servePluginPage(req, res, rendererRoot, allowed)
+  })
 
   const sharing = options.sharing !== false
   const server = createServer(
-    createRequestHandler({ rendererRoot, sharing, browserProxy, terminalProxy, controlMcp, pluginMcpRoute })
+    createRequestHandler({ rendererRoot, sharing, browserProxy, terminalProxy, controlMcp, pluginMcpRoute, pluginWebRoute })
   )
   const host = options.host || '0.0.0.0'
   const port = await listenWithFallback(server, host, options.port || DEFAULT_RUNTIME_PORT, {
@@ -941,9 +961,9 @@ export async function startDesktopServer(options = {}) {
     stopBrowserControl()
     stopTerminalControl()
     stopNotifyBridge()
-    unwatchFile(pluginStatePath, syncPluginMcp)
+    unwatchFile(pluginStatePath, syncPluginRuntimes)
     setPluginMcpCatalog()
-    await pluginMcpRuntime.close()
+    await Promise.all([pluginMcpRuntime.close(), pluginWebRuntime.close()])
     await disposePluginHost()
     // 攒在防抖里的界面状态是用户最后那次输入/拖动，必须在退出前落盘
     flushUiState()
@@ -1015,7 +1035,8 @@ function createRequestHandler({
   browserProxy = null,
   terminalProxy = null,
   controlMcp = {},
-  pluginMcpRoute = null
+  pluginMcpRoute = null,
+  pluginWebRoute = null
 }) {
   return (req, res) => {
     void (async () => {
@@ -1065,6 +1086,9 @@ function createRequestHandler({
 
         // 独立插件 MCP：沿用前面的远程访问门禁，并由通用路由做 Host/Origin 校验。
         if (pluginMcpRoute && await pluginMcpRoute(req, res, pathname)) return
+        // Pages and read-only queries share the current HTTP port and origin guard.
+        // Consume all /plugins paths, including unknown ones, before static SPA fallback.
+        if (pluginWebRoute && await pluginWebRoute(req, res, pathname)) return
 
         // 受控能力的 MCP 端点（/mcp/browser、/mcp/terminal）：agent 的唯一入口。
         // 和 /api 同一套来源校验；MCP 用 POST/GET/DELETE，不能落到下面「只允许 GET」的兜底上。
@@ -1180,12 +1204,6 @@ function createRequestHandler({
         // 页面通过同源 /remote/terminal/* 读写终端，所以窗口只需要运行时地址。
         if (isTerminalPagePath(url.pathname)) {
           return await serveStatic(req, res, rendererRoot, '/terminal.html')
-        }
-        // 插件整页：`/plugins/pages/<id>` 是一个真地址（可复制、可收藏、手机上也能直接开），
-        // 内容是同一份渲染层产物，由页面按 pathname 决定画哪个插件页。深路径要靠注入的
-        // 根基路径才取得到资源，所以它不走通用静态回退。
-        if (isPluginPagePath(url.pathname)) {
-          return await servePluginPage(req, res, rendererRoot)
         }
         // 页面产物：`/share` 与 `/mica-web` 都是别名，剥掉服务前缀后走同一份静态资源。
         // 产物里的资源引用是相对的（`./assets/x.js`），从 `/mica-web/`、`/share/` 下取时会

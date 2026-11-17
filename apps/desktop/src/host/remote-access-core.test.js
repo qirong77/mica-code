@@ -128,6 +128,15 @@ describe('remoteAccessDecision', () => {
   const off = emptyRemoteAccessPolicy()
   const on = { ...off, enabled: true }
 
+  it('never grants plugin pages or JSON queries through a share-scope cookie', () => {
+    for (const pathname of ['/plugins/pages/demo', '/plugins/demo/console', '/plugins/demo/api/summary', '/plugins/demo/api/summary.json']) {
+      expect(remoteAccessDecision({ policy: off, pathname, hasShare: true })).toBe('not-found')
+      expect(remoteAccessDecision({ policy: on, pathname, hasShare: true })).toBe('login')
+      expect(remoteAccessDecision({ policy: on, pathname, hasAccess: true })).toBe('allow')
+      expect(remoteAccessDecision({ policy: off, pathname, local: true })).toBe('allow')
+    }
+  })
+
   it('always lets a local client or a valid access token through', () => {
     for (const pathname of [
       '/',

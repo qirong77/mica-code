@@ -358,6 +358,10 @@
   padding: 0 6px 0 8px;
   gap: 3px;
 }
+.notebook-ai-button {
+  flex: none;
+  white-space: nowrap;
+}
 .notebook-breadcrumb {
   min-width: 0;
   padding-left: 2px;
