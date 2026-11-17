@@ -21,8 +21,8 @@ export default function PluginPageWindow({ pluginId }) {
     void readPluginsDetails()
       .then((plugins) => {
         const plugin = plugins.find((item) => item?.id === pluginId)
-        if (plugin?.state !== 'enabled' || !plugin.desktopPage ||
-          !matchesPluginPagePath(window.location.pathname, pluginId, plugin.desktopPage.route)) return null
+        if (plugin?.state !== 'enabled' || !(plugin.desktopPage || plugin.desktopLauncher) ||
+          !matchesPluginPagePath(window.location.pathname, pluginId, plugin.desktopPage?.route)) return null
         return loadPluginPageEntry(pluginId)
       })
       .then((loaded) => {

@@ -60,7 +60,8 @@ function fixture({ queries = { summary: () => ({ count: 1 }) }, loader, ...route
   const disabled = new Set()
   const manifests = [
     { id: 'demo', name: 'Demo', version: '1.0.0', web: true, desktopPage: { title: 'Console', route: 'console' } },
-    { id: 'legacy', name: 'Legacy', version: '1.0.0', desktopPage: { title: 'Page' } }
+    { id: 'legacy', name: 'Legacy', version: '1.0.0', desktopPage: { title: 'Page' } },
+    { id: 'launcher', name: 'Launcher', version: '1.0.0', desktopLauncher: { title: 'Launcher' } }
   ]
   let loads = 0
   const runtime = createPluginWebRuntime({
@@ -86,7 +87,7 @@ function fixture({ queries = { summary: () => ({ count: 1 }) }, loader, ...route
 describe('application /plugins namespace', () => {
   it('serves only the precise declared page route; a custom route has no default alias', async () => {
     const { call, disabled, loads } = fixture()
-    for (const path of ['/plugins/demo/console', '/plugins/demo/console/', '/plugins/pages/legacy']) {
+    for (const path of ['/plugins/demo/console', '/plugins/demo/console/', '/plugins/pages/legacy', '/plugins/pages/launcher']) {
       const { res, handled } = await call(path)
       expect(handled).toBe(true)
       expect(res.status).toBe(200)
@@ -99,6 +100,8 @@ describe('application /plugins namespace', () => {
     }
     disabled.add('demo')
     expect((await call('/plugins/demo/console')).res.status).toBe(404)
+    disabled.add('launcher')
+    expect((await call('/plugins/pages/launcher')).res.status).toBe(404)
     expect(loads()).toBe(0)
     expect((await call('/api/invoke')).handled).toBe(false)
   })

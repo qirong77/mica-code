@@ -1,5 +1,6 @@
 const DEFAULT_MAX_RETRIES = 3;
 const DEFAULT_RETRY_DELAY_MS = 3000;
+export const MAX_PROVIDER_RETRIES = 5;
 
 /**
  * 中转网关报告请求体解析失败（Go 的 invalid json 或 codexgo 的 invalid_json）。

@@ -518,7 +518,7 @@ test('corrupt or oversized assembly is explicitly unreadable, not a default load
 test('the default read service returns a real empty state without creating any data directories', async (t) => {
   const root = await temporary(t);
   vi.stubEnv('MICA_LOG_DIR', join(root, 'logs'));
-  t.onTestFinished(() => vi.unstubAllEnvs());
+  t.onTestFinished(() => { vi.unstubAllEnvs(); });
   const ctx = context(root);
   const service = new HarnessConsoleService(ctx);
   t.onTestFinished(() => service.dispose());

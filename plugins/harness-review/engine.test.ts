@@ -3253,7 +3253,7 @@ test('concurrent recorder rotation keeps both hosts events in a consistent snaps
 test('read-only review does not flush/reclaim or create missing directories and locks', async (t) => {
   const { temporary, root, recorder } = await fixture(t);
   vi.stubEnv('MICA_LOG_DIR', join(temporary, 'missing-logs'));
-  t.onTestFinished(() => vi.unstubAllEnvs());
+  t.onTestFinished(() => { vi.unstubAllEnvs(); });
   const flush = vi.spyOn(recorder, 'flush');
   const reclaim = vi.spyOn(recorder, 'reclaim');
   const report = await recorder.review(undefined, { readOnly: true });

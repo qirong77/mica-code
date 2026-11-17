@@ -437,6 +437,8 @@ export default function createWeb(ctx: PluginWebContext): PluginWebHandler {
 - 固定路由 **`GET /plugins/<id>/api/<query>`**，只认查询目录自己的固定键。参数、并发、
   时间、序列化后的 JSON 字节数均受限；超时和断连通过 `AbortSignal` 传给查询。长扫描须在
   迭代/IO 边界检查 signal，不能只用 `Promise.race` 提前回包后继续无限计算。
+  宿主预算为 15 秒、最多 16 个 HTTP 等待、8 个全局实际执行、每插件 4 个实际执行、
+  含信封的 JSON 响应 1 MiB；即使调用者已取消，忽略取消的处理器仍占执行槽直到实际结束。
 - 页面用 **`api.web.read(query, params?, { signal }?)`** 读取同源 JSON，失败 reject；不经
   `/api/invoke` 另开授权别名。宿主自动记录固定查询名及终态元数据，不复制输入输出。
 - 模块按随包目录懒加载、缓存及合并初始化；停用/退出时释放，读取前后复核启停。未知
@@ -688,6 +690,8 @@ export function summary(api) { return api.currentHost() } // 可选：入口行�
 canonical 地址，不另保留该插件的默认地址别名。宿主生成页面内可复制地址与深链，插件不
 自己拼路径；没有 route 的现有页面不变。服务器按清单、随包模块和启停状态核对，不能只靠
 前端隐藏入口授权。
+`pages` 是默认整页命名空间，id 为 `pages` 的插件不能声明自定义 route。启动器已有的浏览器
+整页 `/plugins/pages/<id>` 仍可使用，不要求为同一个启动器再声明一份 `desktop.page`。
 
 ### 输入框控件（`composer`）
 

@@ -31,6 +31,8 @@ class MockAgent {
   iterationBoundaryResults: Array<unknown> = [];
   /** Errors to throw from run(), in order; when exhausted the run succeeds. */
   nextErrors: Array<Error> = [];
+  /** Provider request retries to report from run(), in order, one batch per run. */
+  nextProviderRetries: Array<Array<{ attempt: number; delayMs: number; error: unknown }>> = [];
   restoreCalls = 0;
   /** 0-indexed run index after which a non-readonly toolCall is emitted. */
   emitToolCallAfterRunIndex = -1;
@@ -80,7 +82,10 @@ class MockAgent {
 
   async run(
     content: unknown,
-    options: { onIterationComplete?: () => unknown | Promise<unknown> } = {},
+    options: {
+      onIterationComplete?: () => unknown | Promise<unknown>;
+      onRetry?: (info: { attempt: number; delayMs: number; error: unknown }) => void;
+    } = {},
   ): Promise<{ runId: number; text: string }> {
     this.runCalls.push({ content, options });
     await new Promise((resolve) => setTimeout(resolve, 5));
@@ -97,6 +102,7 @@ class MockAgent {
     if (this.runCalls.length - 1 === this.emitToolCallAfterRunIndex) {
       this.events.emit('toolCall', { name: 'run_shell', args: 'echo hi' });
     }
+    for (const retry of this.nextProviderRetries.shift() ?? []) options.onRetry?.(retry);
     const nextError = this.nextErrors.shift();
     if (nextError) throw nextError;
     return { runId: this.runId, text: 'done' };
@@ -717,8 +723,65 @@ describe('HeadlessTurnExecutor', () => {
     expect(agent.restoreCalls).toBe(1);
     expect(restore).toHaveBeenCalledWith({ marker: 'pre-turn' }, { preserveUsage: true });
     const retrying = events.find((event) => event.type === 'turn:retrying');
-    expect(retrying).toMatchObject({ type: 'turn:retrying', attempt: 1 });
+    expect(retrying).toMatchObject({ type: 'turn:retrying', attempt: 1, maxAttempts: 2 });
     expect(events.find((event) => event.type === 'turn:finish')).toMatchObject({ status: 'completed' });
+  });
+
+  it('reports and persists provider request retries without restarting the whole turn', async () => {
+    const { agent, executor, events, savedConversations, noticeLog, getIdleCount } = createHarness();
+    agent.nextProviderRetries = [[
+      { attempt: 2, delayMs: 4000, error: new Error('socket disconnected') },
+    ]];
+
+    await executor.start(input('provider request retry'));
+    await vi.waitFor(() => expect(getIdleCount()).toBe(1));
+
+    expect(agent.runCalls).toHaveLength(1);
+    expect(agent.restoreCalls).toBe(0);
+    expect(events).toContainEqual(expect.objectContaining({
+      type: 'turn:retrying',
+      attempt: 2,
+      maxAttempts: 5,
+      delayMs: 4000,
+      error: 'socket disconnected',
+    }));
+    const saved = savedConversations.flatMap((messages) => messages ?? []);
+    expect(saved).toContainEqual(expect.objectContaining({
+      role: 'notice',
+      command: '/retry',
+      content: expect.stringContaining('socket disconnected'),
+    }));
+    expect(noticeLog.size).toBe(1);
+  });
+
+  it('shows provider request retries after a non-readonly tool call without allowing a whole-turn retry', async () => {
+    const { agent, executor, events, savedConversations, getIdleCount } = createHarness();
+    agent.emitToolCallAfterRunIndex = 0;
+    agent.nextProviderRetries = [[
+      { attempt: 1, delayMs: 2000, error: new Error('request body reset') },
+    ]];
+    agent.nextErrors = [Object.assign(new Error('server is busy'), { status: 503 })];
+
+    await executor.start(input('tool then provider retry'));
+    await vi.waitFor(() => expect(getIdleCount()).toBe(1));
+
+    expect(agent.runCalls).toHaveLength(1);
+    expect(agent.restoreCalls).toBe(0);
+    expect(events).toContainEqual(expect.objectContaining({
+      type: 'turn:retrying',
+      attempt: 1,
+      maxAttempts: 5,
+      delayMs: 2000,
+      error: 'request body reset',
+    }));
+    expect(events.filter((event) => event.type === 'turn:retrying')).toHaveLength(1);
+    expect(events.find((event) => event.type === 'turn:finish')).toMatchObject({ status: 'error' });
+    const saved = savedConversations.flatMap((messages) => messages ?? []);
+    expect(saved).toContainEqual(expect.objectContaining({
+      role: 'notice',
+      command: '/retry',
+      content: expect.stringContaining('request body reset'),
+    }));
   });
 
   it('keeps prompt controls fixed across turn retries and refreshes them for the next turn', async () => {

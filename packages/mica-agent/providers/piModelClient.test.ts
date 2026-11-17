@@ -466,6 +466,26 @@ describe('pi retries and display rollback', () => {
     expect(requests[2]!.context.messages).toEqual(requests[1]!.context.messages);
     expect(JSON.stringify(client.messages)).not.toContain('discard');
   });
+  it('reports a socket retry after a completed write without running the tool again', async () => {
+    vi.useFakeTimers();
+    const execute = vi.fn(async () => 'written');
+    tool('write_probe', false, execute);
+    const error = new Error(
+      'The socket connection was closed unexpectedly. For more information, pass `verbose: true` in the second argument to fetch()',
+    );
+    scripts.push(
+      () => completed([call('w', 'write_probe')]),
+      async function* () { throw error; },
+      () => text('done'),
+    );
+    const retry = vi.fn();
+    const query = new PiModelClient(options()).query('question', { onRetry: retry });
+    await vi.advanceTimersByTimeAsync(2000);
+    await expect(query).resolves.toBe('done');
+    expect(retry).toHaveBeenCalledExactlyOnceWith({ attempt: 1, delayMs: 2000, error });
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(requests[2]!.context.messages).toEqual(requests[1]!.context.messages);
+  });
   it.each([false, true])(
     'requires thinking rollback support to retry thinking output: %s',
     async (canRollbackThinking) => {

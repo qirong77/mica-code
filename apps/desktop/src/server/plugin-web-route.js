@@ -14,7 +14,7 @@ export function createPluginWebRoute({
   runtime, manifests = [], readDisabled = () => new Set(),
   verifyOrigin, servePage, timeoutMs = PLUGIN_WEB_TIMEOUT_MS, maxConcurrent = 16
 }) {
-  const pages = new Map(manifests.filter((manifest) => manifest.desktopPage).map((manifest) => [manifest.id, manifest]))
+  const pages = new Map(manifests.filter((manifest) => manifest.desktopPage || manifest.desktopLauncher).map((manifest) => [manifest.id, manifest]))
   let pending = 0
   return async (req, res, pathname) => {
     let namespace = pathname
@@ -31,7 +31,7 @@ export function createPluginWebRoute({
       const pluginId = readPluginPageId(pathname)
       const manifest = pages.get(pluginId)
       const allowed = () => manifest && !runtime.signal.aborted && !readDisabled().has(pluginId) &&
-        matchesPluginPagePath(pathname, pluginId, manifest.desktopPage.route)
+        matchesPluginPagePath(pathname, pluginId, manifest.desktopPage?.route)
       if (!allowed()) sendJson(res, 404, { ok: false, error: '没有这个插件页面' })
       else if (req.method !== 'GET' && req.method !== 'HEAD') {
         sendJson(res, 405, { ok: false, error: '插件页面只接受 GET / HEAD' }, { allow: 'GET, HEAD' })

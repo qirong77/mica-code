@@ -1,5 +1,6 @@
 import type { AgentQueryContent } from '@packages/mica-agent/index.js';
 import { micaAgent } from '@packages/mica-agent/index.js';
+import { MAX_PROVIDER_RETRIES } from '@packages/mica-agent/core/retry.js';
 import type { MicaUiConversationMessage } from '@packages/mica-ui/index.js';
 import type { HookRegistry } from '@packages/mica-plugin/index.js';
 import { micaRuntime, type MessageQueueService, type RuntimeInput } from '@packages/mica-runtime/index.js';
@@ -32,7 +33,7 @@ export type HeadlessTurnStartResult = 'started' | 'queued' | 'rejected' | 'busy-
 export type HeadlessTurnEvent =
   | { type: 'turn:start'; input: RuntimeInput }
   | { type: 'turn:finish'; input: RuntimeInput; status: HeadlessTurnStatus; elapsedMs: number; error?: string }
-  | { type: 'turn:retrying'; input: RuntimeInput; attempt: number; delayMs: number; error?: string }
+  | { type: 'turn:retrying'; input: RuntimeInput; attempt: number; maxAttempts: number; delayMs: number; error?: string }
   | { type: 'queued'; input: RuntimeInput; position: number; pending: RuntimeInput[] }
   | { type: 'dequeue'; input: RuntimeInput }
   | { type: 'queue:changed'; pending: RuntimeInput[] };
@@ -560,6 +561,30 @@ export class HeadlessTurnExecutor {
                 }
                 return this.takeQueuedIterationInput(attemptInputs);
               },
+              // `AgentRuntime` exposes provider-level retries separately from
+              // whole-turn retries.  The app-server uses this headless path,
+              // so without forwarding this callback a request can be retried
+              // several times while the desktop only sees the final /error.
+              // This retry is safe even after a write tool: the provider only
+              // calls it when the current request has no replay-unsafe output.
+              onRetry: (info) => {
+                const notice = createRetryNotice(info.error, info.attempt, MAX_PROVIDER_RETRIES, info.delayMs);
+                try {
+                  this.options.notices?.ensure().upsert(notice);
+                  this.saveCurrent({ allowEmpty: true, turnState: 'running' }, inFlightUser);
+                } catch {
+                  // A diagnostic notice must never turn a retryable provider
+                  // failure into a terminal inference failure.
+                }
+                onEvent({
+                  type: 'turn:retrying',
+                  input,
+                  attempt: info.attempt,
+                  maxAttempts: MAX_PROVIDER_RETRIES,
+                  delayMs: info.delayMs,
+                  error: info.error instanceof Error ? info.error.message : String(info.error),
+                });
+              },
             });
             break;
           } catch (error) {
@@ -593,6 +618,7 @@ export class HeadlessTurnExecutor {
               type: 'turn:retrying',
               input,
               attempt: attempt + 1,
+              maxAttempts: maxRetries,
               delayMs: retryDelayMs,
               error: error instanceof Error ? error.message : String(error),
             });

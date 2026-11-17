@@ -21,7 +21,7 @@ import {
   type AgentSnapshot,
   type AgentUsageRecord,
 } from '../core/Agent.js';
-import { abortError, isRetryableError, withRetry } from '../core/retry.js';
+import { abortError, isRetryableError, MAX_PROVIDER_RETRIES, withRetry } from '../core/retry.js';
 import { withIdleTimeout } from '../core/streamIdleTimeout.js';
 import { buildSystemPrompt } from '../prompt/index.js';
 import { compactHistoricalToolResultText } from './historyCompaction.js';
@@ -346,7 +346,7 @@ export class PiModelClient extends BaseAgent<ModelClientOptions, Message, AgentU
           },
           {
             signal: options?.signal,
-            maxRetries: 5,
+            maxRetries: MAX_PROVIDER_RETRIES,
             delayMs: 2000,
             backoffFactor: 2,
             maxDelayMs: 30_000,

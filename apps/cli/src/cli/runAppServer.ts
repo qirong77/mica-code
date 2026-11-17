@@ -76,7 +76,6 @@ import { readAgentRuntimeConfig, type AgentRuntimeConfigOverride } from '../agen
 import { SubagentTaskManager, type SubagentTaskRecord } from '../agents/SubagentTaskManager.js';
 import {
   HeadlessTurnExecutor,
-  MAX_TURN_RETRIES,
   REMOTE_TURN_MESSAGE,
   type HeadlessTurnEvent,
   type HeadlessTurnStartResult,
@@ -2206,7 +2205,7 @@ function handleTurnEvent(
       // The Mica extension notification below is what the app renders as
       // "retrying n/5" — stderr never reaches it.
       console.error(
-        `[mica] turn will retry (${event.attempt}/${MAX_TURN_RETRIES}) in ${Math.ceil(event.delayMs / 1000)}s: ${
+        `[mica] turn will retry (${event.attempt}/${event.maxAttempts}) in ${Math.ceil(event.delayMs / 1000)}s: ${
           event.error ?? 'unknown error'
         }`,
       );
@@ -2214,7 +2213,7 @@ function handleTurnEvent(
         threadId: sessionId,
         turnId: lifecycle.getTurnId(),
         attempt: event.attempt,
-        maxAttempts: MAX_TURN_RETRIES,
+        maxAttempts: event.maxAttempts,
         delayMs: event.delayMs,
         error: event.error ?? '',
       } satisfies MicaTurnRetrying);
