@@ -28,11 +28,13 @@ export function summarizePluginExperience(
     } catch {
       continue;
     }
-    if (!row || row.event !== EXPERIENCE_LOG_EVENT || typeof row.plugin !== 'string') continue;
+    if (!row || row.event !== EXPERIENCE_LOG_EVENT || typeof (row.plugin ?? row.pluginId) !== 'string') continue;
+    row.plugin ??= row.pluginId;
     if (options.plugin && row.plugin !== options.plugin) continue;
+    const at = typeof row.at === 'number' ? row.at : typeof row.time === 'string' ? Date.parse(row.time) : NaN;
     if (
       options.since !== undefined &&
-      (typeof row.time !== 'string' || !Number.isFinite(Date.parse(row.time)) || Date.parse(row.time) < options.since)
+      (!Number.isFinite(at) || at < options.since)
     )
       continue;
     const data = row.data;
@@ -71,7 +73,7 @@ export function summarizePluginExperience(
     }
     const summary = group.result;
     increment(summary.events, data.event);
-    if (['card', 'panel', 'tool', 'background'].includes(data.surface))
+    if (['card', 'panel', 'tool', 'background', 'page', 'launcher'].includes(data.surface))
       increment(summary.surfaces, `${data.surface}:${data.event}`);
     if (typeof data.action === 'string' && /^[a-z][a-z0-9:_-]{0,47}$/.test(data.action))
       increment(summary.actions, `${data.event}:${data.action}`);

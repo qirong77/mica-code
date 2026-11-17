@@ -142,4 +142,16 @@ describe('resolveRuntimeConfigOverride', () => {
       effortAdjustment: { requested: 'high', applied: 'high', reason: 'undeclared' },
     });
   });
+
+  it('rejects an explicitly disabled provider prefix', () => {
+    const disabledConfig = {
+      ...config,
+      providers: config.providers.map((provider) =>
+        provider.id === 'gateway' ? { ...provider, disabled: true } : provider,
+      ),
+    };
+    expect(() => resolveRuntimeConfigOverride(disabledConfig, 'gateway/private-model')).toThrow(
+      'Provider is disabled: gateway',
+    );
+  });
 });

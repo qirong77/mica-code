@@ -1,25 +1,24 @@
-import { appendFileSync, existsSync, mkdirSync, readdirSync, statSync, unlinkSync } from 'node:fs';
+import { mkdirSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { resolveLogDir } from '@packages/mica-config/brand.js';
+import { enqueueLogEntry, flushLogs } from '@packages/mica-diagnostics/index.js';
 
 /**
  * 插件日志：每个插件一份 JSONL，和 desktop 运行时日志同一个目录，出问题时直接 tail / grep。
  *
- * 插件跑在 CLI 进程里（TUI 或 app-server），拿不到 desktop `host/log.js` 的写入器，
- * 所以这里是一个独立的小实现，规则和它保持一致：
+ * 复用 mica-diagnostics 的有界批量写入器，不在每条事件的调用栈里扫描或写盘：
  *
  * - 目录来自 `resolveLogDir()`（macOS `~/Library/Logs/mica`），与运行时日志同处一地。
  *   不放系统 temp：temp 每次登录被清空，重启后连「上一个版本为什么失败」都查不到；
  *   堆积靠下面两条规则控制，而不是靠系统清空；
  * - 一天一个文件，单文件超过 `MAX_FILE_BYTES` 就换下一个分片，不原地无限增长；
- * - 超过 `KEEP_DAYS` 天的旧分片在下次写入时清掉；
+ * - 超过 7 天的旧分片在批量写入时节流清掉，目录总容量由共享写入器兜底；
  * - 写盘失败、目录不可写一律吞掉：日志永远不能成为插件失败的原因。
  *
  * `MICA_PLUGIN_LOG=0` 关闭落盘（仍然转发给 host 的 logger）。
  */
 const PLUGIN_FILE_PREFIX = 'plugin-';
 const MAX_FILE_BYTES = 2 * 1024 * 1024;
-const KEEP_DAYS = 7;
 
 export type PluginLogPayload = Record<string, unknown> | unknown;
 
@@ -34,6 +33,10 @@ export type PluginLogOptions = {
   dir?: string;
   /** 关闭落盘（仍然转发）。 */
   disabled?: boolean;
+  /** 覆盖共享 writer 的分片大小；默认 2 MiB。 */
+  fileMaxBytes?: number;
+  /** 测试或一次性宿主需要立刻落盘时显式刷新共享批次。 */
+  force?: boolean;
 };
 
 /** 插件日志目录。与 desktop `host/log.js` 同一个目录，只是文件前缀不同。 */
@@ -82,7 +85,15 @@ export function createPluginLogger(
     forward(fallback, level, event, data);
     if (options.disabled || process.env.MICA_PLUGIN_LOG === '0') return;
     try {
-      appendLine(pluginId, { time: new Date().toISOString(), plugin: pluginId, level, event, data }, options);
+      enqueueLogEntry(
+        { at: Date.now(), scope: 'plugin', pluginId, plugin: pluginId, level, event, data },
+        {
+          dir: pluginLogDir(options),
+          filePrefix: `${PLUGIN_FILE_PREFIX}${safeFileName(pluginId)}`,
+          maxFileBytes: options.fileMaxBytes ?? MAX_FILE_BYTES,
+        },
+      );
+      if (options.force) flushLogs();
     } catch {
       // 日志落到磁盘失败不影响插件本身。
     }
@@ -93,53 +104,6 @@ export function createPluginLogger(
     warn: (event, data) => write('warn', event, data),
     error: (event, data) => write('error', event, data),
   };
-}
-
-function appendLine(
-  pluginId: string,
-  entry: { time: string; plugin: string; level: string; event: string; data?: PluginLogPayload },
-  options: PluginLogOptions,
-): void {
-  const dir = pluginLogDir(options);
-  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-  const base = join(dir, `${PLUGIN_FILE_PREFIX}${safeFileName(pluginId)}-${dayStamp(Date.now())}`);
-  appendFileSync(`${nextFreePath(base)}.jsonl`, `${JSON.stringify(entry)}\n`, 'utf-8');
-  pruneOldFiles(dir, Date.now());
-}
-
-/**
- * 当天第几个分片：同一份日志超过上限就换下一个 `-1.jsonl`，而不是原地截断。
- * 保留分片而不是丢弃内容，排查「刚才那次为什么失败」才有价值。
- */
-function nextFreePath(base: string): string {
-  for (let index = 0; ; index += 1) {
-    const candidate = index === 0 ? base : `${base}-${index}`;
-    const file = `${candidate}.jsonl`;
-    try {
-      if (!existsSync(file) || statSync(file).size < MAX_FILE_BYTES) return candidate;
-    } catch {
-      return candidate;
-    }
-  }
-}
-
-function pruneOldFiles(dir: string, now: number): void {
-  const cutoff = now - KEEP_DAYS * 24 * 60 * 60 * 1000;
-  let entries: string[];
-  try {
-    entries = readdirSync(dir);
-  } catch {
-    return;
-  }
-  for (const name of entries) {
-    if (!name.startsWith(PLUGIN_FILE_PREFIX) || !name.endsWith('.jsonl')) continue;
-    const file = join(dir, name);
-    try {
-      if (statSync(file).mtimeMs < cutoff) unlinkSync(file);
-    } catch {
-      // 文件在扫描与删除之间消失，或者没有权限：都不影响记录本次日志。
-    }
-  }
 }
 
 function forward(
@@ -153,15 +117,6 @@ function forward(
   } catch {
     // host 的 logger 自己抛错时，插件不该跟着挂掉。
   }
-}
-
-function dayStamp(now: number): string {
-  const date = new Date(now);
-  return [
-    date.getFullYear(),
-    String(date.getMonth() + 1).padStart(2, '0'),
-    String(date.getDate()).padStart(2, '0'),
-  ].join('');
 }
 
 function safeFileName(pluginId: string): string {

@@ -137,6 +137,22 @@ export type AgentRuntimeSnapshot = {
   turnTimings?: TurnTimingRecord[];
 };
 
+/**
+ * Provider-only checkpoint used while a turn is being retried or its history
+ * is rewritten.  It deliberately has no conversation projection: callers
+ * either provide that separately or use the runtime's display state.
+ */
+export type AgentClientSnapshot = Omit<AgentSnapshot<unknown, AgentUsageRecord>, 'conversationMessages'>;
+
+export type RestoreClientSnapshotOptions = {
+  /**
+   * Keep usage records produced since the checkpoint was captured.  A whole
+   * turn retry rewinds provider messages/reasoning, but the requests already
+   * sent to the provider still happened and must remain billable.
+   */
+  preserveUsage?: boolean;
+};
+
 export type InterruptedThinking = {
   providerId: string;
   protocol: ProviderProtocol;
@@ -1029,7 +1045,7 @@ export class AgentRuntime {
     return hadCurrentTurn;
   }
 
-  captureClientSnapshot() {
+  captureClientSnapshot(): AgentClientSnapshot | null {
     if (!this.client) return null;
     // 回滚只使用 provider 状态。跳过展示投影与 JSON 文本中间副本；一次 clone 也会
     // 保留 lastUsage 与 usageHistory 尾项的共享引用，而不是复制两遍。
@@ -1042,9 +1058,20 @@ export class AgentRuntime {
     });
   }
 
-  restoreClientSnapshot(snapshot: Omit<AgentSnapshot<unknown, AgentUsageRecord>, 'conversationMessages'>) {
-    // 只有真正回滚时才再复制。provider 会追加 usage，不能污染下一次重试的原始基线。
-    this.client?.loadSnapshot({ ...structuredClone(snapshot), conversationMessages: [] });
+  restoreClientSnapshot(snapshot: AgentClientSnapshot, options: RestoreClientSnapshotOptions = {}): void {
+    if (!this.client) return;
+    const usageHistory = options.preserveUsage
+      ? this.client.usageHistory
+      : snapshot.usageHistory;
+    const lastUsage = options.preserveUsage
+      ? this.client.lastUsage
+      : snapshot.lastUsage;
+    // 只回滚 provider 历史时原样保留当前 ledger，不重放基线、不发 usage 事件；真实请求
+    // 因此不会丢失或重复记账。合在同一次 clone 中也保留 lastUsage 与尾项的共享引用。
+    this.client.loadSnapshot({
+      ...structuredClone({ ...snapshot, usageHistory, lastUsage }),
+      conversationMessages: [],
+    });
   }
 
   loadSnapshot(snapshot: AgentRuntimeSnapshot, options: { recoverActiveThinking?: boolean } = {}) {

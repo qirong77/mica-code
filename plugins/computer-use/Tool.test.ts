@@ -76,7 +76,9 @@ function tool(deps: { runtimeDir: string; ask?: PluginAskApi }) {
   return createComputerUseTool({ ...deps, nodeBin: process.execPath });
 }
 
-function calls(logFile: string): Array<{ cmd: string; args: string[]; permit: string; permitBody: unknown; pid: number }> {
+function calls(
+  logFile: string,
+): Array<{ cmd: string; args: string[]; permit: string; permitBody: unknown; pid: number }> {
   try {
     return readFileSync(logFile, 'utf-8')
       .split('\n')
@@ -94,13 +96,15 @@ describe('computer_use tool', () => {
     process.env.CU_LOG = logFile;
 
     const result = await tool({ runtimeDir, ask }).execute!({
-      commands: [
-        { cmd: 'screens' },
-        { cmd: 'text', args: ['Calculator'] },
-      ],
+      commands: [{ cmd: 'screens' }, { cmd: 'text', args: ['Calculator'] }],
     });
 
     expect(ask.calls).toHaveLength(0);
+    expect(JSON.parse(result as string)).toMatchObject({
+      outcome: 'success',
+      code: 'completed',
+      text: expect.stringContaining('ok screens'),
+    });
     expect(result).toContain('ok screens');
     expect(result).toContain('ok text');
     const logged = calls(logFile);
@@ -153,6 +157,7 @@ describe('computer_use tool', () => {
       commands: [{ cmd: 'tap', args: ['Finder', '设置'] }],
     });
 
+    expect(JSON.parse(result as string)).toMatchObject({ outcome: 'declined', code: 'approval_declined' });
     expect(result).toContain('没有执行');
     expect(calls(logFile)).toHaveLength(0);
   });
@@ -166,6 +171,7 @@ describe('computer_use tool', () => {
       commands: [{ cmd: 'move', args: ['10', '20'] }],
     });
 
+    expect(JSON.parse(result as string)).toMatchObject({ outcome: 'waiting', code: 'approval_timeout' });
     expect(result).toContain('没有回应');
     expect(calls(logFile)).toHaveLength(0);
   });
@@ -202,6 +208,12 @@ describe('computer_use tool', () => {
       const result = await tool({ runtimeDir, ask: askStub({}) }).execute!({
         commands: [{ cmd: 'tap', args: ['Calculator', '1'] }, { cmd: 'type', args: ['1'] }, { cmd: 'pos' }],
       });
+      expect(JSON.parse(result as string)).toMatchObject({
+        outcome: 'error',
+        code: 'step_failed',
+        exitCode: 3,
+        timedOut: false,
+      });
       expect(result).toContain('exit=3');
       expect(result).toContain('boom');
       expect(result).toContain('后面的 1 步没有执行');
@@ -213,6 +225,7 @@ describe('computer_use tool', () => {
   it('explains the shape when commands are missing', async () => {
     const { runtimeDir } = workspace();
     const result = await tool({ runtimeDir }).execute!({});
+    expect(JSON.parse(result as string)).toMatchObject({ outcome: 'error', code: 'invalid_input' });
     expect(result).toContain('缺少 commands');
   });
 
@@ -225,9 +238,12 @@ describe('computer_use tool', () => {
     const heartbeat = setInterval(() => {
       heartbeats += 1;
     }, 5);
-    const pending = tool({ runtimeDir, ask: askStub({}) }).execute!({
-      commands: [{ cmd: 'tap' }, { cmd: 'type', args: ['must not run'] }],
-    }, { signal: controller.signal });
+    const pending = tool({ runtimeDir, ask: askStub({}) }).execute!(
+      {
+        commands: [{ cmd: 'tap' }, { cmd: 'type', args: ['must not run'] }],
+      },
+      { signal: controller.signal },
+    );
     let result;
     try {
       await vi.waitFor(() => expect(calls(logFile).map((entry) => entry.cmd)).toContain('tap'));
@@ -237,6 +253,7 @@ describe('computer_use tool', () => {
       result = await pending;
       clearInterval(heartbeat);
     }
+    expect(JSON.parse(result as string)).toMatchObject({ outcome: 'cancelled', code: 'aborted' });
     expect(result).toContain('中止');
     expect(result).toContain('后面的 1 步没有执行');
     const logged = calls(logFile);
@@ -259,6 +276,7 @@ describe('computer_use tool', () => {
       controller.abort();
       result = await pending;
     }
+    expect(JSON.parse(result as string)).toMatchObject({ outcome: 'cancelled', code: 'aborted' });
     expect(result).toContain('中止');
     expect(ask.calls).toHaveLength(0);
     expect(calls(logFile).map((entry) => entry.cmd)).toEqual(['commands', 'terminated']);
@@ -268,10 +286,55 @@ describe('computer_use tool', () => {
     const { runtimeDir, logFile } = workspace();
     process.env.CU_LOG = logFile;
     process.env.CU_OUTPUT_BYTES = String(2 * 1024 * 1024);
-    const result = await tool({ runtimeDir, ask: askStub({}) }).execute!({ commands: [{ cmd: 'tap' }, { cmd: 'type' }] });
+    const result = await tool({ runtimeDir, ask: askStub({}) }).execute!({
+      commands: [{ cmd: 'tap' }, { cmd: 'type' }],
+    });
     expect(result).toContain('失败');
     expect(calls(logFile).map((entry) => entry.cmd)).toEqual(['tap']);
     expect(existsSync(calls(logFile)[0]!.permit)).toBe(false);
+  });
+
+  it('keeps cancellation, busy and conflict explicit when approval cannot proceed', async () => {
+    for (const [code, outcome] of [
+      ['busy', 'busy'],
+      ['conflict', 'conflict'],
+    ] as const) {
+      const { runtimeDir, logFile } = workspace();
+      process.env.CU_LOG = logFile;
+      const ask = askStub({});
+      ask.request = async () => {
+        throw Object.assign(new Error('approval blocked'), { code });
+      };
+      const result = await tool({ runtimeDir, ask }).execute!({ commands: [{ cmd: 'tap' }] });
+      expect(JSON.parse(result as string)).toMatchObject({ outcome, code });
+      expect(calls(logFile)).toHaveLength(0);
+    }
+    const { runtimeDir, logFile } = workspace();
+    process.env.CU_LOG = logFile;
+    const result = await tool({ runtimeDir, ask: askStub({ optionIds: [], cancelled: true, reason: 'cancelled' }) })
+      .execute!({ commands: [{ cmd: 'tap' }] });
+    expect(JSON.parse(result as string)).toMatchObject({ outcome: 'cancelled', code: 'approval_cancelled' });
+    expect(calls(logFile)).toHaveLength(0);
+  });
+
+  it('reports step timeout structurally and never executes subsequent steps', async () => {
+    const { runtimeDir, logFile } = workspace();
+    process.env.CU_LOG = logFile;
+    process.env.CU_HOLD_ON = 'tap';
+    const original = globalThis.setTimeout;
+    const timer = vi
+      .spyOn(globalThis, 'setTimeout')
+      .mockImplementation(((fn: (...args: any[]) => void, ms?: number, ...args: any[]) =>
+        original(fn, ms === 120_000 ? 100 : ms, ...args)) as typeof setTimeout);
+    try {
+      const result = await tool({ runtimeDir, ask: askStub({}) }).execute!({
+        commands: [{ cmd: 'tap' }, { cmd: 'type' }],
+      });
+      expect(JSON.parse(result as string)).toMatchObject({ outcome: 'error', code: 'timeout', timedOut: true });
+      expect(calls(logFile).some((entry) => entry.cmd === 'type')).toBe(false);
+    } finally {
+      timer.mockRestore();
+    }
   });
 
   it('describes each step in a way the user can judge', () => {

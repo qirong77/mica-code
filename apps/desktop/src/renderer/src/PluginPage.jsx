@@ -5,6 +5,18 @@ import { pluginPagePath } from '@packages/mica-web-shared/index.js'
 import { createPluginHostApi } from './plugin-host'
 import { useIsMobile } from './hooks'
 import { notify } from './notify'
+import { lazyView } from './lazy-view'
+import { PluginSurface } from './PluginSurface'
+
+// 插件整页复用宿主的 Markdown 排版，不把 ChatView 作为插件依赖，也不另造渲染器。
+const PageMarkdown = lazyView(() => import('./ChatView'), 'Markdown')
+function PluginMarkdown(props) {
+  return (
+    <Suspense fallback={<div className="chat-markdown whitespace-pre-wrap">{props.text}</div>}>
+      <PageMarkdown {...props} />
+    </Suspense>
+  )
+}
 
 /**
  * 插件整页（清单 `desktop.page`）。
@@ -61,6 +73,7 @@ export function PluginPage({ entry, onClose, standalone = false }) {
   const api = useMemo(
     () => ({
       ...createPluginHostApi(entry.id),
+      ui: { Markdown: PluginMarkdown },
       page: {
         beforeClose(handler) {
           beforeClose.add(handler)
@@ -92,6 +105,7 @@ export function PluginPage({ entry, onClose, standalone = false }) {
     closing.current = true
     try {
       for (const handler of beforeClose) if ((await handler()) === false) return
+      api.experience('dismiss', { surface: 'page', action: 'close' })
       onClose()
     } catch (error) {
       notify({ key: `plugin-page-close:${entry.id}`, text: '页面暂时无法关闭', detail: error?.message || String(error), level: 'error' })
@@ -140,7 +154,9 @@ export function PluginPage({ entry, onClose, standalone = false }) {
               <div className="grid h-full place-items-center text-xs text-fg-muted">正在加载…</div>
             }
           >
-            <Page api={api} onClose={close} />
+            <PluginSurface api={api} surface="page" className="h-full min-h-0">
+              <Page api={api} onClose={close} />
+            </PluginSurface>
           </Suspense>
         </div>
       </div>

@@ -12,6 +12,8 @@ import {
   type FindingStatus,
 } from './assessments.js';
 import { CorrectionQueue, type StoredCorrection } from './corrections.js';
+import { fileSignature, ProjectionIndex } from './derived-index.js';
+import { LogEvidenceReader, type LogEvidence } from './log-evidence.js';
 
 export type { FindingStatus } from './assessments.js';
 
@@ -20,7 +22,7 @@ export type CaptureOptions = { captureContent: boolean; maxEventChars: number; m
  * 问题推导规则的版本。改了 classify / 退出码白名单 / 重复调用判定就加一：
  * 宿主据此重算 findings 与派生错误计数，不动用量、耗时和人工结论。
  */
-export const CLASSIFIER_VERSION = 9;
+export const CLASSIFIER_VERSION = 11;
 type Config = { providerId: string; protocol: string; model: string; effort: string; role: string };
 /**
  * `paused` 是宿主在迭代边界主动停下（开发构建重载），历史完整、随后续跑；
@@ -207,7 +209,7 @@ export type HelperSummary = { total: number; kinds: HelperKindSummary[] };
  * 这些失败发生在任何一轮之外，所以没有 `cwd`、也没有 `runId`：它们属于这台机器，
  * 不受 `review(cwd)` 的范围过滤。
  *
- * `count` 是下界：落盘被限流，跨进程重启也接不上累计数。
+ * `count` 是下界：窗口合并保留本宿主累计数，但强杀、轮转与跨宿主重启仍可能缺历史。
  */
 export type PluginFailureSummary = {
   pluginId: string;
@@ -255,6 +257,7 @@ export type ReviewReport = {
   helpers: HelperSummary;
   /** 插件常驻任务失败；机器级事实，不受工作区过滤。 */
   pluginFailures: PluginFailureSummary[];
+  logEvidence?: LogEvidence;
   /** 每个工具的调用量与失败率：这张表才看得出「哪个工具的失败率高到该修」。 */
   toolHealth: ToolHealthRow[];
   toolHealthCoverage: { includedRuns: number; excludedRuns: number; unknownResults: number };
@@ -316,7 +319,7 @@ const MAX_TOOL_HEALTH_ROWS = 60;
 const MAX_PLUGIN_FAILURES = 100;
 /** 同一任务失败到第三次才值得看一眼：前两次多半是外部服务抖了一下。 */
 const PLUGIN_FAILURE_FINDING_COUNT = 3;
-/** 同一个常驻任务在本进程内最多每 5 分钟落一条失败记录（每个任务的第一条一定落盘）。 */
+/** 同一个任务的详细事件每 5 分钟合并一次；首条与 flush/dispose 的尾部检查点不受限流。 */
 const PLUGIN_EVENT_INTERVAL_MS = 5 * 60 * 1000;
 const MAX_PLUGIN_EVENT_KEYS = 500;
 /** 单个事件文件的上限：滚成 `.1` 之后重新写，坏掉的任务写不满磁盘。 */
@@ -327,6 +330,20 @@ const MAX_PLUGIN_EVENTS_BYTES = 4 * 1024 * 1024;
 const MAX_PLUGIN_EVENTS_READ_BYTES = 8 * 1024 * 1024;
 const PLUGIN_EVENTS_FILE = 'plugin-events.jsonl';
 const PLUGIN_EVENTS_ROTATED = 'plugin-events.1.jsonl';
+type PluginEventRecord = {
+  at: string;
+  pluginId: string;
+  taskId: string;
+  tick: number;
+  failures: number;
+  error: string;
+};
+type PluginEventSlot = {
+  lastWriteAt: number;
+  generation: number;
+  latest: PluginEventRecord;
+  pending: boolean;
+};
 const STATUSES = new Set<FindingStatus>(['open', 'accepted', 'dismissed', 'validated', 'regressed']);
 const OUTCOMES = new Set<Outcome>(['running', 'completed', 'aborted', 'error', 'interrupted', 'paused']);
 const COMPACTION_STRATEGIES = new Set<CompactionStrategy>(['local', 'llm', 'idle']);
@@ -573,8 +590,13 @@ function literalWords(text: string): string[] | null {
         started = false;
       } else finishWord();
       if (redirectTarget || text[index + 1] === '<') return null;
-      if (text[index + 1] === char || text[index + 1] === '&' || text[index + 1] === '|' ||
-          (char === '<' && text[index + 1] === '>')) index++;
+      if (
+        text[index + 1] === char ||
+        text[index + 1] === '&' ||
+        text[index + 1] === '|' ||
+        (char === '<' && text[index + 1] === '>')
+      )
+        index++;
       redirectTarget = true;
     } else if (char === '"' || char === "'") {
       quote = char;
@@ -607,7 +629,9 @@ function expectedGitExit(segment: string): boolean {
     if (['-C', '-c', '--git-dir', '--work-tree', '--namespace', '--config-env'].includes(option)) {
       if (words[++index] === undefined) return false;
     } else if (
-      !/^(?:--(?:git-dir|work-tree|namespace|config-env)=.+|--(?:no-pager|paginate|bare|literal-pathspecs|no-optional-locks))$/.test(option)
+      !/^(?:--(?:git-dir|work-tree|namespace|config-env)=.+|--(?:no-pager|paginate|bare|literal-pathspecs|no-optional-locks))$/.test(
+        option,
+      )
     )
       return false;
   }
@@ -617,7 +641,22 @@ function expectedGitExit(segment: string): boolean {
     let check = false;
     for (let cursor = 0; cursor < args.length && args[cursor] !== '--'; cursor++) {
       const arg = args[cursor];
-      if (['--output', '--src-prefix', '--dst-prefix', '--line-prefix', '--word-diff-regex', '--diff-algorithm', '--anchored', '--find-object', '-S', '-G', '-O', '-I'].includes(arg)) {
+      if (
+        [
+          '--output',
+          '--src-prefix',
+          '--dst-prefix',
+          '--line-prefix',
+          '--word-diff-regex',
+          '--diff-algorithm',
+          '--anchored',
+          '--find-object',
+          '-S',
+          '-G',
+          '-O',
+          '-I',
+        ].includes(arg)
+      ) {
         if (args[++cursor] === undefined) return false;
       } else if (arg === '--quiet' || arg === '--exit-code') check = true;
     }
@@ -635,13 +674,19 @@ function expectedGitExit(segment: string): boolean {
       if (args[++cursor] === undefined) return false;
     } else if (
       /^--(?:global|local|system|worktree|includes|no-includes|show-origin|show-scope|null)$/.test(arg) ||
-      /^--file=.+/.test(arg) || arg === '-z'
-    ) continue;
+      /^--file=.+/.test(arg) ||
+      arg === '-z'
+    )
+      continue;
     else if (arg.startsWith('-')) return false;
     else positional.push(arg);
   }
-  return query && positional.length >= 1 && positional.length <= 2 &&
-    /^[A-Za-z0-9-]+\.(?:.+\.)?[A-Za-z][A-Za-z0-9-]*$/.test(positional[0]);
+  return (
+    query &&
+    positional.length >= 1 &&
+    positional.length <= 2 &&
+    /^[A-Za-z0-9-]+\.(?:.+\.)?[A-Za-z][A-Za-z0-9-]*$/.test(positional[0])
+  );
 }
 
 /**
@@ -684,12 +729,14 @@ function exitVerdict(
   const code = Number(category.slice(5));
   const expected = segments.map((segment) => expectedExit(programOf(segment), code, segment));
   const { stdout, stderr } = shellOutput(result);
-  const otherOutputSources = (commandSegments(call?.command ?? '')?.filter((segment) => programOf(segment.text)).length ?? 0) > segments.length;
+  const otherOutputSources =
+    (commandSegments(call?.command ?? '')?.filter((segment) => programOf(segment.text)).length ?? 0) > segments.length;
   // Git can report invalid keys, arguments or permissions with status 1 as well.
   if (
     /^(?:\s*(?:error|fatal):|\s*usage: git\b)|\b(?:EACCES|EPERM|permission denied)\b/im.test(stderr) &&
     segments.some((segment) => programOf(segment) === 'git')
-  ) return otherOutputSources ? 'unknown' : 'error';
+  )
+    return otherOutputSources ? 'unknown' : 'error';
   if (expected.every(Boolean)) return 'expected';
   if (!expected.some(Boolean)) return 'error';
   // Earlier sequence / OR branches and upstream pipeline stages can leave
@@ -699,9 +746,12 @@ function exitVerdict(
   // printed by rg) cannot prove which command ran. Recognise only explicit diagnostics.
   const diagnostics = `${stdout}\n${stderr}`.replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, '');
   if (
-    /^\s*(?:(?:SyntaxError|TypeError|ReferenceError|AssertionError|Error|error|fatal):|(?:ls|stat|find|cd):)/m.test(stderr) ||
+    /^\s*(?:(?:SyntaxError|TypeError|ReferenceError|AssertionError|Error|error|fatal):|(?:ls|stat|find|cd):)/m.test(
+      stderr,
+    ) ||
     /^\s*(?:FAIL(?:ED)?(?:\s|$)|\d+\s+(?:fail(?:ed)?|tests? failed)\b|error TS\d+:)/m.test(diagnostics)
-  ) return 'error';
+  )
+    return 'error';
   return 'unknown';
 }
 
@@ -1018,7 +1068,65 @@ function failureText(value: unknown): string {
       | undefined;
     return text?.text ?? '';
   }
+  if (typeof item.code === 'string') return item.code;
   return '';
+}
+
+/** Only the envelope is metadata. Never walk stdout, content, or arbitrary nested result data. */
+function envelopeCategory(item: Record<string, unknown>, name: string): string | null {
+  const outcome = typeof item.outcome === 'string' ? item.outcome : item.status;
+  if (outcome === 'unknown') return 'unknown-result';
+  if (typeof outcome === 'string' && ['cancelled', 'aborted', 'declined', 'denied', 'waiting', 'running', 'busy', 'conflict', 'partial', 'skipped', 'expected-exit'].includes(outcome)) return null;
+  const explicitFailure =
+    item.isError === true ||
+    item.success === false ||
+    item.ok === false ||
+    outcome === 'error' ||
+    outcome === 'failed' ||
+    outcome === 'failure';
+  const explicitSuccess = item.success === true || item.ok === true || outcome === 'completed' || outcome === 'success';
+  // Legacy snake_case process keys without an outcome discriminator belong only to
+  // run_shell. A read tool may return a JSON source file containing exactly those keys.
+  const execution =
+    SHELL_TOOL.test(name) ||
+    explicitFailure ||
+    explicitSuccess ||
+    typeof item.outcome === 'string' ||
+    Object.hasOwn(item, 'exitCode') ||
+    Object.hasOwn(item, 'timedOut');
+  if (
+    (execution && (item.timed_out === true || item.timedOut === true)) ||
+    outcome === 'timeout' ||
+    outcome === 'timed_out'
+  )
+    return 'timeout';
+  if (execution && typeof item.signal === 'string' && item.signal.trim()) return 'signal';
+  const code = item.exitCode ?? (execution ? item.exit_code : undefined);
+  const exit = typeof code === 'number' && Number.isInteger(code) && code !== 0 ? `exit-${code}` : null;
+  if (explicitFailure || (!explicitSuccess && (typeof item.error === 'string' ? !!item.error.trim() : !!item.error))) {
+    const category = classifyError(failureText(item), name);
+    return category === 'tool-error' && exit ? exit : category;
+  }
+  if (exit) return exit;
+  // A shell with no terminal code did not establish successful completion.
+  if (SHELL_TOOL.test(name) && (item.exit_code === null || item.exitCode === null)) return 'tool-error';
+  return null;
+}
+
+/** Existing operation headers, independent of plugin/tool names. New producers should use JSON outcomes. */
+function operationHeaderCategory(raw: string, name: string): string | null {
+  // Headers must start an operation block, not appear in a quoted source line or normal prose.
+  for (const block of raw.trimStart().split(/\r?\n\r?\n/)) {
+    const first = block.split(/\r?\n/, 1)[0];
+    const step = /^\[\d+\/\d+\] [^\n]+ → 失败（exit=(-?\d+)）$/.exec(first);
+    if (step && Number(step[1]) !== 0) return `exit-${step[1]}`;
+    const operation = /^\[[^\]\r\n]+\] (exit=(-?\d+)|失败[:：](.*?)) · \d+(?:\.\d+)?s(?: · (.*))?$/.exec(first);
+    if (!operation) continue;
+    if (operation[4]?.includes('已超时中断')) return 'timeout';
+    if (operation[3]) return classifyError(operation[3], name);
+    if (operation[2] !== undefined && Number(operation[2]) !== 0) return `exit-${operation[2]}`;
+  }
+  return null;
 }
 
 function errorCategory(raw: string, name: string): string | null {
@@ -1029,19 +1137,7 @@ function errorCategory(raw: string, name: string): string | null {
     /* shell/plain result */
   }
   if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-    const item = parsed as Record<string, unknown>;
-    if (item.isError === true || item.success === false || item.ok === false || item.status === 'error') {
-      return classifyError(failureText(item), name);
-    }
-    if (SHELL_TOOL.test(name)) {
-      if (item.timed_out === true) return 'timeout';
-      if (item.signal !== undefined && item.signal !== null) return 'signal';
-      if (item.exit_code === null || item.exitCode === null) return 'tool-error';
-      const exitCode = item.exitCode ?? item.exit_code;
-      if (typeof exitCode === 'number' && Number.isInteger(exitCode) && exitCode !== 0) return `exit-${exitCode}`;
-    }
-    // A successful envelope can contain source text or logs beginning with Error:.
-    return null;
+    return envelopeCategory(parsed as Record<string, unknown>, name);
   }
   // Only the shell tool's leading command envelope is metadata. Source files
   // and stdout can legitimately contain the same keys or entire sample blocks.
@@ -1066,7 +1162,7 @@ function errorCategory(raw: string, name: string): string | null {
   if (exit && Number(exit[1]) !== 0) return `exit-${exit[1]}`;
   if (/^(?:Error:|Tool (?:execution )?(?:error|failed):|工具[^\n]*(?:失败|错误)[:：])/i.test(raw.trimStart()))
     return classifyError(raw, name);
-  return null;
+  return operationHeaderCategory(raw, name);
 }
 /**
  * Per-cause guidance for a failing tool call. A review item whose suggestion is
@@ -1164,7 +1260,7 @@ function errorGuidance(name: string, category: string): { suggestion: string; ev
   };
 }
 
-function classifyError(text: string, name = ''): string {
+function classifyError(text: string, name = '', context: 'tool' | 'runtime' | 'provider' = 'tool'): string {
   // A tool may append previous entries, usage text or a sample patch after its
   // failure. Only its explicit failure line (or the first line) identifies the cause.
   const lines = text
@@ -1175,6 +1271,29 @@ function classifyError(text: string, name = ''): string {
   const wrapper = /^(?:Tool (?:execution )?(?:error|failed)|工具[^\n]*(?:失败|错误))[:：]\s*/i;
   const wrapped = wrapper.test(first) ? first.replace(wrapper, '') : first;
   const cause = (wrapped || (wrapper.test(first) ? (lines[1] ?? '') : '')).replace(/^Error:\s*/i, '');
+  // Retry events come from the model transport, not from tool execution. These categories
+  // identify the failing request path, not which side (provider / proxy / network) caused it.
+  if (context !== 'tool') {
+    if (
+      /overload(?:ed)?|server_is_overloaded|service_unavailable|\b503\b|server[^\n]{0,40}(?:busy|capacity)|服务[^\n]{0,20}(?:过载|繁忙)/i.test(
+        cause,
+      )
+    )
+      return 'provider-overload';
+    if (/rate.?limit|slow_down|\b429\b/i.test(cause)) return 'provider-rate-limit';
+    if (
+      /\b(?:timeout|timed out|ETIMEDOUT)\b|超时|^No stream data from provider for \d+(?:\.\d+)?s \(waiting for model output\)\./i.test(
+        cause,
+      )
+    )
+      return 'provider-timeout';
+    if (
+      /\b(?:APIConnectionError|ECONNRESET|ECONNREFUSED|EPIPE|ENOTFOUND|EAI_AGAIN)\b|connection error|fetch failed|(?:socket|connection|transport|stream)[^\n]{0,80}(?:closed|reset|terminated|failed|refused)/i.test(
+        cause,
+      )
+    )
+      return 'provider-connection';
+  }
   const patch = baseName(name) === 'apply_patch';
   if (patch) {
     if (/hunk (?:没有任何增删内容|只有上下文行)|hunk (?:has|contains) no (?:changes|additions|removals)/i.test(cause))
@@ -1209,9 +1328,12 @@ function classifyError(text: string, name = ''): string {
   if (/EACCES|EPERM|permission denied|unauthorized|forbidden/i.test(cause)) return 'permission';
   if (/\b(?:timeout|timed out|ETIMEDOUT)\b|超时/i.test(cause)) return 'timeout';
   if (
-    /^页面(?:截图超过 \d+ms 未返回(?:（页面可能在忙）；可重试或改用 evaluate 读 DOM)?|脚本执行超过 \d+ms)[。.]?$/.test(cause) ||
+    /^页面(?:截图超过 \d+ms 未返回(?:（页面可能在忙）；可重试或改用 evaluate 读 DOM)?|脚本执行超过 \d+ms)[。.]?$/.test(
+      cause,
+    ) ||
     /^No stream data from provider for \d+(?:\.\d+)?s \(waiting for model output\)\.$/i.test(cause)
-  ) return 'timeout';
+  )
+    return 'timeout';
   if (
     /\b(?:invalid|validation|schema)\b|(?:unknown|unexpected|unrecognized|unsupported|missing|required) (?:parameter|argument|field|key)|(?:未知|不支持|未识别|非法)(?:的)?(?:参数|字段)|不认识这些参数/i.test(
       cause,
@@ -1219,7 +1341,16 @@ function classifyError(text: string, name = ''): string {
   )
     return 'invalid-input';
   if (/rate.?limit|\b429\b/i.test(cause)) return 'rate-limit';
-  return 'tool-error';
+  return context === 'provider' ? 'provider-error' : context === 'runtime' ? 'runtime-error' : 'tool-error';
+}
+
+/** Metadata-only history still tells us whether this was a request retry or a tool failure. */
+function runtimeCategory(category: string, retry: boolean): string {
+  if (category === 'connection-closed' || category === 'connection-error') return 'provider-connection';
+  if (category === 'timeout') return 'provider-timeout';
+  if (category === 'rate-limit') return 'provider-rate-limit';
+  if (category === 'tool-error') return retry ? 'provider-error' : 'runtime-error';
+  return category;
 }
 function timestamp(value: string): string {
   return typeof value === 'string' && Number.isFinite(Date.parse(value)) ? value : new Date().toISOString();
@@ -1495,8 +1626,23 @@ export class HarnessRecorder {
   private readonly correctionQueue: CorrectionQueue;
   /** 归属不明被丢弃的纠正次数，进 review 的 warnings。 */
   private droppedCorrections = 0;
-  /** `pluginId/taskId` → 上次写插件失败记录的时间，只用于限流。 */
-  private readonly pluginEventWrites = new Map<string, number>();
+  /** Detailed writes are throttled; the latest cumulative counters must never be throttled. */
+  private readonly pluginEventWrites = new Map<string, PluginEventSlot>();
+
+  private readonly summaryIndex = new ProjectionIndex<{ startedAt: string; cwd?: string; outcome: Outcome }>(
+    10_000,
+    4 * 1024 * 1024,
+  );
+  private readonly runIndex = new ProjectionIndex<RunProjection>(2000, 16 * 1024 * 1024);
+  private readonly logs = new LogEvidenceReader();
+
+  /** Stored absolute paths are historical metadata, never an authority for local IO. */
+  private relocate(summary: RunSummary): RunSummary {
+    summary.traceFile = join(this.root, 'runs', summary.id, 'events.jsonl');
+    for (const finding of summary.findings)
+      for (const evidence of finding.evidence) evidence.traceFile = summary.traceFile;
+    return summary;
+  }
 
   constructor(
     root: string,
@@ -1692,13 +1838,16 @@ export class HarnessRecorder {
       recordedResultHash === undefined ? digest(textOf(result)) : recordedResultHash,
     );
     const category = recordedCategory === undefined ? errorCategory(result, name) : recordedCategory;
-    const verdict = recordedExpected === undefined
-      ? exitVerdict(call, name, category, result)
-      : recordedExpected ? 'expected' : 'error';
-    if (category === 'unknown-exit' || verdict === 'unknown') {
+    const verdict =
+      recordedExpected === undefined
+        ? exitVerdict(call, name, category, result)
+        : recordedExpected
+          ? 'expected'
+          : 'error';
+    if (category === 'unknown-exit' || category === 'unknown-result' || verdict === 'unknown') {
       state.unknownResults = (state.unknownResults ?? 0) + 1;
       state.uncertainExits = (state.uncertainExits ?? 0) + 1;
-      return { category: 'unknown-exit', expectedExit: false };
+      return { category: category === 'unknown-result' ? category : 'unknown-exit', expectedExit: false };
     }
     const expected = verdict === 'expected';
     if (state.toolTally) {
@@ -1819,6 +1968,18 @@ export class HarnessRecorder {
     // purpose 也进 key 与标题：同一个插件可能既起标题又写提交说明，合并成一条就看不出
     // 是哪条链路在超时，而修法完全不同。
     const purpose = helper?.purpose ? ` · ${helper.purpose}` : '';
+    const provider = category.startsWith('provider-');
+    const providerAdvice: Record<string, string> = {
+      'provider-overload':
+        '模型请求路径报告服务过载/不可用。先核对供应商状态、网关同时间段日志与退避；不要把它当成工具参数错误或仅凭此归因本机。',
+      'provider-connection':
+        '模型请求连接失败。核对供应商、代理/网关与网络的同时间段日志；仅凭这条错误无法确定故障在哪一端，不是工具调用失败。',
+      'provider-timeout':
+        '模型请求等待超时。对比请求首字/空闲超时与供应商、网关日志；不要建议把工具改成后台命令，也不要仅凭重试判定本机缺陷。',
+      'provider-rate-limit': '模型请求被限流。核对供应商配额、并发与退避，不能据此判断工具实现有错。',
+      'provider-error':
+        '模型请求触发重试，原因尚未明确。先读请求边界错误及供应商/网关日志，再决定是否修改运行时；这不是工具失败证据。',
+    };
     this.addFinding(
       state,
       kind,
@@ -1832,10 +1993,10 @@ export class HarnessRecorder {
           ? `Request retry: ${category}`
           : `Run ended with an error: ${category}`,
       helper ? (helper.pluginId ? `plugin:${helper.pluginId}` : `helper:${helper.kind}`) : 'runtime',
-      retry
-        ? 'Inspect provider availability, limits, and retry configuration before proposing a runtime change.'
+      provider
+        ? (providerAdvice[category] ?? providerAdvice['provider-error']!)
         : 'Inspect the final error and preceding trace before identifying a runtime or guidance change.',
-      retry
+      retry || provider
         ? 'Run comparable requests and compare retry rate, latency, and completion without masking persistent errors.'
         : 'Replay the original acceptance criteria and confirm both task completion and an independent user or test check.',
       retry ? `Attempt ${attempt}; category ${category}.` : `Runtime reported error: ${category}.`,
@@ -1921,9 +2082,8 @@ export class HarnessRecorder {
    * 它不挂在任何一条 run 上（两者都不在轮次里），所以单独落 `plugin-events.jsonl`：
    * 硬塞进某次运行的轨迹，会让那条运行的失败原因与耗时都变成假的。
    *
-   * 限流只影响写盘频率、不丢「曾经失败」这个事实：每个任务在本进程内的第一条一定写
-   * （一次失败立刻可见），之后同一任务每 5 分钟最多一条，`tick` / `failures` 随事件
-   * 一起写进去，聚合时仍能看出「它一直在坏」。
+   * 每次先更新计数与最新错误，再限流详细写入。首条立即写，窗口尾部由下一次到期事件、
+   * flush/dispose 或键淘汰补写；报告仍明确是下界，强杀与跨宿主累计数无法补齐。
    */
   notePluginEvent(event: PluginObservationEvent): void {
     if (this.disposed) return;
@@ -1941,25 +2101,30 @@ export class HarnessRecorder {
       if (!pluginId) return;
       const key = `${pluginId}\n${taskId}`;
       const now = Date.now();
-      const last = this.pluginEventWrites.get(key);
-      if (last !== undefined && now - last < PLUGIN_EVENT_INTERVAL_MS) return;
-      if (!this.pluginEventWrites.has(key) && this.pluginEventWrites.size >= MAX_PLUGIN_EVENT_KEYS)
-        this.pluginEventWrites.delete(this.pluginEventWrites.keys().next().value!);
-      this.pluginEventWrites.set(key, now);
-      const record = {
+      let slot = this.pluginEventWrites.get(key);
+      if (!slot && this.pluginEventWrites.size >= MAX_PLUGIN_EVENT_KEYS) {
+        const [oldKey, oldSlot] = this.pluginEventWrites.entries().next().value!;
+        this.writePluginEvent(oldSlot);
+        this.pluginEventWrites.delete(oldKey);
+      }
+      const record: PluginEventRecord = {
         at: timestamp(event.timestamp),
         pluginId,
         taskId,
-        tick: finiteCount(event.type === 'background:failed' ? event.tick : 0),
-        failures: finiteCount(event.failures),
+        tick: Math.max(slot?.latest.tick ?? 0, finiteCount(event.type === 'background:failed' ? event.tick : 0)),
+        failures: Math.max((slot?.latest.failures ?? 0) + 1, finiteCount(event.failures)),
         error: boundedText(event.error, 500),
       };
-      const line = `${JSON.stringify(record)}\n`;
-      this.enqueue(async () => {
-        await this.directory(this.root);
-        await this.rotatePluginEvents();
-        await appendFile(join(this.root, PLUGIN_EVENTS_FILE), line, { mode: 0o600 });
-      });
+      const first = !slot;
+      if (!slot) {
+        slot = { lastWriteAt: now, generation: 0, latest: record, pending: true };
+        this.pluginEventWrites.set(key, slot);
+      } else {
+        slot.latest = record;
+        slot.pending = true;
+      }
+      if (first || now - slot.lastWriteAt >= PLUGIN_EVENT_INTERVAL_MS || now < slot.lastWriteAt)
+        this.writePluginEvent(slot);
     } catch (error) {
       try {
         this.onError(error);
@@ -1967,6 +2132,45 @@ export class HarnessRecorder {
         /* reporting must not break the plugin task */
       }
     }
+  }
+
+  private writePluginEvent(slot: PluginEventSlot): void {
+    if (!slot.pending) return;
+    const line = `${JSON.stringify(slot.latest)}\n`;
+    const generation = ++slot.generation;
+    slot.pending = false;
+    slot.lastWriteAt = Date.now();
+    this.enqueue(async () => {
+      try {
+        await this.directory(this.root);
+        await this.withPluginEventsLock(async () => {
+          // Rotation and append must be one cross-host transaction. Otherwise another
+          // writer can replace `.1` while it still holds this host's new event.
+          await this.rotatePluginEvents();
+          await appendFile(join(this.root, PLUGIN_EVENTS_FILE), line, { mode: 0o600 });
+        });
+      } catch (error) {
+        // A newer queued checkpoint already contains this cumulative state. Do not
+        // leave it dirty if that newer write succeeds (which would duplicate rows).
+        if (slot.generation === generation) slot.pending = true;
+        throw error;
+      }
+    });
+  }
+
+  private async withPluginEventsLock<T>(work: () => Promise<T>): Promise<T> {
+    for (let attempt = 0; attempt < 200; attempt++) {
+      const release = acquireProcessLock(join(this.root, 'plugin-events.lock'));
+      if (release) {
+        try {
+          return await work();
+        } finally {
+          release();
+        }
+      }
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    throw new Error('Plugin events are busy; the checkpoint was not applied.');
   }
 
   /** 单个事件文件有上限：超了就滚成 `.1`（覆盖旧的），一个坏掉的任务写不满磁盘。 */
@@ -1977,6 +2181,33 @@ export class HarnessRecorder {
       await rename(join(this.root, PLUGIN_EVENTS_FILE), join(this.root, PLUGIN_EVENTS_ROTATED));
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    }
+  }
+
+  private async readPluginEventFiles(warnings: string[]): Promise<{ name: string; text: string }[]> {
+    try {
+      await stat(this.root);
+      return await this.withPluginEventsLock(async () => {
+        const files: { name: string; text: string }[] = [];
+        for (const name of [PLUGIN_EVENTS_ROTATED, PLUGIN_EVENTS_FILE]) {
+          try {
+            const info = await stat(join(this.root, name));
+            if (info.size > MAX_PLUGIN_EVENTS_READ_BYTES) {
+              warnings.push(`${name} exceeds the plugin event size limit; its failures were not counted.`);
+              continue;
+            }
+            files.push({ name, text: await readFile(join(this.root, name), 'utf8') });
+          } catch (error) {
+            if ((error as NodeJS.ErrnoException).code !== 'ENOENT')
+              warnings.push(`Unreadable ${name}: ${boundedText(String(error))}`);
+          }
+        }
+        return files;
+      });
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT')
+        warnings.push(`Unreadable plugin event snapshot: ${boundedText(String(error))}`);
+      return [];
     }
   }
 
@@ -1991,23 +2222,11 @@ export class HarnessRecorder {
     eventTimes?: Map<string, Set<number>>,
   ): Promise<PluginFailureSummary[]> {
     const groups = new Map<string, PluginFailureSummary>();
-    // 写盘被限流：一个每 30 秒失败一次的任务，一小时只留 12 行，真实失败 120 次。
+    // 详细写盘被合并：一个每 30 秒失败一次的任务，一小时可能只留 12 行，真实失败 120 次。
     // 事件自带累计数，最后取「行数」与「累计数最大值」中大的那个，才不会低估。
     const reported = new Map<string, number>();
-    for (const name of [PLUGIN_EVENTS_FILE, PLUGIN_EVENTS_ROTATED]) {
-      let text: string;
-      try {
-        const info = await stat(join(this.root, name));
-        if (info.size > MAX_PLUGIN_EVENTS_READ_BYTES) {
-          warnings.push(`${name} exceeds the plugin event size limit; its failures were not counted.`);
-          continue;
-        }
-        text = await readFile(join(this.root, name), 'utf8');
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'ENOENT')
-          warnings.push(`Unreadable ${name}: ${boundedText(String(error))}`);
-        continue;
-      }
+    // Rotation and both reads share a lock: never read the same file twice across a rename.
+    for (const { name, text } of await this.readPluginEventFiles(warnings)) {
       let corrupt = 0;
       for (const line of text.split('\n')) {
         if (!line.trim()) continue;
@@ -2363,7 +2582,7 @@ export class HarnessRecorder {
         stored.attempt = event.attempt;
         stored.delayMs = event.delayMs;
         if (captureTrace) stored.error = payload(event.error, state.options);
-        const category = classifyError(event.error);
+        const category = classifyError(event.error, '', 'provider');
         stored.errorCategory = category;
         this.noteRuntimeError(state, seq, 'retry', category, event.attempt);
         break;
@@ -2397,7 +2616,7 @@ export class HarnessRecorder {
           if (captureTrace) stored.error = payload(event.error, state.options);
         }
         if (event.outcome === 'error') {
-          const category = classifyError(event.error ?? '');
+          const category = classifyError(event.error ?? '', '', 'runtime');
           stored.errorCategory = category;
           this.noteRuntimeError(state, seq, 'run-error', category);
         }
@@ -2419,6 +2638,7 @@ export class HarnessRecorder {
   }
 
   async flush(): Promise<void> {
+    for (const slot of this.pluginEventWrites.values()) this.writePluginEvent(slot);
     for (const state of this.active) this.save(state);
     let pending: Promise<void>;
     do {
@@ -2470,8 +2690,11 @@ export class HarnessRecorder {
         const info = await stat(file);
         if (info.size > 4_000_000) continue;
         writtenAt = info.mtimeMs;
+        const indexed = this.summaryIndex.get(id, fileSignature(info));
+        if (indexed && indexed.outcome !== 'running') continue;
         summary = JSON.parse(await readFile(file, 'utf8')) as RunSummary;
         if (!validSummary(summary, id)) continue;
+        this.relocate(summary);
       } catch {
         continue;
       }
@@ -2494,6 +2717,135 @@ export class HarnessRecorder {
       }
     }
     return reclaimed;
+  }
+
+  private async projectRun(summary: RunSummary, loadedSignature?: string): Promise<RunProjection> {
+    let signature = '';
+    const signatureOf = async () => {
+      const summarySignature = fileSignature(await stat(join(this.root, 'runs', summary.id, 'summary.json')));
+      // The supplied summary must be the same generation as the cache signature.
+      if (!loadedSignature || summarySignature !== loadedSignature) return '';
+      return `${CLASSIFIER_VERSION}:${summarySignature}:${fileSignature(await stat(summary.traceFile))}`;
+    };
+    try {
+      signature = await signatureOf();
+    } catch {
+      /* missing traces are reported below */
+    }
+    const cached = signature ? this.runIndex.get(summary.id, signature) : undefined;
+    if (cached) return cached;
+    const warnings: string[] = [];
+    const memory: InputMemory = new Map();
+    const result: RunProjection = {
+      findings: [],
+      toolErrors: 0,
+      expectedExits: 0,
+      timestamps: [],
+      observed: [],
+      warnings,
+      included: false,
+      unknown: 0,
+      tools: [],
+    };
+    const finish = async (): Promise<RunProjection> => {
+      Object.assign(result, {
+        findings: summary.findings,
+        toolErrors: summary.toolErrors,
+        expectedExits: summary.expectedExits,
+        derivationDrops: summary.derivationDrops,
+        timestamps: [...timestamps],
+      });
+      // Cache only derived metadata, not events, input, tool results or errors.
+      if (signature && summary.outcome !== 'running') {
+        try {
+          if (signature === (await signatureOf())) this.runIndex.set(summary.id, signature, result);
+        } catch {
+          /* raced removal */
+        }
+      }
+      return result;
+    };
+    const timestamps = new Map<number, string>();
+    const events = await inspectTrace(summary, warnings, timestamps);
+    const observed = new Map<string, Set<number>>();
+    const state = derivationState(summary, events?.length ?? 0);
+    state.onFinding = (id, seq) => {
+      const sequences = observed.get(id) ?? new Set<number>();
+      sequences.add(seq);
+      observed.set(id, sequences);
+    };
+    // Replay uncapped occurrence signals, not only the first MAX_EVIDENCE
+    // references. Even partial traces can confirm the events actually present.
+    if (events) for (const event of events) this.replay(state, event, memory);
+    const recordTimes = (): void => {
+      for (const candidate of summary.findings) {
+        const eligible =
+          candidate.kind === 'retry' ||
+          candidate.kind === 'run-error' ||
+          (events &&
+            summary.droppedEvents === 0 &&
+            events.length === summary.eventCount &&
+            (state.unknownResults ?? 0) === (state.uncertainExits ?? 0) &&
+            state.pending.size === 0);
+        if (eligible) result.observed.push([candidate.id, [...(observed.get(candidate.id) ?? [])]]);
+      }
+    };
+    if (!events || summary.outcome === 'running' || summary.droppedEvents > 0 || events.length !== summary.eventCount) {
+      result.included = false;
+      recordTimes();
+      return finish();
+    }
+    // Tool health uses its own replay so timing collection cannot alter the
+    // existing health coverage or cross-run input classification.
+    const healthState = derivationState(summary, events.length);
+    healthState.toolTally = new Map();
+    for (const event of events)
+      if (event.type === 'tool:call' || event.type === 'tool:result') this.replay(healthState, event, memory);
+    const unknown = (healthState.unknownResults ?? 0) + healthState.pending.size;
+    result.unknown = unknown;
+    // Ambiguous exits are classified as unknown, rather than missing trace data.
+    // Replace stale tool findings even when these results exclude the run from health;
+    // other confirmed errors in this same replay must remain visible.
+    if (unknown === (healthState.uncertainExits ?? 0)) {
+      summary.toolErrors = healthState.summary.toolErrors;
+      summary.expectedExits = healthState.summary.expectedExits;
+      summary.derivationDrops = healthState.summary.derivationDrops;
+      const runtimeKind = (finding: ReviewFinding): boolean => finding.kind === 'retry' || finding.kind === 'run-error';
+      const runtimeComplete = events.every(
+        (event) =>
+          !(event.type === 'retry' || (event.type === 'run:finish' && event.outcome === 'error')) ||
+          hasCompleteContent(event.error) ||
+          typeof event.errorCategory === 'string',
+      );
+      summary.findings = [
+        ...healthState.candidates.values(),
+        ...(runtimeComplete
+          ? [...state.candidates.values()].filter(runtimeKind)
+          : summary.findings.filter(runtimeKind)),
+        ...summary.findings.filter(
+          (finding) => finding.kind !== 'tool-error' && finding.kind !== 'repeated-call' && !runtimeKind(finding),
+        ),
+      ];
+      for (const finding of summary.findings)
+        for (const evidence of finding.evidence)
+          evidence.available = events.some((event) => event.seq === evidence.seq);
+    }
+    if (unknown > 0) {
+      result.included = false;
+      warnings.push(
+        `Run ${summary.id} has ${unknown} unpaired or unclassifiable tool result(s), including ${healthState.uncertainExits ?? 0} with unknown shell exit ownership; excluded from tool health.`,
+      );
+      recordTimes();
+      return finish();
+    }
+    result.included = true;
+    result.tools = [...healthState.toolTally].map(([name, row]) => [
+      name,
+      { calls: row.calls, errors: [...row.errors] },
+    ]);
+    recordTimes();
+
+    return finish();
   }
 
   async review(cwd?: string): Promise<ReviewReport> {
@@ -2520,7 +2872,8 @@ export class HarnessRecorder {
     if (this.droppedCorrections > 0)
       warnings.push(`丢弃了 ${this.droppedCorrections} 次无法确定会话的用户纠正，未记入任何运行。`);
     const runs: RunSummary[] = [];
-    let entries: { id: string; modified: number }[] = [];
+    const summarySignatures = new Map<string, string>();
+    let entries: { id: string }[] = [];
     try {
       const directories = await readdir(join(this.root, 'runs'), { withFileTypes: true });
       const candidates = directories.filter((entry) => entry.isDirectory());
@@ -2530,24 +2883,49 @@ export class HarnessRecorder {
         warnings.push(
           `Global directory scan limited to ${MAX_SCANNED_RUNS} of ${candidates.length} runs before scope filtering; this review may be incomplete.`,
         );
-      entries = await Promise.all(
-        candidates.slice(0, MAX_SCANNED_RUNS).map(async (entry) => {
-          try {
-            return { id: entry.name, modified: (await stat(join(this.root, 'runs', entry.name))).mtimeMs };
-          } catch {
-            return { id: entry.name, modified: 0 };
-          }
-        }),
-      );
+      entries = candidates.slice(0, MAX_SCANNED_RUNS).map((entry) => ({ id: entry.name }));
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
         coverage.directoryReadFailed = true;
         warnings.push(`Cannot list runs: ${boundedText(String(error))}`);
       }
     }
-    entries.sort((a, b) => b.modified - a.modified || a.id.localeCompare(b.id));
-    let scannedRuns = 0;
+    const headers: { id: string; startedAt: string; cwd?: string; outcome: Outcome }[] = [];
+    this.summaryIndex.retain(new Set(entries.map((entry) => entry.id)));
     for (const entry of entries) {
+      const file = join(this.root, 'runs', entry.id, 'summary.json');
+      try {
+        const info = await stat(file);
+        if (info.size > 4_000_000) throw new Error('summary exceeds size limit');
+        const signature = fileSignature(info);
+        let header = this.summaryIndex.get(entry.id, signature);
+        if (!header) {
+          const summary = JSON.parse(await readFile(file, 'utf8')) as RunSummary;
+          if (!validSummary(summary, entry.id) || !tracesOwnRun(summary.traceFile, entry.id))
+            throw new Error('invalid summary schema');
+          header = {
+            startedAt: summary.startedAt,
+            outcome: summary.outcome,
+            cwd: summary.cwd,
+          };
+          if (signature === fileSignature(await stat(file))) this.summaryIndex.set(entry.id, signature, header);
+        }
+        if (!filter || (header.cwd && canonicalCwd(header.cwd) === filter)) headers.push({ id: entry.id, ...header });
+      } catch (error) {
+        coverage.unreadableSummaries++;
+        warnings.push(
+          `Unreadable or corrupt run ${entry.id}: ${boundedText(error instanceof Error ? error.message : error)}`,
+        );
+      }
+    }
+    headers.sort((a, b) => Date.parse(b.startedAt) - Date.parse(a.startedAt) || a.id.localeCompare(b.id));
+    coverage.runLimitReached = headers.length > MAX_RUNS;
+    if (coverage.runLimitReached)
+      warnings.push(`Review limited to the ${MAX_RUNS} most recent runs by startedAt in the selected scope.`);
+    const selected = headers.slice(0, MAX_RUNS);
+    this.runIndex.retain(new Set(selected.map((entry) => entry.id)));
+    let scannedRuns = 0;
+    for (const entry of selected) {
       scannedRuns++;
       const file = join(this.root, 'runs', entry.id, 'summary.json');
       try {
@@ -2556,6 +2934,7 @@ export class HarnessRecorder {
         const summary = JSON.parse(await readFile(file, 'utf8')) as RunSummary;
         if (!validSummary(summary, entry.id) || !tracesOwnRun(summary.traceFile, entry.id))
           throw new Error('invalid summary schema');
+        this.relocate(summary);
         if (summary.cwd) summary.cwd = canonicalCwd(summary.cwd);
         // Summaries written before this counter existed report it as absent.
         if (!Number.isFinite(summary.expectedExits)) summary.expectedExits = 0;
@@ -2566,11 +2945,7 @@ export class HarnessRecorder {
         if (helper) summary.helper = helper;
         else delete summary.helper;
         if (filter && summary.cwd !== filter) continue;
-        if (runs.length >= MAX_RUNS) {
-          coverage.runLimitReached = true;
-          warnings.push(`Review limited to the ${MAX_RUNS} most recently updated runs in the selected scope.`);
-          break;
-        }
+        summarySignatures.set(summary.id, fileSignature(info));
         runs.push(summary);
         if (summary.outcome === 'running')
           warnings.push(
@@ -2592,98 +2967,41 @@ export class HarnessRecorder {
     const toolTally: ToolTally = new Map();
     const findingTimes = new Map<string, Map<string, FindingTiming>>();
     const toolHealthCoverage = { includedRuns: 0, excludedRuns: 0, unknownResults: 0 };
-    const memory: InputMemory = new Map();
     for (const summary of [...runs].sort(
       (a, b) => a.startedAt.localeCompare(b.startedAt) || a.id.localeCompare(b.id),
     )) {
-      const timestamps = new Map<number, string>();
-      const events = await inspectTrace(summary, warnings, timestamps);
-      const observed = new Map<string, Set<number>>();
-      const state = derivationState(summary, events?.length ?? 0);
-      state.onFinding = (id, seq) => {
-        const sequences = observed.get(id) ?? new Set<number>();
-        sequences.add(seq);
-        observed.set(id, sequences);
-      };
-      // Replay uncapped occurrence signals, not only the first MAX_EVIDENCE
-      // references. Even partial traces can confirm the events actually present.
-      if (events) for (const event of events) this.replay(state, event, memory);
-      const recordTimes = (): void => {
-        const times = new Map<string, FindingTiming>();
-        for (const candidate of summary.findings)
-          times.set(
-            candidate.id,
-            findingTiming(
-              candidate,
-              summary,
-              timestamps,
-              candidate.kind === 'retry' ||
-                candidate.kind === 'run-error' ||
-                (events &&
-                  summary.droppedEvents === 0 &&
-                  events.length === summary.eventCount &&
-                  (state.unknownResults ?? 0) === (state.uncertainExits ?? 0) &&
-                  state.pending.size === 0)
-                ? observed.get(candidate.id)
-                : undefined,
-              windowStart,
-              now,
-            ),
-          );
-        findingTimes.set(summary.id, times);
-      };
-      if (
-        !events ||
-        summary.outcome === 'running' ||
-        summary.droppedEvents > 0 ||
-        events.length !== summary.eventCount
-      ) {
-        toolHealthCoverage.excludedRuns++;
-        recordTimes();
-        continue;
-      }
-      // Tool health uses its own replay so timing collection cannot alter the
-      // existing health coverage or cross-run input classification.
-      const healthState = derivationState(summary, events.length);
-      healthState.toolTally = new Map();
-      for (const event of events)
-        if (event.type === 'tool:call' || event.type === 'tool:result') this.replay(healthState, event, memory);
-      const unknown = (healthState.unknownResults ?? 0) + healthState.pending.size;
-      toolHealthCoverage.unknownResults += unknown;
-      // Ambiguous exits are classified as unknown, rather than missing trace data.
-      // Replace stale tool findings even when these results exclude the run from health;
-      // other confirmed errors in this same replay must remain visible.
-      if (unknown === (healthState.uncertainExits ?? 0)) {
-        summary.toolErrors = healthState.summary.toolErrors;
-        summary.expectedExits = healthState.summary.expectedExits;
-        summary.derivationDrops = healthState.summary.derivationDrops;
-        const runtimeKind = (finding: ReviewFinding): boolean => finding.kind === 'retry' || finding.kind === 'run-error';
-        const runtimeComplete = events.every((event) =>
-          !(event.type === 'retry' || (event.type === 'run:finish' && event.outcome === 'error')) ||
-          hasCompleteContent(event.error) || typeof event.errorCategory === 'string',
+      const projection = await this.projectRun(summary, summarySignatures.get(summary.id));
+      warnings.push(...projection.warnings);
+      summary.findings = projection.findings;
+      summary.toolErrors = projection.toolErrors;
+      summary.expectedExits = projection.expectedExits;
+      summary.derivationDrops = projection.derivationDrops;
+      const times = new Map<string, FindingTiming>();
+      for (const candidate of summary.findings)
+        times.set(
+          candidate.id,
+          findingTiming(
+            candidate,
+            summary,
+            new Map(projection.timestamps),
+            projection.observed.find(([id]) => id === candidate.id)?.[1]
+              ? new Set(projection.observed.find(([id]) => id === candidate.id)![1])
+              : undefined,
+            windowStart,
+            now,
+          ),
         );
-        summary.findings = [
-          ...healthState.candidates.values(),
-          ...(runtimeComplete ? [...state.candidates.values()].filter(runtimeKind) : summary.findings.filter(runtimeKind)),
-          ...summary.findings.filter((finding) => finding.kind !== 'tool-error' && finding.kind !== 'repeated-call' && !runtimeKind(finding)),
-        ];
-        for (const finding of summary.findings)
-          for (const evidence of finding.evidence)
-            evidence.available = events.some((event) => event.seq === evidence.seq);
-      }
-      if (unknown > 0) {
-        toolHealthCoverage.excludedRuns++;
-        warnings.push(
-          `Run ${summary.id} has ${unknown} unpaired or unclassifiable tool result(s), including ${healthState.uncertainExits ?? 0} with unknown shell exit ownership; excluded from tool health.`,
+      findingTimes.set(summary.id, times);
+      toolHealthCoverage.unknownResults += projection.unknown;
+      if (projection.included) {
+        toolHealthCoverage.includedRuns++;
+        mergeToolTally(
+          toolTally,
+          new Map(projection.tools.map(([name, row]) => [name, { calls: row.calls, errors: new Map(row.errors) }])),
         );
-        recordTimes();
-        continue;
-      }
-      toolHealthCoverage.includedRuns++;
-      mergeToolTally(toolTally, healthState.toolTally);
-      recordTimes();
+      } else toolHealthCoverage.excludedRuns++;
     }
-    runs.sort((a, b) => b.startedAt.localeCompare(a.startedAt));
+    runs.sort((a, b) => Date.parse(b.startedAt) - Date.parse(a.startedAt) || a.id.localeCompare(b.id));
     const delegation = summarizeDelegation(runs, warnings);
     const helpers = summarizeHelpers(runs, warnings);
     const pluginTimes = new Map<string, Set<number>>();
@@ -2799,6 +3117,7 @@ export class HarnessRecorder {
       }
       if (occurrences > 0) finding.reviewNeeded = { reason: 'new-evidence', occurrences, runs: affectedRuns };
     }
+    scannedRuns = entries.length;
     coverage.scannedRunDirectories = scannedRuns;
     coverage.includedRuns = runs.length;
     if (runs.length) {
@@ -2823,6 +3142,7 @@ export class HarnessRecorder {
       delegation,
       helpers,
       pluginFailures,
+      logEvidence: await this.logs.read(),
       toolHealth: toolHealthRows(toolTally),
       toolHealthCoverage,
       derivationCoverage,
@@ -2835,7 +3155,7 @@ export class HarnessRecorder {
         evidencePerFinding: MAX_EVIDENCE,
       },
       interpretation:
-        'Findings are review candidates, not established causes. Tool errors do not imply task failure. Completed runs are not user validation. Decisions are manual and persist across runs; repeated calls may reflect legitimate polling or pagination.',
+        'Findings are review candidates, not established causes. Tool errors do not imply task failure. Completed runs are not user validation. Decisions are manual and persist across runs; repeated calls may reflect legitimate polling or pagination. Plugin failure counts are lower bounds: merged checkpoints preserve observed counters, but host restarts, forced exits and rotation can leave history incomplete.',
     };
   }
 
@@ -2881,8 +3201,8 @@ export class HarnessRecorder {
     if (failure) throw failure;
   }
 
-  async exportReport(cwd?: string): Promise<string> {
-    const report = await this.review(cwd);
+  async exportReport(cwd?: string, snapshot?: ReviewReport): Promise<string> {
+    const report = snapshot ?? (await this.review(cwd));
     const directory = join(this.root, 'reports');
     const path = join(directory, `review-${randomUUID()}.md`);
     let failure: unknown;
@@ -2941,6 +3261,7 @@ export class HarnessRecorder {
         if ((await stat(file)).size > 4_000_000) throw new Error('summary exceeds size limit');
         summary = JSON.parse(await readFile(file, 'utf8')) as RunSummary;
         if (!validSummary(summary, entry.name)) throw new Error('invalid summary schema');
+        this.relocate(summary);
       } catch {
         // Unreadable runs carry no evidence: keep them so the review keeps
         // reporting them as corrupt instead of silently disappearing.
@@ -3023,6 +3344,7 @@ export class HarnessRecorder {
         const summary = JSON.parse(await readFile(file, 'utf8')) as RunSummary;
         if (!validSummary(summary, id) || !tracesOwnRun(summary.traceFile, id))
           throw new Error('invalid summary schema');
+        this.relocate(summary);
         loaded.push({ id, summary });
       } catch {
         skippedUnreadable++;
@@ -3089,8 +3411,10 @@ export class HarnessRecorder {
         this.replay(state, event, memory);
       }
       if (
-        !usable || expected !== summary.eventCount ||
-        (state.unknownResults ?? 0) > (state.uncertainExits ?? 0) || state.pending.size > 0
+        !usable ||
+        expected !== summary.eventCount ||
+        (state.unknownResults ?? 0) > (state.uncertainExits ?? 0) ||
+        state.pending.size > 0
       ) {
         skippedUnreadable++;
         continue;
@@ -3107,6 +3431,7 @@ export class HarnessRecorder {
       try {
         await this.withSummaryLock(directory, async () => {
           const latest = JSON.parse(await readFile(join(directory, 'summary.json'), 'utf8')) as RunSummary;
+          this.relocate(latest);
           if (
             latest.outcome === 'running' ||
             latest.finishedAt !== summary.finishedAt ||
@@ -3179,10 +3504,10 @@ export class HarnessRecorder {
       const category =
         argsIncomplete && event.errorCategory === 'unknown-exit'
           ? 'unknown-exit'
-          : truncatedToolCategory(event.result, name) ??
-        (!complete && (typeof event.errorCategory === 'string' || event.errorCategory === null)
-          ? event.errorCategory
-          : undefined);
+          : (truncatedToolCategory(event.result, name) ??
+            (!complete && (typeof event.errorCategory === 'string' || event.errorCategory === null)
+              ? event.errorCategory
+              : undefined));
       if ((!complete && category === undefined) || state.pending.get(correlation ?? `name:${name}`)?.name !== name)
         state.unknownResults = (state.unknownResults ?? 0) + 1;
       const resultHash =
@@ -3201,10 +3526,7 @@ export class HarnessRecorder {
         storedText(event.result),
         correlation,
         category,
-        (!complete || argsIncomplete) &&
-          typeof event.expectedExit === 'boolean'
-          ? event.expectedExit
-          : undefined,
+        (!complete || argsIncomplete) && typeof event.expectedExit === 'boolean' ? event.expectedExit : undefined,
         resultHash,
       );
     } else if (event.type === 'compaction') {
@@ -3219,8 +3541,8 @@ export class HarnessRecorder {
     } else if (event.type === 'retry' || (event.type === 'run:finish' && event.outcome === 'error')) {
       const category =
         !hasCompleteContent(event.error) && typeof event.errorCategory === 'string'
-          ? event.errorCategory
-          : classifyError(storedText(event.error));
+          ? runtimeCategory(event.errorCategory, event.type === 'retry')
+          : classifyError(storedText(event.error), '', event.type === 'retry' ? 'provider' : 'runtime');
       this.noteRuntimeError(
         state,
         seq,
@@ -3235,8 +3557,8 @@ export class HarnessRecorder {
 /**
  * 轨迹文件必须指向这条运行自己的 `events.jsonl`。
  *
- * 只比后缀而不比绝对路径：整个数据目录搬过家（换 `MICA_HOME`、从备份恢复）时
- * 记下的绝对路径必然对不上，那种情况下把全部历史判成损坏没有意义。
+ * 只检查历史元数据后缀是否合法；读取与对外证据一律重定位到当前 root。
+ * 搬目录后旧副本即使仍然存在也绝不会被读取。
  */
 function tracesOwnRun(traceFile: string, id: string): boolean {
   return traceFile.endsWith(join('runs', id, 'events.jsonl'));
@@ -3444,6 +3766,19 @@ function validSummary(value: RunSummary, directoryId: string): boolean {
       ),
   );
 }
+
+type RunProjection = {
+  findings: ReviewFinding[];
+  toolErrors: number;
+  expectedExits: number;
+  derivationDrops?: RunSummary['derivationDrops'];
+  timestamps: [number, string][];
+  observed: [string, number[]][];
+  warnings: string[];
+  included: boolean;
+  unknown: number;
+  tools: [string, { calls: number; errors: [string, number][] }][];
+};
 
 /** 一次轨迹巡检的副产品：按工具统计的调用量、失败数与错误类别。 */
 type ToolTally = Map<string, { calls: number; errors: Map<string, number> }>;
@@ -3670,7 +4005,7 @@ function markdownReport(report: ReviewReport, directory: string): string {
     '',
     `Coverage: ${report.coverage.totalRunDirectories} run directories total; ${report.coverage.scannedRunDirectories} actually scanned; ${report.coverage.includedRuns} included; ${report.coverage.unreadableSummaries} unreadable summaries. Directory read failed: ${report.coverage.directoryReadFailed}; directory scan truncated: ${report.coverage.scanLimitReached}; run limit truncated: ${report.coverage.runLimitReached}.`,
     '',
-    `Included run bounds: ${report.coverage.earliestRunStartedAt ?? 'unknown'} to ${report.coverage.latestRunFinishedAt ?? 'no recorded finish'}. Selection uses directory modification time, not a complete chronological window.`,
+    `Included run bounds: ${report.coverage.earliestRunStartedAt ?? 'unknown'} to ${report.coverage.latestRunFinishedAt ?? 'no recorded finish'}. Selection uses actual startedAt within the bounded directory scan, not directory modification time or a complete historical window.`,
     '',
     'Recent counts are lower bounds. Event timestamps take precedence; missing times use run bounds only when the entire run is inside or outside the window. Runs crossing a boundary remain uncertain. First/last seen show confirmed event times only; unknown occurrence times can extend that range. Queued corrections predate their attachment run and remain undated. Plugin counts are machine-wide and their cumulative history cannot be dated from the last failure alone.',
     '',
@@ -3741,10 +4076,28 @@ function markdownReport(report: ReviewReport, directory: string): string {
   );
   lines.push('', '## Plugin health', '');
   // 常驻任务失败是机器级事实：插件不在任何一轮里跑，也就没有 cwd 可过滤。
+  if (report.logEvidence) {
+    lines.push(
+      '## Log evidence (machine-wide, bounded tails)',
+      '',
+      report.logEvidence.interpretation,
+      '',
+      'Coverage: `' + JSON.stringify(report.logEvidence.coverage) + '`',
+      '',
+    );
+    for (const [title, rows] of [
+      ['Plugin operations', report.logEvidence.operations],
+      ['Plugin experience', report.logEvidence.experience],
+      ['System warnings / errors', report.logEvidence.system],
+      ['Memory peaks (MB)', report.logEvidence.memory],
+    ] as const) {
+      lines.push(`### ${title}`, '', '```json', JSON.stringify(rows, null, 2), '```', '');
+    }
+  }
   lines.push(
     'Plugin failures (background tasks and throwing hooks) are per machine, not per workspace: these counts ignore the reviewed working directory.',
     '',
-    'Counts are a lower bound: one task leaves at most one record per five minutes, and its cumulative counter restarts with the host.',
+    'Counts are a lower bound: detail writes merge within five-minute windows; flush/dispose preserve the latest counters. Forced exits, host counter resets and file rotation can leave history incomplete. A merged row dates only its latest failure, not the entire cumulative count.',
     '',
   );
   if (!report.pluginFailures.length) lines.push('No plugin background failures recorded.', '');

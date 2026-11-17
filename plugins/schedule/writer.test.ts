@@ -85,18 +85,86 @@ describe('createScheduleWriter', () => {
     expect(errors).toEqual([]);
   });
 
-  it('reports a failed write and stops the queue instead of writing the rest blindly', async () => {
+  describe.each([
+    { method: 'readData', message: '读取排期失败', writeCalls: 0 },
+    { method: 'writeData', message: '保存排期失败', writeCalls: 1 },
+  ] as const)('$method failure', ({ method, message, writeCalls }) => {
+    it.each(['response', 'rejection', 'throw'] as const)(
+      'reports a %s once, clears the queue and permits later saves',
+      async (failure) => {
+        const page = fixture();
+        const errors: string[] = [];
+        const writer = createScheduleWriter({ host: page.host, onError: (message) => errors.push(message) });
+        const hostCall = vi.mocked(page.host[method]);
+        const detail = '存储不可用';
+        if (failure === 'response') {
+          hostCall.mockResolvedValueOnce({ ok: false, error: detail });
+        } else if (failure === 'rejection') {
+          hostCall.mockRejectedValueOnce(new Error(detail));
+        } else {
+          hostCall.mockImplementationOnce(() => {
+            throw new Error(detail);
+          });
+        }
+
+        writer.push({ type: 'delete-task', taskId: 't1' });
+        writer.push({ type: 'delete-task', taskId: 't2' });
+        await expect(writer.flush()).resolves.toBe(false);
+        expect(errors).toEqual([failure === 'response' ? detail : `${message}：${detail}`]);
+        expect(page.host.readData).toHaveBeenCalledTimes(1);
+        expect(page.writeData).toHaveBeenCalledTimes(writeCalls);
+        expect(writer.pending()).toBe(0);
+        expect(page.disk()).toEqual(initial());
+
+        // 失败的一批已丢弃，下一次显式编辑可以正常保存，不重放失败前的删除。
+        writer.push({ type: 'update-task', taskId: 't1', name: '重新保存' });
+        await expect(writer.flush()).resolves.toBe(true);
+        expect(page.disk().tasks.map((task) => task.name)).toEqual(['重新保存', '测试']);
+        expect(errors).toHaveLength(1);
+        expect(writer.pending()).toBe(0);
+      },
+    );
+
+    it('contains a rejected automatic save when push is not followed by an awaited flush', async () => {
+      const page = fixture();
+      const onError = vi.fn();
+      const onUnhandledRejection = vi.fn();
+      const writer = createScheduleWriter({ host: page.host, onError });
+      vi.mocked(page.host[method]).mockRejectedValueOnce(new Error('自动保存失败'));
+
+      process.on('unhandledRejection', onUnhandledRejection);
+      try {
+        writer.push({ type: 'delete-task', taskId: 't1' });
+        writer.push({ type: 'delete-task', taskId: 't2' });
+        // 让自动 flush 和未处理 rejection 检查完整走过一轮事件循环，不用 flush() 接住异常。
+        await new Promise<void>((resolve) => setImmediate(resolve));
+
+        expect(onUnhandledRejection).not.toHaveBeenCalled();
+        expect(onError).toHaveBeenCalledExactlyOnceWith(`${message}：自动保存失败`);
+        expect(page.host.readData).toHaveBeenCalledTimes(1);
+        expect(page.writeData).toHaveBeenCalledTimes(writeCalls);
+        expect(writer.pending()).toBe(0);
+        expect(page.disk()).toEqual(initial());
+      } finally {
+        process.off('unhandledRejection', onUnhandledRejection);
+      }
+    });
+  });
+
+  it('retries only conflicts and reports exhausted attempts once before discarding the queue', async () => {
     const page = fixture();
     const errors: string[] = [];
     const writer = createScheduleWriter({ host: page.host, onError: (message) => errors.push(message) });
-    page.writeData.mockImplementation(async () => ({ ok: false, error: '磁盘满了' }));
+    page.writeData.mockResolvedValue({ ok: false, conflict: true, error: 'conflict' });
 
     writer.push({ type: 'delete-task', taskId: 't1' });
     writer.push({ type: 'delete-task', taskId: 't2' });
     await expect(writer.flush()).resolves.toBe(false);
-    expect(errors).toEqual(['磁盘满了']);
+    expect(page.host.readData).toHaveBeenCalledTimes(8);
+    expect(page.writeData).toHaveBeenCalledTimes(8);
+    expect(errors).toEqual(['排期正在其他窗口更新，请稍后重试']);
     expect(writer.pending()).toBe(0);
-    expect(page.disk().tasks).toHaveLength(2);
+    expect(page.disk()).toEqual(initial());
   });
 
   it('reports a missing target (deleted by someone else) instead of retrying forever', async () => {

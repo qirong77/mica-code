@@ -17,6 +17,12 @@ import { readPromptControls } from '@packages/mica-config/promptControls.js';
 
 export type HeadlessTurnStatus = 'completed' | 'aborted' | 'error';
 
+/** One shared, idempotent terminal path for a started turn. */
+type TurnFinalization = {
+  readonly status: HeadlessTurnStatus | null;
+  finish(status: HeadlessTurnStatus, error?: unknown, inFlightUser?: InFlightUserMessage): Promise<HeadlessTurnStatus>;
+};
+
 /**
  * `busy-remote`: another process (a second app-server, the desktop chat host or a
  * TUI terminal) holds this session's turn lease, so this turn must not run.
@@ -334,18 +340,20 @@ export class HeadlessTurnExecutor {
         });
       } else {
         this.lease = lease;
+        const finalization = this.createTurnFinalization(input);
         try {
-          status = await this.runTurn(input);
+          status = await this.runTurn(input, finalization);
         } catch (error) {
-          // runTurn handles abort/error itself; this guards the drain loop.
-          if (this.options.hooks) await this.emitTurnAfter(input, 'error', 0, true);
-          this.options.onEvent({
-            type: 'turn:finish',
-            input,
-            status: 'error',
-            elapsedMs: 0,
-            error: error instanceof Error ? error.message : String(error),
-          });
+          // runTurn normally settles itself.  A failing terminal hook/event is
+          // already finalized, so this guard must never emit a second finish.
+          if (finalization.status === null) {
+            try {
+              await finalization.finish('error', error);
+            } catch {
+              // finish always attempts the terminal event, even if a hook fails.
+            }
+          }
+          status = finalization.status ?? 'error';
         } finally {
           this.releaseTurnLease();
         }
@@ -387,9 +395,50 @@ export class HeadlessTurnExecutor {
     }
   }
 
-  private async runTurn(input: RuntimeInput): Promise<HeadlessTurnStatus> {
-    const { agent, onEvent } = this.options;
+  private createTurnFinalization(input: RuntimeInput): TurnFinalization {
     const startedAt = Date.now();
+    let status: HeadlessTurnStatus | null = null;
+    let completion: Promise<HeadlessTurnStatus> | null = null;
+    return {
+      get status() { return status; },
+      finish: (outcome, error, inFlightUser) => {
+        if (completion) return completion;
+        status = outcome;
+        completion = (async () => {
+          let terminalStatus = outcome;
+          let terminalError = error;
+          try {
+            this.saveCurrent({ turnState: outcome }, inFlightUser);
+          } catch (saveError) {
+            // Do not announce a successful turn when its terminal save failed.
+            terminalStatus = 'error';
+            status = terminalStatus;
+            terminalError = saveError;
+          }
+          try {
+            // This also releases the lease and settles subagents without a
+            // plugin layer; turn:finish must follow it even when a hook throws.
+            await this.emitTurnAfter(input, terminalStatus, Date.now() - startedAt, terminalStatus === 'error');
+          } finally {
+            this.options.onEvent({
+              type: 'turn:finish',
+              input,
+              status: terminalStatus,
+              elapsedMs: Date.now() - startedAt,
+              ...(terminalError === undefined
+                ? {}
+                : { error: terminalError instanceof Error ? terminalError.message : String(terminalError) }),
+            });
+          }
+          return terminalStatus;
+        })();
+        return completion;
+      },
+    };
+  }
+
+  private async runTurn(input: RuntimeInput, finalization: TurnFinalization): Promise<HeadlessTurnStatus> {
+    const { agent, onEvent } = this.options;
     this.responseBuffer = '';
     this.committedResponseBuffer = '';
     let content: AgentQueryContent;
@@ -401,8 +450,7 @@ export class HeadlessTurnExecutor {
             ? input.text
             : await this.parseImageRefs(input.text);
     } catch (error) {
-      await this.failTurn(input, startedAt, error);
-      return 'error';
+      return this.failTurn(input, finalization, error);
     }
     // 除了 `system`（提示词内部注入，用户从没打过这句话）之外都要留下用户消息：
     // 插件提交的一轮（`ctx.runtime.submit`）在客户端没有乐观气泡，不写进去就只剩回答，
@@ -527,7 +575,7 @@ export class HeadlessTurnExecutor {
             // reasoning from responses that completed before the failed one.
             // Do this before restoring/saving history or announcing the delay.
             agent.events.emit('thinkingTurnAttemptRollback', undefined);
-            if (preTurnSnapshot) agent.restoreClientSnapshot(preTurnSnapshot);
+            if (preTurnSnapshot) agent.restoreClientSnapshot(preTurnSnapshot, { preserveUsage: true });
             this.responseBuffer = '';
             this.committedResponseBuffer = '';
             this.saveCurrent({ allowEmpty: true, turnState: 'running' }, inFlightUser);
@@ -552,11 +600,17 @@ export class HeadlessTurnExecutor {
             if (!agent.isCurrent(attemptRunId)) throw new AgentAbortError(attemptRunId);
           }
         }
-        // An abort that lands between reserveRunId() and the first agent.run()
-        // check is surfaced by agent.run() as an AgentAbortError; never return
-        // here silently or the client never receives a turn/completed
-        // notification and the app stays "running" forever.
-        if (!agent.isCurrent(runResult!.runId)) return 'aborted';
+        // A resolved query has committed its final response as well as its
+        // tool iterations.  If abort invalidates the result before persistence,
+        // preserveAbortedTurn must not append that response a second time.
+        this.committedResponseBuffer = this.responseBuffer;
+        if (!agent.isCurrent(runResult!.runId)) {
+          // `agent.run()` can resolve after an abort has invalidated its run id.
+          // Route that stale resolution through the same abort finalization as a
+          // rejected AgentAbortError; returning here leaves the persisted turn
+          // running and skips turn:after/turn:finish.
+          throw new AgentAbortError(runResult!.runId);
+        }
         if (this.options.hooks) {
           await this.options.hooks.emit('turn:beforePersist', {
             runtime: this.options.host,
@@ -565,10 +619,8 @@ export class HeadlessTurnExecutor {
             result: runResult,
           });
         }
-        this.saveCurrent({ turnState: 'completed' }, inFlightUser);
-        if (this.options.hooks) await this.emitTurnAfter(input, 'completed', Date.now() - startedAt, false);
-        onEvent({ type: 'turn:finish', input, status: 'completed', elapsedMs: Date.now() - startedAt });
-        return 'completed';
+        if (!agent.isCurrent(runResult!.runId)) throw new AgentAbortError(runResult!.runId);
+        return await finalization.finish('completed', undefined, inFlightUser);
       } finally {
         agent.events.off('toolCall', markToolCall);
         unregisterRollback();
@@ -577,34 +629,36 @@ export class HeadlessTurnExecutor {
         agent.events.off('textRollback', rollback);
       }
     } catch (error) {
+      // A terminal hook/event can throw after the save/after/finish path was
+      // claimed.  Never reinterpret it as a second turn failure.
+      if (finalization.status !== null) return finalization.status;
       if (error instanceof AgentAbortError) {
-        if (this.options.hooks) {
-          await this.options.hooks.emit('turn:abort', { runtime: this.options.host, input, content, error });
+        try {
+          if (this.options.hooks) {
+            await this.options.hooks.emit('turn:abort', { runtime: this.options.host, input, content, error });
+          }
+          agent.preserveAbortedTurn(
+            runContentOr(input),
+            uncommittedResponseText(this.responseBuffer, this.committedResponseBuffer) || undefined,
+          );
+        } finally {
+          await finalization.finish('aborted', undefined, inFlightUser);
         }
-        agent.preserveAbortedTurn(
-          runContentOr(input),
-          uncommittedResponseText(this.responseBuffer, this.committedResponseBuffer) || undefined,
-        );
-        this.saveCurrent({ turnState: 'aborted' }, inFlightUser);
-        if (this.options.hooks) await this.emitTurnAfter(input, 'aborted', Date.now() - startedAt, false);
-        onEvent({ type: 'turn:finish', input, status: 'aborted', elapsedMs: Date.now() - startedAt });
-        return 'aborted';
+        return finalization.status ?? 'aborted';
       }
       if (this.options.hooks) {
         await this.options.hooks.emit('turn:error', { runtime: this.options.host, input, content, error });
       }
-      await this.failTurn(input, startedAt, error, inFlightUser);
-      return 'error';
+      return this.failTurn(input, finalization, error, inFlightUser);
     }
   }
 
   private async failTurn(
     input: RuntimeInput,
-    startedAt: number,
+    finalization: TurnFinalization,
     error: unknown,
     inFlightUser?: InFlightUserMessage,
-  ): Promise<void> {
-    const message = error instanceof Error ? error.message : String(error);
+  ): Promise<HeadlessTurnStatus> {
     this.options.agent.preserveAbortedTurn(
       runContentOr(input),
       uncommittedResponseText(this.responseBuffer, this.committedResponseBuffer) || undefined,
@@ -613,15 +667,7 @@ export class HeadlessTurnExecutor {
     // transient Codex `turn/completed.status=failed` payload: the desktop app
     // used to lose it on reload. Notices stay out of the provider history.
     this.options.notices?.ensure().upsert(createTurnErrorNotice(error));
-    this.saveCurrent({ turnState: 'error' }, inFlightUser);
-    if (this.options.hooks) await this.emitTurnAfter(input, 'error', Date.now() - startedAt, true);
-    this.options.onEvent({
-      type: 'turn:finish',
-      input,
-      status: 'error',
-      elapsedMs: Date.now() - startedAt,
-      error: message,
-    });
+    return finalization.finish('error', error, inFlightUser);
   }
 
   private async emitTurnAfter(
@@ -637,14 +683,17 @@ export class HeadlessTurnExecutor {
     this.releaseTurnLease();
     // 放在 turn:after 之前：那个 hook 会启动排队的下一轮，下一轮开始时就该看不到
     // 这一轮的孤儿任务了。
-    this.settleSubagents(outcome === 'aborted');
-    await this.options.hooks?.emit('turn:after', {
-      input,
-      elapsedMs,
-      hasError,
-      outcome,
-      owner: this.options.agent,
-    });
+    try {
+      this.settleSubagents(outcome === 'aborted');
+    } finally {
+      await this.options.hooks?.emit('turn:after', {
+        input,
+        elapsedMs,
+        hasError,
+        outcome,
+        owner: this.options.agent,
+      });
+    }
   }
 
   /**

@@ -12,11 +12,13 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { flushLogs } from '@packages/mica-diagnostics/index.js';
 import { createPluginLogger, pluginLogPath } from './PluginLog.js';
 
 const tempDirectories: string[] = [];
 
 afterEach(() => {
+  flushLogs();
   vi.useRealTimers();
   delete process.env.MICA_PLUGIN_LOG;
   for (const directory of tempDirectories.splice(0)) rmSync(directory, { recursive: true, force: true });
@@ -31,7 +33,7 @@ function mkTempDir(): string {
 describe('createPluginLogger', () => {
   it('writes one JSONL line per event into the given directory', () => {
     const dir = mkTempDir();
-    const logger = createPluginLogger('session-rename', undefined, { dir });
+    const logger = createPluginLogger('session-rename', undefined, { dir, force: true });
 
     logger.info('session-rename:request', { entries: 2 });
     logger.warn('session-rename:failed', { error: 'boom' });
@@ -53,7 +55,7 @@ describe('createPluginLogger', () => {
 
   it('still forwards to the host logger', () => {
     const warn = vi.fn();
-    const logger = createPluginLogger('demo', { warn }, { dir: mkTempDir() });
+    const logger = createPluginLogger('demo', { warn }, { dir: mkTempDir(), force: true });
 
     logger.warn('demo:event', { a: 1 });
 
@@ -63,7 +65,7 @@ describe('createPluginLogger', () => {
   it('honours MICA_PLUGIN_LOG=0 without dropping the forward', () => {
     const dir = mkTempDir();
     const info = vi.fn();
-    const logger = createPluginLogger('demo', { info }, { dir });
+    const logger = createPluginLogger('demo', { info }, { dir, force: true });
     process.env.MICA_PLUGIN_LOG = '0';
 
     logger.info('demo:event');
@@ -73,7 +75,7 @@ describe('createPluginLogger', () => {
   });
 
   it('never throws when the directory is not writable', () => {
-    const logger = createPluginLogger('demo', undefined, { dir: '/dev/null/not-a-dir' });
+    const logger = createPluginLogger('demo', undefined, { dir: '/dev/null/not-a-dir', force: true });
     expect(() => logger.error('demo:event')).not.toThrow();
   });
 
@@ -84,7 +86,7 @@ describe('createPluginLogger', () => {
     const old = new Date('2020-01-01T00:00:00Z');
     utimesSync(stale, old, old);
 
-    createPluginLogger('demo', undefined, { dir }).info('demo:event');
+    createPluginLogger('demo', undefined, { dir, force: true }).info('demo:event');
 
     expect(readdirSync(dir)).not.toContain('plugin-demo-20200101.jsonl');
   });

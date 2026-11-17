@@ -1,5 +1,6 @@
 import {
   micaConfig,
+  isProviderEnabled,
   type EffortOption,
   type ProviderDefinition,
   type ProviderProtocol,
@@ -29,10 +30,19 @@ export type AgentRuntimeConfigOverride = {
 
 export function readAgentRuntimeConfig(override: AgentRuntimeConfigOverride = {}): AgentRuntimeConfig {
   const config = micaConfig.get();
+  const modelProvider = [...config.providers]
+    .sort((left, right) => right.id.length - left.id.length)
+    .find((provider) => override.model?.startsWith(`${provider.id}/`));
+  if (modelProvider && !isProviderEnabled(modelProvider)) {
+    throw new Error(`Provider is disabled: ${modelProvider.id}`);
+  }
   const providerId = override.providerId ?? config.provider;
   const provider = config.providers.find((item) => item.id === providerId);
   if (!provider) {
     throw new Error(`Provider not found: ${providerId || '(empty)'}`);
+  }
+  if (!isProviderEnabled(provider)) {
+    throw new Error(`Provider is disabled: ${provider.id}`);
   }
   const model = override.model ?? (provider.id === config.provider ? config.model : (provider.models?.[0] ?? ''));
   // model 为空时允许启动（无 key/无模型列表的新用户），首次发送消息前才需要可用 model。
@@ -50,11 +60,13 @@ export function readAgentRuntimeConfig(override: AgentRuntimeConfigOverride = {}
 
 export function agentRuntimeConfigFromSnapshot(snapshot: AgentRuntimeConfigSnapshot): AgentRuntimeConfig {
   const config = micaConfig.get();
-  const provider = config.providers.find((item) => item.id === snapshot.providerId);
+  const provider = config.providers.find((item) => item.id === snapshot.providerId && isProviderEnabled(item));
   if (!provider) {
     // 会话引用的 provider 已从配置移除（旧配置/重命名/迁移）。降级到当前
     // 默认 provider 恢复会话，而不是让整个会话变成 "Session not found"。
-    const fallback = config.providers.find((item) => item.id === config.provider) ?? config.providers[0];
+    const fallback =
+      config.providers.find((item) => item.id === config.provider && isProviderEnabled(item)) ??
+      config.providers.find(isProviderEnabled);
     if (fallback) {
       const model = fallback.models?.includes(snapshot.model)
         ? snapshot.model

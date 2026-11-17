@@ -6,7 +6,7 @@ export const EXPERIENCE_LOG_EVENT = 'plugin:experience';
 export const EXPERIENCE_EVENTS = ['impression', 'click', 'dismiss', 'update', 'failure', 'check', 'clear'] as const;
 export type ExperienceEvent = (typeof EXPERIENCE_EVENTS)[number];
 export type ExperienceFields = {
-  surface?: 'card' | 'panel' | 'tool' | 'background';
+  surface?: 'card' | 'panel' | 'tool' | 'background' | 'page' | 'launcher';
   action?: string;
   outcome?: 'success' | 'error' | 'stale' | 'dismissed';
   revision?: string;
@@ -37,7 +37,7 @@ export function createPluginExperience(ctx: PluginContext, pluginVersion = '1.0.
           event,
           ...(sessionId ? { sessionKey: createHash('sha256').update(sessionId).digest('hex').slice(0, 24) } : {}),
         };
-        if (['card', 'panel', 'tool', 'background'].includes(fields.surface ?? '')) data.surface = fields.surface;
+        if (['card', 'panel', 'tool', 'background', 'page', 'launcher'].includes(fields.surface ?? '')) data.surface = fields.surface;
         if (['success', 'error', 'stale', 'dismissed'].includes(fields.outcome ?? '')) data.outcome = fields.outcome;
         if (typeof fields.action === 'string' && /^[a-z][a-z0-9:_-]{0,47}$/.test(fields.action))
           data.action = fields.action;

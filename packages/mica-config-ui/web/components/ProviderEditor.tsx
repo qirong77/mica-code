@@ -3,7 +3,7 @@ import { appIcons } from '../icons.js';
 import { providerProtocolLabel } from '../labels.js';
 import { PROVIDER_PROTOCOL_VALUES, readProviderDraft, type ProviderDraft } from '../configDraft.js';
 import type { ConfigWebProviderTest, ConfigWebProviderTestInput } from '../../src/shared/types.js';
-import { SettingRow } from './Ui.js';
+import { SettingRow, Switch } from './Ui.js';
 import { Button, Input, Select, Tag } from './ArcoSettings.js';
 
 type ProviderEditorProps = {
@@ -66,7 +66,7 @@ export function ProviderEditor({
   const testModel = fields.models[0] ?? '';
 
   async function runTest() {
-    if (!onTest || !testModel) return;
+    if (!onTest || fields.disabled || !testModel) return;
     setTesting(true);
     setTestResult(null);
     try {
@@ -114,6 +114,7 @@ export function ProviderEditor({
             {fields.id.trim() || '新的服务商'}
           </span>
           <span className="entry-row-protocol">{providerProtocolLabel(fields.protocol)}</span>
+          {fields.disabled ? <span className="entry-row-protocol">已禁用</span> : null}
           <span className="entry-row-meta" title={fields.apiBase}>
             {summaryText(fields)}
           </span>
@@ -141,6 +142,15 @@ export function ProviderEditor({
               aria-label={`服务商 ${index + 1} 名称`}
               aria-invalid={Boolean(errorFor('id'))}
               onChange={(id) => patch({ id })}
+            />
+          </SettingRow>
+
+          <SettingRow label="禁用" hint="开启后不会出现在模型选择中，也不会发送请求。" error={errorFor('disabled')}>
+            <Switch
+              checked={fields.disabled}
+              label={`禁用服务商 ${fields.id || index + 1}`}
+              disabled={disabled}
+              onChange={(next) => patch({ disabled: next })}
             />
           </SettingRow>
 
@@ -256,7 +266,7 @@ export function ProviderEditor({
               }
             >
               <div className="provider-test">
-                <Button disabled={disabled || testing || !testModel} onClick={() => void runTest()}>
+                <Button disabled={disabled || fields.disabled || testing || !testModel} onClick={() => void runTest()}>
                   {testing ? '测试中…' : '测试连接'}
                 </Button>
                 {testResult ? (

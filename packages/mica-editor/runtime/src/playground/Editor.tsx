@@ -138,7 +138,7 @@ export default function Editor(): JSX.Element {
             <MarkdownPastePlugin />
             <TableControlsPlugin />
             <TableScrollShadowPlugin />
-            <MarkdownTableLayoutPlugin />
+            <MarkdownTableLayoutPlugin fill />
             <ExcalidrawPlugin />
             {floatingAnchorElem && (
               <>

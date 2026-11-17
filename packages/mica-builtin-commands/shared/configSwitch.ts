@@ -1,6 +1,7 @@
 import { formatTokenCount } from '@packages/mica-common/format.js';
 import {
   isEffortLevelName,
+  isProviderEnabled,
   micaConfig,
   type EffortOption,
   type IMicaConfig,
@@ -46,6 +47,9 @@ export async function applyConfigSwitchUpdate({
   let adjustments: ConfigSwitchAdjustment[] = [];
   const candidate = update(configForAgent(micaConfig.get(), agent));
   const candidateProvider = candidate.providers.find((item) => item.id === candidate.provider);
+  if (candidateProvider && !isProviderEnabled(candidateProvider)) {
+    throw new Error(`Provider is disabled: ${candidateProvider.id}`);
+  }
   await micaConfig.ensureModelRule(candidate.model, undefined, candidateProvider);
   assertProtocolCompatible(agent, candidate);
   const next = micaConfig.update((config) => {
@@ -148,7 +152,7 @@ function configForAgent(config: IMicaConfig, agent: CommandAgent): IMicaConfig {
 }
 
 function findCurrentProvider(config: IMicaConfig): ProviderDefinition | undefined {
-  return config.providers.find((item) => item.id === config.provider);
+  return config.providers.find((item) => item.id === config.provider && isProviderEnabled(item));
 }
 
 function formatConfigSwitchSuccess(message: string, adjustments: ConfigSwitchAdjustment[], hint?: string): string {

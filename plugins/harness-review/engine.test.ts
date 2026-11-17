@@ -83,6 +83,27 @@ async function trace(run: RunSummary): Promise<Record<string, unknown>[]> {
     : [];
 }
 
+test('neutral results override timeout/error fields and unknown results never count as healthy', async (t) => {
+  const { recorder } = await fixture(t);
+  const run = runner(recorder);
+  run.start();
+  for (const outcome of ['cancelled', 'declined', 'waiting', 'busy', 'conflict', 'partial', 'skipped', 'expected-exit']) {
+    run.call('{}', 'operation', outcome);
+    run.result(JSON.stringify({ outcome, timedOut: true, error: 'not an operational fault', exitCode: 1 }), 'operation', outcome);
+  }
+  run.finish();
+  const unknown = runner(recorder, { runId: 2 });
+  unknown.start();
+  unknown.call('{}', 'operation', 'unknown');
+  unknown.result('{"outcome":"unknown"}', 'operation', 'unknown');
+  unknown.finish();
+  const report = await recorder.review();
+  assert.equal(report.runs.reduce((sum, entry) => sum + entry.toolErrors, 0), 0);
+  assert.equal(report.toolHealthCoverage.unknownResults, 1);
+  assert.equal(report.toolHealthCoverage.excludedRuns, 1);
+  assert.ok(!report.findings.some((finding) => finding.kind === 'tool-error'));
+});
+
 test('recent plugin failure counts use dated event rows, not the lifetime failure counter', async (t) => {
   const { root, recorder } = await fixture(t);
   vi.useFakeTimers({ toFake: ['Date'] });
@@ -294,14 +315,21 @@ test('coverage exposes MAX_RUNS truncation independently of the global directory
       }),
     );
   }
+  const newest = '2026-06-02T10:00:00.000Z';
+  await writeFile(
+    join(root, 'runs', initial.id, 'summary.json'),
+    JSON.stringify({ ...initial, startedAt: newest, finishedAt: newest }),
+  );
+  await utimes(join(root, 'runs', initial.id), new Date('2000-01-01'), new Date('2000-01-01'));
   const report = await recorder.review();
+  assert.equal(report.runs[0].id, initial.id);
   assert.equal(report.coverage.totalRunDirectories, 2001);
   assert.equal(report.coverage.scannedRunDirectories, 2001);
   assert.equal(report.coverage.includedRuns, 2000);
   assert.equal(report.coverage.scanLimitReached, false);
   assert.equal(report.coverage.runLimitReached, true);
   assert.equal(report.coverage.earliestRunStartedAt, at);
-  assert.equal(report.coverage.latestRunFinishedAt, at);
+  assert.equal(report.coverage.latestRunFinishedAt, newest);
 }, 30_000);
 
 // 子运行（委派 / helper）的 runId 是负数：早先版本按「必须非负」校验，会把它们整份
@@ -1293,8 +1321,11 @@ test('scope filtering precedes the run limit and out-of-scope traces are never i
   for (let index = 0; index < 350; index++) await clone(cwd);
   report = await recorder.review(cwd);
   assert.equal(report.runs.length, 351);
-  // The original run is the least recently updated one, so it sorts last but stays in scope.
-  assert.equal(report.runs.at(-1)?.id, initial.id);
+  // Directory mtime does not decide run order; equal starts use a deterministic id tie-break.
+  assert.deepEqual(
+    report.runs.map((item) => item.id),
+    report.runs.map((item) => item.id).sort(),
+  );
   assert.equal(report.limits.runs, 2000);
   assert.ok(!report.warnings.some((warning) => warning.includes('most recently updated runs in the selected scope')));
   // Every clone has no trace at all; the original run still has one.
@@ -1585,7 +1616,7 @@ test('failure lines and tool identity win over unrelated examples; rebuilt categ
   const cwd = resolve('workspace-failure-lines');
   const run = runner(recorder, { cwd });
   run.start();
-  assert.equal(CLASSIFIER_VERSION, 9);
+  assert.equal(CLASSIFIER_VERSION, 10);
   const samples = [
     {
       name: 'memory',
@@ -1683,6 +1714,106 @@ test('failure lines and tool identity win over unrelated examples; rebuilt categ
   assert.deepEqual((await recorder.review(cwd)).findings, before.findings);
 });
 
+test('generic structured outcomes and existing operation headers count tool failures without plugin-name rules', async (t) => {
+  const { recorder } = await fixture(t);
+  for (const [index, capture] of [options, { ...options, captureContent: false }].entries()) {
+    const cwd = resolve(`workspace-outcomes-${index}`);
+    const run = runner(recorder, { runId: index + 1, cwd, capture });
+    run.start();
+    const samples: Array<[string, string, string | null]> = [
+      ['remote_call', '{"outcome":"error","error":{"message":"permission denied"}}', 'permission'],
+      ['remote_call', '{"error":{"code":"EACCES"}}', 'permission'],
+      ['remote_call', '{"exitCode":23,"output":"not found is only stdout"}', 'exit-23'],
+      ['desktop_action', '{"outcome":"failed","error":"unknown failure"}', 'tool-error'],
+      ['desktop_action', '{"status":"failed","exit_code":7}', 'exit-7'],
+      ['desktop_action', '{"outcome":"timeout","error":"wait expired"}', 'timeout'],
+      ['ssh_run', '[server] exit=2 · 1.0s\ncommand output', 'exit-2'],
+      ['ssh_read', '[first] exit=0 · 1.0s\nokay\n\n[second] 失败：permission denied · 2.0s', 'permission'],
+      ['computer_use', '[1/2] screens\nDisplay 1\n\n[2/2] tap App Button → 失败（exit=1）\nstderr: AX error', 'exit-1'],
+      // The same shape also works for a user plugin, rather than matching the above names.
+      ['user.custom', '[1/1] probe → 失败（exit=3）\nfailed', 'exit-3'],
+      [
+        'remote_call',
+        '{"outcome":"completed","error":"Error: timeout is a log example","stdout":"[server] exit=2 · 1.0s"}',
+        null,
+      ],
+      ['desktop_action', '{"ok":true,"content":{"outcome":"error","exitCode":9,"error":"not found"}}', null],
+      ['desktop_action', '{"success":true,"message":"Error: permission denied","stdout":"timeout"}', null],
+      ['read_file', '1 | [1/1] probe → 失败（exit=3）\n2 | const outcome = "error";', null],
+      [
+        'run_shell',
+        '[command]\nexit_code: 0\ntimed_out: false\nsignal: null\n\n[stdout]\n[server] exit=2 · 1.0s',
+        null,
+      ],
+    ];
+    for (const [sampleIndex, [name, result]] of samples.entries()) {
+      run.call('{}', name, `outcome-${sampleIndex}`);
+      run.result(result, name, `outcome-${sampleIndex}`);
+    }
+    run.finish();
+    const before = await recorder.review(cwd);
+    assert.equal(before.runs[0].toolErrors, samples.filter(([, , category]) => category !== null).length);
+    assert.deepEqual(before.toolHealthCoverage, { includedRuns: 1, excludedRuns: 0, unknownResults: 0 });
+    assert.deepEqual(
+      (await trace(before.runs[0])).filter((event) => event.type === 'tool:result').map((event) => event.errorCategory),
+      samples.map(([, , category]) => category),
+    );
+    assert.equal(before.toolHealth.find((row) => row.name === 'computer_use')?.errors, 1);
+    assert.equal(before.toolHealth.find((row) => row.name === 'ssh_read')?.errors, 1);
+    assert.equal((await recorder.rebuild({ cwd })).rebuilt, 1);
+    assert.deepEqual((await recorder.review(cwd)).findings, before.findings);
+  }
+});
+
+test('provider retries retain fault domains and never suggest fixing tools', async (t) => {
+  const { recorder } = await fixture(t);
+  const causes = [
+    ['503 Our servers are currently overloaded. Please try again later.', 'provider-overload'],
+    ['server_is_overloaded', 'provider-overload'],
+    ['Connection error.', 'provider-connection'],
+    ['fetch failed: ECONNREFUSED', 'provider-connection'],
+    ['request timed out', 'provider-timeout'],
+    ['No stream data from provider for 60s (waiting for model output).', 'provider-timeout'],
+    ['429 rate limit', 'provider-rate-limit'],
+    ['unexpected upstream failure', 'provider-error'],
+  ];
+  for (const [index, capture] of [options, { ...options, captureContent: false }].entries()) {
+    const cwd = resolve(`workspace-provider-domains-${index}`);
+    const run = runner(recorder, { runId: index + 1, cwd, capture });
+    run.start();
+    for (const [causeIndex, [error]] of causes.entries())
+      run.emit({ type: 'retry', attempt: causeIndex + 1, delayMs: 10, error });
+    run.finish('error', causes[0][0]);
+    const before = await recorder.review(cwd);
+    assert.equal(before.runs[0].toolErrors, 0);
+    assert.deepEqual(before.toolHealth, []);
+    for (const [, category] of causes) {
+      const finding = before.findings.find((finding) => finding.title === `Request retry: ${category}`);
+      assert.ok(finding, category);
+      assert.ok(!finding.suggestion.includes('background_tasks_start'));
+      assert.match(finding.suggestion, /模型请求/);
+    }
+    assert.ok(before.findings.some((finding) => finding.title === 'Run ended with an error: provider-overload'));
+    assert.equal((await recorder.rebuild({ cwd })).rebuilt, 1);
+    assert.deepEqual((await recorder.review(cwd)).findings, before.findings);
+  }
+});
+
+test('old metadata-only retries no longer inherit a tool-error fault domain', async (t) => {
+  const { recorder } = await fixture(t);
+  const run = runner(recorder, { capture: { ...options, captureContent: false } });
+  run.start();
+  run.emit({ type: 'retry', attempt: 1, delayMs: 10, error: 'unavailable upstream details' });
+  run.finish();
+  const initial = (await recorder.review()).runs[0];
+  const events = await trace(initial);
+  events.find((event) => event.type === 'retry')!.errorCategory = 'tool-error';
+  await writeFile(initial.traceFile, events.map((event) => JSON.stringify(event)).join('\n') + '\n');
+  const before = await recorder.review();
+  assert.equal(before.findings.find((finding) => finding.kind === 'retry')?.title, 'Request retry: provider-error');
+  assert.equal((await recorder.rebuild()).rebuilt, 1);
+});
+
 test('network retries and helper deadlines retain their causes through rebuild', async (t) => {
   const { recorder } = await fixture(t);
   const cwd = resolve('workspace-provider-errors');
@@ -1695,9 +1826,9 @@ test('network retries and helper deadlines retain their causes through rebuild',
   helper.finish('error', '模型请求超时（60s）');
 
   const before = await recorder.review(cwd);
-  assert.ok(before.findings.some((finding) => finding.title === 'Request retry: connection-error'));
-  assert.ok(before.findings.some((finding) => finding.title === 'Run ended with an error: connection-error'));
-  assert.ok(before.findings.some((finding) => finding.title === 'Run ended with an error: timeout'));
+  assert.ok(before.findings.some((finding) => finding.title === 'Request retry: provider-connection'));
+  assert.ok(before.findings.some((finding) => finding.title === 'Run ended with an error: provider-connection'));
+  assert.ok(before.findings.some((finding) => finding.title === 'Run ended with an error: provider-timeout'));
   assert.deepEqual(await recorder.rebuild({ cwd }), {
     rebuilt: 2,
     findings: 3,
@@ -1713,7 +1844,11 @@ test('browser deadlines and provider stream silence are timeouts only in explici
   const screenshot = 'Error: 页面截图超过 20000ms 未返回（页面可能在忙）；可重试或改用 evaluate 读 DOM';
   const script = 'Error: 页面脚本执行超过 15000ms';
   const provider = ' No stream data from provider for 60s (waiting for model output).';
-  for (const [index, capture] of [options, { ...options, captureContent: false }, { ...options, maxEventChars: 40 }].entries()) {
+  for (const [index, capture] of [
+    options,
+    { ...options, captureContent: false },
+    { ...options, maxEventChars: 40 },
+  ].entries()) {
     const cwd = resolve(`workspace-explicit-timeouts-${index}`);
     const browser = 'mcp__mica-browser__control_4e54cce9';
     const run = runner(recorder, { runId: index + 1, cwd, capture });
@@ -1725,7 +1860,11 @@ test('browser deadlines and provider stream silence are timeouts only in explici
     run.call('{}', 'read_file', 'source');
     run.result(`1 | const message = ${JSON.stringify(screenshot)};\n2 | ${provider}`, 'read_file', 'source');
     run.call('{"command":"cat timeout-fixture.txt"}', 'run_shell', 'stdout');
-    run.result(JSON.stringify({ exit_code: 0, stdout: `${screenshot}\n${script}\n${provider}`, stderr: '' }), 'run_shell', 'stdout');
+    run.result(
+      JSON.stringify({ exit_code: 0, stdout: `${screenshot}\n${script}\n${provider}`, stderr: '' }),
+      'run_shell',
+      'stdout',
+    );
     run.call('{}', browser, 'successful-message');
     run.result(JSON.stringify({ success: true, message: script }), browser, 'successful-message');
     run.call('{}', browser, 'ordinary-text');
@@ -1739,22 +1878,30 @@ test('browser deadlines and provider stream silence are timeouts only in explici
       const events = await trace(summary);
       for (const event of events) if (event.errorCategory === 'timeout') event.errorCategory = 'tool-error';
       await writeFile(summary.traceFile, events.map((event) => JSON.stringify(event)).join('\n') + '\n');
-      await writeFile(join(summary.traceFile, '..', 'summary.json'), JSON.stringify({
-        ...summary,
-        findings: summary.findings.map((finding) => ({
-          ...finding,
-          id: sha(`old-timeout-${finding.id}`),
-          title: finding.title.replace('timeout', 'tool-error'),
-        })),
-      }));
+      await writeFile(
+        join(summary.traceFile, '..', 'summary.json'),
+        JSON.stringify({
+          ...summary,
+          findings: summary.findings.map((finding) => ({
+            ...finding,
+            id: sha(`old-timeout-${finding.id}`),
+            title: finding.title.replace('timeout', 'tool-error'),
+          })),
+        }),
+      );
       before = await recorder.review(cwd);
       assert.deepEqual(before.findings, expected);
     }
     assert.equal(before.runs[0].toolErrors, 2);
-    assert.deepEqual(before.toolHealth.find((row) => row.name === browser)?.categories, [{ category: 'timeout', count: 2 }]);
-    assert.equal(before.findings.find((finding) => finding.title === `Tool error in ${browser}: timeout`)?.occurrences, 2);
-    assert.ok(before.findings.some((finding) => finding.title === 'Request retry: timeout'));
-    assert.ok(before.findings.some((finding) => finding.title === 'Run ended with an error: timeout'));
+    assert.deepEqual(before.toolHealth.find((row) => row.name === browser)?.categories, [
+      { category: 'timeout', count: 2 },
+    ]);
+    assert.equal(
+      before.findings.find((finding) => finding.title === `Tool error in ${browser}: timeout`)?.occurrences,
+      2,
+    );
+    assert.ok(before.findings.some((finding) => finding.title === 'Request retry: provider-timeout'));
+    assert.ok(before.findings.some((finding) => finding.title === 'Run ended with an error: provider-timeout'));
     assert.equal(before.findings.length, 3);
     assert.equal((await recorder.rebuild({ cwd })).rebuilt, 1);
     assert.deepEqual((await recorder.review(cwd)).findings, before.findings);
@@ -1998,7 +2145,11 @@ test('git config missing-value exits are expected while query errors and unrelat
 
 test('ambiguous && exits stay unknown without retaining stale errors or hiding confirmed failures in the same run', async (t) => {
   const { recorder } = await fixture(t);
-  for (const [index, capture] of [options, { ...options, captureContent: false }, { ...options, maxEventChars: 40 }].entries()) {
+  for (const [index, capture] of [
+    options,
+    { ...options, captureContent: false },
+    { ...options, maxEventChars: 40 },
+  ].entries()) {
     const cwd = resolve(`workspace-ambiguous-exits-${index}`);
     const run = runner(recorder, { runId: index + 1, cwd, capture });
     run.start();
@@ -2038,7 +2189,10 @@ test('ambiguous && exits stay unknown without retaining stale errors or hiding c
     assert.equal(live.expectedExits, 1);
     const events = await trace(initial);
     const results = events.filter((event) => event.type === 'tool:result');
-    assert.deepEqual(results.slice(0, 3).map((event) => event.errorCategory), ['unknown-exit', 'unknown-exit', 'unknown-exit']);
+    assert.deepEqual(
+      results.slice(0, 3).map((event) => event.errorCategory),
+      ['unknown-exit', 'unknown-exit', 'unknown-exit'],
+    );
     // Simulate the previous classifier's stale aggregate, including an obsolete
     // candidate whose only evidence is the short-circuited call.
     const stale = { ...live.findings.find((finding) => finding.kind === 'tool-error')! };
@@ -2063,10 +2217,16 @@ test('ambiguous && exits stay unknown without retaining stale errors or hiding c
     assert.deepEqual(before.toolHealthCoverage, { includedRuns: 0, excludedRuns: 1, unknownResults: 3 });
     assert.ok(before.warnings.some((warning) => warning.includes('unknown shell exit ownership')));
     assert.ok(!before.findings.some((finding) => finding.id === stale.id));
-    assert.equal(before.findings.find((finding) => finding.title === 'Tool error in run_shell: exit-1')?.occurrences, 5);
-    assert.equal(before.findings.find((finding) => finding.title === 'Tool error in run_shell: exit-2')?.occurrences, 1);
+    assert.equal(
+      before.findings.find((finding) => finding.title === 'Tool error in run_shell: exit-1')?.occurrences,
+      5,
+    );
+    assert.equal(
+      before.findings.find((finding) => finding.title === 'Tool error in run_shell: exit-2')?.occurrences,
+      1,
+    );
     assert.ok(before.findings.some((finding) => finding.title === 'Tool error in read_file: not-found'));
-    assert.ok(before.findings.some((finding) => finding.title === 'Request retry: timeout'));
+    assert.ok(before.findings.some((finding) => finding.title === 'Request retry: provider-timeout'));
     assert.equal((await recorder.rebuild({ cwd })).rebuilt, 1);
     const after = await recorder.review(cwd);
     assert.deepEqual(after.findings, before.findings);
@@ -2591,7 +2751,7 @@ test('helper runs never read as the user retrying the previous task', async (t) 
   const failures = report.findings.filter((finding) => finding.kind === 'run-error');
   assert.equal(failures.length, 1);
   assert.equal(failures[0]!.occurrences, 2);
-  assert.equal(failures[0]!.title, 'Helper run failed: compaction (timeout)');
+  assert.equal(failures[0]!.title, 'Helper run failed: compaction (provider-timeout)');
 
   // 反向也成立：helper 不能把「上一轮用户说了什么」挤掉，紧随其后的真实重试仍要被认出来。
   const task = 'Refactor the compaction service so idle history collapses without touching the turn lease.';
@@ -2648,8 +2808,11 @@ test('a failing helper run names its source and stays apart from ordinary run fa
     'runtime',
   ]);
   const helper = findings.find((finding) => finding.module === 'plugin:session-compact')!;
-  assert.equal(helper.title, 'Helper run failed: session-compact · compaction (timeout)');
-  assert.equal(findings.find((finding) => finding.module === 'runtime')!.title, 'Run ended with an error: timeout');
+  assert.equal(helper.title, 'Helper run failed: session-compact · compaction (provider-timeout)');
+  assert.equal(
+    findings.find((finding) => finding.module === 'runtime')!.title,
+    'Run ended with an error: provider-timeout',
+  );
 });
 
 test('two purposes of the same plugin fail as two review items', async (t) => {
@@ -2671,8 +2834,8 @@ test('two purposes of the same plugin fail as two review items', async (t) => {
   }
   const findings = (await recorder.review(cwd)).findings.filter((finding) => finding.kind === 'run-error');
   assert.deepEqual(findings.map((finding) => finding.title).sort(), [
-    'Helper run failed: commit · plugin-llm · commit-message (timeout)',
-    'Helper run failed: commit · plugin-llm · title (timeout)',
+    'Helper run failed: commit · plugin-llm · commit-message (provider-timeout)',
+    'Helper run failed: commit · plugin-llm · title (provider-timeout)',
   ]);
   // 模块仍然按插件归并：一个插件的失败不该因为来源不同就散成好几处。
   assert.deepEqual([...new Set(findings.map((finding) => finding.module))], ['plugin:commit']);
@@ -2880,8 +3043,6 @@ test('plugin background failures are throttled, aggregated and exposed as a revi
   });
   // 每个任务的第一条一定落盘：一次失败立刻可见。
   recorder.notePluginEvent(failure(1, at));
-  // 5 分钟内第二次不落盘：常驻任务每 30 秒坏一次，一天就是几千行同一个结论。
-  recorder.notePluginEvent(failure(2, at));
   await recorder.flush();
   const file = join(root, 'plugin-events.jsonl');
   const lines = (await readFile(file, 'utf8')).trim().split('\n');
@@ -2935,6 +3096,156 @@ test('plugin background failures are throttled, aggregated and exposed as a revi
   const markdown = await readFile(await recorder.exportReport(), 'utf8');
   assert.match(markdown, /## Plugin health/);
   assert.match(markdown, /\| mobile-relay \| poll \| 3 \|/);
+});
+
+test('forty failures in one window keep cumulative counters and flush the latest error', async (t) => {
+  const { recorder, root } = await fixture(t);
+  for (let failures = 1; failures <= 40; failures++)
+    recorder.notePluginEvent({
+      pluginId: 'sample',
+      type: 'background:failed',
+      taskId: 'poll',
+      timestamp: `2026-06-01T10:00:${String(failures).padStart(2, '0')}.000Z`,
+      tick: failures * 2,
+      failures,
+      error: `failure ${failures}`,
+    });
+  await recorder.flush();
+  const file = join(root, 'plugin-events.jsonl');
+  const records = (await readFile(file, 'utf8'))
+    .trim()
+    .split('\n')
+    .map((line) => JSON.parse(line));
+  assert.equal(records.length, 2, 'one immediate event plus one merged tail checkpoint');
+  assert.equal(records[0].failures, 1);
+  assert.deepEqual(records[1], {
+    at: '2026-06-01T10:00:40.000Z',
+    pluginId: 'sample',
+    taskId: 'poll',
+    tick: 80,
+    failures: 40,
+    error: 'failure 40',
+  });
+  await recorder.flush();
+  assert.equal((await readFile(file, 'utf8')).trim().split('\n').length, 2, 'clean flush does not duplicate rows');
+  const report = await recorder.review();
+  assert.equal(report.pluginFailures[0].count, 40);
+  assert.equal(report.pluginFailures[0].lastError, 'failure 40');
+  assert.equal(report.findings.find((finding) => finding.kind === 'plugin-background')?.occurrences, 40);
+  assert.match(report.interpretation, /Plugin failure counts are lower bounds/);
+});
+
+test('dispose checkpoints pending hook failures before restart, including reset producer counters', async (t) => {
+  const { recorder, root } = await fixture(t);
+  for (let index = 0; index < 40; index++)
+    recorder.notePluginEvent({
+      pluginId: 'sample',
+      type: 'hook:failed',
+      hook: 'turn:after',
+      timestamp: at,
+      failures: 1,
+      error: `hook ${index + 1}`,
+    });
+  await recorder.dispose();
+  const reader = new HarnessRecorder(root);
+  t.onTestFinished(() => reader.dispose());
+  const report = await reader.review();
+  assert.equal(report.pluginFailures[0].count, 40, 'every observed failure counts even if a producer resets');
+  assert.equal(report.pluginFailures[0].lastError, 'hook 40');
+  const markdown = await readFile(await reader.exportReport(), 'utf8');
+  assert.match(markdown, /Counts are a lower bound/);
+  assert.match(markdown, /flush\/dispose preserve the latest counters/);
+});
+
+test('expired plugin-event windows write the current checkpoint without an explicit flush', async (t) => {
+  const { recorder, root } = await fixture(t);
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(at);
+  t.onTestFinished(() => {
+    vi.useRealTimers();
+  });
+  const fail = (failures: number) =>
+    recorder.notePluginEvent({
+      pluginId: 'sample',
+      type: 'hook:failed',
+      hook: 'turn:after',
+      timestamp: new Date().toISOString(),
+      failures,
+      error: `hook ${failures}`,
+    });
+  fail(1);
+  fail(2);
+  vi.setSystemTime(Date.parse(at) + 5 * 60 * 1000);
+  fail(3);
+  await (recorder as unknown as { tail: Promise<void> }).tail;
+  const records = (await readFile(join(root, 'plugin-events.jsonl'), 'utf8'))
+    .trim()
+    .split('\n')
+    .map((line) => JSON.parse(line));
+  assert.deepEqual(
+    records.map((record) => record.failures),
+    [1, 3],
+  );
+});
+
+test('plugin-event key eviction checkpoints its pending tail', async (t) => {
+  const { recorder, root } = await fixture(t);
+  const fail = (taskId: string, failures: number) =>
+    recorder.notePluginEvent({
+      pluginId: 'sample',
+      type: 'background:failed',
+      taskId,
+      timestamp: at,
+      failures,
+      tick: failures,
+      error: taskId,
+    });
+  fail('oldest', 1);
+  fail('oldest', 40);
+  for (let index = 0; index < 500; index++) fail(`task-${index}`, 1);
+  await recorder.dispose();
+  const records = (await readFile(join(root, 'plugin-events.jsonl'), 'utf8'))
+    .trim()
+    .split('\n')
+    .map((line) => JSON.parse(line));
+  assert.deepEqual(
+    records.filter((record) => record.taskId === 'oldest').map((record) => record.failures),
+    [1, 40],
+  );
+});
+
+test('concurrent recorder rotation keeps both hosts events in a consistent snapshot', async (t) => {
+  const { recorder, root, errors } = await fixture(t);
+  await mkdir(root, { recursive: true });
+  const old = JSON.stringify({ at, pluginId: 'old', taskId: 'poll', failures: 3, error: 'old' });
+  await writeFile(join(root, 'plugin-events.jsonl'), `${old}\n${' '.repeat(4 * 1024 * 1024)}\n`);
+  const second = new HarnessRecorder(root, (error) => errors.push(error));
+  t.onTestFinished(() => second.dispose());
+  for (const [host, pluginId] of [
+    [recorder, 'one'],
+    [second, 'two'],
+  ] as const) {
+    for (let failures = 1; failures <= 40; failures++)
+      host.notePluginEvent({
+        pluginId,
+        type: 'background:failed',
+        taskId: 'poll',
+        timestamp: at,
+        tick: failures,
+        failures,
+        error: `host ${pluginId}`,
+      });
+  }
+  await Promise.all([recorder.flush(), second.flush()]);
+  const report = await recorder.review();
+  assert.deepEqual(Object.fromEntries(report.pluginFailures.map((failure) => [failure.pluginId, failure.count])), {
+    one: 40,
+    two: 40,
+    old: 3,
+  });
+  assert.deepEqual(errors, []);
+  assert.ok((await stat(join(root, 'plugin-events.jsonl'))).size < 4 * 1024 * 1024);
+  assert.ok((await stat(join(root, 'plugin-events.1.jsonl'))).size > 4 * 1024 * 1024);
 });
 
 test('hook failures are recorded like background tasks, with a lower-bound count', async (t) => {

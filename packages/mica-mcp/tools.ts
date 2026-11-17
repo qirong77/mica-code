@@ -11,6 +11,19 @@ import { connectToServer, connections, type ConnectedMcpServer } from './client.
 import { createHash } from 'node:crypto';
 
 const MAX_MCP_TOOL_RESULT_CHARS = 60_000;
+const MCP_TOOL_TIMEOUT_MS = 120_000;
+const RESPONSE_GRACE_MS = 5_000;
+
+/** A declared wait budget must not be cut short by the transport's old 120s ceiling. */
+function toolCallTimeout(args: Record<string, unknown>): number {
+  const params = args.params && typeof args.params === 'object' ? (args.params as Record<string, unknown>) : {};
+  const budgets = [args.timeoutMs, params.timeoutMs].filter(
+    (value): value is number => typeof value === 'number' && Number.isSafeInteger(value) && value > 0,
+  );
+  // SDK timers overflow above the signed 32-bit range. Do not turn a long wait
+  // into an immediate timeout, or lower the existing default for short waits.
+  return Math.min(2_147_483_647, Math.max(MCP_TOOL_TIMEOUT_MS, ...budgets.map((value) => value + RESPONSE_GRACE_MS)));
+}
 
 class McpProxyTool extends micaTools.MicaTool {
   constructor(
@@ -91,7 +104,7 @@ async function doCallMcpTool(
   signal?: AbortSignal,
 ): Promise<ToolResult> {
   const result = await server.client.callTool({ name: toolName, arguments: args }, CallToolResultSchema, {
-    timeout: 120_000,
+    timeout: toolCallTimeout(args),
     signal,
   });
   const content = result.content as ContentBlock[];

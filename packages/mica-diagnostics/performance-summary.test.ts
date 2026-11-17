@@ -189,6 +189,29 @@ describe('Performance summary cache', () => {
     expect(result.buckets.map((item) => item.event)).toEqual(['older']);
   });
 
+  it('normalizes historical plugin envelopes without hiding warnings or nested data', async () => {
+    writeFileSync(
+      join(dir, 'plugin-demo-20261104.jsonl'),
+      `${JSON.stringify({
+        time: '2026-11-04T12:00:00.000Z',
+        plugin: { id: 'demo' },
+        level: 'info',
+        event: 'plugin-warning',
+        data: { warning: 'service unavailable', detail: { retryable: true } },
+      })}\n`,
+    );
+
+    const summary = await readPerformanceSummaryAsync();
+    expect(summary.events[0]).toMatchObject({
+      at: Date.parse('2026-11-04T12:00:00.000Z'),
+      scope: 'plugin',
+      event: 'plugin-warning',
+      level: 'warn',
+      error: 'service unavailable',
+      plugin: 'demo',
+    });
+  });
+
   it('coalesces concurrent cold reads and lets other event-loop work run between chunks', async () => {
     const rows = 10_000;
     writeFileSync(

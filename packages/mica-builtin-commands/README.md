@@ -5,7 +5,7 @@
 ## 主要能力
 
 - 提供全部产品内置命令实现：`/cd`、`/clear`、`/compact`、`/config`、`/exit`、`/fork`、`/model`、`/effort`、`/role`、`/capabilities`、`/mcp`、`/skills`、`/status`、`/task`、`/context`、`/new`、`/rename`、`/resume`、`/rewind`、`/loop`。`/commit` 由官方插件 `plugins/commit`、`/btw` 由官方插件 `plugins/btw` 提供，不在本包；本包只保留它们共用的 `shared/btwThread.ts`。
-- `/harness-review list|report|assess <id> <状态> <依据>` 由官方插件 `plugins/harness-review` 提供：查看当前工作区运行复盘、导出报告、记录人工评估；运行中可用。
+- `/harness-review list|report|assess <id> <状态> <依据>` 由官方插件 `plugins/harness-review` 提供：查看当前工作区运行与整机系统/插件日志旁证的有界摘要、导出完整报告、记录人工评估；运行中可用。机器级旁证不冒充工作区根因，截断/未知覆盖单独说明。
 - `/todo [show|hide|clear]` 由官方插件 `plugins/todo` 提供，运行中可用；`/memory [status|list|review|refresh|path]` 由 `plugins/memory` 提供，运行中不可用。两者均不在本包实现，停用插件后命令消失。
 - 通过 `CommandHostService` 支持 `plugins/command-*.ts` 装配层注册全部命令（TUI 与 headless 共用）。
 - 提供命令所需的服务类型与注入入口。

@@ -200,6 +200,7 @@ export const PLUGIN_REQUIREMENTS = [
   'git',
   'hooks',
   'llm',
+  'operations',
   'prompt',
   'runtime',
   'session',

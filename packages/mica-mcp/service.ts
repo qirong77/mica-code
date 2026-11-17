@@ -57,6 +57,11 @@ const defaultInitDependencies: McpInitDependencies = {
   cleanup: cleanupConnection,
 };
 
+// Tool definitions are successful snapshots. Reconnecting an unrelated server
+// must not depend on every other connection being able to tools/list again.
+// Proxies resolve their live connection by server name at execution time.
+const registeredToolsByServer = new Map<string, MicaTool[]>();
+
 export async function initMcp(options: InitMcpOptions = {}): Promise<void> {
   throwIfAborted(options.signal);
   const localConfigs = options.strict ? {} : await loadMcpConfig();
@@ -68,6 +73,7 @@ export async function initMcp(options: InitMcpOptions = {}): Promise<void> {
   const configs = { ...localConfigs, ...externalConfigs };
   const entries = Object.entries(configs);
   if (entries.length === 0) {
+    registeredToolsByServer.clear();
     micaTools.unregisterMcp();
     return;
   }
@@ -86,6 +92,8 @@ export async function initializeMcpEntries(
     ? await Promise.all(entries.map(initialize))
     : await initializeMcpServersSerially(entries, initialize);
 
+  registeredToolsByServer.clear();
+  entries.forEach(([name], index) => registeredToolsByServer.set(name, toolGroups[index] ?? []));
   dependencies.registerTools(toolGroups.flat());
 }
 
@@ -215,45 +223,38 @@ function abortReason(signal: AbortSignal): Error {
 
 export async function reconnectMcpServer(name: string, config: McpServerConfig): Promise<string> {
   const existing = connections.get(name);
-  if (existing) await existing.cleanup();
-
+  let server: ConnectedMcpServer | undefined;
   try {
-    const server = await connectToServer(name, config);
+    if (existing) await existing.cleanup();
+    registeredToolsByServer.delete(name);
+    refreshRegisteredToolsFromConnections();
+    server = await connectToServer(name, config);
     const tools = await fetchToolsForServer(server);
     markServerConnected(name, configLabel(config), tools.length, extractToolInfo(tools, name));
-
-    const allTools: MicaTool[] = [...tools];
-    for (const [serverName, connected] of connections) {
-      if (serverName === name) continue;
-      try {
-        allTools.push(...(await fetchToolsForServer(connected)));
-      } catch {
-        // Keep other connections untouched if refresh fails.
-      }
-    }
-    micaTools.registerMcp(allTools);
+    registeredToolsByServer.set(name, tools);
+    refreshRegisteredToolsFromConnections();
     return `已重连 ${name}，注册 ${tools.length} 个工具`;
   } catch (error) {
+    if (server) await server.cleanup().catch(() => undefined);
+    registeredToolsByServer.delete(name);
     const message = error instanceof Error ? error.message : String(error);
     markServerFailed(name, configLabel(config), message);
-    await refreshRegisteredToolsFromConnections();
+    refreshRegisteredToolsFromConnections();
     return `${name} 重连失败: ${message}`;
   }
 }
 
 export async function shutdownMcp(): Promise<void> {
+  registeredToolsByServer.clear();
   micaTools.unregisterMcp();
   await disconnectAll();
 }
 
-async function refreshRegisteredToolsFromConnections(): Promise<void> {
+function refreshRegisteredToolsFromConnections(): void {
   const allTools: MicaTool[] = [];
-  for (const server of connections.values()) {
-    try {
-      allTools.push(...(await fetchToolsForServer(server)));
-    } catch {
-      // Keep the registry consistent with servers that can still list tools.
-    }
+  for (const [name, tools] of registeredToolsByServer) {
+    if (connections.has(name)) allTools.push(...tools);
+    else registeredToolsByServer.delete(name);
   }
   micaTools.registerMcp(allTools);
 }

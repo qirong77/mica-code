@@ -22,6 +22,8 @@ export type ModelEffortRule = Partial<Record<ProviderProtocol, ModelRequestPatch
 
 export interface ProviderDefinition {
   id: string;
+  /** Disabled providers remain in config.json but cannot be selected or used for requests. */
+  disabled?: boolean;
   api_base: string;
   api_key?: string;
   protocol: ProviderProtocol;
@@ -113,6 +115,11 @@ export function providerSupportsModel(provider: ProviderDefinition, model: strin
   return provider.models.includes(model);
 }
 
+/** A provider is usable unless it is explicitly disabled in config.json. */
+export function isProviderEnabled(provider: Pick<ProviderDefinition, 'disabled'>): boolean {
+  return provider.disabled !== true;
+}
+
 /**
  * 这个模型实际由哪个 provider 服务：带 `provider/model` 前缀时按最长前缀匹配，
  * 否则算在当前 provider 上（常驻会话里的裸模型名就是这种）。
@@ -130,7 +137,8 @@ export function providerForModel(
       .find((provider) => model.startsWith(`${provider.id}/`));
     if (matched) return matched;
   }
-  return config.providers.find((provider) => provider.id === config.provider);
+  const current = config.providers.find((provider) => provider.id === config.provider);
+  return current && isProviderEnabled(current) ? current : undefined;
 }
 
 export function firstProviderModel(provider: ProviderDefinition | Record<string, unknown>): string | undefined {
@@ -140,7 +148,7 @@ export function firstProviderModel(provider: ProviderDefinition | Record<string,
 
 export function requireProvider(config: IMicaConfig, providerId: string): ProviderDefinition {
   const provider = config.providers.find((item) => item.id === providerId);
-  if (!provider) {
+  if (!provider || !isProviderEnabled(provider)) {
     throw new Error(`Provider not found: ${providerId || '(empty)'}`);
   }
   return provider;

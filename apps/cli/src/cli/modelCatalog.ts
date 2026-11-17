@@ -1,5 +1,6 @@
 import {
   isEffortLevelName,
+  isProviderEnabled,
   micaConfig,
   normalizeModelEffort,
   type EffortOption,
@@ -38,6 +39,7 @@ export async function listRuntimeModelIds(): Promise<string[]> {
   const ids: string[] = [];
   const seen = new Set<string>();
   for (const provider of config.providers) {
+    if (!isProviderEnabled(provider)) continue;
     const models = [...(provider.models ?? [])];
     if (provider.id === config.provider && config.model && !models.includes(config.model)) {
       models.push(config.model);
@@ -61,6 +63,9 @@ export function resolveRuntimeConfigOverride(
   const matchedProvider = [...config.providers]
     .sort((left, right) => right.id.length - left.id.length)
     .find((provider) => modelID?.startsWith(`${provider.id}/`));
+  if (matchedProvider && !isProviderEnabled(matchedProvider)) {
+    throw new Error(`Provider is disabled: ${matchedProvider.id}`);
+  }
   const model = !modelID ? config.model : matchedProvider ? modelID.slice(matchedProvider.id.length + 1) : modelID;
   if (modelID && matchedProvider && !model) {
     throw new Error(`Missing model name after provider prefix: ${modelID}`);
@@ -68,7 +73,10 @@ export function resolveRuntimeConfigOverride(
   // 没有 provider 前缀的 model（常驻 host 里的会话模型）属于「当前正在跑的 provider」，
   // 不是全局默认 provider：档位要按正在生效的协议过滤，否则两种协议同一模型会算出两套档位。
   const provider =
-    matchedProvider ?? config.providers.find((item) => item.id === (options.fallbackProviderId ?? config.provider));
+    matchedProvider ??
+    config.providers.find(
+      (item) => item.id === (options.fallbackProviderId ?? config.provider) && isProviderEnabled(item),
+    );
   const { effort, adjustment } = resolveEffort(variant, model, provider, options.effortPolicy ?? 'clamp');
   const extra = adjustment ? { effortAdjustment: adjustment } : {};
 

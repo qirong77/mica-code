@@ -62,6 +62,7 @@ mica 选后者，这个插件就是「洗」的地方。
 | `browser-cookie-sync-extension` | 将识别出的 v1 Chrome 数据库 / 手动同步设置与状态改名归档为同目录 `*.legacy-v1.json`；已有归档保留并使用编号后缀。新版 `target` 连接对象与未知状态字段保留，token 与扩展目录不动；损坏或无法识别的文件不改，旧形态不再支持。                                                                                                                                                     |
 | `harness-review-assessments`    | 将 `plugin-data/harness-review/decisions/<key>.json` 的合法旧人工决策迁入 `<key>/legacy-<digest>.json`，补 `version: 1` 与 `baseline: null`（观测范围未知），保留 id、status、note、updatedAt；已有同内容历史不重复。原文件改名归档为 `*.legacy-v1.json`，已有归档保留并使用编号后缀；未知、损坏、键不匹配或非法路径不动。运行期不再支持旧单文件形态，需运行 `/evolution run`。 |
 | `plugin-startup-health` | 将旧 `plugin-health/<id>.json` 中宿主写下的「启动失败：…」错误原文归档到 `plugin-data/evolution/legacy-plugin-health/`，不再当作当前运行健康。只识别明确的旧启动错误，真实运行错误、成功记录与损坏文件不动；装配结论由当前宿主的 `plugin-status.json` 负责。 |
+| `plugin-health-issues-v2` | 将旧单条健康状态迁为 `schemaVersion: 2` 的 `issues` 映射：业务状态放 `runtime`，明确的模型降级放 `llm:degraded`；所有原字段随报告保留，替换前完整原文归档到 `plugin-data/evolution/legacy-plugin-health/`。迁移与运行健康写入使用同一跨进程锁；当前形态、损坏内容与符号链接不改。运行时不再解析旧单条形态。 |
 | `subagent-task-files` | 将 `subagent-tasks/<sessionId>.json` 的旧任务数组拆为 `<sessionId>/<taskId>.json`，已有独立任务更新优先；完整原文件改名归档为 `*.legacy-v1.json`，归档重名时加编号。损坏、未知数据与符号链接不改。运行时不再读取旧数组，需经此迁移。 |
 | `notebook-comments` | 评论功能移除后，笔记文档里的 `comments` 讨论记录先归档到 `plugin-data/evolution/legacy-notebook-comments/<noteId>.json`（重名加编号），再删掉该字段；正文里由评论产生的 MarkNode 锚点拆回普通子节点，文字与格式不变。文档只剩 `version` 与 `editorState`，损坏文档与非 `version: 1` 文档不动；重复执行改动数为 0。 |
 | `notebook-mcp` | 将 Notebook 旧插件 skill 索引移到 `plugin-data/evolution/legacy-notebook-skill/` 原文归档，迁移默认能力中的旧工具停用项；不改笔记正文、用户手写 skill 或其它插件索引。旧 skill / 直连工具入口不再支持。 |
@@ -78,6 +79,9 @@ mica 选后者，这个插件就是「洗」的地方。
 Harness Review 的纯转换 `harnessReviewAssessmentV1` 放在 `migrations.ts`，但不登记到
 会话 `MIGRATIONS`：决策是非会话插件数据，只由 `DATA_MIGRATIONS` 扫描，避免让全部会话
 为无关数据重跑。旧决策没有记录观测范围，所以迁移只写 `baseline: null`，不从现有运行回填。
+
+同样，`pluginHealthIssuesV2` 在 `migrations.ts` 登记纯转换，只由 `DATA_MIGRATIONS` 的
+`plugin-health-issues-v2` 扫描非会话健康文件，不加入会话 `MIGRATIONS`。
 
 规则只有三条，违反任何一条都会让「删除运行时兼容分支」变成一次数据事故：
 

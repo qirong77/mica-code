@@ -2,6 +2,7 @@ import { atom } from 'nanostores';
 import {
   CONFIG_PATH,
   firstProviderModel,
+  isProviderEnabled,
   type EffortOption,
   type IMicaConfig,
   type PersistedMicaConfig,
@@ -16,6 +17,7 @@ export {
   DEFAULT_MODEL_CONTEXT_SIZE,
   KNOWN_EFFORT_LEVELS,
   PROVIDER_PROTOCOLS,
+  isProviderEnabled,
   providerForModel,
   providerSupportsModel,
 } from './types.js';
@@ -57,8 +59,10 @@ export function getConfig() {
 
 export function refreshProviders(): IMicaConfig {
   const current = getConfig();
-  const providers = synthesizeEnvProviders(readPersistedConfig(CONFIG_PATH).providers ?? []);
-  const next = { ...current, providers };
+  const persisted = readPersistedConfig(CONFIG_PATH);
+  const providers = synthesizeEnvProviders(persisted.providers ?? []);
+  const currentProvider = providers.find((item) => item.id === current.provider);
+  const next = currentProvider && isProviderEnabled(currentProvider) ? { ...current, providers } : mergeRuntimeConfig(persisted);
   configAtom.set(next);
   return next;
 }
@@ -117,7 +121,7 @@ export function resetSessionModelDefaults(): IMicaConfig {
 /** Resolve model metadata before creating a new session. */
 export async function prepareSessionModelDefaults(): Promise<IMicaConfig> {
   const config = resetSessionModelDefaults();
-  const provider = config.providers.find((item) => item.id === config.provider);
+  const provider = config.providers.find((item) => item.id === config.provider && isProviderEnabled(item));
   if (!provider) {
     throw new Error('Cannot prepare session model defaults: no default provider is configured.');
   }
@@ -141,10 +145,13 @@ function mergeRuntimeConfig(config: PersistedMicaConfig): IMicaConfig {
   const configured = Array.isArray(config.providers) ? config.providers : [];
   const providers = synthesizeEnvProviders(configured);
   const defaults = config.defaultModel;
-  const provider = defaults ? providers.find((item) => item.id === defaults.provider) : providers[0];
+  const provider =
+    (defaults ? providers.find((item) => item.id === defaults.provider && isProviderEnabled(item)) : undefined) ??
+    providers.find(isProviderEnabled);
+  const activeDefaults = provider && defaults?.provider === provider.id ? defaults : undefined;
   const configuredProvider = configured.find((item) => item.id === provider?.id);
   const model =
-    defaults?.model ??
+    activeDefaults?.model ??
     (configuredProvider ? firstProviderModel(configuredProvider) : undefined) ??
     (provider ? firstProviderModel(provider) : undefined) ??
     '';
@@ -152,9 +159,9 @@ function mergeRuntimeConfig(config: PersistedMicaConfig): IMicaConfig {
   const effort: EffortOption =
     provider?.supportsEffort === false
       ? 'none'
-      : defaults?.effort === undefined
+      : activeDefaults?.effort === undefined
         ? rule.defaultEffort
-        : normalizeModelEffort(model, defaults.effort, provider);
+        : normalizeModelEffort(model, activeDefaults.effort, provider);
   return {
     ...config,
     providers,

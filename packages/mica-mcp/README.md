@@ -6,11 +6,15 @@
 
 - 初始化所有 MCP server：`micaMcp.init()`。
 - 重新连接指定 server：`micaMcp.reconnectServer(...)`。
+  工具定义按 server 保留最近一次成功快照；只替换本次重连的 server，不为了重连 A 去刷新 B 的
+  `tools/list`。B 暂时不能列工具时仍保留原代理，真正断开后才清理。重连目标的 connect/list
+  失败会清理该次连接与该 server 的工具，不影响其他已连 server。
 - 关闭连接并清理工具注册：`micaMcp.shutdown()`。
 - 读取 MCP 配置：`micaMcp.loadConfig()`。
 - 从显式路径严格读取 MCP 配置：`micaMcp.readConfig(path)`。
 - 展开配置里的环境变量占位符：`micaMcp.expandEnv(value)`。
 - 暴露 MCP server 状态 store：`micaMcp.servers`。
+- stdio stderr 只累计有界字节计数，不记录命令、env、口令或 stderr 原文；transport error/close 更新失败状态并撤下活连接，使旧工具不能继续执行。主动 cleanup 不记为故障。初始化失败仍通过原有连接错误响应给调用方，不冒充已经完成真实连接验证。
 - 拼会话能力目录的 MCP 一栏：`micaMcp.catalog({ configured, extra, statuses })`——用户配置、
   会话自己的 `--mcp-config`、已连上的 server 三处合并。桌面端把受控浏览器 / 终端挂在会话
   `--mcp-config` 上而不写用户配置，能力目必须把这一处也算进去。
@@ -22,6 +26,8 @@
 
 桌面端浏览器 MCP 的 `screenshot` 默认按 `raw=true` 返回模型可见的图片；需要 JSON dataUrl 时可
 显式传 `raw=false`。这只改变 MCP 调用默认值，直接 HTTP 截图接口仍默认返回 JSON。
+
+受控 browser/terminal MCP 将声明的 action `timeoutMs` 加 5 秒传输余量作为 socket 预算（至少 30 秒），并贯穿 SDK/HTTP AbortSignal；取消/超时显式结算 Promise 与关闭请求，不依赖 Bun 的 node:http 在响应头前发出 error。普通 MCP tools/call 保留 120 秒缺省预算，显式更长预算只延长传输等待，不重试或重复业务动作。
 
 ## 使用入口
 
@@ -72,6 +78,9 @@ await micaMcp.init({ parallel: true, initTimeoutMs: 3000 });
 - 配置读取与连接状态更新应保持可观测，便于 `/mcp` 命令展示。
 - `loadConfig` 对缺失/损坏配置保持空集合回退；`readConfig(path)` 会把显式托管文件错误交给调用方处理。
 - MCP connect、tools/list 和 tools/call 都应传递 agent 的 AbortSignal；不要让 headless 取消等待默认超时。
+- `tools/call` 保留原有 120 秒默认等待下限；输入显式声明更长的 `timeoutMs`（顶层或 `params`）时，
+  传输等待扩展为该预算加 5 秒响应余量，而不是提前结束合法长等待。调用方 AbortSignal 仍可随时
+  取消；计时器最大值限制在 SDK/Node 支持的有符号 32 位范围，避免溢出变成立即超时。
 - `initTimeoutMs` 是单个 server 的完整初始化截止时间，不会为 connect 和 tools/list 分别重新计时；本地截止只标记该 server 失败并继续，外部 AbortSignal 仍会终止整个初始化。
 - `parallel: true` 并发初始化独立 server，但最终工具顺序仍按配置顺序合并。
 - stdio server 使用 pipe 隐藏 stderr 时仍必须持续 drain；否则服务端大量诊断输出会填满 pipe 并阻塞协议进程。
@@ -82,4 +91,10 @@ await micaMcp.init({ parallel: true, initTimeoutMs: 3000 });
 - `client.ts`：MCP client 与连接状态。
 - `service.ts`：初始化、重连和关闭编排。
 - `tools.ts`：MCP tool 到 Mica tool 的适配，保留文本资源与资源链接；二进制资源只返回简短说明。
+- `operation.ts`：桌面独立插件后端复用的内部 operation 观察适配，仍由 `mica-diagnostics` 的
+  `logger/timedResult` 负责唯一计时、聚合与轮转。事件 `operation.start/finish` 只含随机 operationId、
+  固定 operation 名、可信插件 id，以及 `outcome/code/ms`；不复制输入、输出、异常消息或堆栈，
+  不伪造 Agent run。`{ ok:false, error }` 与 MCP `isError` 均记为失败；调用方取消/截止分别记为
+  `cancelled/aborted`、`timeout/timeout`。等待沿用调用方 signal，不另设 30 秒截止；不配合取消的
+  插件仍可能在后台继续，观察层仅结算等待，不能撤销已发生的写入。
 - `index.ts`：公共 API 聚合导出。

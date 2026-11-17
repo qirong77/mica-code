@@ -4,7 +4,7 @@ import { harnessReviewAssessments } from './harness-review.js';
 import { memoryScopes } from './memory.js';
 import { notebookComments } from './notebook-comments.js';
 import { notebookMcpData } from './notebook-mcp.js';
-import { pluginStartupHealth } from './plugin-health.js';
+import { pluginHealthIssues, pluginStartupHealth } from './plugin-health.js';
 import { promptContributions } from './prompt-contributions.js';
 import { sessionTagSlots } from './session-tags.js';
 import { subagentTaskFiles } from './subagent-tasks.js';
@@ -20,6 +20,7 @@ export const DATA_MIGRATIONS: DataMigration[] = [
   browserCookieSyncExtension,
   harnessReviewAssessments,
   pluginStartupHealth,
+  pluginHealthIssues,
   subagentTaskFiles,
   notebookComments,
   notebookMcpData,

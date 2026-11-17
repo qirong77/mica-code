@@ -46,7 +46,7 @@ const groups = [
       ['/commit', '生成提交说明并执行 Git 提交、尝试推送（官方插件 commit 提供）。', true],
       [
         '/harness-review',
-        'list 查看运行复盘；report 导出报告；assess <id> <状态> <依据> 记录人工评估（官方插件 Harness Review 提供）。',
+        'list 查看工作区运行与整机系统/插件日志旁证的有界摘要；report 导出完整报告；assess <id> <状态> <依据> 记录人工评估（Harness Review 插件）。',
         true,
       ],
     ],
@@ -158,7 +158,7 @@ const groups = [
   <p>
     <code>/harness-review assess &lt;id&gt; &lt;状态&gt; &lt;判断依据&gt;</code> 记录人工评估，<code>prune [天数]</code>{' '}
     删除较早运行记录，
-    <code>rebuild</code> 重新聚合历史候选问题。报告提供证据，改进是否有效仍需要实际验证。
+    <code>rebuild</code> 重新聚合历史候选问题。摘要有明确体积预算与覆盖说明，系统/插件日志为机器级旁证，不能自动当作当前项目根因。报告提供证据，改进是否有效仍需要实际验证。
   </p>
 
   <h2>键盘操作</h2>

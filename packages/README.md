@@ -38,6 +38,8 @@
 - `mica-skills`：用户 skills 的扫描、解析和缓存。
 - `mica-plugin`：插件生命周期、hooks、service container、host capability context（含跨宿主共享插件数据 `ctx.data`、委派子代理的 `ctx.subagents` 与对话右侧面板 `ctx.desktop.panel` 能力面），`ctx.data` 使用统一的 CAS、跨进程锁和原子写；`ctx.subagents.tasks.restart(taskId)` 在原 owner 下创建带原任务上下文的替代任务并返回新 ID（不是断点续跑），类型可选 `maxTurnContinuations` 控制同上下文续跑，以及插件包格式（`plugin.json` 清单、目录加载器、用户插件装载、`writePluginStatus()` 写全部插件的装配结论与宿主、启停状态）；启停是运行期能力：资源按插件登记，`syncPluginState()` 在每轮开始时对齐名单，改完不必重开会话。`AgentObservationEvent` 定义 `agent:observe` 的只读运行观察协议，覆盖运行、请求、工具、用量和终态。
 - `mica-plugin/PluginMcp.ts` 提供独立插件 MCP 的 `PluginMcpContext` / `PluginMcpTool` / `PluginMcpHandler` 契约及路径命名 helpers；随包 `mcp: true` 模块由应用挂在同端口 `/plugin/<id>/mcp`，不经会话工具 registry 重复注册。模块上下文复用绑定插件的 CAS 数据与只读设置，MCP 编解码、schema 校验与启停释放由应用宿主负责。
+- `mica-plugin` 的 `PluginOperations` / `ctx.operations?.run()` 与 `mica-diagnostics/operation.ts` 共用元数据操作观察：宿主自动覆盖插件工具、命令、面板/动作、菜单、后台、数据和生命周期，无会话操作也记录而不伪造运行。`PluginLauncherHandler.request` 第三个可选 context 透传 `signal`；MCP 重连只刷新目标服务的工具快照，不因另一服务临时 tools/list 失败撤掉其工具。
+- `PluginHealthInput.issueKey?` 指定独立恢复边界，默认 `runtime`；健康存储使用 schemaVersion 2 issues，`read()` 聚合最高严重度，业务 ok/clear 不影响独立的 `llm:degraded`。旧形态由 Evolution 归档迁移，运行时不兼容解析。
 - 插件面板编辑器的正文上限为 200000 字符：超限读取只读告知、超限提交拒绝且不调用处理器，空字符串正文可正常提交；不静默截断可写内容。
 - `mica-official-plugins`：官方插件目录。清单来自仓库根 `plugins/<id>/plugin.json`，入口静态登记；只想列清单的宿主用 `manifests.js`，避免把插件实现拖进进程。
 - 会话体验扩展使用 `mica-plugin` 的 `PluginPanelView.cards` 摘要卡与 `createPluginExperience()` 本地元数据记录；`summarizePluginExperience()` 提供可自动化分析的版本化聚合。Mobile Relay 已使用统一事件记录面板操作，格式见 [埋点与导出](../docs/plugin-experience.md)。

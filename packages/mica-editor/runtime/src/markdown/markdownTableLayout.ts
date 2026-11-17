@@ -20,13 +20,14 @@ function preferredCellWidth(text: string): number {
 }
 
 /**
- * Short tables stay compact. When a table needs more room, divide the available
- * width by its content needs rather than giving an ID column as much as prose.
- * At very narrow widths retain readable columns and let the table wrapper scroll.
+ * Short tables stay compact by default; a document host can request the full
+ * reading column. Content controls the relative weight of each column. At very
+ * narrow widths retain readable columns and let the table wrapper scroll.
  */
 export function calculateMarkdownTableColumnWidths(
   rows: readonly (readonly string[])[],
   availableWidth: number,
+  fill = false,
 ): number[] {
   const columns = rows.reduce((count, row) => Math.max(count, row.length), 0);
   if (!columns) return [];
@@ -41,7 +42,22 @@ export function calculateMarkdownTableColumnWidths(
   const budget = Number.isFinite(availableWidth) && availableWidth > 0
     ? Math.max(columns * MARKDOWN_TABLE_MIN_COLUMN_WIDTH, Math.floor(availableWidth) - 1)
     : preferredTotal;
-  if (preferredTotal <= budget) return preferred;
+  if (preferredTotal <= budget) {
+    if (!fill) return preferred;
+    // A short comparison table is still a document-level block. Keeping its
+    // preferred pixel widths makes a three-column table only ~200px wide and
+    // leaves a distracting blank area beside it. Grow each column in proportion
+    // to its content so a label column remains lighter than a prose column.
+    const extra = budget - preferredTotal;
+    const weights = preferredTotal || columns;
+    const widths = preferred.map(width => width + Math.floor((extra * width) / weights));
+    let remainder = budget - widths.reduce((sum, width) => sum + width, 0);
+    for (let column = 0; remainder > 0; column = (column + 1) % columns) {
+      widths[column]++;
+      remainder--;
+    }
+    return widths;
+  }
   const minimumTotal = columns * MARKDOWN_TABLE_MIN_COLUMN_WIDTH;
   const scale = (budget - minimumTotal) / (preferredTotal - minimumTotal);
   const widths = preferred.map(width => MARKDOWN_TABLE_MIN_COLUMN_WIDTH + Math.floor((width - MARKDOWN_TABLE_MIN_COLUMN_WIDTH) * scale));
@@ -78,7 +94,7 @@ function contentWidth(element: HTMLElement): number {
  * ordinary GFM and intentionally ignores them. Observe the editor, not the window,
  * so opening a side pane also refits tables that the user has not resized.
  */
-export function registerMarkdownTableLayout(editor: LexicalEditor): () => void {
+export function registerMarkdownTableLayout(editor: LexicalEditor, fill = false): () => void {
   const automatic = new Map<NodeKey, {widths: readonly number[]; available: number}>();
   const styledTables = new Map<HTMLTableElement, {original: string; applied: string}>();
   let root: HTMLElement | null = null;
@@ -105,7 +121,7 @@ export function registerMarkdownTableLayout(editor: LexicalEditor): () => void {
         if (widths && previous && !sameWidths(widths, previous.widths)) automatic.delete(key);
         if (!widths || (previous && sameWidths(widths, previous.widths) && Math.abs(previous.available - available) >= 1)) {
           const rows = table.getChildren().filter($isTableRowNode).slice(0, 200).map(row => row.getChildren().filter($isTableCellNode).map(cell => cell.getTextContent()));
-          const nextWidths = calculateMarkdownTableColumnWidths(rows, available);
+          const nextWidths = calculateMarkdownTableColumnWidths(rows, available, fill);
           if (nextWidths.length !== table.getColumnCount()) continue;
           if (!sameWidths(widths, nextWidths)) table.setColWidths(nextWidths);
           widths = nextWidths;
@@ -155,8 +171,8 @@ export function registerMarkdownTableLayout(editor: LexicalEditor): () => void {
   };
 }
 
-export default function MarkdownTableLayoutPlugin(): null {
+export default function MarkdownTableLayoutPlugin({fill = false}: {fill?: boolean} = {}): null {
   const [editor] = useLexicalComposerContext();
-  useEffect(() => registerMarkdownTableLayout(editor), [editor]);
+  useEffect(() => registerMarkdownTableLayout(editor, fill), [editor, fill]);
   return null;
 }

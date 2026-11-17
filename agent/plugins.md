@@ -83,11 +83,12 @@ Capabilities 可按插件查看实际工具、技能和提示词贡献。工具�
 - Harness Review 配置页状态聚合所有工作区，工具按会话目录筛选；手动重算 / 清理后立即更新全局状态，局部重算不提升全局规则版本。展示近期24小时、历史待评估、评估进展与待复核，时间覆盖不足单独标未知，同时展示统计时间及扫描/分析限制。仅近期重复与待复核触发提示点；代码修改或没有新错误不自动写评估、不表示已确认修复。
 
 - 输入框上方的会话摘要用 `PluginPanelView.cards`（每插件最多 3 张，`id/title/summary/detail/tone/revision/actions/impressionAction`），由宿主复用主题和共享控件；清单 `dynamicShortcuts: true` 使快捷区获取视图。动作带版本 key，插件拒绝旧内容点击。`impressionAction` 只记录实际可见展示，不能在 `view()` 中记录曝光或执行副作用。
-- 插件行为埋点用 `createPluginExperience(ctx)`（`PluginExperience.ts`），事件 `plugin:experience`、schemaVersion 1；仅固定动作与结果等元数据，禁放正文、路径、命令与服务地址。`telemetry` 开关即时停记，日志沿用现有轮转。导出：`bun scripts/plugin-experience-report.ts`，口径见 `docs/plugin-experience.md`。
+- 插件行为埋点用 `createPluginExperience(ctx)`（`PluginExperience.ts`），事件 `plugin:experience`、schemaVersion 1；仅固定动作与结果等元数据，禁放正文、路径、命令与服务地址。声明了 `telemetry` 的插件可即时停记；不声称所有插件都有这个设置项。桌面共享 `PluginSurface` 为随包 card/page/launcher 记录实际可见曝光和控件点击，不把预热/轮询/Suspense 占位当曝光；不支持 visibility-v2 时只保留点击，不猜曝光。导出：`bun scripts/plugin-experience-report.ts`，口径见 `docs/plugin-experience.md`。
+- 全插件操作观察由 manager 统一包裹工具、命令、面板视图/动作、配置动作、会话菜单、常驻 tick、非观察类 hook、自有数据和装配/释放；独立 MCP、launcher、页面数据由应用宿主包裹。`mica-diagnostics/operation.ts` 的 `operation.start/finish` 仅含插件/版本、操作、关联 ID、终态/固定码与耗时，无会话操作不伪造 Agent run。同步处理器保持同步，观察类 hook 不递归埋点；插件内部可用 `ctx.operations?.run('固定操作名', task, { signal })`。成功表示处理器正常完成，不冒充用户验收；取消、拒绝、等待、冲突、忙、部分结果、未知与真正失败分开。
 
 - 命令结果给用户看走 `ctx.ui.notice(content, { command, status, surface, variant })`：`surface: 'command_panel'` 是输入框上方的运行中面板（被同一 `command` 的下一条 notice 收尾），默认进对话的 notice；headless 宿主直接落进 turn notice 日志。可选 `displayContent` 为桌面摘要卡指定短展示文本，完整正文仍保存在 `content` 并可展开；TUI 直接显示正文。
-- 用户可见故障（缺配置、外部服务拒绝、请求失败）必须 `ctx.health.report({ level, message, hint })`，不能只写日志。记录带上是哪一版插件写的（`createPluginHealthStore` 的 `version`），读的一方传 `version` 就只认这一版：升级之后上一版留下的「连不上 X」不该继续挂在页面上。装配失败（setup 抛错、入口加载不了）不属于健康状态——那条走 `plugin-status.json`，卡片上写「加载失败」；健康状态 `error` 写「运行出错」。
-- `ctx.logger` 按 pluginId 注入，同时写 `resolveLogDir()/plugin-<id>-<day>[-n].jsonl`（macOS `~/Library/Logs/mica`，2 MB 分片、7 天清理、`MICA_PLUGIN_LOG=0` 关闭）。排查插件问题先看它。 配置页日志入口取实际存在的最新日期及数字分片；无日志时返回真实日志目录，不使用下一次写入路径。
+- 用户可见故障（缺配置、外部服务拒绝、请求失败）必须 `ctx.health.report({ issueKey?, level, message, hint })`，不能只写日志。持久形态为 `schemaVersion: 2` 的 issues 映射，省略 issueKey 仅操作 `runtime`；`read()` 取当前版本最高严重度，`read(key)` / `clear(key)` 只针对该问题，业务 ok 不清掉 `llm:degraded` 等依赖故障。旧单条形态只由 Evolution 的 `plugin-health-issues-v2` 归档迁移；迁移前先收到新报告时，旧原文另存 `plugin-health/archive/` 再写当前形态，不做运行期旧字段解释。记录带插件版本，读取传 `version` 只认这一版。装配失败属于 `plugin-status.json`，不混入运行健康。
+- `ctx.logger` 按 pluginId 注入，经 `mica-diagnostics.enqueueLogEntry` 同一有界批量 writer 写 `resolveLogDir()/plugin-<id>-<day>[-n].jsonl`（2 MiB 分片、7 天清理、`MICA_PLUGIN_LOG=0` 关闭）。信封统一 at/scope/pluginId/plugin/data，Performance 读取规范化历史 time/plugin。生产者栈不逐条同步扫描/写盘；共享 stats 暴露溢出、序列化和写失败计数。配置页日志入口取实际存在的最新日期/分片；无日志返回真实目录，不使用未来路径。
 
 ### ask（问用户一个问题，等一个回答）
 
@@ -181,6 +182,8 @@ macOS 浮窗只取键盘焦点、不连带唤起主应用；原生窗口策略�
 
 ### 前端模块的 api
 
+整页宿主另外提供 `api.ui.Markdown`，复用聊天视图的流式 Markdown 展示，不让插件引入第二套解析 / 排版。跨会话操作用 `api.sessions`（无 chat/stats 通道时为 null）：`list({limit})`、`history(sessionId)`、`send({sessionId,cwd,prompt,clientMessageId?})`、`abort(sessionId)`、`status/isRunning(sessionId)`，以及 `onEvent/onExit/onQueueError/onQueueState/onRunStarted` 订阅。宿主从共享工作区解析实际 nodeId，事件按 sessionId 对外归属并保留 nodeId / sequence，发送只透传调用方正文，不追加插件上下文。历史和运行态不是原子快照：读取前暂存事件，按 sequence / 轮次边界合并，异步队列拒绝按 clientMessageId 恢复输入；remoteRunning 属于其它进程，不能冒充可停止的本地 run。
+
 原生桌面另提供 `api.currentTarget()`（完整页面入口，保留中转机 `t` 身份）与 `api.client`：
 `context()` 返回 `{ localHost }`（客户端实际本机页面地址），`readData/writeData` 访问本机插件数据，
 `probe/open/local` 分别从客户端探活、复用或打开目标窗口、聚焦原本机窗口。清单 `desktop.clientData: true`
@@ -249,6 +252,7 @@ macOS 浮窗只取键盘焦点、不连带唤起主应用；原生窗口策略�
 - 会话能力目录（`mica/capabilities/get` 的 `mcpServers`）由 `micaMcp.catalog()` 合并三处：用户配置、会话自己的 `--mcp-config`、已连上的 server。桌面端把受控浏览器 / 终端挂进 `--mcp-config` 而不写用户配置，漏掉第二处界面上就看不到也关不掉它们。
 - MCP 工具名由 `mcpToolNamePrefix()` 生成；按 server 关闭时用前缀匹配，断开/重连失败同步清理并刷新 registry。
 - headless 显式初始化/关闭 MCP，支持独立配置与超时参数。
+- 重连一个 MCP 只替换该服务的成功工具快照；另一服务 tools/list 临时失败不能撤掉它的工具。受控 browser/terminal 门面将声明的 timeoutMs 加传输余量作为 socket 预算（至少 30s），SDK/HTTP 取消一路传到 socket；取消和超时都要显式结算 Promise 并销毁请求，不能只依赖 Bun 的 node:http error 事件。
 - skills 只扫描解析缓存、不执行；扫描 `$MICA_HOME/skills` 与项目 `.mica/skills`、`.agents/skills`、`.deveco/skills`、`.agent_context/skills`；未设 MICA_HOME 时额外共享 `~/.agents/skills`、`~/.config/deveco/skills`。插件注册的内置 skill 与磁盘 skill 合流在同一份 `getLoaded()` 里（`registerRuntime` / `clearRuntime`），磁盘同名优先；`parseMarkdown` 是内嵌 SKILL.md 取元数据的唯一入口。
 - skill 是含 `SKILL.md` 的目录；内容不能覆盖安全规则、系统指令和当前用户请求。
 - 联网：`web_search` 由 `plugins/web-search` 提供（设置 `searxngUrl` → `SEARXNG_URL` → `http://127.0.0.1:8080`，实例须开 JSON，结果缓存 5 分钟）；`web_fetch` 是内置工具。

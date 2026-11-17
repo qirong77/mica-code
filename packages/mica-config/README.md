@@ -58,7 +58,8 @@ micaConfig.update((current) => ({
       "api_base": "https://api.openai.com/v1",
       "api_key": "your-key",
       "protocol": "openai_responses",
-      "models": ["gpt-5.4", "gpt-5.5"]
+      "models": ["gpt-5.4", "gpt-5.5"],
+      "disabled": false
     }
   ],
   "defaultModel": { "provider": "openai", "model": "gpt-5.5", "effort": "high" }
@@ -66,7 +67,8 @@ micaConfig.update((current) => ({
 ```
 
 - 配置了 `defaultModel` 就使用对应 provider/model；model 必须在该 provider 的 `models` 列表里。
-- 未配置 `defaultModel` 时取 provider 列表第一项的第一个 model。
+- `providers[].disabled` 为 `true` 时该 provider 会保留在配置文件中，但不会出现在模型选择中，也不会被用于发送请求；未配置 `defaultModel` 时取第一个启用 provider 的第一个 model。
+- 如果 `defaultModel` 指向已禁用 provider，运行时会跳过它并使用第一个启用 provider；所有 provider 都禁用时无法发送消息。
 - effort 省略时使用该 provider 下模型规则的 `defaultEffort`；填写的档位必须符合档位名语法，不支持的档位按同一 provider 的模型规则收敛。`supportsEffort: false` 始终使用 `none`。
 - 上次会话的选择不会改变新会话默认值。`await prepareSessionModelDefaults()` 在新会话入口调用，重新读取磁盘并在模型元数据就绪后重置 `provider`、`model`、`effort` 和 `contextWindowSize`；已有会话继续使用自己的模型状态。
 

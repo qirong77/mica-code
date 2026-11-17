@@ -1,6 +1,7 @@
 import {
   CONFIG_PATH,
   PROVIDER_PROTOCOLS,
+  isProviderEnabled,
   providerForModel,
   readConfig,
   getConfig,
@@ -57,6 +58,8 @@ export const micaConfig = {
   readActiveProviderConfig,
   /** 这个模型实际由哪个 provider 服务（模型元数据要按它查）。 */
   providerForModel: (model: string | undefined) => providerForModel(getConfig(), model),
+  /** 判断 provider 是否允许参与模型选择和请求。 */
+  isProviderEnabled,
   /** 注册数据驱动的模型规则。 */
   registerModelRules,
   /** 注册异步模型规则解析器。 */
@@ -96,6 +99,7 @@ export {
   normalizeModelEffort,
   providerSupportsModel,
   providerForModel,
+  isProviderEnabled,
   registerModelRuleResolver,
   registerModelRules,
   resetRejectedEffortLevels,

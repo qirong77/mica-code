@@ -25,6 +25,7 @@ describe('agentRuntimeConfigFromSnapshot', () => {
   it('keeps the snapshot provider when its current protocol changes and another provider is the default', async () => {
     vi.resetModules();
     vi.doMock('@packages/mica-config/index.js', () => ({
+      isProviderEnabled: (provider: { disabled?: boolean }) => provider.disabled !== true,
       micaConfig: {
         get: () => makeConfig({ provider: 'deepseek', model: 'deepseek-v4' }),
         normalizeModelEffort: () => 'medium',
@@ -47,6 +48,7 @@ describe('agentRuntimeConfigFromSnapshot', () => {
   it('falls back to the default provider when the snapshot provider is gone', async () => {
     vi.resetModules();
     vi.doMock('@packages/mica-config/index.js', () => ({
+      isProviderEnabled: (provider: { disabled?: boolean }) => provider.disabled !== true,
       micaConfig: {
         get: () => makeConfig(),
         normalizeModelEffort: () => 'low',

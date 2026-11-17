@@ -69,4 +69,16 @@ describe('readActiveProviderConfig', () => {
       (config as { providers: unknown[] }).providers = original;
     }
   });
+
+  it('never returns a disabled provider', () => {
+    const cheap = config.providers[1] as (typeof config.providers)[number] & { disabled?: boolean };
+    const original = cheap.disabled;
+    cheap.disabled = true;
+    try {
+      expect(() => readActiveProviderConfig({ providerId: 'cheap' })).toThrow('已禁用');
+      expect(() => readActiveProviderConfig({ model: 'cheap/cheap-model' })).toThrow('已禁用');
+    } finally {
+      cheap.disabled = original;
+    }
+  });
 });

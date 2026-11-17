@@ -328,6 +328,30 @@ class Lines {
     try {
       const entry = JSON.parse(text) as LogEntry | null;
       if (entry && typeof entry === 'object' && !Array.isArray(entry)) {
+        // Historical diagnostic records are immutable evidence, not plugin state to migrate.
+        // Normalize their former time/plugin envelope at the read boundary.
+        const data = entry.data && typeof entry.data === 'object' && !Array.isArray(entry.data)
+          ? entry.data as Record<string, unknown>
+          : {};
+        if (typeof entry.at !== 'number' || !Number.isFinite(entry.at)) {
+          const historicalTime = typeof entry.time === 'number' ? entry.time : typeof entry.time === 'string' ? Date.parse(entry.time) : NaN;
+          if (Number.isFinite(historicalTime)) entry.at = historicalTime;
+        }
+        const historicalPlugin = typeof entry.plugin === 'string'
+          ? entry.plugin
+          : entry.plugin && typeof entry.plugin === 'object'
+            ? String((entry.plugin as { id?: unknown; name?: unknown }).id ?? (entry.plugin as { name?: unknown }).name ?? '')
+            : '';
+        if (typeof entry.scope !== 'string' && (historicalPlugin || typeof entry.pluginId === 'string')) entry.scope = 'plugin';
+        if (entry.scope === 'plugin') {
+          entry.plugin = typeof entry.pluginId === 'string' ? entry.pluginId : historicalPlugin || undefined;
+          entry.message ??= data.message ?? data.error ?? data.warning;
+          entry.ms ??= data.ms;
+          if (!entry.event && typeof data.event === 'string') entry.event = data.event;
+          if (!entry.level || entry.level === 'info') {
+            if (data.warning !== undefined || data.warn === true) entry.level = 'warn';
+          }
+        }
         // 日志可能来自插件或手工编辑；核心字段也只允许保留字符串。
         entry.scope = typeof entry.scope === 'string' ? entry.scope : 'unknown';
         entry.event = typeof entry.event === 'string' ? entry.event : '';

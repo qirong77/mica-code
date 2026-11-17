@@ -22,6 +22,7 @@ import type { PluginSubagentApi } from './PluginSubagents.js';
 import type { PluginModelsApi } from './PluginModels.js';
 import type { PluginLlmApi } from './PluginLlm.js';
 import type { PluginHealthStore } from './PluginHealth.js';
+import type { PluginOperations } from './PluginOperations.js';
 import type { PluginStatusFile } from './PluginStatus.js';
 import type { PluginSettingIssue, PluginSettingValues } from './PluginSettings.js';
 import type { PluginActionHandler } from './PluginActions.js';
@@ -148,6 +149,8 @@ export type PluginSessionApi = {
 
 export type PluginContext = {
   pluginId: string;
+  /** Local metadata-only observations, bound to this plugin by the manager. */
+  operations?: PluginOperations;
   /** 当前宿主内存中的装配快照；没有宿主身份与路径的一次性宿主不提供。 */
   pluginStatus?: () => PluginStatusFile;
   paths?: {

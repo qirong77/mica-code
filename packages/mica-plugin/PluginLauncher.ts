@@ -10,6 +10,6 @@ export type PluginLauncherContext = {
 
 /** createLauncher 返回的处理器；宿主在关闭插件时调用可选的 dispose。 */
 export type PluginLauncherHandler = {
-  request(action: string, input: unknown): unknown | Promise<unknown>;
+  request(action: string, input: unknown, context?: { signal?: AbortSignal }): unknown | Promise<unknown>;
   dispose?(): void | Promise<void>;
 };

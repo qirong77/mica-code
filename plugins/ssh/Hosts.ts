@@ -182,7 +182,7 @@ export async function mutateData<T>(
       release();
     }
   }
-  throw new Error('主机清单正在保存（另一个入口在写），稍后再试一次');
+  throw Object.assign(new Error('主机清单正在保存（另一个入口在写），稍后再试一次'), { code: 'busy' });
 }
 
 /** 按别名解析；也接受直接写地址（`ssh_hosts` 的模型偶尔会这么干，不留模糊匹配）。 */

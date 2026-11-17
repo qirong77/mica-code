@@ -36,15 +36,24 @@ export function openSocketRequest(
       resolve
     )
     request.on('error', reject)
-    if (timeoutMs) {
-      request.setTimeout(timeoutMs, () => request.destroy(new Error(`${label}请求超时`)))
-    }
     if (signal) {
-      if (signal.aborted) {
-        request.destroy(new Error('已取消'))
-        return
+      const abort = () => {
+        const reason = signal.reason instanceof Error ? signal.reason : new DOMException('已取消', 'AbortError')
+        // Bun's node:http shim can close a pre-header request without emitting
+        // an error. Settle explicitly as well as destroying the transport.
+        reject(reason)
+        request.destroy(reason)
       }
-      signal.addEventListener('abort', () => request.destroy(new Error('已取消')), { once: true })
+      if (signal.aborted) { abort(); return }
+      signal.addEventListener('abort', abort, { once: true })
+      request.once('close', () => signal.removeEventListener('abort', abort))
+    }
+    if (timeoutMs) {
+      request.setTimeout(timeoutMs, () => {
+        const reason = new DOMException(`${label}请求超时`, 'TimeoutError')
+        reject(reason)
+        request.destroy(reason)
+      })
     }
     if (payload) request.write(payload)
     request.end()
@@ -61,11 +70,12 @@ export async function readAllText(stream) {
 export async function requestJson(
   socketPath,
   path,
-  { method = 'GET', body, timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS, label = '本机服务' } = {}
+  { method = 'GET', body, signal, timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS, label = '本机服务' } = {}
 ) {
   const response = await openSocketRequest(socketPath, path, {
     method,
     body,
+    signal,
     timeoutMs,
     label
   })

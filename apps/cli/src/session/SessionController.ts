@@ -7,7 +7,7 @@ import {
 } from '@packages/mica-agent/index.js';
 import type { MicaUiCommandStatus, MicaUiConversationMessage, MicaUiTextBlock } from '@packages/mica-ui/index.js';
 import { AgentRuntime, type AgentRuntimeSnapshot } from '../agent/AgentRuntime.js';
-import { micaConfig, providerSupportsModel } from '@packages/mica-config/index.js';
+import { isProviderEnabled, micaConfig, providerSupportsModel } from '@packages/mica-config/index.js';
 import {
   micaSession,
   takeLastSerializedSession,
@@ -1016,9 +1016,13 @@ function sanitizeConversationContent(value: unknown): MicaUiConversationMessage[
 export function applySessionConfig(snapshot: PersistedRuntimeSnapshot): PersistedRuntimeSnapshot {
   let resolvedSnapshot = snapshot;
   micaConfig.update((config) => {
-    const snapshotProvider = config.providers.find((item) => item.id === snapshot.providerId);
+    const snapshotProvider = config.providers.find(
+      (item) => item.id === snapshot.providerId && isProviderEnabled(item),
+    );
     const provider =
-      snapshotProvider ?? config.providers.find((item) => item.id === config.provider) ?? config.providers[0];
+      snapshotProvider ??
+      config.providers.find((item) => item.id === config.provider && isProviderEnabled(item)) ??
+      config.providers.find(isProviderEnabled);
     if (!provider) return config;
 
     const snapshotModelAvailable = providerSupportsModel(provider, snapshot.model);

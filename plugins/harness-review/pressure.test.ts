@@ -5,7 +5,12 @@ import { performance } from 'node:perf_hooks';
 import { afterEach, expect, it, vi } from 'vitest';
 import type { AgentObservationEvent } from '@packages/mica-plugin/index.js';
 
-const io = vi.hoisted(() => ({ summaries: 0, append: 0, block: null as Promise<void> | null }));
+const io = vi.hoisted(() => ({
+  summaries: 0,
+  append: 0,
+  pluginAppendFailures: 0,
+  block: null as Promise<void> | null,
+}));
 vi.mock('node:fs/promises', async (original) => {
   const fs = await original<typeof import('node:fs/promises')>();
   return {
@@ -13,6 +18,10 @@ vi.mock('node:fs/promises', async (original) => {
     appendFile: async (...args: Parameters<typeof fs.appendFile>) => {
       io.append++;
       if (io.block) await io.block;
+      if (String(args[0]).endsWith('/plugin-events.jsonl') && io.pluginAppendFailures > 0) {
+        io.pluginAppendFailures--;
+        throw new Error('simulated plugin event append failure');
+      }
       return fs.appendFile(...args);
     },
     rename: (...args: Parameters<typeof fs.rename>) => {
@@ -27,6 +36,7 @@ const directories: string[] = [];
 afterEach(async () => {
   io.block = null;
   io.summaries = io.append = 0;
+  io.pluginAppendFailures = 0;
   await Promise.all(directories.splice(0).map((directory) => rm(directory, { recursive: true, force: true })));
 });
 async function fixture(maxEventsPerRun = 100_000) {
@@ -93,6 +103,40 @@ it('bounds trace bytes under stalled IO while preserving counters and terminal s
   } finally {
     release();
     await recorder.dispose();
+  }
+});
+
+it('failed plugin checkpoints remain retryable without duplicating a newer successful checkpoint', async () => {
+  for (const queuedTail of [false, true]) {
+    const { recorder } = await fixture();
+    const root = directories.at(-1)!;
+    const fail = (failures: number) =>
+      recorder.notePluginEvent({
+        pluginId: 'sample',
+        type: 'hook:failed',
+        hook: 'turn:after',
+        timestamp: '2026-06-01T10:00:00.000Z',
+        failures,
+        error: 'hook failed',
+      });
+    try {
+      io.pluginAppendFailures = 1;
+      fail(1);
+      if (queuedTail) fail(2);
+      await recorder.flush();
+      // No tail: retry the failed first checkpoint. With a queued tail: it already
+      // contains the cumulative state, so the first failure must not dirty it again.
+      await recorder.flush();
+      await recorder.flush();
+      const records = (await readFile(join(root, 'plugin-events.jsonl'), 'utf8'))
+        .trim()
+        .split('\n')
+        .map((line) => JSON.parse(line));
+      expect(records).toHaveLength(1);
+      expect(records[0].failures).toBe(queuedTail ? 2 : 1);
+    } finally {
+      await recorder.dispose();
+    }
   }
 });
 

@@ -2,7 +2,7 @@
 
 - `MICA_HOME` 覆盖全部用户路径，默认 `~/.mica`；品牌目录经 `brand.ts` 解析。
 - `$MICA_HOME/prompt-controls.json` 是全局提示词控制（version 1）：`disabledPlugins` 关闭整插件注入，`sections[id]` 保存可选 `enabled` / `content`，插件段键为 `plugin:<pluginId>/<sectionId>`，基础段键为 role / project-instructions / skills / context；可选的 `order` 是用户拖拽出来的段落顺序，只装可编辑段落（写 `system` 直接报错），不含它时提示词排列保持原样，空数组不落盘。缺文件等于无覆盖，损坏内容显式报错，写入先校验整份再以 0600 原子替换；每段最多 200000 字符、整份最多 1 MiB。固定 system 不接受覆盖。它不进入会话快照，不随 resume/fork/rewind 复制或回滚。历史回查归 Memory 后，Evolution 的 `prompt-contributions` 将旧 `plugin:builtin.command-memory/guidance` 控制迁到 `plugin:memory/history`，保留正文、开关与顺序，撤下的静态段原控制先归档；Schedule 旧随包 skill 索引由迁移归档；能力停用选择不动，避免重新启用用户自己的同名 skill，用户 skill 与排期数据保留。
-- `PersistedMicaConfig` 只存静态字段；运行时用 `stripRuntimeFields` 去除 provider/model/effort/contextWindowSize。新会话默认值唯一来自 `config.json.defaultModel: { provider, model, effort? }`；未配置取 `providers[0].models[0]`，未填 effort 用模型默认档位；`providers[].models` 是纯手填数据，没有任何运行时拉取或缓存。`micaConfig.resetSessionModelDefaults()` 重读默认值，TUI `/new`、`/clear` 同样调用；恢复会话与显式选择保留自己的值。`storage.json` 不再读写目录模型偏好。
+- `PersistedMicaConfig` 只存静态字段；运行时用 `stripRuntimeFields` 去除 provider/model/effort/contextWindowSize。新会话默认值唯一来自 `config.json.defaultModel: { provider, model, effort? }`；未配置取第一个启用 provider 的第一个模型，`providers[].disabled: true` 的服务商保留在配置里但不参与模型选择或请求；未填 effort 用模型默认档位；`providers[].models` 是纯手填数据，没有任何运行时拉取或缓存。`micaConfig.resetSessionModelDefaults()` 重读默认值，TUI `/new`、`/clear` 同样调用；恢复会话与显式选择保留自己的值。`storage.json` 不再读写目录模型偏好。
 - 旧版本写在 `config.json` 的 `searxngUrl` 在启动时迁进 `plugin-settings/web-search.json`（已有值不覆盖）并删掉原键；搜索改成插件后只有插件设置生效。
 - 配置迁移与语义校验统一在 `startup/validate-config.js`，配置页保存复用它。
 - 仅当所有 provider 都没有 api_key 时，`envProvider.ts` 从 `OPENAI_API_KEY` / `OPENAI_BASE_URL` 合成运行时 provider；环境 provider 永不写回 config.json。
@@ -17,6 +17,7 @@
 - 请求用量可选保存 `providerId`、`durationMs`、`firstTokenMs`、`responseWaitMs` 与成对的 `generationDurationMs` / `generationOutputTokens`。`responseWaitMs` 包含 provider 内重试；生成计时只量成功尝试首末非空正文增量，分子是 API 输出量扣除明确记录的推理 tokens 与首 token（至少 32 个非推理输出 tokens、两个正文增量、500ms，无工具或其它输出）。缺少推理明细不假设为零；旧形态不再支持，迁移将未配分子的旧时长归档为 `legacyGenerationDurationMs`，统计不回退；账本旧行原样留存但不采纳。`provider` 仍表示协议，不能当作服务商 ID。
 - **不落盘 provider 的原始 usage**：聚合网关会在 `usage.attribution.items` 里逐条回传 token 归因（实测一份 1085 条、单条 247KB），没有任何消费方——界面与统计只读记录自身的 `inputTokens` / `cachedInputTokens` / `outputTokens` / `totalTokens`。早先的版本存过它，让一份会话的 22% 成了死数据（单文件最大 153MB，其中 74MB 是它）。provider adapter 现在只写 token 数字，存量由 `evolution` 的 `drop-raw-usage` 迁移删掉；不要为了「留着排查网关」再把它加回来。
 - compact 保留 `lastUsage` / `usageHistory` 供 Stats 对账；界面 ctx 优先读 `displayUsage`。
+- 整轮自动重试同样保留已经发生的请求用量；回滚 provider 对话不是回滚计费账本。显式 fork / rewind 仍遵守各自原有的用量边界，不借此补造历史消费。
 - 无手动标题时取最后一条真实用户消息（最长 60 字符）；自动改名不得覆盖 `titleSource === 'manual'`。
 - `$MICA_HOME/session-index.json` 是可重建缓存，不进 `sessions/`；索引 v3 记录读不出摘要的 `rejects`（id + size/mtime），避免每次全量重扫，并带上侧栏嵌套要用的 `parentSessionId`（v2 没有它，版本对不上就整份重建）。
 - `sessions/.turn-locks/<id>.lock` 是跨进程写入的唯一事实来源（`wx` + owner pid 存活判定）；孤儿锁在 acquire 时回收。

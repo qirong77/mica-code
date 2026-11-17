@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { afterEach, expect, it, vi } from 'vitest';
 import { clearPluginHealth, readPluginHealth, writePluginHealth } from '@packages/mica-plugin/PluginHealth.js';
 import { acquireProcessLock } from '@packages/mica-common/processLock.js';
-import { pluginStartupHealth } from './plugin-health.js';
+import { pluginHealthIssues, pluginStartupHealth } from './plugin-health.js';
 import { DATA_MIGRATIONS } from './index.js';
 
 const homes: string[] = [];
@@ -17,6 +17,21 @@ function fixture() {
   mkdirSync(join(home, 'plugin-health'));
   return home;
 }
+
+it('migrates single reports into independent issues and archives original bytes once', () => {
+  const home = fixture();
+  const file = join(home, 'plugin-health', 'digest.json');
+  const original = '{"level":"warn","message":"配置的模型不可用，已降级为主配置：503","version":"1"}\n';
+  writeFileSync(file, original);
+  expect(pluginHealthIssues.run({ home, log() {} })).toBe(1);
+  expect(readPluginHealth('digest', { configDir: home })).toMatchObject({ issueKey: 'llm:degraded', level: 'warn' });
+  writePluginHealth('digest', { level: 'ok', message: 'business done' }, { configDir: home, version: '1' });
+  expect(readPluginHealth('digest', { configDir: home })?.level).toBe('warn');
+  const archive = join(home, 'plugin-data', 'evolution', 'legacy-plugin-health');
+  expect(readdirSync(archive)).toHaveLength(1);
+  expect(readFileSync(join(archive, readdirSync(archive)[0]!), 'utf8')).toBe(original);
+  expect(pluginHealthIssues.run({ home, log() {} })).toBe(0);
+});
 
 it('archives only legacy setup errors, preserving runtime health and all original bytes', () => {
   const home = fixture();

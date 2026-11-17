@@ -29,7 +29,7 @@
 - 主机指纹记在自己的 `known_hosts`（`StrictHostKeyChecking=yes`），首次连接记录、之后严格校验；变了就连接失败，面板上有「重新信任主机密钥」。
 - 模型能表达的最大范围是 `{ host: '<别名>', script }`：不能指定别的地址、拿不到口令、改不了校验策略。
 - 只读主机（面板里没开写）只能被 `ssh_read` 使用；`ssh_read` 也会拒掉明显的写命令（`rm -rf`、`mkfs`、`systemctl stop`…），因为它们可能被并发或重试执行。
-- 每次调用记一行 `audit.jsonl`（时间、主机、退出码、脚本首行），面板「最近操作」可见。
+- 每次调用记一行 `audit.jsonl`（时间、主机、退出码、脚本首行），面板「最近操作」可见。只保留最近 200 条，并非完整历史；审计写入/维护失败仅累计进程内 `auditFailureCount()` 并记录固定日志 `ssh.audit_write_failed`，不改变远程操作结果。持久会话的 run/write 在命令完成时记一次，等待超时不是完成，重复 wait 不重复记账。
 
 ## 文件
 
@@ -74,3 +74,5 @@ $MICA_HOME/plugin-data/ssh/
 - 只跑非交互命令：`ssh -T`，没有远端 PTY，`top`/`vim` 这类全屏界面不适用。
 - 远端窗口宽度固定（120 列），进度条类输出会被 `TERM=dumb` 压成纯文本。
 - Windows 远端：`bash -l -s` 要求远端有 bash；没有 bash 的机器需要在脚本里自己换 shell。
+
+工具返回仍是字符串，内容为 JSON（`outcome`、固定 `code`、可选 `error/exitCode/timedOut` 与人类可读 `text`）；取消、拒绝、等待、忙、冲突和失败分别表达，成功也保留正文。

@@ -1,5 +1,5 @@
 import { getConfig } from './config.js';
-import { providerForModel } from './types.js';
+import { isProviderEnabled, providerForModel } from './types.js';
 import type { ProviderProtocol } from './types.js';
 
 /**
@@ -31,6 +31,9 @@ export function readActiveProviderConfig(override: { providerId?: string; model?
   const provider = config.providers.find((item) => item.id === providerId);
   if (!provider) {
     throw new Error(`没有可用的模型服务商：${providerId || '(空)'}。请先在配置页添加服务商。`);
+  }
+  if (!isProviderEnabled(provider)) {
+    throw new Error(`模型服务商 ${provider.id} 已禁用，请先在配置页启用。`);
   }
   const model =
     override.model ||

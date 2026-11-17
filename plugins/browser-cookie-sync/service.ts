@@ -7,6 +7,14 @@ const MAX_EVENT = 256 * 1024;
 const MAX_SNAPSHOT = 16 * 1024 * 1024;
 
 type CookieEvent = { cookie: SyncCookie; removed: boolean };
+export type CookieSyncObservation = {
+  direction: 'upstream' | 'incremental' | 'snapshot' | 'to-browser';
+  outcome: 'success' | 'error' | 'recovered';
+  code: 'ok' | 'invalid-json' | 'stream-ended' | 'timeout' | 'unavailable' | 'request-failed';
+  failures: number;
+  reconnects: number;
+  durationMs: number;
+};
 
 function normalizeCookie(value: unknown): SyncCookie | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
@@ -135,12 +143,15 @@ export async function startCookieService({
   micaBrowserUrl,
   port = 19387,
   onClientCount = () => {},
+  onObservation = () => {},
   extensionInfo,
 }: {
   token: string;
   micaBrowserUrl: string;
   port?: number;
   onClientCount?: (count: number) => void;
+  /** Metadata only; never includes cookie identity/value, URL, token or error text. */
+  onObservation?: (event: CookieSyncObservation) => void;
   /** 磁盘上那份扩展的版本与最近更新时间，扩展据此判断自己要不要重载。 */
   extensionInfo?: () => { version: string; fingerprint: string; updatedAt: number };
 }): Promise<{ port: number; close(): Promise<void> }> {
@@ -156,6 +167,23 @@ export async function startCookieService({
   let stopped = false;
   let writes = Promise.resolve();
   let revision = 0;
+  let reconnects = 0;
+  const failures = new Map<CookieSyncObservation['direction'], { count: number; since: number; degraded: boolean }>();
+  function note(direction: CookieSyncObservation['direction'], error?: unknown): void {
+    const state = failures.get(direction) ?? { count: 0, since: Date.now(), degraded: false };
+    const recovering = state.degraded && error === undefined;
+    if (error !== undefined) {
+      if (!state.degraded) state.since = Date.now();
+      state.degraded = true;
+      state.count++;
+    } else state.degraded = false;
+    failures.set(direction, state);
+    const name = error instanceof Error ? error.name : '';
+    const code = error === undefined ? 'ok' : name === 'SyntaxError' ? 'invalid-json' : name === 'TimeoutError' ? 'timeout'
+      : error === 'stream-ended' ? 'stream-ended' : direction === 'upstream' ? 'unavailable' : 'request-failed';
+    try { onObservation({ direction, outcome: error === undefined ? (recovering ? 'recovered' : 'success') : 'error', code, failures: state.count, reconnects, durationMs: Math.max(0, Date.now() - state.since) }); }
+    catch { /* diagnostics cannot stop cookie synchronization */ }
+  }
 
   function enqueue<T>(job: () => Promise<T>): Promise<T> {
     const result = writes.then(job);
@@ -230,8 +258,10 @@ export async function startCookieService({
           if (cookies.some((item) => item === null)) throw new Error('invalid snapshot cookie');
           return { cookies, revision };
         });
+        note('snapshot');
         send(res, 200, snapshot);
-      } catch {
+      } catch (error) {
+        note('snapshot', error);
         send(res, 502, { ok: false, error: 'snapshot unavailable or incomplete' });
       }
       return;
@@ -287,7 +317,9 @@ export async function startCookieService({
       });
       try {
         send(res, 200, { ok: true, revision: await write });
-      } catch {
+        note('to-browser');
+      } catch (error) {
+        note('to-browser', error);
         send(res, 502, { ok: false, error: 'browser write failed' });
       }
       return;
@@ -321,6 +353,7 @@ export async function startCookieService({
           signal: controller.signal,
         });
         if (!response.ok || !response.body) throw new Error('upstream event stream unavailable');
+        note('upstream');
         if (reconnecting) for (const client of clients) client.end();
         let buffer = '';
         let data: string[] = [];
@@ -337,21 +370,26 @@ export async function startCookieService({
               if (data.length) {
                 try {
                   const raw = JSON.parse(data.join('\n')) as unknown;
-                  await enqueue(async () => {
+                  const relayed = await enqueue(async () => {
                     const event =
                       clients.size > 0 ? (eventFromUpstream(raw) ?? (await resolveUpstreamEvent(raw, base))) : null;
                     if (event) {
                       delay = 500;
                       const frame = `data: ${JSON.stringify({ ...event, revision: ++revision })}\n\n`;
+                      let sent = false;
                       for (const client of clients) {
                         if (client.writableLength > MAX_EVENT * 4) {
                           clients.delete(client);
                           client.end();
-                        } else client.write(frame);
+                        } else { client.write(frame); sent = true; }
                       }
+                      return sent;
                     }
+                    return false;
                   });
-                } catch {
+                  if (relayed) note('incremental');
+                } catch (error) {
+                  note('incremental', error);
                   // Reconnect clients so their snapshot repairs a failed incremental read.
                   for (const client of clients) client.end();
                 }
@@ -366,11 +404,13 @@ export async function startCookieService({
             }
           }
         }
-      } catch {
-        /* Reconnect after bounded backoff, without logging cookie data. */
+        if (!stopped) note('upstream', 'stream-ended');
+      } catch (error) {
+        if (!stopped && !controller.signal.aborted) note('upstream', error);
       }
       if (stopped) break;
       reconnecting = true;
+      reconnects++;
       for (const client of clients) client.end();
       await new Promise<void>((resolve) => {
         const done = () => {

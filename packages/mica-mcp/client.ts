@@ -3,6 +3,7 @@ import { atom } from 'nanostores';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
+import { logger } from '@packages/mica-diagnostics/index.js';
 import type { McpServerConfig } from './config.js';
 import { MCP_CONFIG_PATH } from './config.js';
 
@@ -32,6 +33,7 @@ export interface ConnectedMcpServer {
 export const mcpServersAtom = atom<McpServerStatus[]>([]);
 export const connections = new Map<string, ConnectedMcpServer>();
 const pendingConnections = new Map<string, Promise<ConnectedMcpServer>>();
+const diagnosticLog = logger('mcp-client');
 
 function updateServerStatus(update: McpServerStatus) {
   const current = mcpServersAtom.get();
@@ -85,6 +87,13 @@ async function createConnection(
   const transport = createTransport(config);
 
   const client = new Client({ name: 'mica-code', version: '0.1.0' }, { capabilities: {} });
+  let closing = false;
+  let connected = false;
+  attachTransportDiagnostics(name, transport, () => closing, () => {
+    if (connected) {
+      connections.delete(name);
+    }
+  });
   await client.connect(transport, { timeout: 15_000, signal });
 
   const server: ConnectedMcpServer = {
@@ -92,12 +101,14 @@ async function createConnection(
     client,
     config,
     cleanup: async () => {
+      closing = true;
       if (connections.get(name) === server) connections.delete(name);
       await client.close();
     },
   };
 
   connections.set(name, server);
+  connected = true;
   return server;
 }
 
@@ -114,10 +125,48 @@ function createTransport(config: McpServerConfig): StreamableHTTPClientTransport
     stderr: (config.stderr ?? 'pipe') as IOType,
     cwd: config.cwd,
   });
-  // The SDK exposes piped stderr through a PassThrough but does not consume it.
-  // Drain the stream so a verbose MCP server cannot deadlock on a full buffer.
-  (transport.stderr as { resume?: () => void } | null)?.resume?.();
   return transport;
+}
+
+function attachTransportDiagnostics(
+  name: string,
+  transport: StreamableHTTPClientTransport | StdioClientTransport,
+  isClosing: () => boolean,
+  onUnexpectedClose: () => void,
+): void {
+  const target = transport as unknown as {
+    stderr?: { on?: (event: string, listener: (...args: unknown[]) => void) => void } | null;
+    onerror?: (error: unknown) => void;
+    onclose?: () => void;
+  };
+  let stderrBytes = 0;
+  target.stderr?.on?.('data', (chunk: unknown) => {
+    const bytes = Buffer.isBuffer(chunk) ? chunk.byteLength : Buffer.byteLength(String(chunk ?? ''));
+    stderrBytes = Math.min(Number.MAX_SAFE_INTEGER, stderrBytes + bytes);
+  });
+  target.stderr?.on?.('error', () => {
+    diagnosticLog.warn('transport.stderr', { server: name, category: 'stderr_error', bytes: stderrBytes });
+    if (!isClosing()) {
+      markServerFailed(name, name, 'MCP stderr stream error');
+      onUnexpectedClose();
+    }
+  });
+  target.onerror = () => {
+    if (!isClosing()) {
+      diagnosticLog.warn('transport.error', { server: name, category: 'transport_error', bytes: stderrBytes });
+      markServerFailed(name, name, 'MCP transport error');
+      onUnexpectedClose();
+    }
+  };
+  target.onclose = () => {
+    if (!isClosing()) {
+      diagnosticLog.warn('transport.close', { server: name, category: 'transport_close', bytes: stderrBytes });
+      markServerFailed(name, name, 'MCP transport closed');
+      onUnexpectedClose();
+    } else {
+      diagnosticLog.info('transport.close', { server: name, category: 'intentional_close', bytes: stderrBytes });
+    }
+  };
 }
 
 export function markServerConnected(name: string, url: string, toolCount: number, tools: McpToolInfo[]) {

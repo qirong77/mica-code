@@ -1,0 +1,80 @@
+/* Probe chrome / editor placeholder only. Never override .notebook-chat styles. */
+body.notebook-chat-probe,
+body.notebook-chat-probe #root {
+  width: 100%;
+  height: 100dvh;
+  margin: 0;
+  overflow: hidden;
+}
+.notebook-chat-probe-shell {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  color: var(--color-fg);
+  background: var(--color-canvas);
+}
+.notebook-chat-probe-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+  flex-wrap: wrap;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--color-line-soft);
+  background: var(--color-panel);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.notebook-chat-probe-toolbar > span {
+  color: var(--color-fg-muted);
+}
+.notebook-chat-probe-toolbar .ui-select {
+  width: 140px;
+  flex: none;
+}
+.notebook-chat-probe-stage {
+  display: flex;
+  justify-content: center;
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  background: var(--color-panel);
+}
+.notebook-chat-probe-frame {
+  flex: none;
+  max-width: 100%;
+  height: 100%;
+  min-height: 0;
+}
+.notebook-chat-probe-document {
+  max-width: 680px;
+  padding: 48px 32px;
+  margin: auto;
+  line-height: 1.9;
+}
+.notebook-chat-probe-document h1 {
+  font-size: 26px;
+  font-weight: 650;
+  margin: 16px 0;
+}
+.notebook-chat-probe-document h2 {
+  font-size: 18px;
+  font-weight: 600;
+  margin: 24px 0 10px;
+}
+.notebook-chat-probe-document p {
+  margin: 12px 0;
+}
+.notebook-chat-probe-document small {
+  color: var(--color-fg-muted);
+}
+.notebook-chat-probe-notes {
+  padding: 10px 16px;
+  line-height: 2.5;
+  color: var(--color-fg-muted);
+}
+.notebook-chat-probe-error {
+  padding: 24px;
+  color: var(--color-danger);
+}

@@ -21,8 +21,15 @@ afterEach(async () => {
 });
 
 describe('Markdown table starting widths', () => {
-  it('keeps a short table compact instead of filling the editor', () => {
+  it('keeps a short Markdown table compact instead of filling the editor', () => {
     expect(calculateMarkdownTableColumnWidths([['ID', '状态'], ['1', '完成']], 900)).toEqual([64, 64]);
+  });
+
+  it('fills the Notebook reading column while retaining content weighting', () => {
+    const widths = calculateMarkdownTableColumnWidths([['时刻', '关注', '状态'], ['晨间', '整理思路', '清醒 · 从容']], 700, true);
+    expect(widths.reduce((sum, width) => sum + width, 0)).toBe(699);
+    expect(widths[0]).toBeLessThan(widths[1]);
+    expect(widths[1]).toBeLessThan(widths[2]);
   });
 
   it('allocates more room to prose than identifiers and fits the viewport', () => {
@@ -67,7 +74,7 @@ function readWidths(editor: LexicalEditor) {
   return editor.getEditorState().read(() => $table().getColWidths());
 }
 
-function layoutFixture(initialWidth = 600, savedWidths?: number[]) {
+function layoutFixture(initialWidth = 600, savedWidths?: number[], fill = false) {
   const {editor, root} = createTableEditor();
   if (savedWidths) editor.update(() => $table().setColWidths(savedWidths), {discrete: true});
   let width = initialWidth;
@@ -83,7 +90,7 @@ function layoutFixture(initialWidth = 600, savedWidths?: number[]) {
     disconnect() {}
   }
   vi.stubGlobal('ResizeObserver', TestResizeObserver);
-  cleanups.push(registerMarkdownTableLayout(editor));
+  cleanups.push(registerMarkdownTableLayout(editor, fill));
   const flush = async () => {
     for (let turn = 0; turn < 8 && frames.length; turn++) {
       const pending = frames;
@@ -97,6 +104,24 @@ function layoutFixture(initialWidth = 600, savedWidths?: number[]) {
 }
 
 describe('runtime-only table layout', () => {
+  it('fills short Notebook tables, refits them, and still respects a manual resize', async () => {
+    const {editor, root, flush, resize} = layoutFixture(600, undefined, true);
+    editor.update(() => $importMarkdown('| 时刻 | 关注 | 状态 |\n| --- | --- | --- |\n| 晨间 | 整理思路 | 清醒 · 从容 |\n'), {discrete: true});
+    const markdown = editor.getEditorState().read(() => $exportMarkdown(true));
+    await flush();
+    expect(readWidths(editor)?.reduce((sum, width) => sum + width, 0)).toBe(539);
+    expect(root.querySelector('table')?.style.width).toBe('540px');
+    resize(400);
+    await flush();
+    expect(readWidths(editor)?.reduce((sum, width) => sum + width, 0)).toBe(339);
+    editor.update(() => $table().setColWidths([100, 150, 170]), {discrete: true});
+    await flush();
+    resize(700);
+    await flush();
+    expect(readWidths(editor)).toEqual([100, 150, 170]);
+    expect(editor.getEditorState().read(() => $exportMarkdown(true))).toBe(markdown);
+  });
+
   it('refits untouched tables on editor resize and leaves Markdown and node styles unchanged', async () => {
     const {editor, root, flush, resize} = layoutFixture();
     const markdown = editor.getEditorState().read(() => $exportMarkdown(true));

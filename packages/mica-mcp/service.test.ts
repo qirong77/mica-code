@@ -1,6 +1,16 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { MicaTool } from '@packages/mica-tools/index.js';
-import { createMcpInitScope, initMcp, initializeMcpEntries, type McpInitDependencies } from './service.js';
+import { micaTools } from '@packages/mica-tools/index.js';
+import * as mcpClient from './client.js';
+import * as mcpTools from './tools.js';
+import {
+  createMcpInitScope,
+  initMcp,
+  initializeMcpEntries,
+  reconnectMcpServer,
+  shutdownMcp,
+  type McpInitDependencies,
+} from './service.js';
 
 describe('initMcp', () => {
   afterEach(() => vi.useRealTimers());
@@ -170,5 +180,117 @@ describe('initMcp', () => {
     await Promise.resolve();
 
     expect(cleanup).toHaveBeenCalledWith(server);
+  });
+});
+
+describe('MCP reconnect tool snapshots', () => {
+  afterEach(async () => {
+    await shutdownMcp();
+    mcpClient.connections.clear();
+    vi.restoreAllMocks();
+  });
+
+  async function twoServers() {
+    const tool = (name: string, action = 'lookup') =>
+      new (class extends micaTools.MicaTool {
+        constructor() {
+          super(`mcp__${name}__${action}`, name, {}, { source: 'mcp', mcpServer: name });
+        }
+        async execute() {
+          return name;
+        }
+        onToolUseDisplayText() {
+          return name;
+        }
+      })();
+    const tools = { first: tool('first'), second: tool('second'), replacement: tool('first', 'new_lookup') };
+    const server = (name: string) => {
+      const connection = {
+        name,
+        config: { command: name },
+        client: {},
+        cleanup: vi.fn(async () => {
+          mcpClient.connections.delete(name);
+        }),
+      } as unknown as mcpClient.ConnectedMcpServer;
+      mcpClient.connections.set(name, connection);
+      return connection;
+    };
+    const first = server('first');
+    const second = server('second');
+    const dependencies = {
+      connect: vi.fn(async (name: string) => mcpClient.connections.get(name)),
+      fetchTools: vi.fn(async (connected: mcpClient.ConnectedMcpServer) => [
+        tools[connected.name as 'first' | 'second'],
+      ]),
+      markConnected: mcpClient.markServerConnected,
+      markFailed: mcpClient.markServerFailed,
+      registerTools: micaTools.registerMcp,
+      cleanup: vi.fn(),
+    } as unknown as McpInitDependencies;
+    await initializeMcpEntries(
+      [
+        ['first', first.config],
+        ['second', second.config],
+      ],
+      {},
+      dependencies,
+    );
+    const replacement = {
+      ...first,
+      cleanup: vi.fn(async () => {
+        mcpClient.connections.delete('first');
+      }),
+    };
+    const connect = vi.spyOn(mcpClient, 'connectToServer').mockImplementation(async () => {
+      mcpClient.connections.set('first', replacement);
+      return replacement;
+    });
+    const fetchTools = vi.spyOn(mcpTools, 'fetchToolsForServer').mockImplementation(async (connected) => {
+      if (connected.name === 'second') throw new Error('second tools/list unavailable');
+      return [tools.replacement];
+    });
+    const names = () =>
+      micaTools
+        .getDefinitions()
+        .filter((entry) => entry.name.startsWith('mcp__'))
+        .map((entry) => entry.name);
+    return { first, second, replacement, tools, connect, fetchTools, names };
+  }
+
+  it('replaces only the reconnected server, retaining another server whose tools/list would fail', async () => {
+    const fixture = await twoServers();
+
+    expect(await reconnectMcpServer('first', fixture.first.config)).toContain('已重连 first');
+
+    expect(fixture.names()).toEqual([fixture.tools.replacement.name, fixture.tools.second.name].sort());
+    expect(fixture.fetchTools).toHaveBeenCalledTimes(1);
+    expect(fixture.fetchTools).toHaveBeenCalledWith(fixture.replacement);
+    expect(mcpClient.connections.get('second')).toBe(fixture.second);
+    expect(fixture.second.cleanup).not.toHaveBeenCalled();
+    expect(await micaTools.execute(fixture.tools.second.name, {})).toBe('second');
+  });
+
+  it('cleans a failed replacement without dropping an unrelated server snapshot', async () => {
+    const fixture = await twoServers();
+    fixture.fetchTools.mockRejectedValueOnce(new Error('replacement tools/list unavailable'));
+
+    expect(await reconnectMcpServer('first', fixture.first.config)).toContain('重连失败');
+
+    expect(fixture.names()).toEqual([fixture.tools.second.name]);
+    expect(fixture.replacement.cleanup).toHaveBeenCalledOnce();
+    expect(mcpClient.connections.has('first')).toBe(false);
+    expect(fixture.second.cleanup).not.toHaveBeenCalled();
+    expect(fixture.fetchTools).toHaveBeenCalledTimes(1);
+  });
+
+  it('removes an old snapshot once its server really disconnects', async () => {
+    const fixture = await twoServers();
+    await fixture.second.cleanup();
+
+    await reconnectMcpServer('first', fixture.first.config);
+
+    expect(fixture.names()).toEqual([fixture.tools.replacement.name]);
+    expect(fixture.fetchTools).toHaveBeenCalledTimes(1);
   });
 });

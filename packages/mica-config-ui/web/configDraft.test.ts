@@ -62,11 +62,31 @@ describe('config draft providers', () => {
   it('reads form fields from a raw provider', () => {
     expect(readProviderDraft(providerEntries(draftOf(SOURCE))[0])).toEqual({
       id: 'deepseek',
+      disabled: false,
       apiBase: 'https://api.deepseek.com',
       apiKey: 'sk-test',
       protocol: 'openai_chat_completions',
       models: ['deepseek-chat'],
     });
+  });
+
+  it('round trips the disabled provider flag', () => {
+    const draft = draftOf({ providers: [{ ...SOURCE.providers[0], disabled: true }] });
+    const fields = readProviderDraft(providerEntries(draft)[0]);
+    expect(fields.disabled).toBe(true);
+    const restored = JSON.parse(serializeConfigDraft(writeProviderDraft(draft, 0, fields))) as {
+      providers: Array<Record<string, unknown>>;
+    };
+    expect(restored.providers[0]?.disabled).toBe(true);
+    expect(validateConfigDraft(restored)).toEqual([]);
+  });
+
+  it('reports a non-boolean disabled provider flag', () => {
+    expect(
+      validateConfigDraft(draftOf({ providers: [{ ...SOURCE.providers[0], disabled: 'yes' }] })).map(
+        (issue) => issue.key,
+      ),
+    ).toEqual(['providers.0.disabled']);
   });
 
   it('keeps unknown provider fields and unknown top-level keys on write', () => {

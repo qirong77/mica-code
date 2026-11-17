@@ -166,12 +166,17 @@ export function ConfigPage() {
   const providers = draft ? providerEntries(draft) : [];
   const defaultModel = readDefaultModelDraft(draft ?? {});
   const providerOptions = providers.map(readProviderDraft).filter((provider) => provider.id);
-  const modelOptions = (providerOptions.find((provider) => provider.id === defaultModel.provider)?.models ?? []).map(
-    (model) => ({ value: model, label: model }),
-  );
+  const selectedDefaultProvider = providerOptions.find((provider) => provider.id === defaultModel.provider);
+  const modelOptions = (selectedDefaultProvider?.models ?? []).map((model) => ({ value: model, label: model }));
   const providerSelectOptions = [
-    { value: '', label: '跟随配置列表第一项' },
-    ...providerOptions.map((provider) => ({ value: provider.id, label: provider.id })),
+    { value: '', label: '跟随第一个启用服务商' },
+    ...providerOptions.filter((provider) => !provider.disabled).map((provider) => ({
+      value: provider.id,
+      label: provider.id,
+    })),
+    ...(selectedDefaultProvider?.disabled
+      ? [{ value: selectedDefaultProvider.id, label: `${selectedDefaultProvider.id}（已禁用）`, disabled: true }]
+      : []),
   ];
 
   return (
@@ -249,7 +254,7 @@ export function ConfigPage() {
 
             <SettingsGroup
               title="新会话默认模型"
-              description="未配置时使用第一个服务商的第一个模型，以及该模型的默认 effort。"
+              description="未配置时使用第一个启用服务商的第一个模型，以及该模型的默认 effort。"
               actions={
                 <Button
                   disabled={draft.defaultModel === undefined}
@@ -289,7 +294,7 @@ export function ConfigPage() {
                   id="default-model-name"
                   value={defaultModel.model || undefined}
                   options={modelOptions}
-                  disabled={!defaultModel.provider || modelOptions.length === 0}
+                  disabled={!defaultModel.provider || modelOptions.length === 0 || Boolean(selectedDefaultProvider?.disabled)}
                   placeholder={defaultModel.provider ? '暂无可选模型' : '请先选择服务商'}
                   renderFormat={() =>
                     modelOptions.find((option) => option.value === defaultModel.model)?.label ??

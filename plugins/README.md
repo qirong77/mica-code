@@ -15,6 +15,8 @@
 
 [Harness Review](harness-review/README.md) 记录运行轨迹并聚合问题候选，工具错误与健康率共用分类并标出数据覆盖缺口；条件命令链无法确定非零退出来源时记为未知，不当成功或已确认工具故障。评估按历史追加，验证后的新证据提醒复核但不自动宣判回归。用户纠正独立持久化，仅由下一次同会话主运行消费。它不自动修改代码、提示词或记忆，也不把运行完成当成验收通过。
 
+所有插件（含用户插件和一次性动作）自动接入宿主的 `operation.start/finish` 元数据日志，覆盖工具/命令、面板/动作、菜单、后台 tick、数据、hook 与装配/释放；独立 MCP/launcher 不依赖主对话轨迹。内部步骤可调用 `ctx.operations?.run('固定操作名', task, { signal })`。禁止传正文、命令、路径、地址或异常原文；处理器完成不代表业务验收。随包页面/卡片/启动器的实际曝光与点击由共享容器记录，预取和轮询不算曝光。
+
 [Subagent](subagent/README.md) 的文件租约限定文件工具的写入路径；shell 可从工作区内包含租约的目录执行，文件租约也能运行测试。外部 checkout 的祖先以最近 `.git` 为界，独立外部路径只放行到直接父目录；cwd 检查不是 shell 沙箱，命令仍须遵守写策略。
 
 面板视图可返回 `cards`（每插件最多 3 张）：`{ id, title, summary?, detail?, tone?, revision, actions?, impressionAction? }`。卡片动作 `{ id, label, key?, tone? }` 复用面板动作通道；`key` 应携带版本并由插件校验，拒绝旧界面执行新内容。`impressionAction` 仅用于记录实际展示，不应产生用户可见操作。清单声明 `desktop.panel.dynamicShortcuts: true` 让快捷区获取卡片视图。卡片里显示摘要，详细清单仍放 `sections`。
@@ -24,6 +26,8 @@
 随包 `notebook` 在顶栏右侧（与 Schedule 同一排）提供 Notebook 整页：目录树、本地富文本与表格编辑，和会话笔记相互独立；通过应用同端口的 `/plugin/notebook/mcp` 暴露 `notebook_read` / `notebook_write`，让 Mica 或其它 MCP 客户端按 id 查找、读取、创建、整理、软删除、恢复和编辑正文。桌面/Web 会话宿主启动时自动连接，不再提供 Notebook skill 或直连工具入口。正文写入沿用页面的版本比较，不直接改插件 JSON。
 编辑器是共享包 `packages/mica-editor`（笔记用其富文本模式，配置页 Role / Skill 用同一份运行时的 Markdown 模式），第三方依赖固定版本从 CDN 运行时加载；数据在 `plugin-data/notebook/data.json` 与 `documents/<id>.json`。首次打开需要 CDN 网络。
 具体能力、限制与开发方式见 [Notebook](./notebook/README.md)。
+
+Notebook 的右侧对话经通用 `api.sessions` 复用已有 app-server 会话，输入原样透传、不附加笔记上下文；Markdown 展示由整页宿主提供 `api.ui.Markdown`。Notebook MCP 的 `set_markdown` / `append_markdown` / `prepend_markdown` 把 Markdown 确定性转换为原生富文本，保留原有 CAS 与复杂文档保护边界，返回大纲、结构统计与降级警告。
 
 ## 目录结构
 
@@ -275,7 +279,7 @@ const { text } = await llm.request({ purpose: '自动起标题', system, user })
 插件应按 owner 隔离自己的临时状态。
 
 `requires` 要写全插件实际触碰的每一面 `ctx.*`：`actions`、`background`、`commands`、`data`、`desktop`、`events`、`hooks`、`prompt`、
-`session`、`sessionSettings`、`sessionState`、`settings`、`skills`、`subagents`、`tools`、`ui`、`git`、`runtime`、`agent`、`models`、`llm`。宿主缺哪个，
+`session`、`sessionSettings`、`sessionState`、`settings`、`skills`、`subagents`、`tools`、`ui`、`git`、`runtime`、`agent`、`models`、`llm`、`operations`。宿主缺哪个，
 插件就整块不装配，并在 `plugin-status.json` 里记一条 `skipped`（配置页显示「已跳过」与缺的能力名）。
 这条跳过**不写插件的健康状态**：缺哪一面取决于当前宿主（TUI / `mica exec` 没有 `desktop`），
 写进所有宿主共享的 `plugin-health` 会让桌面端显示一条别的宿主留下的「待配置」。
@@ -936,10 +940,13 @@ ctx.desktop.sessionMenu({
 
 插件自身的故障要能被用户看见，而不是只落在日志里：
 
-- `ctx.health.report({ level: 'warn' | 'error', message, hint })` 写
+- `ctx.health.report({ issueKey?, level: 'warn' | 'error', message, hint })` 写
   `$MICA_HOME/plugin-health/<id>.json`，配置页据此显示「待配置 / 运行出错」以及原因。
   记录带上是哪一版插件写的，版本一变它就不作数：上一版留下的「连不上 X」不能继续挂在
   页面上让人去修一个已经不存在的问题（`readPluginHealth(..., { version })`）。
+  健康文件是 `schemaVersion: 2` 的 issues 映射；默认业务项 `runtime`，依赖故障单独用固定 key。
+  `read()` 聚合最高严重度，`read(key)` / `clear(key)` 仅操作指定项；业务成功不清除模型降级。
+  旧单条形态由 Evolution 归档迁移，不在运行期保留解析分支。
 - 装配失败（setup 抛错、入口加载不了）不是健康状态：那条走 `plugin-status.json`，
   卡片上写「加载失败」。两者混成一句话会出现「开关亮着、脚注却写着加载失败」。
 - 只上报插件自己的状态：缺宿主能力由宿主记进 `plugin-status.json` 的 `skipped`，
@@ -962,7 +969,7 @@ ctx.desktop.sessionMenu({
 ~/Library/Logs/mica/plugin-<id>-<YYYYMMDD>[-n].jsonl
 ```
 
-单文件超过 2 MB 自动分片，超过 7 天的文件在下次写入时清理；`MICA_PLUGIN_LOG=0` 关闭。
+插件日志复用 `mica-diagnostics` 的有界批量队列，生产者不再每行同步扫描/写盘；信封为 `at/scope/pluginId/plugin/level/event/data`。单文件超过 2 MiB 分片，7 天与目录总容量由共享 writer 兜底；`MICA_PLUGIN_LOG=0` 关闭。`stats()` 可见溢出、序列化与写失败计数，不能把丢失样本当成功。
 排查插件问题时先看这里，配置页插件详情里也会显示当前日志路径。
 
 ## 派生一个子会话（sidecar）

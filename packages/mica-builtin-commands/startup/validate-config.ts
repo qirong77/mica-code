@@ -183,6 +183,15 @@ export function validateConfig(input: unknown): ConfigValidationResult {
     }
 
     const providerName = isNonEmptyString(provider.id) ? provider.id : `providers[${index}]`;
+    if (provider.disabled !== undefined && typeof provider.disabled !== 'boolean') {
+      add(
+        'error',
+        'provider_disabled_invalid',
+        `${providerPath}.disabled`,
+        `provider "${providerName}" 的 disabled 必须是 boolean。`,
+      );
+    }
+
     if (!isNonEmptyString(provider.api_base)) {
       add(
         'error',

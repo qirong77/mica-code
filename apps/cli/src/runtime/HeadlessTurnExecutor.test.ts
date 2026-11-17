@@ -6,6 +6,7 @@ import { AgentAbortError } from '../agent/AgentRuntime.js';
 import { HeadlessTurnExecutor, type HeadlessTurnEvent } from './HeadlessTurnExecutor.js';
 import { TurnNoticeLog } from './turnNotices.js';
 import { attachCodexProjector } from './CodexProjector.js';
+import { LocalRuntimeController } from '../app/adapters/LocalRuntimeController.js';
 import type { MicaUiConversationMessage } from '@packages/mica-ui/index.js';
 import { micaPlugin } from '@packages/mica-plugin/index.js';
 import type { RuntimeInput } from '@packages/mica-runtime/index.js';
@@ -132,6 +133,7 @@ function createHarness(
   };
   let idleCount = 0;
   const noticeLog = new TurnNoticeLog(() => agent.toConversationMessages() as unknown as MicaUiConversationMessage[]);
+  const hooks = options.withPluginLayer ? new micaPlugin.HookRegistry() : undefined;
   const executor = new HeadlessTurnExecutor({
     agent: agent as unknown as never,
     sessionController: sessionController as never,
@@ -145,11 +147,8 @@ function createHarness(
         return 0;
       },
     } as never,
-    // 收尾发生在 turn:after 之前，所以必须有插件层才会跑（没有插件层连 agent
-    // 工具都不存在，也就不会有子代理）。
-    ...(options.withPluginLayer
-      ? { hooks: new micaPlugin.HookRegistry(), host: { getCurrentSessionId: () => sessionId } }
-      : {}),
+    // 子代理在 turn:after 之前收尾；没有插件层时仍需释放 lease 并报告终态。
+    ...(hooks ? { hooks, host: { getCurrentSessionId: () => sessionId } } : {}),
     notices: { ensure: () => noticeLog },
     // Mirrors HeadlessPluginHost: the persisted conversation is the provider
     // history with the notices threaded back in.
@@ -172,6 +171,7 @@ function createHarness(
     savedStates,
     savedConversations,
     subagentSettleCalls,
+    hooks,
     getIdleCount: () => idleCount,
   };
 }
@@ -586,6 +586,63 @@ describe('HeadlessTurnExecutor', () => {
     expect(finish).toMatchObject({ status: 'aborted' });
   });
 
+  it.each([false, true])('finalizes a stale provider resolution once even if turn:after fails (hookFails=%s)', async (hookFails) => {
+    const { agent, executor, events, savedStates, hooks, sessionId, getIdleCount, subagentSettleCalls } = createHarness({ withPluginLayer: true });
+    let releasedBeforeAfter = false;
+    const after = vi.fn((_event: unknown) => {
+      const available = micaSession.acquireTurnLease(sessionId);
+      releasedBeforeAfter = available !== null;
+      available?.release();
+      if (hookFails) throw new Error('after failed');
+    });
+    hooks!.on('turn:after', after, { failPolicy: 'stop' });
+    let resolveRun!: (result: { runId: number; text: string }) => void;
+    agent.run = () => new Promise((resolve) => { resolveRun = resolve; });
+
+    await executor.start(input('stale resolve'));
+    await vi.waitFor(() => expect(resolveRun).toBeTypeOf('function'));
+    agent.events.emit('text', 'late answer');
+    executor.abort();
+    // Simulate a provider that ignored the abort and resolved afterwards.
+    resolveRun({ runId: 1, text: 'late answer' });
+
+    await vi.waitFor(() => expect(getIdleCount()).toBe(1));
+    expect(events.filter((event) => event.type === 'turn:finish')).toHaveLength(1);
+    expect(events.filter((event) => event.type === 'turn:finish')[0]).toMatchObject({ status: 'aborted' });
+    expect(savedStates.filter((state) => state === 'aborted')).toHaveLength(1);
+    expect(savedStates).not.toContain('completed');
+    expect(agent.abortedTurnCalls).toEqual([{ content: 'stale resolve', partialAnswer: undefined }]);
+    expect(after).toHaveBeenCalledOnce();
+    expect(after.mock.calls[0]![0]).toMatchObject({ outcome: 'aborted', owner: agent });
+    expect(releasedBeforeAfter).toBe(true);
+    expect(subagentSettleCalls).toHaveLength(1);
+    expect(existsSync(join(process.env.MICA_HOME!, 'sessions', '.turn-locks', `${sessionId}.lock`))).toBe(false);
+  });
+
+  it('does not send a second completed/finish when a completed turn:after hook fails', async () => {
+    const { executor, events, savedStates, hooks, getIdleCount } = createHarness({ withPluginLayer: true });
+    const after = vi.fn(() => { throw new Error('after failed'); });
+    hooks!.on('turn:after', after, { failPolicy: 'stop' });
+    await executor.start(input('complete once'));
+    await vi.waitFor(() => expect(getIdleCount()).toBe(1));
+    expect(events.filter((event) => event.type === 'turn:finish')).toEqual([
+      expect.objectContaining({ status: 'completed' }),
+    ]);
+    expect(savedStates.filter((state) => state !== 'running')).toEqual(['completed']);
+    expect(after).toHaveBeenCalledOnce();
+  });
+
+  it('treats an abort during turn:beforePersist as aborted instead of completed', async () => {
+    const { executor, events, savedStates, hooks, getIdleCount } = createHarness({ withPluginLayer: true });
+    hooks!.on('turn:beforePersist', () => executor.abort());
+    await executor.start(input('abort before save'));
+    await vi.waitFor(() => expect(getIdleCount()).toBe(1));
+    expect(events.filter((event) => event.type === 'turn:finish')).toEqual([
+      expect.objectContaining({ status: 'aborted' }),
+    ]);
+    expect(savedStates.filter((state) => state !== 'running')).toEqual(['aborted']);
+  });
+
   it('records only the text an iteration did not already commit for an aborted turn', async () => {
     const { agent, executor } = createHarness();
     agent.committedText = 'committed half';
@@ -652,11 +709,13 @@ describe('HeadlessTurnExecutor', () => {
 
   it('retries transient provider errors and reports turn:retrying', async () => {
     const { agent, executor, events } = createHarness();
+    const restore = vi.spyOn(agent, 'restoreClientSnapshot');
     agent.nextErrors = [Object.assign(new Error('server is busy'), { status: 500 })];
     await executor.start(input('hello'));
     await new Promise((resolve) => setTimeout(resolve, 80));
     expect(agent.runCalls).toHaveLength(2);
     expect(agent.restoreCalls).toBe(1);
+    expect(restore).toHaveBeenCalledWith({ marker: 'pre-turn' }, { preserveUsage: true });
     const retrying = events.find((event) => event.type === 'turn:retrying');
     expect(retrying).toMatchObject({ type: 'turn:retrying', attempt: 1 });
     expect(events.find((event) => event.type === 'turn:finish')).toMatchObject({ status: 'completed' });
@@ -835,4 +894,70 @@ describe('HeadlessTurnExecutor turn lease', () => {
     await new Promise((resolve) => setTimeout(resolve, 60));
     expect(existsSync(lockPath(sessionId))).toBe(false);
   });
+});
+
+// Kept alongside the headless regression because both host entry points must
+// settle the same stale-run boundary, without starting a real UI/process.
+describe('LocalRuntimeController stale turn finalization', () => {
+  it.each(['before-run', 'after-resolve', 'before-persist'] as const)(
+    'saves and finishes one aborted turn when invalidated %s',
+    async (boundary) => {
+      const { agent, sessionController, savedStates, sessionId } = createHarness();
+      const hooks = new micaPlugin.HookRegistry();
+      let releasedBeforeAfter = false;
+      const after = vi.fn((_event: unknown) => {
+        const available = micaSession.acquireTurnLease(sessionId);
+        releasedBeforeAfter = available !== null;
+        available?.release();
+      });
+      hooks.on('turn:after', after);
+      const runtime = new LocalRuntimeController(
+        agent as never,
+        sessionController as never,
+        { resolve: () => null } as never,
+        hooks,
+        {} as never,
+      );
+      const events: Array<{ type: string }> = [];
+      runtime.events.on('event', (event) => { events.push(event); });
+      const preserve = vi.spyOn(agent, 'preserveAbortedTurn');
+      let resolveRun: ((result: { runId: number; text: string }) => void) | undefined;
+      const run = vi.spyOn(agent, 'run').mockImplementation(() => {
+        if (boundary !== 'after-resolve') return Promise.resolve({ runId: agent.runId, text: 'answer' });
+        return new Promise((resolve) => { resolveRun = resolve; });
+      });
+      if (boundary === 'before-run') {
+        vi.spyOn(agent, 'captureClientSnapshot').mockImplementation(() => {
+          agent.abort();
+          return { marker: 'pre-turn' };
+        });
+      }
+      if (boundary === 'before-persist') hooks.on('turn:beforePersist', () => agent.abort());
+
+      try {
+        // System inputs bypass rewind's filesystem snapshots in this focused
+        // lifecycle test; the provider/run-id path is the same as user input.
+        const submission = runtime.submit('stale local turn', { source: 'system' });
+        if (boundary === 'after-resolve') {
+          await vi.waitFor(() => expect(resolveRun).toBeTypeOf('function'));
+          const staleRunId = agent.runId;
+          runtime.appendResponseTextFor(agent as never, 'late answer');
+          await runtime.abort();
+          resolveRun!({ runId: staleRunId, text: 'late answer' });
+        }
+        await submission;
+        expect(savedStates.filter((state) => state !== 'running')).toEqual(['aborted']);
+        expect(events.filter((event) => event.type === 'turn:aborted')).toHaveLength(1);
+        expect(events.filter((event) => event.type === 'turn:finished')).toHaveLength(1);
+        expect(after).toHaveBeenCalledOnce();
+        expect(after.mock.calls[0]![0]).toMatchObject({ outcome: 'aborted', owner: agent });
+        expect(releasedBeforeAfter).toBe(true);
+        expect(runtime.getStatus()).toEqual({ running: false });
+        expect(run).toHaveBeenCalledTimes(boundary === 'before-run' ? 0 : 1);
+        expect(preserve).toHaveBeenCalledExactlyOnceWith('stale local turn', '');
+      } finally {
+        await runtime.stop();
+      }
+    },
+  );
 });

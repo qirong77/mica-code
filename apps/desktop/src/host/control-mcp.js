@@ -21,6 +21,7 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import { suggestActionIds } from '../main/browser/browser-docs.js'
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js'
 import { openSocketRequest } from './control-client.js'
+import { awaitOperation, operationResult } from '@packages/mica-diagnostics/operation.js'
 
 export const OWNER_HEADER = 'x-mica-owner'
 export const CONTROL_TOOL_NAME = 'control'
@@ -32,6 +33,15 @@ export const CONTROL_MCP_PREFIX = '/mcp'
 const NON_ACTION_IDS = new Set(['health', 'capabilities', 'docs', 'events'])
 
 const REQUEST_TIMEOUT_MS = 30_000
+
+/** A declared wait budget is not a 30s socket timeout. Keep headroom for transport/serialization. */
+export function controlRequestTimeout(endpoint, params = {}) {
+  const declared = endpoint?.params?.some((param) => param.name === 'timeoutMs')
+  const timeout = params?.timeoutMs
+  return declared && typeof timeout === 'number' && Number.isFinite(timeout) && timeout > 0
+    ? Math.max(REQUEST_TIMEOUT_MS, Math.min(2 ** 31 - 1, Math.ceil(timeout) + 5000))
+    : REQUEST_TIMEOUT_MS
+}
 
 function isActionEndpoint(endpoint) {
   return Boolean(endpoint?.id) && !NON_ACTION_IDS.has(endpoint.id) && endpoint.method !== 'SSE'
@@ -221,13 +231,14 @@ function decodeBody(buffer, contentType) {
 export async function callControlService(
   socketPath,
   request,
-  { label = '受控服务', timeoutMs = REQUEST_TIMEOUT_MS } = {}
+  { label = '受控服务', timeoutMs = REQUEST_TIMEOUT_MS, signal } = {}
 ) {
   const response = await openSocketRequest(socketPath, request.path, {
     method: request.method,
     body: request.body,
     headers: request.headers,
     timeoutMs,
+    signal,
     label
   })
   const chunks = []
@@ -252,7 +263,8 @@ function toolResult(value) {
   if (value.kind === 'image')
     return { content: [{ type: 'image', data: value.data, mimeType: value.mimeType }] }
   const text = typeof value.value === 'string' ? value.value : JSON.stringify(value.value, null, 2)
-  return { content: [{ type: 'text', text }] }
+  const outcome = operationResult(value.value).outcome
+  return { content: [{ type: 'text', text }], ...(['error', 'timeout'].includes(outcome) ? { isError: true } : {}) }
 }
 
 function errorResult(message) {
@@ -290,7 +302,8 @@ export function createControlMcpServer({
   instructions,
   toolDescription,
   getCatalog,
-  callAction
+  callAction,
+  signal: callerSignal
 }) {
   const server = new Server(
     { name: serverInfo.name, version: serverInfo.version || '1.0.0' },
@@ -328,10 +341,12 @@ export function createControlMcpServer({
     const args = request.params?.arguments || {}
     const action = typeof args.action === 'string' ? args.action.trim() : ''
     const owner = ownerFromRequest(extra)
+    const signals = [extra?.signal, callerSignal].filter(Boolean)
+    const signal = signals.length > 1 ? AbortSignal.any(signals) : signals[0]
     try {
-      const catalog = await getCatalog()
+      const catalog = await awaitOperation(getCatalog, signal)
       if (!action) return toolResult({ kind: 'json', value: catalog.docs })
-      return toolResult(await callAction(action, args.params || {}, { owner, catalog }))
+      return toolResult(await awaitOperation(() => callAction(action, args.params || {}, { owner, catalog, signal }), signal))
     } catch (error) {
       return errorResult(error instanceof Error ? error.message : String(error))
     }
@@ -401,11 +416,17 @@ export function createControlMcpHandler({
 
   return async function handleControlMcp(req, res, parsedBody) {
     const body = parsedBody === undefined ? await readJsonBody(req) : parsedBody
+    const controller = new AbortController()
+    res.once('close', () => {
+      if (!res.writableEnded) controller.abort(new DOMException('MCP caller disconnected', 'AbortError'))
+    })
+    if (req.aborted || res.destroyed) controller.abort(new DOMException('MCP caller disconnected', 'AbortError'))
     const server = createControlMcpServer({
       serverInfo: { name: kind, title, version: '1.0.0' },
       instructions,
       toolDescription,
       getCatalog,
+      signal: controller.signal,
       callAction: async (action, params, options) => {
         const endpoint = options.catalog.byId.get(action)
         if (!endpoint) {
@@ -425,7 +446,7 @@ export function createControlMcpHandler({
             ? { ...params, raw: params.raw ?? true }
             : params
         const request = buildActionRequest(endpoint, actionParams, options)
-        return callControlService(socketPath, request, { label })
+        return callControlService(socketPath, request, { label, signal: options.signal, timeoutMs: controlRequestTimeout(endpoint, actionParams) })
       }
     })
 

@@ -231,6 +231,24 @@ export const harnessReviewAssessmentV1: Migration = {
   },
 };
 
+/** 非会话数据，由 data/plugin-health.ts 在原文归档后调用，不让会话重扫。 */
+export const pluginHealthIssuesV2: Migration = {
+  id: 'plugin-health-issues-v2',
+  description: '将单条插件健康状态迁为按 issue 独立恢复的聚合状态，并保留迁移前原文',
+  apply(document) {
+    if (document.schemaVersion !== undefined || document.issues !== undefined) return 0;
+    if (!['ok', 'warn', 'error'].includes(String(document.level)) || typeof document.message !== 'string') return 0;
+    const issueKey = document.message.startsWith('配置的模型不可用，已降级为主配置：')
+      ? 'llm:degraded'
+      : 'runtime';
+    const report = { ...document, issueKey };
+    for (const key of Object.keys(document)) delete document[key];
+    document.schemaVersion = 2;
+    document.issues = { [issueKey]: report };
+    return 1;
+  },
+};
+
 export const generationTimingV2: Migration = {
   id: 'generation-timing-v2',
   description: '将无法与正文 token 对应的旧生成计时归档，保留用量与响应等待',

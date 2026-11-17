@@ -30,6 +30,7 @@ import { PLUGIN_STATE_FILE, readPluginState, resolvePluginStatePath } from './Pl
 import { createPluginStatus, writePluginStatus, type PluginHostKind } from './PluginStatus.js';
 import type { FilePluginLoadResult } from './FilePluginLoader.js';
 import { micaSkills } from '@packages/mica-skills/index.js';
+import { createPluginOperations, observePluginHandler, observePluginTool, skippedOperation } from './PluginOperations.js';
 
 export type PluginSetupReport = {
   loaded: string[];
@@ -97,7 +98,7 @@ export type PluginStateSyncOptions = {
  */
 export type PluginBaseContext = Omit<
   PluginContext,
-  'pluginId' | 'pluginStatus' | 'onDispose' | 'logger' | 'settings' | 'sessionSettings' | 'health' | 'skills' | 'models' | 'data'
+  'pluginId' | 'pluginStatus' | 'onDispose' | 'logger' | 'settings' | 'sessionSettings' | 'health' | 'skills' | 'models' | 'data' | 'operations'
 > & {
   logger?: PluginContext['logger'];
   /**
@@ -258,7 +259,13 @@ export class PluginManager {
     }
     for (const plugin of this.sortedPlugins()) {
       if (options.only && !options.only.includes(plugin.id)) continue;
-      if (disabled.has(plugin.id)) continue;
+      if (disabled.has(plugin.id)) {
+        observePluginHandler({
+          plugin: plugin.id, pluginVersion: plugin.version, operation: 'lifecycle.setup', surface: 'lifecycle',
+          classify: () => ({ outcome: 'skipped', code: 'disabled' }),
+        }, () => undefined);
+        continue;
+      }
       await this.setupPlugin(plugin, baseContext, options, report);
     }
     if (resident && baseContext.pluginStateSync) {
@@ -281,6 +288,7 @@ export class PluginManager {
       return registration;
     };
     const logger = createPluginLogger(plugin.id, baseContext.logger);
+    const observation = { plugin: plugin.id, pluginVersion: plugin.version };
     const configDir = baseContext.paths?.config;
     // 这个插件注册成功的 skill 与它声明的角色：每次注册后整份重写它的索引文件
     // （见 PluginSkills.ts）。
@@ -343,7 +351,7 @@ export class PluginManager {
         ? {
             tools: {
               register: (tool, options = {}) =>
-                shared.tools!.register(tool, {
+                shared.tools!.register(observePluginTool(tool, observation), {
                   ...options,
                   group: { key: `plugin:${plugin.id}`, label: plugin.manifest?.name ?? plugin.id },
                 }),
@@ -351,6 +359,7 @@ export class PluginManager {
           }
         : {}),
       pluginId: plugin.id,
+      operations: createPluginOperations(plugin.id, plugin.version),
       ...(statusHost && paths
         ? {
             pluginStatus: () =>
@@ -383,9 +392,54 @@ export class PluginManager {
       },
       onDispose: (dispose) => localDisposables.push({ dispose }),
     };
+    // Every plugin, including user and action-only hosts, uses one observation
+    // contract. Input arguments never enter the metadata-only operation log.
+    ctx.commands = new Proxy(baseContext.commands, {
+      get(target, key) {
+        if (key === 'register') return (command: Parameters<typeof target.register>[0]) => trackRegistration(target.register({
+          ...command, pluginId: plugin.id,
+          handler: (...args) => observePluginHandler(
+            { ...observation, operation: 'command.execute', surface: 'command' }, () => command.handler(...args),
+          ),
+        }));
+        const value = Reflect.get(target, key, target);
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    });
+    ctx.hooks = new Proxy(baseContext.hooks, {
+      get(target, key) {
+        if (key === 'on') return (name: string, handler: Parameters<typeof target.on>[1], hookOptions: Parameters<typeof target.on>[2]) =>
+          trackRegistration(target.on(name, (...args) => {
+            // Per-token observations must not recursively observe observers.
+            if (name === 'agent:observe' || name === 'plugin:observe') return handler(...args);
+            return observePluginHandler({ ...observation, operation: 'hook.execute', surface: 'hook' }, () => handler(...args));
+          }, { ...hookOptions, pluginId: plugin.id }));
+        const value = Reflect.get(target, key, target);
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    });
     // Ignore even untyped host-injected handles: only this manager binds plugin-owned data.
     delete ctx.data;
-    if (configDir && pluginDataPath(configDir, plugin.id)) ctx.data = createPluginDataApi(configDir, plugin.id);
+    if (configDir && pluginDataPath(configDir, plugin.id)) {
+      const data = createPluginDataApi(configDir, plugin.id);
+      const observedData = (target: object) => new Proxy(target, {
+        get(object, key) {
+          const value = Reflect.get(object, key, object);
+          if (typeof value !== 'function') return value;
+          return (...args: unknown[]) => observePluginHandler(
+            { ...observation, operation: key === 'write' ? 'data.write' : 'data.read' }, () => value.apply(object, args),
+          );
+        },
+      });
+      const documents = observedData(data.documents);
+      const observed = observedData(data);
+      ctx.data = new Proxy(data, {
+        get(_target, key) {
+          if (key === 'documents') return documents;
+          return Reflect.get(observed, key);
+        },
+      });
+    }
     // 常驻任务由 manager 自己调度，不依赖宿主接线：它是纯定时逻辑，任何宿主都能给。
     // 插件没手动 dispose 的循环随 localDisposables 一起回收，所以停用插件 = 循环停止。
     const background = createPluginBackgroundScheduler({
@@ -408,11 +462,30 @@ export class PluginManager {
         });
       },
     });
-    ctx.background = background;
+    ctx.background = {
+      ...background,
+      register: (task) => background.register({ ...task, run: (input) => observePluginHandler(
+        { ...observation, operation: 'background.tick', surface: 'background', signal: input.signal }, () => task.run(input),
+      ) }),
+    };
     localDisposables.push({ dispose: () => background.disposeAll() });
     const sessionState = sessionStateFor?.(plugin.id);
     if (sessionState) ctx.sessionState = sessionState;
-    if (askFor) ctx.ask = askFor(plugin.id);
+    if (askFor) {
+      const ask = askFor(plugin.id);
+      ctx.ask = {
+        request: (question, requestOptions) => observePluginHandler(
+          { ...observation, operation: 'ask.answer', surface: 'action', signal: requestOptions?.signal },
+          () => ask.request(question, requestOptions),
+        ),
+        post: (question, requestOptions) => {
+          const handle = observePluginHandler({ ...observation, operation: 'ask.post', surface: 'action' }, () => ask.post(question, requestOptions));
+          return { ...handle, answered: observePluginHandler(
+            { ...observation, operation: 'ask.answer', surface: 'action', signal: requestOptions?.signal }, () => handle.answered,
+          ) };
+        },
+      };
+    }
     if (promptRegistry) {
       ctx.prompt = {
         section: (section) => {
@@ -460,12 +533,17 @@ export class PluginManager {
       ctx.desktop = {
         host: 'desktop',
         ...(panels && plugin.manifest?.desktopPanel
-          ? { panel: (handler: PluginPanelHandler) => trackRegistration(panels.add(plugin.id, handler)) }
+          ? { panel: (handler: PluginPanelHandler) => trackRegistration(panels.add(plugin.id, {
+              view: (input) => observePluginHandler({ ...observation, operation: 'panel.view', surface: 'panel' }, () => handler.view(input)),
+              action: (...args) => observePluginHandler({ ...observation, operation: 'panel.action', surface: 'panel' }, () => handler.action(...args)),
+            })) }
           : {}),
         ...(sessionMenus && (plugin.manifest?.desktopSessionMenu.length ?? 0) > 0
           ? {
               sessionMenu: (handler: PluginSessionMenuHandler) =>
-                trackRegistration(sessionMenus.add(plugin.id, handler)),
+                trackRegistration(sessionMenus.add(plugin.id, { run: (input) => observePluginHandler(
+                  { ...observation, operation: 'menu.execute', surface: 'menu' }, () => handler.run(input),
+                ) })),
             }
           : {}),
       };
@@ -475,7 +553,9 @@ export class PluginManager {
     if ((plugin.manifest?.actions.length ?? 0) > 0) {
       const actionStore = this.actions;
       ctx.actions = {
-        register: (key, handler) => trackRegistration(actionStore.add(plugin.id, key, handler)),
+        register: (key, handler) => trackRegistration(actionStore.add(plugin.id, key, (input) => observePluginHandler(
+          { ...observation, operation: 'action.execute', surface: 'action' }, () => handler(input),
+        ))),
       };
     }
     if (plugin.manifest?.llm && modelsHandler) {
@@ -501,6 +581,7 @@ export class PluginManager {
       report.skipped.push({ pluginId: plugin.id, missing });
       this.attempts.set(plugin.id, { status: 'skipped', missing });
       logger.warn('plugin:skipped', { missing });
+      observePluginHandler({ ...observation, operation: 'lifecycle.setup', surface: 'lifecycle', classify: skippedOperation }, () => undefined);
       return;
     }
 
@@ -509,6 +590,9 @@ export class PluginManager {
     const settingIssues = settings.validate();
     if (settingIssues.length > 0) {
       logger.warn('plugin:settings-invalid', { issues: settingIssues });
+      observePluginHandler({ ...observation, operation: 'lifecycle.settings', surface: 'lifecycle',
+        classify: () => ({ outcome: 'skipped', code: 'configuration_invalid' }),
+      }, () => undefined);
       ctx.health.report({
         level: 'warn',
         message: `配置不完整：${settingIssues.map((issue) => `${issue.key} ${issue.message}`).join('；')}`,
@@ -555,7 +639,7 @@ export class PluginManager {
     }
 
     try {
-      const disposable = await plugin.setup(ctx);
+      const disposable = await observePluginHandler({ ...observation, operation: 'lifecycle.setup', surface: 'lifecycle' }, () => plugin.setup(ctx));
       if (disposable) localDisposables.push(disposable);
       // 保留这份登记表：常驻插件在 setup 返回之后仍可能注册界面或清理回调。按插件分开存，
       // 停用这一个插件时只释放这一份，不碰别人的工具、命令与钩子。
@@ -680,7 +764,10 @@ export class PluginManager {
     const disposables = this.runs.get(pluginId);
     this.runs.delete(pluginId);
     this.attempts.delete(pluginId);
-    if (disposables) await disposeResources(disposables);
+    if (disposables) await observePluginHandler(
+      { plugin: pluginId, pluginVersion: this.plugins.get(pluginId)?.version, operation: 'lifecycle.dispose', surface: 'lifecycle' },
+      () => disposeResources(disposables),
+    );
   }
 
   /**

@@ -28,6 +28,7 @@ export const KNOWN_CONFIG_KEYS = ['providers', 'defaultModel', 'mcpServers', 'ca
 const CONFIG_KEY_ORDER: readonly string[] = KNOWN_CONFIG_KEYS;
 const PROVIDER_KEY_ORDER = [
   'id',
+  'disabled',
   'api_base',
   'api_key',
   'protocol',
@@ -47,6 +48,7 @@ export type DefaultModelDraft = {
 
 export type ProviderDraft = {
   id: string;
+  disabled: boolean;
   apiBase: string;
   apiKey: string;
   protocol: ProviderProtocolValue;
@@ -98,6 +100,7 @@ export function readProviderDraft(raw: unknown): ProviderDraft {
   const record = isRecord(raw) ? raw : {};
   return {
     id: text(record.id),
+    disabled: record.disabled === true,
     apiBase: text(record.api_base),
     apiKey: text(record.api_key),
     protocol: isProviderProtocol(record.protocol) ? record.protocol : DEFAULT_PROVIDER_PROTOCOL,
@@ -116,6 +119,7 @@ export function addProviderDraft(draft: ConfigDraft): ConfigDraft {
   providers.push(
     buildProviderRecord(undefined, {
       id: uniqueProviderId(providerEntries(draft)),
+      disabled: false,
       apiBase: '',
       apiKey: '',
       protocol: DEFAULT_PROVIDER_PROTOCOL,
@@ -169,6 +173,9 @@ export function validateConfigDraft(draft: ConfigDraft): ConfigDraftIssue[] {
       if (raw.supportsEffort !== undefined && typeof raw.supportsEffort !== 'boolean') {
         issues.push({ key: `${base}.supportsEffort`, message: '只能是开或关' });
       }
+      if (raw.disabled !== undefined && typeof raw.disabled !== 'boolean') {
+        issues.push({ key: `${base}.disabled`, message: '禁用只能是开或关' });
+      }
       if (raw.api_key !== undefined && typeof raw.api_key !== 'string') {
         issues.push({ key: `${base}.api_key`, message: '必须是字符串' });
       }
@@ -219,6 +226,8 @@ function buildProviderRecord(raw: unknown, fields: ProviderDraft): ConfigDraft {
   delete next.get_model_url;
   if (id) next.id = id;
   else delete next.id;
+  if (fields.disabled) next.disabled = true;
+  else delete next.disabled;
   if (apiBase) next.api_base = apiBase;
   else delete next.api_base;
   // api_key：原本有键就保留（空串表示「显式清空」），原本没有、现在也没填就不写。

@@ -43,6 +43,8 @@
 - 端口常量唯一出口 `mica-web-shared/runtime-port.js`；页面路径约定唯一出口 `app-paths.ts`。
 - 单端口路由：`/`、`/mica-web`、`/share`、`/terminal-control`、`/plugins/pages/<插件 id>`、`/mcp/browser`、`/mcp/terminal`、`/plugin/<id>/mcp`、`/api/*`、`/remote/control/*`、`/remote/terminal/*`。编辑器与评审都还是主应用里的视图，不占额外页面；编辑器**窗口**也只是 `/` 加 `?editor=<绝对路径>`（见下文「编辑器窗口」），不是新路径。
 - 独立插件 MCP 的声明与契约见 `plugins.md` 的「MCP 与 Skills」。`server/index.js` 只扫描随包 `plugins/*/mcp.ts` 并装配通用 runtime/route；端点在 remoteGate 后再过 Host/Origin，`/plugin/*` 未命中一律 404。运行时发布实际可用目录给会话配置与 `/` 补全，纯 Web 无受控 socket 时插件 MCP 仍可独立工作；启停名单按文件监听缓存，不为每次工具调用重新扫描目录或起子进程。
+- 独立插件 MCP/launcher 与页面数据操作用通用 `mica-diagnostics/operation.ts` 记录开始/终态/耗时/固定结果码，返回 `{ok:false}` 与 `isError` 同样算失败，不复制输入输出；launcher request 的第三参数 `{signal}` 继承 HTTP 调用方取消，单个调用取消不销毁共享后端。受控 MCP 的 action timeoutMs 带传输余量透传到 socket（至少 30s），SDK/HTTP 取消必须真正结算等待并关闭请求。
+- 随包页面/卡片/启动器共享 `PluginSurface` 采集实际可见曝光与控件激活，放在 Suspense 内容内，不统计加载占位。visibility-v2 不可用时不推断曝光；前端只发固定元数据，宿主从清单绑定身份/版本。`plugin-host:experience` 不是执行动作通道，不接受标题、文档 key、URL 或自由文本。
 - 受控浏览器与终端服务走 `userData` 下的 Unix socket；`apps/config-web` 是独立宿主（默认 13987）。
 - `shareView` 只影响呈现，不是权限边界；`access-core.js` 校验 Origin / Host 防跨站与 DNS rebinding。
 - 分享地址用 `access:info.shareBaseUrl`，不以本机 `location.origin` 兜底；链接形如 `/share?session=<id>`。
@@ -172,6 +174,8 @@
 ## 侧栏入口与整页设置
 
 - Notebook 的目录、保存队列与文档栏在 `plugins/notebook/desktop.jsx`；富文本排版、块首键盘行为、文档样式与演示统一在 `packages/mica-editor/runtime/src/workspace/WorkspaceShell.tsx` 装配，仅属于笔记 composer。宿主用经 noteId/loadId 校验的 `action` 消息触发样式/演示，业务不进入桌面内核。正文按约 650ms 防抖自动保存，顶栏不显示保存状态，失败时才在正文上方给出带重试的提示；文档样式使用 Lexical root NodeState，演示只调整视图与临时只读；数据与交互口径见 `packages/mica-editor/README.md`、`plugins/notebook/README.md`。
+
+- Notebook 右侧对话由插件的 `NotebookChatDock.jsx` 与 `chat-controller.js` 承载，打开时暂让大纲位置，关闭 / 专注模式不丢当前页面草稿；共享会话能力与节点映射在 `plugin-host.js` 的 `api.sessions`，不新建模型链路、不自动附加笔记上下文。整页通过 `api.ui.Markdown` 复用宿主排版；恢复和运行态边界见 `plugins.md`。
 
 - 会话侧栏顶部保持一行入口的固定顺序：New Session / Stats / Settings / 插件声明的侧栏入口 / Plugins。插件入口由清单 `desktop.entry` 声明、按清单顺序渲染（`Connections` 是浮层卡片）；`placement: "header"` 的入口不占侧栏位置，画在主区顶栏右侧那一簇的最左边（`Schedule` 是整页 + 顶栏图标——顶栏只有 32px 高，所以只画图标，窗口类图标仍贴最右），宿主只画一行与容器，不知道里面是什么；加一个桌面插件只改插件目录，不改侧栏代码。只声明 `desktop.page`、不写 `entry` 的插件不占这一列：它的整页入口是 Plugins 页里那张卡的「打开…」按钮（`plugin-entries.js` 的 `loadPluginPageEntry` 按 id 现取模块，`SettingsView` 经 `onOpenPluginPage` 交回 `App` 打开；标签就这样，不再占侧栏一行）。Plugins 虽然在最末，但它只是一个页面入口——点它进插件整页（目录 → 点一张卡进详情），不做下拉面板、不在侧栏里列插件。
 - 设置与插件页都以覆盖整窗的一层打开（`configPage` 状态 + `fixed inset-0` + 顶部拖拽条），不在对话区右侧再开一栏：配置页自带侧栏导航，套两层侧栏只会把内容挤窄。返回走配置页侧栏顶部的「返回对话」，主区顶栏的返回只管 Files / Stats。

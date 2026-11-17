@@ -87,6 +87,27 @@ describe('startup config validation', () => {
     expect(() => assertValidConfig(result, '/tmp/config.json')).toThrow('配置文件有问题：/tmp/config.json');
   });
 
+  it('rejects a non-boolean disabled provider flag', () => {
+    const result = validateConfig({
+      providers: [
+        {
+          id: 'disabled',
+          api_base: 'https://example.com',
+          protocol: DEFAULT_PROVIDER_PROTOCOL,
+          api_key: 'x',
+          disabled: 'yes',
+        },
+      ],
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.issues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: 'provider_disabled_invalid', path: 'providers[0].disabled' }),
+      ]),
+    );
+  });
+
   it('rejects provider effort levels that are not level names', () => {
     const result = validateConfig({
       providers: [
@@ -298,6 +319,23 @@ describe('new-session defaults', () => {
 
     expect(configApi.readConfig()).toMatchObject({ provider: 'deepseek', model: 'deepseek-v4-flash', effort: 'none' });
     expect(existsSync(join(tempHome, 'storage.json'))).toBe(false);
+  });
+
+  it('skips disabled providers when resolving new-session defaults', () => {
+    const config = baseConfig();
+    config.providers[0] = { ...config.providers[0]!, disabled: true };
+    writeFileSync(configApi.CONFIG_PATH, JSON.stringify({ providers: config.providers }));
+
+    expect(configApi.readConfig()).toMatchObject({ provider: 'krill-codex', model: 'gpt-5.5' });
+
+    writeFileSync(
+      configApi.CONFIG_PATH,
+      JSON.stringify({
+        providers: config.providers,
+        defaultModel: { provider: 'deepseek', model: 'deepseek-v4-pro' },
+      }),
+    );
+    expect(configApi.readConfig()).toMatchObject({ provider: 'krill-codex', model: 'gpt-5.5' });
   });
 
   it('uses explicit defaults and provider-scoped rules for effort and context size', () => {

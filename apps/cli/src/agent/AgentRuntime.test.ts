@@ -134,6 +134,64 @@ describe('AgentRuntime tool status', () => {
     expect(next.messages).toEqual(checkpoint.messages);
   });
 
+  it('restores retry messages while retaining each usage record produced by earlier attempts', async () => {
+    const { AgentRuntime } = await import('./AgentRuntime.js');
+    const agent = new AgentRuntime();
+    const baselineMessages = [
+      piUser('baseline'),
+      piAssistant([{ type: 'thinking', thinking: 'baseline reasoning', thinkingSignature: 'signed' }]),
+    ];
+    const usage = (usageId: string, requestIndex: number): AgentUsageRecord => ({
+      usageId,
+      provider: 'openai_chat_completions',
+      model: 'test-model',
+      turnId: 1,
+      requestIndex,
+      messageCount: 1,
+      inputTokens: 10,
+      outputTokens: 2,
+      totalTokens: 12,
+      paidTokenRate: 1,
+    });
+    const baselineUsage = usage('baseline', 1);
+    const firstRetryUsage = usage('retry-1', 2);
+    const secondRetryUsage = usage('retry-2', 3);
+
+    modelClient.messages = structuredClone(baselineMessages);
+    modelClient.usageHistory = [baselineUsage];
+    modelClient.lastUsage = baselineUsage;
+    const checkpoint = agent.captureClientSnapshot()!;
+    const usageEvent = vi.fn();
+    agent.events.on('usage', usageEvent);
+    const load = vi.mocked(modelClient.loadSnapshot).mockImplementation((snapshot) => {
+      modelClient.messages = snapshot.messages;
+      modelClient.usageHistory = snapshot.usageHistory;
+      modelClient.lastUsage = snapshot.lastUsage;
+    });
+    try {
+      // Failed attempts changed messages/reasoning and appended real requests.
+      // Repeated restores must rewind only the former, not replay baseline usage.
+      const expectedUsage = [baselineUsage];
+      for (const record of [firstRetryUsage, secondRetryUsage]) {
+        modelClient.messages.push(piAssistant('retry output'));
+        modelClient.usageHistory.push(record);
+        modelClient.lastUsage = record;
+        expectedUsage.push(record);
+        agent.restoreClientSnapshot(checkpoint, { preserveUsage: true });
+        expect(modelClient.messages).toEqual(baselineMessages);
+        expect(modelClient.usageHistory).toEqual(expectedUsage);
+        expect(modelClient.lastUsage).toBe(modelClient.usageHistory.at(-1));
+      }
+      agent.restoreClientSnapshot(checkpoint, { preserveUsage: true });
+      expect(modelClient.usageHistory).toEqual(expectedUsage);
+      expect(checkpoint.messages).toEqual(baselineMessages);
+      expect(checkpoint.usageHistory).toEqual([baselineUsage]);
+      expect(usageEvent).not.toHaveBeenCalled();
+    } finally {
+      load.mockReset();
+    }
+  });
+
   it('forwards provider retry info to the run onRetry callback', async () => {
     const { AgentRuntime } = await import('./AgentRuntime.js');
     const agent = new AgentRuntime();

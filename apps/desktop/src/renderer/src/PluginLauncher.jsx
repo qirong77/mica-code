@@ -3,6 +3,7 @@ import { Button } from '@mica-config-ui/web'
 import { createPluginHostApi } from './plugin-host'
 import { pluginEntryLoader } from './plugin-entries'
 import { readPluginsDetails } from './plugins-details'
+import { PluginSurface } from './PluginSurface'
 
 /** Small standalone renderer for a manifest-declared launcher; never mounts a chat. */
 export function PluginLauncher({ pluginId }) {
@@ -32,7 +33,9 @@ export function PluginLauncher({ pluginId }) {
   return (
     <div className="mica-config-ui h-full bg-canvas text-fg">
       {state.Component ? (
-        <state.Component api={api} />
+        <PluginSurface api={api} surface="launcher" className="h-full">
+          <state.Component api={api} />
+        </PluginSurface>
       ) : (
         <div
           className="flex h-full flex-col items-center justify-center gap-3 p-6 text-sm"

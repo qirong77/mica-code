@@ -17,6 +17,8 @@ import { appendFileSync, existsSync, mkdirSync, readdirSync, statSync, unlinkSyn
 import { join } from 'node:path';
 import { resolveLogDir } from '@packages/mica-config/brand.js';
 import { clearPerformanceCache, readSummary, readSummaryAsync } from './performance-summary.js';
+export { observePluginOperation, startPluginOperation, operationResult, awaitOperation } from './operation.js';
+export type { OperationContext, OperationOutcome } from './operation.js';
 
 const MAX_BYTES = 16 * 1024 * 1024;
 const KEEP_DAYS = 7;
@@ -27,6 +29,9 @@ const PRUNE_MS = 60 * 60 * 1000;
 const RING_SIZE = 1000;
 const FLUSH_MS = 2000;
 const FLUSH_BATCH = 100;
+const QUEUE_LIMIT = 2000;
+const BUFFER_BYTES = 4 * 1024 * 1024;
+const ENTRY_BYTES = 64 * 1024;
 // 默认内存采样间隔：够看出「一个会话跑了 4 小时涨了 1GB」，又不会让日志变噪音。
 const MEM_INTERVAL_MS = 30_000;
 
@@ -155,13 +160,26 @@ export interface PerfMetrics {
   events: PerfEvent[];
 }
 
-let queue: LogEntry[] = [];
+export type LogDestination = {
+  dir?: string;
+  /** File identity only; the entry's scope remains unchanged. */
+  filePrefix?: string;
+  maxFileBytes?: number;
+};
+type QueuedEntry = { line: string; bytes: number; destination: Required<LogDestination> };
+let queue: QueuedEntry[] = [];
+let queueBytes = 0;
 let ring: LogEntry[] = [];
+let ringBytes: number[] = [];
+let ringSizeBytes = 0;
 let flushTimer: ReturnType<typeof setInterval> | null = null;
+let batchTimer: ReturnType<typeof setTimeout> | null = null;
 let slowStats = new Map<string, { count: number; totalMs: number; maxMs: number; slow: number; fails: number }>();
 let dropped = 0;
-let lastPrune = 0;
-let lastPruneDir = '';
+let writeFailures = 0;
+let serializationFailures = 0;
+let overflowDrops = 0;
+const lastPrunes = new Map<string, number>();
 // 每个 scope 当天正在写的文件。分片必须按序号递增，不能按时间戳算文件名：
 // 日文件一满，按 flush 时刻取名等于每 2s 新建一个文件（一天几千个）。
 const activeFiles = new Map<string, string>();
@@ -189,15 +207,17 @@ function safeScope(scope: string): string {
   return (cleaned || 'app').slice(0, 32);
 }
 
-function fileFor(scope: string, now: number): string {
-  const dir = logDir();
+function fileFor(destination: Required<LogDestination>, now: number): string {
+  const { dir, filePrefix, maxFileBytes } = destination;
+  mkdirSync(dir, { recursive: true });
   // scope 会拼进文件名，而它可能来自渲染层或插件（`log:report`）：只放行文件名安全的字符，
   // 否则 `../../x` 能把日志写到目录外。
-  const key = `${safeScope(scope)}-${dayStamp(now)}`;
-  const cached = activeFiles.get(key);
+  const key = `${filePrefix}-${dayStamp(now)}`;
+  const cacheKey = `${dir}/${key}/${maxFileBytes}`;
+  const cached = activeFiles.get(cacheKey);
   if (cached) {
     try {
-      if (statSync(cached).size <= MAX_BYTES) return cached;
+      if (statSync(cached).size < maxFileBytes) return cached;
     } catch {
       // 被清理或挪走，重新找一片
     }
@@ -205,23 +225,24 @@ function fileFor(scope: string, now: number): string {
   for (let part = 0; part < 1000; part += 1) {
     const path = part === 0 ? join(dir, `${key}.jsonl`) : join(dir, `${key}-${part}.jsonl`);
     try {
-      if (statSync(path).size > MAX_BYTES) continue;
+      if (statSync(path).size >= maxFileBytes) continue;
     } catch {
       // 不存在就用它
     }
-    activeFiles.set(key, path);
+    if (activeFiles.size >= 256) activeFiles.delete(activeFiles.keys().next().value!);
+    activeFiles.set(cacheKey, path);
     return path;
   }
   return join(dir, `${key}.jsonl`);
 }
 
 // 保留期 + 总容量兜底清理。
-function prune(now: number): void {
-  const dir = logDir();
+function prune(dir: string, now: number): void {
   // 换了目录（MICA_LOG_DIR 覆盖、隔离实例）就立即清一次，别让上一个目录的节流带过来。
-  if (dir === lastPruneDir && now - lastPrune < PRUNE_MS) return;
-  lastPrune = now;
-  lastPruneDir = dir;
+  const previous = lastPrunes.get(dir);
+  if (previous !== undefined && now - previous < PRUNE_MS) return;
+  if (lastPrunes.size >= 64) lastPrunes.delete(lastPrunes.keys().next().value!);
+  lastPrunes.set(dir, now);
   const cutoff = now - KEEP_DAYS * 24 * 60 * 60 * 1000;
   let names: string[] = [];
   try {
@@ -259,28 +280,33 @@ function prune(now: number): void {
 }
 
 function writeNow(): void {
+  if (batchTimer) clearTimeout(batchTimer);
+  batchTimer = null;
   if (queue.length === 0) return;
   const batch = queue;
   queue = [];
+  queueBytes = 0;
   const now = Date.now();
   // 按 scope 分组，避免一行写一个文件（缩小 fsync 次数）
-  const byScope = new Map<string, LogEntry[]>();
+  const byScope = new Map<string, QueuedEntry[]>();
   for (const entry of batch) {
-    const list = byScope.get(entry.scope) || [];
+    const key = JSON.stringify(entry.destination);
+    const list = byScope.get(key) || [];
     list.push(entry);
-    byScope.set(entry.scope, list);
+    byScope.set(key, list);
   }
-  for (const [scope, entries] of byScope) {
+  const dirs = new Set<string>();
+  for (const entries of byScope.values()) {
+    const destination = entries[0]!.destination;
+    dirs.add(destination.dir);
     try {
-      // stringify 也放进 try：字段里出现 BigInt / 循环引用时不能把异常抛回调用方
-      // （队列满 100 条时 record() 会同步走到这里）。
-      const body = entries.map((entry) => JSON.stringify(entry)).join('\n');
-      appendFileSync(fileFor(scope, now), `${body}\n`);
+      appendFileSync(fileFor(destination, now), entries.map((entry) => entry.line).join(''));
     } catch {
       dropped += entries.length;
+      writeFailures += entries.length;
     }
   }
-  prune(now);
+  for (const dir of dirs) prune(dir, now);
 }
 
 function schedule(): void {
@@ -293,11 +319,48 @@ function schedule(): void {
 function record(level: LogLevel, scope: string, event: string, fields?: Record<string, unknown>): void {
   if ((LEVELS[level] ?? 0) < threshold) return;
   const entry: LogEntry = { at: Date.now(), level, scope, event, ...fields };
-  queue.push(entry);
-  ring.push(entry);
-  if (ring.length > RING_SIZE) ring.splice(0, ring.length - RING_SIZE);
+  enqueueLogEntry(entry);
+}
+
+/** Shared bounded writer. Explicit producers (plugin logs) apply their own enable/level policy. */
+export function enqueueLogEntry(entry: LogEntry, options: LogDestination = {}): void {
+  let line: string;
+  let copy: LogEntry;
+  try {
+    line = `${JSON.stringify(entry)}\n`;
+    copy = JSON.parse(line) as LogEntry;
+  } catch {
+    dropped += 1;
+    serializationFailures += 1;
+    return;
+  }
+  const bytes = Buffer.byteLength(line);
+  if (bytes > ENTRY_BYTES || queue.length >= QUEUE_LIMIT || queueBytes + bytes > BUFFER_BYTES) {
+    dropped += 1;
+    overflowDrops += 1;
+    return;
+  }
+  const prefix = options.filePrefix?.replace(/[^A-Za-z0-9._-]+/g, '_').slice(0, 180);
+  const destination = {
+    dir: options.dir ?? resolveLogDir(),
+    filePrefix: prefix && prefix !== '.' && prefix !== '..' ? prefix : safeScope(entry.scope),
+    maxFileBytes: Math.max(1, options.maxFileBytes || MAX_BYTES),
+  };
+  queue.push({ line, bytes, destination });
+  queueBytes += bytes;
+  ring.push(copy);
+  ringBytes.push(bytes);
+  ringSizeBytes += bytes;
+  while (ring.length > RING_SIZE || ringSizeBytes > BUFFER_BYTES) {
+    ring.shift();
+    ringSizeBytes -= ringBytes.shift()!;
+  }
   schedule();
-  if (queue.length >= FLUSH_BATCH) writeNow();
+  // Never scan/write in a producer's stack, even when a verbose plugin fills a batch.
+  if (queue.length >= FLUSH_BATCH && !batchTimer) {
+    batchTimer = setTimeout(writeNow, 0);
+    batchTimer.unref?.();
+  }
 }
 
 function errorFields(error: unknown): Record<string, unknown> {
@@ -566,6 +629,10 @@ export function stats(): {
   queued: number;
   ring: number;
   dropped: number;
+  queuedBytes: number;
+  writeFailures: number;
+  serializationFailures: number;
+  overflowDrops: number;
   slowKeys: number;
   threshold: number;
   dir: string;
@@ -574,6 +641,10 @@ export function stats(): {
     queued: queue.length,
     ring: ring.length,
     dropped,
+    queuedBytes: queueBytes,
+    writeFailures,
+    serializationFailures,
+    overflowDrops,
     slowKeys: slowStats.size,
     threshold,
     dir: logDir(),
@@ -612,8 +683,13 @@ export function clearLogs(): { removed: number } {
     }
   }
   ring = [];
+  ringBytes = [];
+  ringSizeBytes = 0;
   slowStats = new Map();
   dropped = 0;
+  writeFailures = 0;
+  serializationFailures = 0;
+  overflowDrops = 0;
   return { removed };
 }
 

@@ -10,6 +10,7 @@ import {
   type PluginModelRequest,
 } from './index.js';
 import { validatePluginSettingValues } from './PluginSettings.js';
+import { createPluginHealthStore } from './PluginHealth.js';
 
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -251,6 +252,45 @@ describe('describePluginLlmView', () => {
 });
 
 describe('createPluginLlmApi fallback', () => {
+  it.each(['read', 'report'] as const)('does not resend a successful request when health %s fails', async (failing) => {
+    const values = { useMainProvider: 'false', baseUrl: 'https://first.test', model: 'mini' };
+    let calls = 0;
+    const api = createPluginLlmApi({ spec: {}, readValues: () => values,
+      health: {
+        read: () => { if (failing === 'read') throw new Error('health IO'); return null; },
+        report: () => { if (failing === 'report') throw new Error('health IO'); },
+      },
+      models: async (request) => {
+        calls++;
+        if (request.baseUrl === 'https://first.test') throw new Error('primary unavailable');
+        return { text: request.useMainProvider ? 'fallback' : 'primary', usage: null };
+      },
+    });
+    const request = { purpose: 'p', system: 's', user: 'u' };
+    await expect(api.request(request)).resolves.toMatchObject({ text: 'fallback' });
+    values.baseUrl = 'https://second.test';
+    await expect(api.request(request)).resolves.toMatchObject({ text: 'primary' });
+    expect(calls).toBe(3);
+    await expect(api.request(request)).resolves.toMatchObject({ text: 'primary' });
+    expect(calls).toBe(4);
+  });
+  it('does not clear dependency degradation on business success or cached fallback success', async () => {
+    const values = { useMainProvider: 'false', baseUrl: 'https://broken.test/v1', apiKey: 'test', model: 'mini' };
+    const health = createPluginHealthStore('llm-issues', { configDir: process.env.MICA_HOME });
+    const api = createPluginLlmApi({ spec: {}, readValues: () => values, health, models: async (request) => {
+      if (request.baseUrl === 'https://broken.test/v1') throw new Error('unavailable');
+      return { text: 'ok', usage: null };
+    } });
+    const request = { purpose: 'p', system: 's', user: 'u' };
+    await api.request(request);
+    health.report({ level: 'ok', message: 'business done' });
+    await api.request(request);
+    expect(health.read()?.issueKey).toBe('llm:degraded');
+    expect(health.read()?.level).toBe('warn');
+    values.baseUrl = 'https://recovered.test/v1';
+    await api.request(request);
+    expect(health.read('llm:degraded')?.level).toBe('ok');
+  });
   function setup(initial: Record<string, string>, handler: (request: PluginModelRequest) => Promise<string>) {
     const values = { ...initial };
     const requests: PluginModelRequest[] = [];

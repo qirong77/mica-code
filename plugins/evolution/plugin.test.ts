@@ -37,6 +37,7 @@ function harness() {
   );
 
   const messages: string[] = [];
+  const health = vi.fn();
   let command: MicaCommand | undefined;
   let task: PluginBackgroundTask | undefined;
   setup({
@@ -56,11 +57,11 @@ function harness() {
       },
     },
     ui: { showMessage: (value: string) => messages.push(value) },
-    health: { report() {} },
+    health: { report: health },
     logger: { info() {}, warn() {}, error() {} },
     onDispose() {},
   } as unknown as PluginContext);
-  return { home, sessionPath, messages, command, task };
+  return { home, sessionPath, messages, command, task, health };
 }
 
 function readUsage(path: string) {
@@ -68,6 +69,14 @@ function readUsage(path: string) {
 }
 
 describe('evolution 插件装配', () => {
+  it('reports broken files as partial instead of declaring complete recovery', async () => {
+    const { home, task, health } = harness();
+    writeFileSync(join(home, 'sessions', 'broken.json'), '{broken');
+    await task?.run({ signal: new AbortController().signal, tick: 1 });
+    expect(health).toHaveBeenCalledWith(expect.objectContaining({ issueKey: 'migration:files', level: 'warn', message: expect.stringContaining('无法读取') }));
+    expect(health.mock.calls.some(([entry]) => entry.message === '旧数据清洗恢复正常')).toBe(false);
+    expect(readFileSync(join(home, 'sessions', 'broken.json'), 'utf8')).toBe('{broken');
+  });
   it('注册启动清洗与 /evolution 命令，两者都能驱动同一份迁移', async () => {
     const { home, sessionPath, messages, command, task } = harness();
     expect(task?.id).toBe('startup');

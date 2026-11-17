@@ -1,7 +1,8 @@
 import { Server } from '@modelcontextprotocol/sdk/server/index.js'
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js'
-import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js'
+import { CallToolRequestSchema, CallToolResultSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js'
 import { pluginMcpServerName } from '@packages/mica-plugin/PluginMcp.js'
+import { observePluginOperation, operationResult } from '@packages/mica-diagnostics/operation.js'
 
 const MAX_BODY_BYTES = 2 * 1024 * 1024
 
@@ -30,57 +31,65 @@ export function createPluginMcpHandler({ runtime }) {
       return sendJson(res, 400, { jsonrpc: '2.0', error: { code: -32700, message: errorMessage(error) } })
     }
 
-    let handler
-    let manifest
     let server
+    let transport
+    const controller = new AbortController()
+    res.once('close', () => {
+      controller.abort(new DOMException('MCP caller disconnected', 'AbortError'))
+      void transport?.close()
+      void server?.close()
+    })
+    if (req.aborted || res.destroyed) controller.abort(new DOMException('MCP caller disconnected', 'AbortError'))
     try {
-      handler = await runtime.load(pluginId)
-      manifest = runtime.manifestOf(pluginId)
-      server = createPluginMcpServer({ pluginId, version: manifest.version, handler })
+      const { handler, manifest } = await observePluginOperation(
+        { plugin: pluginId, surface: 'mcp', operation: 'mcp.load', signal: controller.signal },
+        async () => ({ handler: await runtime.load(pluginId), manifest: runtime.manifestOf(pluginId) })
+      )
+      server = createPluginMcpServer({ pluginId, version: manifest.version, handler, signal: controller.signal })
     } catch (error) {
+      if (res.destroyed) return
       return sendJson(res, 500, {
         jsonrpc: '2.0',
         error: { code: -32603, message: `插件 MCP 初始化失败：${errorMessage(error)}` }
       })
     }
-    const transport = new StreamableHTTPServerTransport({
+    transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: undefined,
       enableJsonResponse: true
-    })
-    res.on('close', () => {
-      void transport.close()
-      void server.close()
     })
     await server.connect(transport)
     await transport.handleRequest(req, res, body)
   }
 }
 
-export function createPluginMcpServer({ pluginId, version = '1.0.0', handler }) {
+export function createPluginMcpServer({ pluginId, version = '1.0.0', handler, signal: callerSignal }) {
   const server = new Server(
     { name: pluginMcpServerName(pluginId), version },
     { capabilities: { tools: {} }, ...(handler.instructions ? { instructions: handler.instructions } : {}) }
   )
 
-  server.setRequestHandler(ListToolsRequestSchema, async () => ({
-    tools: handler.tools.map(({ execute: _execute, ...tool }) => tool)
-  }))
+  server.setRequestHandler(ListToolsRequestSchema, async (_request, extra) =>
+    observePluginOperation(
+      { plugin: pluginId, pluginVersion: version, surface: 'mcp', operation: 'mcp.tools.list', signal: requestSignal(extra, callerSignal) },
+      () => ({ tools: handler.tools.map(({ execute: _execute, ...tool }) => tool) })
+    )
+  )
 
   server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
-    const name = request.params?.name
-    const tool = handler.tools.find((candidate) => candidate.name === name)
-    if (!tool) return errorResult(`未知 MCP 工具：${String(name || '')}`)
-
-    const input = request.params?.arguments ?? {}
-    const validationError = validateToolInput(input, tool.inputSchema)
-    if (validationError) return errorResult(`${tool.name} 参数无效：${validationError}`)
-
-    const signal = extra?.signal ?? new AbortController().signal
+    const signal = requestSignal(extra, callerSignal)
     try {
-      if (signal.aborted) throw signal.reason ?? new Error('MCP request aborted')
-      const value = await tool.execute(input, { signal })
-      if (signal.aborted) throw signal.reason ?? new Error('MCP request aborted')
-      return textResult(value)
+      return await observePluginOperation({ plugin: pluginId, pluginVersion: version, surface: 'mcp', operation: 'mcp.tools.call', signal }, async () => {
+        const name = request.params?.name
+        const tool = handler.tools.find((candidate) => candidate.name === name)
+        if (!tool) return errorResult(`未知 MCP 工具：${String(name || '')}`)
+
+        const input = request.params?.arguments ?? {}
+        const validationError = validateToolInput(input, tool.inputSchema)
+        if (validationError) return errorResult(`${tool.name} 参数无效：${validationError}`)
+
+        const value = await tool.execute(input, { signal })
+        return textResult(value)
+      })
     } catch (error) {
       return errorResult(errorMessage(error))
     }
@@ -89,15 +98,27 @@ export function createPluginMcpServer({ pluginId, version = '1.0.0', handler }) 
   return server
 }
 
+function requestSignal(extra, callerSignal) {
+  const signals = [extra?.signal, callerSignal].filter(Boolean)
+  return signals.length > 1 ? AbortSignal.any(signals) : signals[0] ?? new AbortController().signal
+}
+
 function textResult(value) {
   if (typeof value === 'string') return { content: [{ type: 'text', text: value }] }
+  if (value?.isError === true && Array.isArray(value.content)) {
+    const parsed = CallToolResultSchema.safeParse(value)
+    return parsed.success ? parsed.data : errorResult('MCP 工具返回了无效的错误结果')
+  }
   let text
   try {
     text = JSON.stringify(value === undefined ? null : value, null, 2)
   } catch (error) {
     return errorResult(`MCP 工具返回值无法序列化：${errorMessage(error)}`)
   }
-  return { content: [{ type: 'text', text }] }
+  return {
+    content: [{ type: 'text', text }],
+    ...(operationResult(value).outcome === 'error' ? { isError: true } : {})
+  }
 }
 
 function errorResult(message) {

@@ -102,6 +102,8 @@ export default function setup(ctx: PluginContext): void {
   let service: Awaited<ReturnType<typeof startCookieService>> | null = null;
   let disposed = false;
   let starting = false;
+  const degradedDirections = new Map<string, string>();
+  const observedDirections = new Set<string>();
   const start = async () => {
     if (disposed || starting || service) return;
     starting = true;
@@ -111,7 +113,22 @@ export default function setup(ctx: PluginContext): void {
         token: serviceToken(dataDir),
         micaBrowserUrl: process.env.MICA_BROWSER_URL!,
         extensionInfo: () => extension,
-        onClientCount: (count) => updatePluginData(dataDir, { target: { text: count > 0 ? '已连接' : '等待 Chrome' } }),
+        onClientCount: (count) => updatePluginData(dataDir, { target: { text: count > 0 ? 'Chrome 已连接' : '等待 Chrome' } }),
+        onObservation: (event) => {
+          const issueKey = `sync:${event.direction}`;
+          if (event.outcome === 'error') {
+            ctx.logger.warn('cookie-sync:operation', event);
+            if (degradedDirections.get(event.direction) !== event.code)
+              ctx.health.report({ issueKey, level: 'warn', message: `Cookie 同步 ${event.direction} 异常（${event.code}），正在自动恢复` });
+            degradedDirections.set(event.direction, event.code);
+          } else if (event.outcome === 'recovered' || !observedDirections.has(event.direction)) {
+            ctx.logger.info('cookie-sync:recovered', event);
+            if (degradedDirections.has(event.direction) || ctx.health.read?.(issueKey)?.level === 'warn')
+              ctx.health.report({ issueKey, level: 'ok', message: `Cookie 同步 ${event.direction} 已恢复` });
+            degradedDirections.delete(event.direction);
+          }
+          observedDirections.add(event.direction);
+        },
       });
       if (disposed) {
         await started.close();

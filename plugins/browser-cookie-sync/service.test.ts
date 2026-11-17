@@ -1,6 +1,6 @@
 import { createServer, type ServerResponse } from 'node:http';
 import { afterEach, describe, expect, it } from 'vitest';
-import { startCookieService } from './service.js';
+import { startCookieService, type CookieSyncObservation } from './service.js';
 
 const cookie = {
   host: 'example.com',
@@ -17,6 +17,7 @@ const token = 'test-token';
 
 async function fixture(extensionInfo?: () => { version: string; fingerprint: string; updatedAt: number }) {
   const calls: Array<{ path: string; body: any }> = [];
+  const observations: CookieSyncObservation[] = [];
   const streams = new Set<ServerResponse>();
   let snapshot: Record<string, unknown> = { ok: true, cookies: [{ ...cookie }], total: 1, truncated: false };
   const upstream = createServer(async (req, res) => {
@@ -43,6 +44,7 @@ async function fixture(extensionInfo?: () => { version: string; fingerprint: str
     token,
     micaBrowserUrl: `http://127.0.0.1:${browserPort}`,
     port: 0,
+    onObservation: (event) => observations.push(event),
     ...(extensionInfo ? { extensionInfo } : {}),
   });
   const url = `http://127.0.0.1:${service.port}`;
@@ -53,6 +55,7 @@ async function fixture(extensionInfo?: () => { version: string; fingerprint: str
     });
   return {
     calls,
+    observations,
     streams,
     url,
     request,
@@ -62,6 +65,7 @@ async function fixture(extensionInfo?: () => { version: string; fingerprint: str
     emit(value: unknown) {
       for (const stream of streams) stream.write(`data: ${JSON.stringify(value)}\n\n`);
     },
+    emitRaw(value: string) { for (const stream of streams) stream.write(`data: ${value}\n\n`); },
     async close() {
       await service.close();
       for (const stream of streams) stream.end();
@@ -94,6 +98,24 @@ async function waitFor(predicate: () => boolean) {
 }
 
 describe('cookie loopback service', () => {
+  it('reports parse failure and recovery without retaining cookie data or token', async () => {
+    const service = await setup();
+    await waitFor(() => service.streams.size > 0);
+    service.emitRaw('{PRIVATE_COOKIE_INVALID_JSON');
+    await waitFor(() => service.observations.some((row) => row.code === 'invalid-json'));
+    service.emit({ cookie, removed: false });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(service.observations.some((row) => row.direction === 'incremental' && row.outcome === 'recovered')).toBe(false);
+    const reader = (await service.request('/events')).body!.getReader();
+    await reader.read();
+    service.emit({ cookie, removed: false });
+    await reader.read();
+    await waitFor(() => service.observations.some((row) => row.direction === 'incremental' && row.outcome === 'recovered'));
+    expect(JSON.stringify(service.observations)).not.toMatch(/PRIVATE|secret|test-token|example.com/);
+    const failure = service.observations.find((row) => row.code === 'invalid-json')!;
+    expect(failure).toMatchObject({ direction: 'incremental', failures: 1 });
+    await reader.cancel();
+  });
   it('reports the on-disk extension version so the extension can self-update', async () => {
     const info = { version: '1.2.0', fingerprint: 'abc123', updatedAt: 1_700_000_000_000 };
     const withInfo = await setup(() => info);
@@ -202,5 +224,6 @@ describe('cookie loopback service', () => {
     await waitFor(() => service.streams.size > 0);
     for (const stream of service.streams) stream.end();
     expect((await reader.read()).done).toBe(true);
+    expect(service.observations.some((row) => row.direction === 'upstream' && row.code === 'stream-ended')).toBe(true);
   });
 });

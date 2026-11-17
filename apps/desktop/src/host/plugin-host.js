@@ -13,6 +13,10 @@ import { officialPluginManifests } from '@packages/mica-official-plugins/manifes
 import { readDisabledPluginIds } from '@packages/mica-plugin/PluginState.js'
 import { createPluginLauncherRuntime } from './plugin-launcher-runtime.js'
 import { controlPluginLauncher } from './system-checks.js'
+import { createPluginExperience } from '@packages/mica-plugin/PluginExperience.js'
+import { createPluginLogger } from '@packages/mica-plugin/PluginLog.js'
+import { createPluginSettingsStore } from '@packages/mica-plugin/PluginSettings.js'
+import { observePluginOperation } from '@packages/mica-diagnostics/operation.js'
 
 /**
  * 插件在桌面端的**能力面**（宿主只提供能力，不认识任何具体插件）。
@@ -51,6 +55,25 @@ function micaHome() {
 export function registerPluginHostIpc() {
   const home = micaHome()
   const statePath = join(home, 'plugins-state.json')
+  const experience = new Map()
+  ipcMain.handle('plugin-host:experience', (_event, payload = {}) => {
+    const manifest = officialPluginManifests.find((item) => item.id === payload.pluginId)
+    if (!manifest || readDisabledPluginIds({ path: statePath }).has(manifest.id)) return { ok: false }
+    // The renderer sends no title, text, address, session id or document key.
+    // Reject unregistered free-text action/revision fields at this boundary.
+    const fields = payload.fields ?? {}
+    if (!['view', 'activate', 'open', 'close', 'save', 'copy', 'retry'].includes(fields.action)) return { ok: false }
+    let tracker = experience.get(manifest.id)
+    if (!tracker) {
+      tracker = createPluginExperience({
+        settings: createPluginSettingsStore(manifest.id, manifest.settings, { configDir: home }),
+        logger: createPluginLogger(manifest.id)
+      }, manifest.version)
+      experience.set(manifest.id, tracker)
+    }
+    tracker.track(payload.event, { surface: fields.surface, action: fields.action })
+    return { ok: true }
+  })
   const loaders = new Map()
   for (const [file, load] of Object.entries(import.meta.glob('../../../../plugins/*/launcher.js'))) {
     const match = /\/([^/]+)\/launcher\.js$/.exec(file)
@@ -75,7 +98,8 @@ export function registerPluginHostIpc() {
 
   ipcMain.handle('plugin-host:read-data', (_event, payload) => {
     const options = Object.hasOwn(payload ?? {}, 'key') ? { key: payload.key } : {}
-    return readPluginData(micaHome(), payload?.pluginId, options)
+    return observePluginOperation({ plugin: isValidPluginId(payload?.pluginId) ? payload.pluginId : 'unknown', operation: 'data.read', surface: 'page' },
+      () => readPluginData(micaHome(), payload?.pluginId, options))
   })
 
   // 失败直接抛：`POST /api/invoke` 会把 Error 的 message 变成 `{ ok: false, error }`。
@@ -84,7 +108,8 @@ export function registerPluginHostIpc() {
       ? { expectedVersion: payload.expectedVersion }
       : {}
     if (Object.hasOwn(payload ?? {}, 'key')) options.key = payload.key
-    return writePluginData(micaHome(), payload?.pluginId, payload?.value, options)
+    return observePluginOperation({ plugin: isValidPluginId(payload?.pluginId) ? payload.pluginId : 'unknown', operation: 'data.write', surface: 'page' },
+      () => writePluginData(micaHome(), payload?.pluginId, payload?.value, options))
   })
 
   /**

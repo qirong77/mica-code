@@ -23,7 +23,7 @@ export type ScheduleHost = {
 export type ScheduleWriter = {
   /** 排一条操作（会立刻开始写）。 */
   push(operation: ScheduleOperation): void;
-  /** 排空队列；`false` 表示中途失败（原因已经经 `onError` 报出去）。 */
+  /** 排空队列；失败时清空剩余操作并返回 `false`（原因只经 `onError` 报一次）。 */
   flush(): Promise<boolean>;
   /** 还有几条没落盘。 */
   pending(): number;
@@ -63,7 +63,12 @@ export function createScheduleWriter(options: {
       } catch (error) {
         return fail(errorText(error));
       }
-      const saved = await host.writeData(next, { expectedVersion: result?.version ?? null });
+      let saved;
+      try {
+        saved = await host.writeData(next, { expectedVersion: result?.version ?? null });
+      } catch (error) {
+        return fail(`保存排期失败：${errorText(error)}`);
+      }
       if (saved?.ok !== false) return true;
       if (!saved.conflict) return fail(saved.error || '保存排期失败');
     }

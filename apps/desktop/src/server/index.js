@@ -76,6 +76,7 @@ import { requestJson } from '../host/control-client.js'
 import { CONTROL_ORIGIN_ENV, removeLegacyControlSkills } from '../host/control-mcp-config.js'
 import { createPluginMcpRuntime } from '../host/plugin-mcp-runtime.js'
 import { createPluginMcpHandler } from '../host/plugin-mcp.js'
+import { withPluginLauncherRequest } from '../host/plugin-launcher-runtime.js'
 import { setPluginMcpCatalog } from '../host/plugin-mcp-config.js'
 import { createPluginMcpRoute } from './plugin-mcp-route.js'
 import { servePluginPage } from './plugin-page-route.js'
@@ -611,6 +612,30 @@ async function handleInvoke(req, res) {
   const channel = body?.channel
   if (typeof channel !== 'string' || !channel) {
     sendJson(res, 400, { ok: false, error: '缺少 channel' })
+    return
+  }
+  // Launcher operations have their own redacted operation envelope and timer.
+  // Do not send their result/errors to the generic timer, which copies messages.
+  // There is deliberately no fixed timeout: the caller/disconnect owns the wait.
+  if (channel === 'plugin-host:launcher-request') {
+    const controller = new AbortController()
+    const abort = () => {
+      if (!res.writableEnded) controller.abort(new DOMException('Launcher caller disconnected', 'AbortError'))
+    }
+    req.once('aborted', abort)
+    res.once('close', abort)
+    if (req.aborted || res.destroyed) abort()
+    try {
+      const result = await withPluginLauncherRequest({ signal: controller.signal }, () =>
+        invokeChannel(channel, body.payload)
+      )
+      if (!res.destroyed) sendJson(res, 200, { ok: true, result })
+    } catch (error) {
+      if (!res.destroyed) sendJson(res, 200, { ok: false, error: errorMessage(error) })
+    } finally {
+      req.off('aborted', abort)
+      res.off('close', abort)
+    }
     return
   }
   // 所有功能都从这一个入口进入，所以只在这里计时就能覆盖 chat/files/git/stats/config…

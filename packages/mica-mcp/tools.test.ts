@@ -43,6 +43,23 @@ describe('MCP proxy tools', () => {
     expect(callTool.mock.calls[0]?.[0]).toEqual({ name: 'lookup', arguments: {} });
   });
 
+  it.each([
+    [{}, 120_000],
+    [{ timeoutMs: 500 }, 120_000],
+    [{ timeoutMs: 300_000 }, 305_000],
+    [{ action: 'wait', params: { timeoutMs: 1_800_000 } }, 1_805_000],
+    [{ timeoutMs: 2_147_483_647 }, 2_147_483_647],
+    [{ timeoutMs: Number.POSITIVE_INFINITY }, 120_000],
+    [{ timeoutMs: 'private' }, 120_000],
+  ])('keeps the existing timeout floor while respecting a longer declared budget (%j)', async (args, timeout) => {
+    const controller = new AbortController();
+    const { tool, callTool } = await createProxyTool();
+
+    await tool.execute(args, { signal: controller.signal });
+
+    expect(callTool.mock.calls[0]?.[2]).toMatchObject({ timeout, signal: controller.signal });
+  });
+
   it('keeps text-only results as newline-joined strings', async () => {
     const { tool } = await createProxyTool({
       content: [

@@ -1,5 +1,14 @@
+import { AsyncLocalStorage } from 'node:async_hooks'
 import { createPluginSettingsStore } from '@packages/mica-plugin/PluginSettings.js'
+import { awaitOperation, observePluginOperation } from '@packages/mica-diagnostics/operation.js'
 import { readPluginData, writePluginData } from './plugin-data-store.js'
+
+// The HTTP gateway owns request cancellation; keep it out of serialized plugin
+// input and preserve it across the existing IPC adapter's three-argument call.
+const requestContext = new AsyncLocalStorage()
+export function withPluginLauncherRequest(options, task) {
+  return requestContext.run(options, task)
+}
 
 /** One runtime per enabled bundled launcher, independent of chat hosts. */
 export function createPluginLauncherRuntime({ manifests, loaders, home, readDisabled }) {
@@ -23,8 +32,16 @@ export function createPluginLauncherRuntime({ manifests, loaders, home, readDisa
     return manifest
   }
 
-  async function request(pluginId, action, input) {
-    await sync()
+  async function request(pluginId, action, input, options = requestContext.getStore() ?? {}) {
+    const manifest = manifests.find((item) => item.id === pluginId && item.desktopLauncher)
+    const plugin = manifest?.id ?? 'unknown'
+    return observePluginOperation({ plugin, pluginVersion: manifest?.version, surface: 'launcher', operation: 'launcher.request', signal: options.signal }, () =>
+      executeRequest(pluginId, action, input, options)
+    )
+  }
+
+  async function executeRequest(pluginId, action, input, { signal }) {
+    await awaitOperation(sync, signal)
     const manifest = manifestOf(pluginId)
     if (typeof action !== 'string' || !action || action.length > 80)
       throw new Error('启动器动作无效')
@@ -44,16 +61,20 @@ export function createPluginLauncherRuntime({ manifests, loaders, home, readDisa
         return handler
       })
       handlers.set(pluginId, pending)
+      void pending.catch(() => {
+        if (handlers.get(pluginId) === pending) handlers.delete(pluginId)
+      })
     }
     let handler
     try {
-      handler = await pending
+      handler = await awaitOperation(() => pending, signal)
     } catch (error) {
-      if (handlers.get(pluginId) === pending) handlers.delete(pluginId)
+      // A caller abort must not invalidate a backend another request is loading.
+      if (!signal?.aborted && handlers.get(pluginId) === pending) handlers.delete(pluginId)
       throw error
     }
     manifestOf(pluginId)
-    return handler.request(action, input)
+    return awaitOperation(() => handler.request(action, input, { signal }), signal)
   }
 
   return {

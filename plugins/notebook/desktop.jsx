@@ -14,6 +14,7 @@ import {
   FolderOpen,
   FolderPlus,
   Menu,
+  MessageSquare,
   MoreHorizontal,
   PanelLeftClose,
   Pencil,
@@ -55,6 +56,7 @@ import {
 import { createEditorBridge } from './bridge';
 import { createNotebookDraft, createNotebookWriter, updateNotebookDraft } from './writer';
 import { createNotebookLifecycle } from './lifecycle';
+import { NotebookChatDock } from './NotebookChatDock';
 import './notebook.css';
 
 const message = (error) =>
@@ -162,7 +164,6 @@ function NoteMenu({ node, open, onOpen, onClose, onAction, extraRows, trigger, p
   );
 }
 
-/** 所有笔记在插件数据目录内，不属于会话、工作区或浏览器 localStorage。 */
 export default function NotebookPage({ api }) {
   const [index, setIndex] = useState(emptyIndex);
   const [loaded, setLoaded] = useState(false);
@@ -187,6 +188,7 @@ export default function NotebookPage({ api }) {
   const [frameState, setFrameState] = useState('loading');
   const [frameKey, setFrameKey] = useState(0);
   const [mcpOpen, setMcpOpen] = useState(false);
+  const [chatOpen, setChatOpen] = useState(false);
   const [copied, setCopied] = useState('');
   const iframe = useRef(null);
   const pageRoot = useRef(null);
@@ -247,7 +249,7 @@ export default function NotebookPage({ api }) {
     [index, expanded, query, trash],
   );
   const railOverlay = layout.mobile && railOpen && !focused;
-  const outlineOverlay = layout.overlay && outlineOpen && !focused && !!active;
+  const outlineOverlay = layout.overlay && outlineOpen && !focused && !chatOpen && !!active;
 
   const save = useCallback(
     async (target = current.current) => {
@@ -1113,7 +1115,7 @@ export default function NotebookPage({ api }) {
               </div>
             </div>
           )}
-          <div className="notebook-document-body">
+          <div className={`notebook-document-body ${chatOpen && !focused ? 'has-chat' : ''}`}>
             <div className={`notebook-editor-area ${active ? 'has-note' : ''}`} inert={outlineOverlay}>
               {/* 顶栏与编辑器工具栏是同一条操作栏：只有目录收起时才在左边出现目录开关与位置，
                   右边常驻保存状态与文档操作；工具栏按这两段的实测宽度让位。 */}
@@ -1140,6 +1142,14 @@ export default function NotebookPage({ api }) {
                 )}
                 {active && (
                   <div className="notebook-bar-actions" ref={barActions}>
+                    <Button
+                      variant="ghost"
+                      icon={<MessageSquare size={16} strokeWidth={1.6} />}
+                      title={chatOpen ? '收起对话' : '对话'}
+                      aria-label={chatOpen ? '收起对话' : '对话'}
+                      pressed={chatOpen}
+                      onClick={() => setChatOpen(!chatOpen)}
+                    />
                     <Button
                       variant="ghost"
                       icon={<Presentation size={16} strokeWidth={1.6} />}
@@ -1283,7 +1293,8 @@ export default function NotebookPage({ api }) {
                 </div>
               ) : null}
             </div>
-            {active && outlineOpen && !focused && (
+            <NotebookChatDock api={api} open={chatOpen && !focused} onClose={() => setChatOpen(false)} />
+            {active && outlineOpen && !focused && !chatOpen && (
               <>
                 <button
                   type="button"
@@ -1331,7 +1342,7 @@ export default function NotebookPage({ api }) {
               </>
             )}
             {/* 收起态的刻度条：标题按顺序标在右侧，当前标题高亮，悬停时出现眼睛按钮展开。 */}
-            {active && !outlineOpen && !focused && outline.items.length > 0 && (
+            {active && !outlineOpen && !focused && !chatOpen && outline.items.length > 0 && (
               <aside className="notebook-outline-rail" aria-label="文档大纲（已收起）">
                 <Button
                   variant="ghost"

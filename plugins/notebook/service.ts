@@ -286,6 +286,13 @@ function collectText(value: unknown, parts: string[]): void {
   }
   if (!value || typeof value !== 'object') return;
   const record = value as Record<string, unknown>;
+  // Rich Markdown writes use Lexical linebreak nodes for soft breaks and code
+  // lines. Keep the plain-text MCP projection readable instead of joining them
+  // into one long word while the editor state itself remains untouched.
+  if (record.type === 'linebreak') {
+    parts.push('\n');
+    return;
+  }
   if (typeof record.text === 'string') {
     parts.push(record.text);
     return;

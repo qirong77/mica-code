@@ -260,15 +260,32 @@ export type CreatePluginLlmApiOptions = {
    * 降级时上报一次：配置的接口/模型坏了是用户可见的故障，不能只留在日志里。
    * 不传就不上报（测试与没有健康通道的宿主）。
    */
-  health?: Pick<PluginHealthStore, 'report'>;
+  health?: Pick<PluginHealthStore, 'report'> & Partial<Pick<PluginHealthStore, 'read'>>;
 };
+
+const LLM_DEGRADED_ISSUE = 'llm:degraded';
 
 export function createPluginLlmApi(options: CreatePluginLlmApiOptions): PluginLlmApi {
   const readConfig = (owner?: unknown) => resolvePluginLlmConfig(options.readValues(owner));
   // 配置的接口/模型不可用时降级为主配置。记住「这一份配置已经失败过」：之后的请求直接
   // 走降级，不再先白白失败一次；用户改过任何一项（指纹变化）就重新尝试自己的配置。
   let degradedFingerprint: string | null = null;
+  let degradedConfigFingerprint: string | null = null;
   let reportedFingerprint: string | null = null;
+
+  const recovered = () => {
+    const wasDegraded = degradedFingerprint !== null;
+    degradedFingerprint = null;
+    degradedConfigFingerprint = null;
+    reportedFingerprint = null;
+    try {
+      if (wasDegraded || options.health?.read?.(LLM_DEGRADED_ISSUE)?.level === 'warn') {
+        options.health?.report({
+          issueKey: LLM_DEGRADED_ISSUE, level: 'ok', message: '模型配置已恢复，当前请求不再降级',
+        });
+      }
+    } catch { /* Health IO must never resend an already successful, billable request. */ }
+  };
 
   const send = (request: PluginLlmRequest, config: PluginLlmConfig, degraded: boolean) => {
     const models = options.models;
@@ -299,17 +316,21 @@ export function createPluginLlmApi(options: CreatePluginLlmApiOptions): PluginLl
       const config = readConfig(owner);
       const text = describePluginLlm(config);
       // 跟随主配置时也可能降级（点名的模型在主配置下不存在），所以这里不写「为主配置」。
-      return degradedFingerprint === pluginLlmFingerprint(config) ? `${text}（已降级）` : text;
+      return degradedConfigFingerprint === pluginLlmFingerprint(config) ? `${text}（已降级）` : text;
     },
     async request(request) {
       const config = readConfig(request.owner);
       if (!options.models) throw new Error('宿主没有提供模型请求能力（requires 里缺 models）');
       if (!isPluginLlmConfigured(config)) throw new Error('模型接口未配置：请在插件设置里填写接口地址与模型');
-      const fingerprint = pluginLlmFingerprint(config);
+      const fingerprint = pluginLlmFingerprint(config, request.model);
       if (degradedFingerprint === fingerprint) return send(request, config, true);
 
       try {
-        return await send(request, config, false);
+        const result = await send(request, config, false);
+        // A cached fallback succeeding is not recovery. Only a successful request
+        // to the selected primary/effectively changed configuration clears this issue.
+        recovered();
+        return result;
       } catch (error) {
         // 已经是最稳的目标（跟随主配置且没点名模型）或用户主动中断时，重发没有意义。
         if (!canFallback(request, config, error)) throw error;
@@ -321,13 +342,17 @@ export function createPluginLlmApi(options: CreatePluginLlmApiOptions): PluginLl
         }
         // 只有降级确实成功了才记住：两边都失败多半是网络问题，下次仍先试用户自己的配置。
         degradedFingerprint = fingerprint;
+        degradedConfigFingerprint = pluginLlmFingerprint(config);
         if (reportedFingerprint !== fingerprint) {
           reportedFingerprint = fingerprint;
-          options.health?.report({
-            level: 'warn',
-            message: `配置的模型不可用，已降级为主配置：${errorMessage(error)}`,
-            hint: '到插件设置里检查接口地址、Key 与模型名；改动后会自动重新尝试。',
-          });
+          try {
+            options.health?.report({
+              issueKey: LLM_DEGRADED_ISSUE,
+              level: 'warn',
+              message: `配置的模型不可用，已降级为主配置：${errorMessage(error)}`,
+              hint: '到插件设置里检查接口地址、Key 与模型名；改动后会自动重新尝试。',
+            });
+          } catch { /* The successful fallback result remains usable if health storage fails. */ }
         }
         return result;
       }
@@ -336,8 +361,11 @@ export function createPluginLlmApi(options: CreatePluginLlmApiOptions): PluginLl
 }
 
 /** 一份插件模型配置的身份：用户改过任何一项就重新尝试自己的接口。 */
-function pluginLlmFingerprint(config: PluginLlmConfig): string {
-  return JSON.stringify([config.useMainProvider, config.baseUrl, config.apiKey, config.protocol, config.model]);
+function pluginLlmFingerprint(config: PluginLlmConfig, model?: string): string {
+  // Inactive endpoint fields do not change the effective main-provider target;
+  // an explicit request model does, and must not inherit another model's fallback.
+  if (config.useMainProvider) return JSON.stringify([true, model?.trim() || '']);
+  return JSON.stringify([false, config.baseUrl, config.apiKey, config.protocol, model?.trim() || config.model]);
 }
 
 /**

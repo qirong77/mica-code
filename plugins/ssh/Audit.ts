@@ -1,11 +1,12 @@
 import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { logger } from '@packages/mica-diagnostics/index.js';
 
 /**
  * 审计日志：`$MICA_HOME/plugin-data/ssh/audit.jsonl`。
  *
  * 分布式系统里最贵的事故是「谁在什么时候改了什么」，而模型发起的命令最容易变成这种
- * 事故：它不会记得自己十分钟前 `rm` 过什么。所以每条命令都留一行——主机、脚本首行、
+ * 事故：它不会记得自己十分钟前 `rm` 过什么。这里尽力保存最近 200 条操作——主机、脚本首行、
  * 退出码、耗时。**不记输出正文**（可能带凭据、可能几十 MB），只在输出被裁剪时记路径。
  *
  * 只追加、只保留最近 N 条：面板要翻的是「刚刚发生了什么」，不是归档。
@@ -34,13 +35,29 @@ function clip(value: string, limit: number): string {
   return flat.length > limit ? `${flat.slice(0, limit)}…` : flat;
 }
 
+let auditFailures = 0;
+export function auditFailureCount(): number {
+  return auditFailures;
+}
+function auditFailed(): void {
+  auditFailures += 1;
+  // Fixed message only: paths, commands and credentials must not leak into diagnostics.
+  try {
+    console.warn('ssh.audit_write_failed');
+    logger('ssh-audit').warn('audit.write.failed', { failures: auditFailures });
+  } catch {
+    /* Diagnostics never affect remote work. */
+  }
+}
+
 export function appendAudit(dataDir: string, entry: AuditEntry): void {
   const file = join(dataDir, AUDIT_FILE);
   try {
     mkdirSync(dirname(file), { recursive: true });
     appendFileSync(file, `${JSON.stringify({ ...entry, script: clip(entry.script, MAX_SCRIPT) })}\n`, 'utf8');
   } catch {
-    // 记不上日志不该让那次远程操作失败。
+    auditFailed();
+    return;
   }
   trimAudit(file);
 }
@@ -51,7 +68,7 @@ function trimAudit(file: string): void {
     if (lines.length <= KEEP) return;
     writeFileSync(file, `${lines.slice(-KEEP).join('\n')}\n`, 'utf8');
   } catch {
-    // 同上：日志维护失败不影响功能。
+    auditFailed();
   }
 }
 

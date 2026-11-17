@@ -6,7 +6,8 @@ import { resolveMicaHome } from '@packages/mica-config/brand.js';
 import type { AgentObservationEvent, PluginContext, PluginObservationEvent } from '@packages/mica-plugin/index.js';
 import { MicaTool, type ToolInput } from '@packages/mica-tools/index.js';
 import { CLASSIFIER_VERSION, HarnessRecorder, type CaptureOptions, type ReviewReport } from './engine.js';
-import { prioritizeFindings, summarizeProgress } from './progress.js';
+import { summarizeProgress } from './progress.js';
+import { summarizeList } from './list.js';
 
 const STATUSES = ['open', 'accepted', 'dismissed', 'validated', 'regressed'] as const;
 const DEFAULT_CAPTURE: CaptureOptions = { captureContent: true, maxEventChars: 4000, maxEventsPerRun: 2000 };
@@ -60,35 +61,63 @@ export default function setup(ctx: PluginContext): void {
 
   let maintenance = Promise.resolve();
   const maintain = <T>(work: () => Promise<T>): Promise<T> => {
-    const task = maintenance.then(() => withStatusLock(root, work));
+    const task = maintenance.then(work);
     maintenance = task.then(
       () => {},
       () => {},
     );
     return task;
   };
+  // Replay, scans and rebuilds never hold the short publication lock.
+  const publishStatus = async (
+    report: ReviewReport,
+    patch: Partial<PluginState> = {},
+    automatic = false,
+  ): Promise<void> => {
+    await withStatusLock(
+      root,
+      async () => {
+        const state = { ...readState(root), ...patch };
+        let latestAt = 0;
+        try {
+          latestAt = Date.parse(JSON.parse(readFileSync(join(root, 'data.json'), 'utf8')).generatedAt) || 0;
+        } catch {
+          /* absent */
+        }
+        if (latestAt <= Date.parse(report.generatedAt)) writeStatus(root, report, state);
+        writeState(root, state);
+      },
+      automatic,
+    );
+  };
   const refreshStatus = async (): Promise<void> => {
-    writeStatus(root, await recorder.review(), readState(root));
+    await publishStatus(await recorder.review());
   };
 
   const updateStatus = async (afterTurn = false): Promise<void> => {
     if (mode === 'one-shot') return;
     try {
       await maintain(async () => {
-        const state = readState(root);
-        let changed = false;
-        if (state.classifierVersion !== CLASSIFIER_VERSION) {
-          await recorder.rebuild();
-          state.classifierVersion = CLASSIFIER_VERSION;
-          state.lastRebuildAt = new Date().toISOString();
-          changed = true;
+        // Another host already does the optional work: skip, do not report a fault.
+        const release = acquireProcessLock(join(root, 'refresh.lock'));
+        if (!release) return;
+        try {
+          const state = readState(root);
+          const patch: Partial<PluginState> = {};
+          let changed = !hasCurrentStatus(root);
+          if (state.classifierVersion !== CLASSIFIER_VERSION) {
+            await recorder.rebuild();
+            patch.classifierVersion = CLASSIFIER_VERSION;
+            patch.lastRebuildAt = new Date().toISOString();
+            changed = true;
+          }
+          if (afterTurn && Date.now() - (state.lastStatusAt ?? 0) >= STATUS_REFRESH_MS) changed = true;
+          if (!changed) return;
+          if (afterTurn) patch.lastStatusAt = Date.now();
+          await publishStatus(await recorder.review(), patch, true);
+        } finally {
+          release();
         }
-        if (!hasCurrentStatus(root)) changed = true;
-        if (afterTurn && Date.now() - (state.lastStatusAt ?? 0) >= STATUS_REFRESH_MS) changed = true;
-        if (!changed) return;
-        if (afterTurn) state.lastStatusAt = Date.now();
-        writeStatus(root, await recorder.review(), state);
-        writeState(root, state);
       });
     } catch (error) {
       ctx.logger.warn('harness-review:status-failed', {
@@ -178,34 +207,8 @@ export default function setup(ctx: PluginContext): void {
     if (!cwd) throw new Error('无法确定复盘工作区，请从工作区会话中打开复盘。');
     if (action === 'list') {
       const report = await recorder.review(cwd);
-      // Keep an accumulated review usable inside a model context. The full
-      // evidence and all selected runs remain available in the exported report.
-      // helper 运行（起标题、压缩摘要）跟着每一轮都发生：混进「最近 20 次」会把真正的一轮
-      // 挤出去，它们已经由 report.helpers 按来源汇总。
-      const userRuns = report.runs.filter((run) => !run.helper);
-      return {
-        ...report,
-        progress: summarizeProgress(report.findings),
-        totalRuns: userRuns.length,
-        totalFindings: report.findings.length,
-        runs: userRuns.slice(0, 20).map(({ findings: _findings, ...summary }) => summary),
-        // 52 个工具一次全塞进上下文没有意义：按失败率排过序，前 15 个就是要看的那些。
-        toolHealth: report.toolHealth.slice(0, 15),
-        findings: prioritizeFindings(report.findings)
-          .slice(0, 20)
-          .map((finding) => ({
-            ...finding,
-            evidence: finding.evidence.slice(0, 5),
-            ...(finding.assessments
-              ? {
-                  assessmentCount: finding.assessments.length,
-                  assessments: finding.assessments.slice(-3),
-                }
-              : {}),
-          })),
-        displayLimit:
-          '最多显示最近 20 次运行与 20 项问题（待复核、近期重复优先），每项 5 条证据；report 导出完整复盘。',
-      };
+      // Export this exact snapshot once, not a second scan whose coverage may have moved.
+      return summarizeList(report, await recorder.exportReport(cwd, report));
     }
     if (action === 'report') return { path: await recorder.exportReport(cwd) };
     if (action === 'prune') {
@@ -229,8 +232,7 @@ export default function setup(ctx: PluginContext): void {
       // Only derived error counts change; usage, timing and outcomes stay untouched.
       const result = await maintain(async () => {
         const result = await recorder.rebuild({ cwd });
-        writeState(root, { ...readState(root), lastRebuildAt: new Date().toISOString() });
-        await refreshStatus();
+        await publishStatus(await recorder.review(), { lastRebuildAt: new Date().toISOString() });
         return result;
       });
       return {
@@ -295,7 +297,8 @@ export class HarnessReviewTool extends MicaTool {
   constructor(private readonly run: (input: ToolInput) => Promise<unknown>) {
     super(
       'harness_review',
-      '按用户要求查看当前工作区的 agent 运行复盘。list 返回运行指标与有证据的问题候选；report 导出 Markdown 报告；assess 记录用户的 review 或外部评估结论（需要 id、status、note）。accepted 仅代表认可建议；validated/regressed 需要在 note 写明实际验证证据。记录和聚合自动完成，无需任务结束后调用。不会修改 system prompt、工具、记忆或执行任何评测。',
+      '按用户要求查看当前工作区的 agent 运行复盘。list 返回运行指标与有证据的问题候选；report 导出 Markdown 报告；assess 记录用户的 review 或外部评估结论（需要 id、status、note）。accepted 仅代表认可建议；validated/regressed 需要在 note 写明实际验证证据。记录和聚合自动完成，无需任务结束后调用。不会修改 system prompt、工具、记忆或执行任何评测。' +
+      '同时附整机系统/插件操作与体验日志旁证；机器级日志不冒充本工作区根因。list 为有界摘要，截断/未知覆盖单独说明，完整证据见 reportPath。',
       {
         type: 'object',
         properties: {
@@ -361,7 +364,7 @@ function hasCurrentStatus(root: string): boolean {
   }
 }
 
-async function withStatusLock<T>(root: string, work: () => Promise<T>): Promise<T> {
+async function withStatusLock<T>(root: string, work: () => Promise<T>, skipBusy = false): Promise<T | undefined> {
   for (let attempt = 0; attempt < 200; attempt++) {
     const release = acquireProcessLock(join(root, 'status.lock'));
     if (release) {
@@ -371,6 +374,7 @@ async function withStatusLock<T>(root: string, work: () => Promise<T>): Promise<
         release();
       }
     }
+    if (skipBusy) return;
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
   throw new Error('复盘状态正在由其他宿主更新，请稍后重试。');
@@ -403,7 +407,7 @@ function writeStatus(root: string, report: ReviewReport, state: PluginState): vo
     updated: report.generatedAt,
     window: `${report.coverage.windowStart} — ${report.coverage.windowEnd}`,
     coverage: {
-      text: `运行目录 ${report.coverage.totalRunDirectories} 个，已扫描 ${report.coverage.scannedRunDirectories} 个，纳入 ${report.coverage.includedRuns} 条（含委派/helper）；${report.coverage.scanLimitReached || report.coverage.runLimitReached ? '已触及扫描/运行上限，统计不完整' : '未触及扫描/运行上限'}；摘要读取失败 ${report.coverage.unreadableSummaries} 条${report.coverage.directoryReadFailed ? '，运行目录读取失败' : ''}；工具健康排除 ${report.toolHealthCoverage.excludedRuns} 条；推导受限 ${report.derivationCoverage.limitedRuns} 条、覆盖未知 ${report.derivationCoverage.unknownRuns} 条。按目录更新时间选取，非完整历史。`,
+      text: `运行目录 ${report.coverage.totalRunDirectories} 个，已扫描 ${report.coverage.scannedRunDirectories} 个，纳入 ${report.coverage.includedRuns} 条（含委派/helper）；${report.coverage.scanLimitReached || report.coverage.runLimitReached ? '已触及扫描/运行上限，统计不完整' : '未触及扫描/运行上限'}；摘要读取失败 ${report.coverage.unreadableSummaries} 条${report.coverage.directoryReadFailed ? '，运行目录读取失败' : ''}；工具健康排除 ${report.toolHealthCoverage.excludedRuns} 条；推导受限 ${report.derivationCoverage.limitedRuns} 条、覆盖未知 ${report.derivationCoverage.unknownRuns} 条。扫描范围内按真实开始时间选取，非完整历史。`,
       tone:
         report.coverage.scanLimitReached ||
         report.coverage.runLimitReached ||

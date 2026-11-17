@@ -532,23 +532,14 @@ export class LocalRuntimeController implements RuntimeController {
     const reservedRunId = agent.reserveRunId();
     const startedAt = Date.now();
     const initialSystemInputs = input.source === 'system' ? [] : this.takeAllSystemInputs(agent);
-    const inputContent =
-      input.source === 'system' ? input.text : ((await micaUi.parseImageRefs(input.text)) as AgentQueryContent);
-    const content = appendSystemInputs(inputContent, initialSystemInputs);
-    const displayedUserContent = input.source === 'system' ? content : inputContent;
-    const displayContent = await parseDisplayContent(input, inputContent);
-    if (!agent.isCurrent(reservedRunId)) {
-      this.prependSystemInputs(agent, initialSystemInputs);
-      this.runningAgents.delete(agent);
-      if (this.isActiveAgent(agent)) this.events.publish({ type: 'turn:aborted', input, owner: agent });
-      return;
-    }
+    let content: AgentQueryContent = appendSystemInputs(input.text, initialSystemInputs);
+    let displayedUserContent: AgentQueryContent = input.text;
     let runId: number | null = null;
     let hasError = false;
     let wasAborted = false;
     let rewindCheckpointId: string | null = null;
     // Capture pre-turn client state so we can restore it before each retry.
-    let preTurnSnapshot = agent.captureClientSnapshot();
+    let preTurnSnapshot: ReturnType<AgentRuntime['captureClientSnapshot']> = null;
     let hadNonRetryableToolCall = false;
     const markToolCall = (toolCall: { name: string }) => {
       if (!micaTools.isReadOnly(toolCall.name)) {
@@ -557,50 +548,61 @@ export class LocalRuntimeController implements RuntimeController {
         preTurnSnapshot = null;
       }
     };
-    agent.events.on('toolCall', markToolCall);
-
     this.responseBuffers.set(agent, '');
     this.committedResponseBuffers.set(agent, '');
     const activeContext = getActiveContext<RuntimeActiveContext>();
     const session = activeContext?.agentSessions.findByAgent(agent);
-    const clearPreviousTurnUi = shouldClearPreviousTurnUi(session?.uiState.lastTurnOutcome);
-    const previousConversationMessages = displayConversationMessages(session, agent);
-    if (input.source !== 'system') {
-      rewindCheckpointId = await this.rewindCheckpoints.capture(agent, input, previousConversationMessages);
-    }
-    if (session) {
-      session.uiState = normalizeUiState({
-        ...session.uiState,
-        conversationMessages:
-          input.source === 'system'
-            ? previousConversationMessages
-            : [...previousConversationMessages, { role: 'user', content: displayedUserContent, displayContent }],
-        responseText: '',
-        pendingInputs: [],
-        pendingQueueMode: null,
-        agentTurnLogItems: clearPreviousTurnUi ? [] : session.uiState.agentTurnLogItems,
-        thinkingText: clearPreviousTurnUi ? '' : session.uiState.thinkingText,
-        workingStatus: { type: 'connecting' },
-        lastTurnOutcome: 'running',
-      });
-      activeContext?.uiBridge?.syncAgentStatusItems();
-    }
-    this.events.publish({ type: 'turn:started', input, owner: agent, preservePreviousTurnUi: !clearPreviousTurnUi });
-    if (this.isActiveAgent(agent)) {
-      if (input.source !== 'system') micaUi.terminalInput.clearText();
-      if (session) {
-        micaUi.conversation.setMessages(session.uiState.conversationMessages);
-      } else if (input.source !== 'system') {
-        micaUi.conversation.appendUserMessage(displayContent ?? displayedUserContent);
-      }
-      micaUi.conversation.clearResponseText();
-      if (clearPreviousTurnUi) {
-        micaUi.panels.clearAgentTurnLogItems();
-      }
-      micaUi.panels.status.connecting();
-    }
-
     try {
+      const inputContent =
+        input.source === 'system' ? input.text : ((await micaUi.parseImageRefs(input.text)) as AgentQueryContent);
+      content = appendSystemInputs(inputContent, initialSystemInputs);
+      displayedUserContent = input.source === 'system' ? content : inputContent;
+      const displayContent = await parseDisplayContent(input, inputContent);
+      if (!agent.isCurrent(reservedRunId)) {
+        // The run was invalidated while parsing/preparing the input.  Use the
+        // same abort path as a stale provider resolution so the session is not
+        // left in `running` and turn:after/turn:finished still run exactly once.
+        throw new AgentAbortError(reservedRunId);
+      }
+      preTurnSnapshot = agent.captureClientSnapshot();
+      agent.events.on('toolCall', markToolCall);
+      const clearPreviousTurnUi = shouldClearPreviousTurnUi(session?.uiState.lastTurnOutcome);
+      const previousConversationMessages = displayConversationMessages(session, agent);
+      if (input.source !== 'system') {
+        rewindCheckpointId = await this.rewindCheckpoints.capture(agent, input, previousConversationMessages);
+      }
+      if (!agent.isCurrent(reservedRunId)) throw new AgentAbortError(reservedRunId);
+      if (session) {
+        session.uiState = normalizeUiState({
+          ...session.uiState,
+          conversationMessages:
+            input.source === 'system'
+              ? previousConversationMessages
+              : [...previousConversationMessages, { role: 'user', content: displayedUserContent, displayContent }],
+          responseText: '',
+          pendingInputs: [],
+          pendingQueueMode: null,
+          agentTurnLogItems: clearPreviousTurnUi ? [] : session.uiState.agentTurnLogItems,
+          thinkingText: clearPreviousTurnUi ? '' : session.uiState.thinkingText,
+          workingStatus: { type: 'connecting' },
+          lastTurnOutcome: 'running',
+        });
+        activeContext?.uiBridge?.syncAgentStatusItems();
+      }
+      this.events.publish({ type: 'turn:started', input, owner: agent, preservePreviousTurnUi: !clearPreviousTurnUi });
+      if (this.isActiveAgent(agent)) {
+        if (input.source !== 'system') micaUi.terminalInput.clearText();
+        if (session) {
+          micaUi.conversation.setMessages(session.uiState.conversationMessages);
+        } else if (input.source !== 'system') {
+          micaUi.conversation.appendUserMessage(displayContent ?? displayedUserContent);
+        }
+        micaUi.conversation.clearResponseText();
+        if (clearPreviousTurnUi) {
+          micaUi.panels.clearAgentTurnLogItems();
+        }
+        micaUi.panels.status.connecting();
+      }
       sessionController.saveCurrent({ allowEmpty: true, turnState: 'running' });
       await this.hooks.emit('turn:before', { runtime: this, owner: agent, input, content });
       const promptBuildEvent = await this.hooks.pipeline('prompt:build', { runtime: this, input, content });
@@ -659,10 +661,14 @@ export class LocalRuntimeController implements RuntimeController {
           });
           runId = result.runId;
           const finalText = result.text;
+          // A resolved query already committed the final provider response.
+          // A stale result still needs aborted finalization, but not another
+          // copy of that response in preserveAbortedTurn.
+          this.committedResponseBuffers.set(agent, this.responseBuffers.get(agent) ?? '');
           if (!agent.isCurrent(runId)) {
-            this.prependSystemInputs(agent, initialSystemInputs);
-            this.prependSystemInputs(agent, attemptSystemInputs);
-            return;
+            // A provider can resolve after another action invalidated this
+            // run.  Do not fall through to the completed UI/save path.
+            throw new AgentAbortError(runId);
           }
 
           const responseBuffer = this.responseBuffers.get(agent) ?? '';
@@ -686,6 +692,7 @@ export class LocalRuntimeController implements RuntimeController {
           }
 
           await this.hooks.emit('turn:beforePersist', { runtime: this, input, content, result });
+          if (!agent.isCurrent(runId)) throw new AgentAbortError(runId);
           sessionController.saveCurrent({ turnState: 'completed' });
           return;
         } catch (error) {
@@ -700,7 +707,7 @@ export class LocalRuntimeController implements RuntimeController {
           // The client snapshot covers the entire run, not just its last
           // request. Restore its matching thinking before restoring history.
           agent.events.emit('thinkingTurnAttemptRollback', undefined);
-          if (preTurnSnapshot) agent.restoreClientSnapshot(preTurnSnapshot);
+          if (preTurnSnapshot) agent.restoreClientSnapshot(preTurnSnapshot, { preserveUsage: true });
           this.responseBuffers.set(agent, '');
           this.committedResponseBuffers.set(agent, '');
           if (session) session.uiState.responseText = '';

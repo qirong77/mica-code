@@ -61,6 +61,8 @@ export default function setup(ctx: PluginContext): void {
       }
       lastResult = result;
       const dataChanged = result.dataFiles.reduce((sum, item) => sum + item.changed, 0);
+      const dataFailures = result.dataFiles.filter((item) => item.error).length;
+      const incomplete = result.brokenFiles > 0 || result.pending > 0 || result.busyFiles > 0 || dataFailures > 0;
       writeEvolutionStatus(statusPath, {
         lastRun: formatStatusTime(result.finishedAt),
         cleaned:
@@ -77,6 +79,15 @@ export default function setup(ctx: PluginContext): void {
       });
       if (result.brokenFiles > 0) {
         ctx.logger.warn('evolution:broken', { reason, count: result.brokenFiles });
+        ctx.health.report({
+          issueKey: 'migration:files', level: 'warn',
+          message: `旧数据清洗部分完成：${result.brokenFiles} 个文件无法读取`,
+          hint: '损坏文件保持原样，请检查后再手动运行清洗。',
+        });
+      } else if (incomplete) {
+        ctx.health.report({ issueKey: 'migration:files', level: 'warn', message: `旧数据清洗尚未完成：${result.pending + result.busyFiles} 个会话待处理，${dataFailures} 项数据迁移失败` });
+      } else {
+        ctx.health.report({ issueKey: 'migration:files', level: 'ok', message: '旧数据检查完成' });
       }
       if (result.migratedFiles > 0) {
         ctx.logger.info('evolution:cleaned', {
@@ -85,7 +96,7 @@ export default function setup(ctx: PluginContext): void {
           records: result.migratedRecords,
         });
       }
-      if (failureReported) {
+      if (failureReported && !incomplete) {
         failureReported = false;
         ctx.health.report({ level: 'ok', message: '旧数据清洗恢复正常' });
       }

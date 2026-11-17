@@ -90,6 +90,7 @@ import { createPluginAskBroker } from '../headless/PluginAskBroker.js';
 import { resolveRuntimeConfigOverride, type EffortAdjustment, type ResolvedRuntimeOverride } from './modelCatalog.js';
 import { applyPluginSessionSettings, listPluginSessionSettings } from './pluginSessionSettings.js';
 import { AppServerRequestQueue } from './appServerRequestQueue.js';
+import { appServerFailureFields } from './appServerDiagnostics.js';
 
 export type AppServerOptions = {
   sessionId?: string;
@@ -817,12 +818,15 @@ export async function runAppServer(options: AppServerOptions): Promise<void> {
               turnOverrides,
               writeNotification,
               writeResponse: (result) => process.stdout.write(encodeCodexResponse(id, result)),
-              writeError: (code, errorMessage, data) =>
-                process.stdout.write(encodeCodexError(id, code, errorMessage, data)),
+              writeError: (code, errorMessage, data) => {
+                diagnostics?.log.warn('request.failed', appServerFailureFields(method, randomUUID(), code));
+                process.stdout.write(encodeCodexError(id, code, errorMessage, data));
+              },
               warn: (warningMessage) => writeWarning(sessionId, warningMessage),
             });
           } catch (error) {
             const errorMessage = error instanceof Error ? error.message : String(error);
+            diagnostics?.log.warn('request.failed', appServerFailureFields(method, randomUUID(), CODEX_ERROR_INTERNAL, error));
             process.stdout.write(encodeCodexError(id, CODEX_ERROR_INTERNAL, errorMessage));
           } finally {
             const finishedAt = performance.now();

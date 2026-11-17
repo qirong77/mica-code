@@ -24,6 +24,7 @@ const IDLE_CLOSE_MS = 60 * 60 * 1000;
 
 type Waiter = {
   token: string;
+  onComplete?: (result: SessionWaitResult) => void;
   /** 超时之后再来的读取请求挂到同一批 resolver 上，等到真结果。 */
   resolvers: Array<(value: SessionWaitResult) => void>;
 };
@@ -188,13 +189,18 @@ export class SessionManager {
   }
 
   /** 写一段命令并等它结束（最常见的一次调用）。 */
-  async run(id: string, command: string, timeoutMs: number): Promise<SessionWaitResult> {
+  async run(
+    id: string,
+    command: string,
+    timeoutMs: number,
+    onComplete?: (result: SessionWaitResult) => void,
+  ): Promise<SessionWaitResult> {
     const session = this.get(id);
     if (!session) return { output: '', exitCode: null, timedOut: false, dead: true };
     session.counter += 1;
     const token = tokenFor(session.counter);
     session.lastUsedAt = Date.now();
-    const promise = this.arm(session, token, timeoutMs);
+    const promise = this.arm(session, token, timeoutMs, onComplete);
     try {
       session.child.stdin.write(wrapSessionCommand(command, token));
     } catch {
@@ -204,13 +210,13 @@ export class SessionManager {
   }
 
   /** 只写不等待（长任务的第二步就是 `wait`），或者几步之后再回来收拾。 */
-  write(id: string, command: string): { token: string } {
+  write(id: string, command: string, onComplete?: (result: SessionWaitResult) => void): { token: string } {
     const session = this.get(id);
     if (!session) throw new Error('会话不存在或已关闭');
     session.counter += 1;
     const token = tokenFor(session.counter);
     session.lastUsedAt = Date.now();
-    this.arm(session, token, IDLE_CLOSE_MS);
+    this.arm(session, token, IDLE_CLOSE_MS, onComplete);
     session.child.stdin.write(wrapSessionCommand(command, token));
     return { token };
   }
@@ -285,11 +291,17 @@ export class SessionManager {
   }
 
   /** 挂一个等待者并起超时；数据可能比这里更早到，所以立刻扫一次缓冲。 */
-  private arm(session: OpenSession, token: string, timeoutMs: number): Promise<SessionWaitResult> {
-    // 上一条的超时等待者还挂着就把它的输出交给它，避免两条命令的输出混在一起。
-    if (session.waiter) this.finish(session, { output: session.buffer, exitCode: null, timedOut: true });
+  private arm(
+    session: OpenSession,
+    token: string,
+    timeoutMs: number,
+    onComplete?: (result: SessionWaitResult) => void,
+  ): Promise<SessionWaitResult> {
+    // A wait timeout is not command completion. Never replace its completion
+    // marker/audit callback with a second command's marker.
+    if (session.waiter) throw Object.assign(new Error('上一条命令仍在运行，请先 wait/read 或关闭会话'), { code: 'busy' });
     return new Promise((resolve) => {
-      session.waiter = { token, resolvers: [resolve] };
+      session.waiter = { token, resolvers: [resolve], onComplete };
       if (session.timer) clearTimeout(session.timer);
       session.timer = setTimeout(() => this.timeout(session), Math.max(1000, timeoutMs));
       this.flush(session);
@@ -320,6 +332,7 @@ export class SessionManager {
     if (!session.waiter) return;
     if (session.timer) clearTimeout(session.timer);
     session.timer = null;
+    try { session.waiter.onComplete?.(result); } catch { /* audit cannot strand command resolvers */ }
     session.last = result;
     this.resolveAll(session, result);
     session.waiter = null;

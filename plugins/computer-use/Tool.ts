@@ -64,6 +64,12 @@ async function commandSets(deps: ComputerUseToolDeps, signal?: AbortSignal): Pro
   const script = scriptPath(deps);
   if (commandSetCache.has(script)) return commandSetCache.get(script)!;
   const r = await runRuntime(deps, ['commands', '--json'], null, signal, 20_000);
+  if (r.status !== 0)
+    throw Object.assign(new Error(r.stderr || '运行时命令发现失败'), {
+      exitCode: r.status,
+      timedOut: r.timedOut,
+      aborted: r.aborted,
+    });
   let sets: CommandSets | null = null;
   if (r.status === 0) {
     try {
@@ -90,7 +96,10 @@ function asText(value: unknown): string {
 function parseSteps(input: ToolInput): { steps: Step[]; error?: string } {
   const raw = input?.commands;
   if (!Array.isArray(raw) || raw.length === 0) {
-    return { steps: [], error: '缺少 commands：给一个步骤数组，例如 [{ "cmd": "tap", "args": ["Calculator", "乘"] }]。' };
+    return {
+      steps: [],
+      error: '缺少 commands：给一个步骤数组，例如 [{ "cmd": "tap", "args": ["Calculator", "乘"] }]。',
+    };
   }
   if (raw.length > MAX_STEPS) {
     return { steps: [], error: `一次最多 ${MAX_STEPS} 步（收到 ${raw.length} 步），拆成几次调用。` };
@@ -188,7 +197,11 @@ function writePermit(steps: Step[]): { dir: string; path: string } {
   return { dir, path };
 }
 
-type StepRun = { status: number; stdout: string; stderr: string };
+type StepRun = { status: number; stdout: string; stderr: string; timedOut?: boolean; aborted?: boolean };
+
+function reply(outcome: string, code: string, text: string, extra: object = {}): string {
+  return JSON.stringify({ outcome, code, ...extra, text });
+}
 
 function runRuntime(
   deps: ComputerUseToolDeps,
@@ -197,7 +210,7 @@ function runRuntime(
   signal: AbortSignal | undefined,
   timeoutMs: number,
 ): Promise<StepRun> {
-  if (signal?.aborted) return Promise.resolve({ status: 1, stdout: '', stderr: '操作已中止' });
+  if (signal?.aborted) return Promise.resolve({ status: 1, stdout: '', stderr: '操作已中止', aborted: true });
   const env = { ...process.env };
   if (permitPath) env.MICA_COMPUTER_USE_APPROVAL = permitPath;
   else delete env.MICA_COMPUTER_USE_APPROVAL;
@@ -212,6 +225,8 @@ function runRuntime(
     const stderr: Buffer[] = [];
     let outputBytes = 0;
     let failure = '';
+    let timedOut = false;
+    let aborted = false;
     let killTimer: ReturnType<typeof setTimeout> | undefined;
     const kill = (kind: NodeJS.Signals) => {
       try {
@@ -238,8 +253,14 @@ function runRuntime(
     child.on('error', (error) => {
       failure ||= error.message;
     });
-    const onAbort = () => stop('操作已中止');
-    const timer = setTimeout(() => stop(`操作超时（${timeoutMs}ms）`), timeoutMs);
+    const onAbort = () => {
+      aborted = true;
+      stop('操作已中止');
+    };
+    const timer = setTimeout(() => {
+      timedOut = true;
+      stop(`操作超时（${timeoutMs}ms）`);
+    }, timeoutMs);
     signal?.addEventListener('abort', onAbort, { once: true });
     if (signal?.aborted) onAbort();
     child.once('close', (code) => {
@@ -254,12 +275,40 @@ function runRuntime(
       }
       signal?.removeEventListener('abort', onAbort);
       resolve({
-        status: failure ? 1 : code ?? 1,
+        status: failure ? 1 : (code ?? 1),
+        timedOut,
+        aborted,
         stdout: Buffer.concat(stdout).toString('utf8').trim(),
         stderr: [failure, Buffer.concat(stderr).toString('utf8').trim()].filter(Boolean).join('\n'),
       });
     });
   });
+}
+
+function errorReply(error: unknown, fallbackCode: string, signal?: AbortSignal): string {
+  const detail = error as { code?: string; exitCode?: number; timedOut?: boolean; aborted?: boolean } | null;
+  const message = error instanceof Error ? error.message : String(error);
+  const cancelled = signal?.aborted || detail?.aborted;
+  const busy = detail?.code === 'busy' || message === '已经有一个问题在等用户回答，同一个会话一次只能问一个';
+  const outcome = cancelled ? 'cancelled' : busy ? 'busy' : detail?.code === 'conflict' ? 'conflict' : 'error';
+  return reply(
+    outcome,
+    cancelled
+      ? 'aborted'
+      : busy
+        ? 'busy'
+        : detail?.code === 'conflict'
+          ? 'conflict'
+          : detail?.timedOut
+            ? 'timeout'
+            : fallbackCode,
+    message,
+    {
+      error: message,
+      ...(detail?.exitCode !== undefined ? { exitCode: detail.exitCode } : {}),
+      ...(detail?.timedOut ? { timedOut: true } : {}),
+    },
+  );
 }
 
 function truncate(text: string): string {
@@ -316,28 +365,41 @@ export function createComputerUseTool(deps: ComputerUseToolDeps): PluginToolDesc
     readOnly: false,
     execute: async (input: ToolInput, callbacks?: ToolExecuteCallbacks): Promise<string> => {
       const parsed = parseSteps(input);
-      if (parsed.error) return parsed.error;
+      if (parsed.error) return reply('error', 'invalid_input', parsed.error, { error: parsed.error });
       const { steps } = parsed;
 
-      const sets = await commandSets(deps, callbacks?.signal);
-      if (callbacks?.signal?.aborted) return '桌面操作已中止，后面的命令没有执行。';
+      let sets: CommandSets | null;
+      try {
+        sets = await commandSets(deps, callbacks?.signal);
+      } catch (error) {
+        return errorReply(error, 'runtime_unavailable', callbacks?.signal);
+      }
+      if (callbacks?.signal?.aborted) return reply('cancelled', 'aborted', '桌面操作已中止，后面的命令没有执行。');
       if (!sets) {
-        return (
+        return reply(
+          'error',
+          'runtime_unavailable',
           `桌面运行时不可用：\`${scriptPath(deps)} commands --json\` 没跑起来。\n` +
-          '检查 `$MICA_HOME/computer-use` 是否完整、`node` 是否在 PATH 上（也可以在插件详情里看运行条件）。'
+            '检查 `$MICA_HOME/computer-use` 是否完整、`node` 是否在 PATH 上（也可以在插件详情里看运行条件）。',
         );
       }
       const unknown = steps.filter((step) => !sets.write.has(step.cmd) && !sets.read.has(step.cmd));
       if (unknown.length > 0) {
-        return `未知命令：${unknown.map((step) => step.cmd).join('、')}。可用命令见 \`desktop.mjs help\`（写操作需要用户确认）。`;
+        return reply(
+          'error',
+          'unknown_command',
+          `未知命令：${unknown.map((step) => step.cmd).join('、')}。可用命令见 \`desktop.mjs help\`（写操作需要用户确认）。`,
+        );
       }
 
       const needsApproval = steps.some((step) => sets.write.has(step.cmd));
       if (needsApproval) {
         if (!deps.ask) {
-          return (
+          return reply(
+            'declined',
+            'approval_unavailable',
             '当前宿主没法向用户确认，写操作被拒绝（只读命令可以照常调用）。' +
-            '需要真的操作桌面请在 Mica 桌面端里发起。'
+              '需要真的操作桌面请在 Mica 桌面端里发起。',
           );
         }
         const goal = asText(input?.goal).trim();
@@ -345,21 +407,44 @@ export function createComputerUseTool(deps: ComputerUseToolDeps): PluginToolDesc
         try {
           answer = await deps.ask.request(approvalQuestion(goal, steps), { signal: callbacks?.signal });
         } catch (error) {
-          return `没能把确认交给用户：${error instanceof Error ? error.message : String(error)}`;
+          return errorReply(error, 'approval_failed', callbacks?.signal);
         }
         if (answer.cancelled || !answer.optionIds.includes('allow')) {
           const why =
-            answer.reason === 'timeout' ? '等了一会儿没有回应' : answer.reason === 'aborted' ? '用户中止了这一轮' : '用户没有批准';
-          return `${why}，这次桌面操作没有执行，也没有发出任何鼠标或键盘事件。不要重试同一批命令：停下来问用户要怎么继续，或换一条不需要动键鼠的做法。`;
+            answer.reason === 'timeout'
+              ? '等了一会儿没有回应'
+              : answer.reason === 'aborted'
+                ? '用户中止了这一轮'
+                : '用户没有批准';
+          return reply(
+            answer.reason === 'timeout' ? 'waiting' : answer.cancelled ? 'cancelled' : 'declined',
+            answer.reason === 'timeout'
+              ? 'approval_timeout'
+              : answer.cancelled
+                ? 'approval_cancelled'
+                : 'approval_declined',
+            `${why}，这次桌面操作没有执行，也没有发出任何鼠标或键盘事件。不要重试同一批命令：停下来问用户要怎么继续，或换一条不需要动键鼠的做法。`,
+          );
         }
       }
 
-      if (callbacks?.signal?.aborted) return '桌面操作已中止，后面的命令没有执行。';
-      const permit = needsApproval ? writePermit(steps) : null;
+      if (callbacks?.signal?.aborted) return reply('cancelled', 'aborted', '桌面操作已中止，后面的命令没有执行。');
+      let permit: ReturnType<typeof writePermit> | null;
+      try {
+        permit = needsApproval ? writePermit(steps) : null;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return reply('error', 'permit_failed', message, { error: message });
+      }
       const lines: string[] = [];
+      let terminal: { outcome: string; code: string; error?: string; exitCode?: number; timedOut?: boolean } = {
+        outcome: 'success',
+        code: 'completed',
+      };
       try {
         for (const [index, step] of steps.entries()) {
           if (callbacks?.signal?.aborted) {
+            terminal = { outcome: 'cancelled', code: 'aborted' };
             lines.push(`第 ${index + 1} 步之前被中止（后面的命令没有执行）。`);
             break;
           }
@@ -373,6 +458,13 @@ export function createComputerUseTool(deps: ComputerUseToolDeps): PluginToolDesc
           const head = `[${index + 1}/${steps.length}] ${step.cmd}${step.args.length ? ` ${step.args.join(' ')}` : ''}`;
           const body = [result.stdout, result.stderr ? `stderr: ${result.stderr}` : ''].filter(Boolean).join('\n');
           if (result.status !== 0) {
+            terminal = {
+              outcome: result.aborted ? 'cancelled' : 'error',
+              code: result.aborted ? 'aborted' : result.timedOut ? 'timeout' : 'step_failed',
+              exitCode: result.status,
+              timedOut: !!result.timedOut,
+              error: result.stderr || `exit=${result.status}`,
+            };
             lines.push(`${head} → 失败（exit=${result.status}）${body ? `\n${body}` : ''}`);
             const rest = steps.length - index - 1;
             if (rest > 0) lines.push(`后面的 ${rest} 步没有执行。`);
@@ -380,6 +472,10 @@ export function createComputerUseTool(deps: ComputerUseToolDeps): PluginToolDesc
           }
           lines.push(`${head}\n${body}`);
         }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        terminal = { outcome: 'error', code: 'runtime_failed', error: message };
+        lines.push(message);
       } finally {
         if (permit) {
           try {
@@ -389,7 +485,7 @@ export function createComputerUseTool(deps: ComputerUseToolDeps): PluginToolDesc
           }
         }
       }
-      return truncate(lines.join('\n\n'));
+      return JSON.stringify({ ...terminal, text: truncate(lines.join('\n\n')) });
     },
     displayText: (input: ToolInput): string => {
       const goal = asText(input?.goal).trim();

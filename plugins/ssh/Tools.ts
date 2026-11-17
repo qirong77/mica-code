@@ -4,13 +4,7 @@ import type { PluginToolDescriptor } from '@packages/mica-tools/PluginTool.js';
 import type { MicaTool, ToolExecuteCallbacks } from '@packages/mica-tools/index.js';
 import { appendAudit } from './Audit.js';
 import { findHost, mutateData, readData, upsertHost, type SshHost } from './Hosts.js';
-import {
-  runRemote,
-  runRemoteMany,
-  readHostFingerprint,
-  type RemoteContext,
-  type RemoteRunResult,
-} from './Remote.js';
+import { runRemote, runRemoteMany, readHostFingerprint, type RemoteContext, type RemoteRunResult } from './Remote.js';
 import { SessionManager, type SessionWaitResult } from './Session.js';
 import { deletePassword } from './Secrets.js';
 import { scopedHosts, type SshScope } from './Scope.js';
@@ -34,6 +28,51 @@ export type ToolDeps = {
   scope: SshScope;
   register(tool: MicaTool | PluginToolDescriptor, options?: PluginToolRegistrationOptions): Disposable;
 };
+
+type Outcome = 'success' | 'error' | 'cancelled' | 'declined' | 'waiting' | 'busy' | 'conflict' | 'partial';
+function reply(outcome: Outcome, code: string, text: string, extra: object = {}): string {
+  return JSON.stringify({ outcome, code, ...extra, text });
+}
+function failure(code: string, text: string, outcome: Outcome = 'error'): string {
+  return reply(outcome, code, text, { error: text });
+}
+function remoteOutcome(result: RemoteRunResult): Outcome {
+  return result.aborted ? 'cancelled' : result.timedOut || result.error || result.exitCode !== 0 ? 'error' : 'success';
+}
+function remoteReply(host: SshHost, result: RemoteRunResult): string {
+  const outcome = remoteOutcome(result);
+  return reply(
+    outcome,
+    result.aborted ? 'aborted' : result.timedOut ? 'timeout' : outcome === 'success' ? 'completed' : 'remote_failed',
+    formatResult(host, result),
+    { exitCode: result.exitCode, timedOut: result.timedOut, ...(result.error ? { error: result.error } : {}) },
+  );
+}
+function sessionReply(id: string, result: SessionWaitResult, started: number, tailLines: number): string {
+  const outcome = result.dead
+    ? 'error'
+    : result.timedOut
+      ? 'waiting'
+      : result.exitCode === 0
+        ? 'success'
+        : result.exitCode === null
+          ? 'waiting'
+          : 'error';
+  return reply(
+    outcome,
+    result.dead
+      ? 'session_dead'
+      : result.timedOut
+        ? 'command_running'
+        : result.exitCode === null
+          ? 'no_completion'
+          : result.exitCode === 0
+            ? 'completed'
+            : 'command_failed',
+    formatSessionResult(id, result, started, tailLines),
+    { exitCode: result.exitCode, timedOut: result.timedOut },
+  );
+}
 
 const MAX_TIMEOUT_MS = 600_000;
 
@@ -140,6 +179,22 @@ function linesOf(value: unknown, fallback: number): number {
 
 export function createTools(deps: ToolDeps): Disposable[] {
   const { ctx, dataFile, sessions } = deps;
+  const auditCompletion = (id: string, command: string) => {
+    const started = Date.now();
+    const info = sessions.list().find((item) => item.id === id);
+    return (result: SessionWaitResult) =>
+      appendAudit(ctx.dataDir, {
+        at: new Date().toISOString(),
+        hostId: info?.hostId ?? id,
+        target: info?.target ?? id,
+        source: 'session',
+        script: command,
+        exitCode: result.exitCode,
+        durationMs: Date.now() - started,
+        ok: !result.dead && !result.timedOut && result.exitCode === 0,
+        ...(result.dead ? { note: 'session_dead' } : result.timedOut ? { note: 'command_superseded_completion_unknown' } : {}),
+      });
+  };
 
   const runTool: PluginToolDescriptor = {
     name: 'ssh_run',
@@ -173,13 +228,17 @@ export function createTools(deps: ToolDeps): Disposable[] {
     },
     async execute(input, callbacks?: ToolExecuteCallbacks) {
       const found = asHost(deps, String(input.host ?? ''));
-      if (!found.host) return found.error;
+      if (!found.host) return failure('host_unavailable', found.error, 'declined');
       const host = found.host;
       if (host.readOnly) {
-        return `[${host.id}] 这台机器在清单里标为只读，\`ssh_run\` 被拒绝。查询请用 \`ssh_read\`；确实要改就在 SSH 面板里取消只读。`;
+        return failure(
+          'read_only',
+          `[${host.id}] 这台机器在清单里标为只读，\`ssh_run\` 被拒绝。查询请用 \`ssh_read\`；确实要改就在 SSH 面板里取消只读。`,
+          'declined',
+        );
       }
       const script = String(input.script ?? '');
-      if (!script.trim()) return '脚本是空的';
+      if (!script.trim()) return failure('empty_script', '脚本是空的');
       const started = Date.now();
       const result = await runRemote(ctx, {
         host,
@@ -199,11 +258,11 @@ export function createTools(deps: ToolDeps): Disposable[] {
         script,
         exitCode: result.exitCode,
         durationMs: Date.now() - started,
-        ok: result.exitCode === 0,
+        ok: !result.aborted && !result.timedOut && !result.error && result.exitCode === 0,
         ...(result.truncated && result.logPath ? { logPath: result.logPath } : {}),
         ...(result.error ? { note: result.error } : {}),
       });
-      return formatResult(host, result);
+      return remoteReply(host, result);
     },
   };
 
@@ -236,17 +295,21 @@ export function createTools(deps: ToolDeps): Disposable[] {
     },
     async execute(input, callbacks?: ToolExecuteCallbacks) {
       const script = String(input.script ?? '');
-      if (!script.trim()) return '脚本是空的';
+      if (!script.trim()) return failure('empty_script', '脚本是空的');
       const hint = findMutatingHint(script);
       if (hint) {
-        return `\`ssh_read\` 是只读工具（可并发、可重试），脚本里出现了「${hint}」。改用 \`ssh_run\`。`;
+        return failure(
+          'read_only',
+          `\`ssh_read\` 是只读工具（可并发、可重试），脚本里出现了「${hint}」。改用 \`ssh_run\`。`,
+          'declined',
+        );
       }
       const names = Array.isArray(input.hosts)
         ? input.hosts.map((entry) => String(entry))
         : input.host
           ? [String(input.host)]
           : [];
-      if (names.length === 0) return '至少给一个 host 或 hosts';
+      if (names.length === 0) return failure('missing_host', '至少给一个 host 或 hosts');
       const resolved: SshHost[] = [];
       const problems: string[] = [];
       for (const name of names) {
@@ -254,7 +317,8 @@ export function createTools(deps: ToolDeps): Disposable[] {
         if (found.host) resolved.push(found.host);
         else problems.push(found.error);
       }
-      if (resolved.length === 0) return problems[0] ?? '没有可用的服务器';
+      if (resolved.length === 0)
+        return failure('host_unavailable', problems.join('\n') || '没有可用的服务器', 'declined');
       const timeoutMs = timeoutOf(input.timeout_ms, ctx.defaultTimeoutMs);
       const tailLines = linesOf(input.tail_lines, ctx.tailLines);
       const started = Date.now();
@@ -277,14 +341,19 @@ export function createTools(deps: ToolDeps): Disposable[] {
           script,
           exitCode: result.exitCode,
           durationMs: Date.now() - started,
-          ok: result.exitCode === 0,
+          ok: !result.aborted && !result.timedOut && !result.error && result.exitCode === 0,
           ...(result.error ? { note: result.error } : {}),
         });
         parts.push(formatResult(host, result));
       }
       // 部分成功时也要把没跑的那几台说清楚：不然看起来像是「全都查过了」。
       if (problems.length > 0) parts.push(problems.join('\n'));
-      return parts.join('\n\n');
+      const outcomes = [...results.values()].map(remoteOutcome);
+      const outcome =
+        problems.length > 0 || outcomes.length !== resolved.length || new Set(outcomes).size > 1
+          ? 'partial'
+          : (outcomes[0] ?? 'error');
+      return reply(outcome, 'read_completed', parts.join('\n\n'));
     },
   };
 
@@ -337,7 +406,7 @@ export function createTools(deps: ToolDeps): Disposable[] {
       }
       if (op === 'open') {
         const found = asHost(deps, String(input.host ?? ''));
-        if (!found.host) return found.error;
+        if (!found.host) return failure('host_unavailable', found.error, 'declined');
         const { info } = await sessions.open(found.host, {
           cwd: typeof input.cwd === 'string' ? input.cwd : undefined,
         });
@@ -354,31 +423,31 @@ export function createTools(deps: ToolDeps): Disposable[] {
         return `[${info.id}] 持久会话已就绪 · cwd=${info.cwd}\n之后用 \`run\` 执行命令（cd / 环境变量 / 虚拟环境都会保留）。`;
       }
       const id = String(input.session_id ?? input.host ?? '').trim();
-      if (!id) return '需要 session_id（等于主机别名，或 open 时返回的 id）';
-      if (!sessions.get(id)) return `[${id}] 没有打开的会话：先 \`open\`（或它已被关闭/超时回收）`;
+      if (!id) return failure('missing_session_id', '需要 session_id（等于主机别名，或 open 时返回的 id）');
+      if (!sessions.get(id))
+        return failure('session_not_found', `[${id}] 没有打开的会话：先 \`open\`（或它已被关闭/超时回收）`);
       if (op === 'run' || op === 'write') {
         const command = String(input.command ?? '');
-        if (!command.trim()) return 'command 是空的';
+        if (!command.trim()) return failure('empty_command', 'command 是空的');
         if (op === 'write') {
-          const { token } = sessions.write(id, command);
-          return `[${id}] 已写入（token=${token}）。用 \`wait\` 取结果，或先做别的事。`;
+          const { token } = sessions.write(id, command, auditCompletion(id, command));
+          return reply(
+            'waiting',
+            'command_submitted',
+            `[${id}] 已写入（token=${token}）。用 \`wait\` 取结果，或先做别的事。`,
+          );
         }
-        const result = await sessions.run(id, command, timeoutOf(input.timeout_ms, ctx.defaultTimeoutMs));
-        appendAudit(ctx.dataDir, {
-          at: new Date().toISOString(),
-          hostId: id,
-          target: id,
-          source: 'session',
-          script: command,
-          exitCode: result.exitCode,
-          durationMs: Date.now() - started,
-          ok: result.exitCode === 0,
-        });
-        return formatSessionResult(id, result, started, tailLines);
+        const result = await sessions.run(
+          id,
+          command,
+          timeoutOf(input.timeout_ms, ctx.defaultTimeoutMs),
+          auditCompletion(id, command),
+        );
+        return sessionReply(id, result, started, tailLines);
       }
       if (op === 'wait') {
         const result = await sessions.wait(id, timeoutOf(input.timeout_ms, ctx.defaultTimeoutMs));
-        return formatSessionResult(id, result, started, tailLines);
+        return sessionReply(id, result, started, tailLines);
       }
       if (op === 'read') {
         const text = sessions.read(id);
@@ -388,7 +457,7 @@ export function createTools(deps: ToolDeps): Disposable[] {
         sessions.close(id);
         return `[${id}] 会话已关闭`;
       }
-      return `不认识的 op：${op}`;
+      return failure('unknown_operation', `不认识的 op：${op}`);
     },
   };
 
@@ -408,7 +477,11 @@ export function createTools(deps: ToolDeps): Disposable[] {
         host: { type: 'string', description: '域名或 IP，不带用户名/端口' },
         user: { type: 'string', description: '登录用户名' },
         port: { type: 'number', description: '端口，默认 22' },
-        auth: { type: 'string', enum: ['password', 'key'], description: '认证方式；密码认证还需要用户在面板里填一次口令' },
+        auth: {
+          type: 'string',
+          enum: ['password', 'key'],
+          description: '认证方式；密码认证还需要用户在面板里填一次口令',
+        },
         keyPath: { type: 'string', description: 'auth=key 时的私钥路径，支持 ~/.ssh/xxx' },
         label: { type: 'string', description: '一句话用途（「测试机」「生产 API」）' },
         readOnly: { type: 'boolean', description: '只读：ssh_run 会被拒绝，只能 ssh_read' },
@@ -427,7 +500,11 @@ export function createTools(deps: ToolDeps): Disposable[] {
           .map((host) => {
             const bits = [
               `${host.id} — ${host.user}@${host.host}:${host.port}`,
-              host.auth === 'key' ? `密钥 ${host.keyPath}` : host.auth === 'password' ? '密码认证' : '使用 ssh agent/config',
+              host.auth === 'key'
+                ? `密钥 ${host.keyPath}`
+                : host.auth === 'password'
+                  ? '密码认证'
+                  : '使用 ssh agent/config',
               host.label ?? '',
               host.readOnly ? '只读' : '',
               inSession.has(host.id) ? '本次会话可用' : '未添加到本次会话',
@@ -439,7 +516,7 @@ export function createTools(deps: ToolDeps): Disposable[] {
       }
       if (op === 'remove') {
         const id = String(input.id ?? '').trim();
-        if (!id) return 'remove 需要 id';
+        if (!id) return failure('missing_id', 'remove 需要 id');
         const removed = await mutateData(dataFile, (data) => {
           const next = data.hosts.filter((entry) => entry.id !== id);
           if (next.length === data.hosts.length) throw new Error(`没有叫 ${id} 的服务器`);
@@ -449,7 +526,7 @@ export function createTools(deps: ToolDeps): Disposable[] {
         deletePassword(removed, ctx.dataDir);
         return `已删除 ${removed}（口令也一并清掉了）`;
       }
-      if (op !== 'add' && op !== 'update') return `不认识的 op：${op}`;
+      if (op !== 'add' && op !== 'update') return failure('unknown_operation', `不认识的 op：${op}`);
       const id = String(input.id ?? '').trim();
       const outcome = await mutateData(dataFile, (data) => {
         const result = upsertHost(data, {
@@ -481,6 +558,39 @@ export function createTools(deps: ToolDeps): Disposable[] {
   };
 
   return [runTool, readTool, sessionTool, hostsTool].map((descriptor) =>
-    deps.register(descriptor, { icon: '🖧' }),
+    deps.register(
+      {
+        ...descriptor,
+        async execute(input, callbacks) {
+          try {
+            if (callbacks?.signal?.aborted) return reply('cancelled', 'aborted', '操作已中止，未执行。');
+            const result = await descriptor.execute!(input, callbacks);
+            if (typeof result !== 'string') return result;
+            try {
+              const parsed = JSON.parse(result);
+              if (parsed && typeof parsed.outcome === 'string' && typeof parsed.code === 'string') return result;
+            } catch {
+              /* Human-readable success from list/open/read/hosts. */
+            }
+            return reply('success', 'completed', result);
+          } catch (error) {
+            const code = (error as { code?: string })?.code;
+            const outcome: Outcome = callbacks?.signal?.aborted
+              ? 'cancelled'
+              : code === 'busy'
+                ? 'busy'
+                : code === 'conflict'
+                  ? 'conflict'
+                  : 'error';
+            return failure(
+              outcome === 'error' ? 'operation_failed' : outcome,
+              error instanceof Error ? error.message : String(error),
+              outcome,
+            );
+          }
+        },
+      },
+      { icon: '🖧' },
+    ),
   );
 }

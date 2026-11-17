@@ -1,6 +1,6 @@
 import { micaUi } from '@packages/mica-ui/index.js';
 import type { CommandAgent } from '../services.js';
-import { micaConfig } from '@packages/mica-config/index.js';
+import { isProviderEnabled, micaConfig } from '@packages/mica-config/index.js';
 import { showSelectCommand } from '../shared/selectCommand.js';
 import type { CommandRuntimeServices, CommandSessionController } from '../services.js';
 import { applyConfigSwitchUpdate, reportConfigSwitchError, syncConfigFromAgent } from '../shared/configSwitch.js';
@@ -47,6 +47,7 @@ export function showModelSelector(
     title: 'select model',
     current,
     options: config.providers.flatMap((provider) => {
+      if (!isProviderEnabled(provider)) return [];
       const activeModel = provider.id === config.provider ? config.model : '';
       return [...new Set(activeModel ? [activeModel, ...(provider.models ?? [])] : (provider.models ?? []))]
         .sort((a, b) => a.localeCompare(b))
@@ -95,6 +96,7 @@ async function applyModelSelection(
       update: (config) => {
         const provider = config.providers.find((item) => item.id === selection.providerId);
         if (!provider) throw new Error(`Provider not found: ${selection.providerId}`);
+        if (!isProviderEnabled(provider)) throw new Error(`Provider is disabled: ${provider.id}`);
         if (!provider.models?.includes(selection.model)) {
           throw new Error(`Model not found for provider ${selection.providerId}: ${selection.model}`);
         }

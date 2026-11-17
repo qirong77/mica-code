@@ -109,4 +109,14 @@ describe('experience analysis', () => {
     malformedTime.time = { toString: 1, valueOf: 1 };
     expect(summarizePluginExperience([JSON.stringify(malformedTime)], { since: 0 })).toEqual([]);
   });
+  it('reads the unified numeric-at/pluginId envelope for pages', () => {
+    const row = JSON.parse(line('unified', { event: 'click', surface: 'page', action: 'activate' }));
+    row.at = Date.parse(row.time);
+    row.pluginId = row.plugin;
+    delete row.time;
+    delete row.plugin;
+    expect(summarizePluginExperience([JSON.stringify(row)], { since: row.at - 1 })[0]).toMatchObject({
+      plugin: 'sample-plugin', surfaces: { 'page:click': 1 },
+    });
+  });
 });

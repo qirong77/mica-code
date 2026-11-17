@@ -11,6 +11,8 @@ import {
   buildActionRequest,
   buildControlDocs,
   createControlMcpHandler,
+  callControlService,
+  controlRequestTimeout,
   unknownParams
 } from './control-mcp.js'
 
@@ -64,6 +66,41 @@ const BROWSER_ENDPOINTS = [
     returns: 'text/event-stream'
   }
 ]
+
+it('extends only declared long-wait budgets, keeping the original 30s floor', () => {
+  const endpoint = { params: [{ name: 'timeoutMs' }] }
+  expect(controlRequestTimeout(endpoint, { timeoutMs: 120000 })).toBe(125000)
+  expect(controlRequestTimeout(endpoint, { timeoutMs: 500 })).toBe(30000)
+  expect(controlRequestTimeout(endpoint, { timeoutMs: Infinity })).toBe(30000)
+  expect(controlRequestTimeout({}, { timeoutMs: 120000 })).toBe(30000)
+})
+
+it.each(['abort', 'timeout'])('settles a waiting socket request on %s', async (reason) => {
+  // macOS Unix socket addresses have a short path limit; keep the fixture name small.
+  const dir = mkdtempSync(join(tmpdir(), 'mc-ab-'))
+  const path = join(dir, 's.sock')
+  let arrived
+  const received = new Promise((resolve) => { arrived = resolve })
+  const service = createServer((_req, _res) => { arrived() })
+  const sockets = new Set()
+  service.on('connection', (socket) => { sockets.add(socket); socket.once('close', () => sockets.delete(socket)) })
+  await new Promise((resolve) => service.listen(path, resolve))
+  try {
+    const controller = new AbortController()
+    const waiting = callControlService(path, { method: 'GET', path: '/wait' }, { signal: controller.signal, timeoutMs: reason === 'abort' ? 125000 : 20 })
+    const settled = waiting.then(() => null, (error) => error)
+    await Promise.race([received, settled.then((error) => { if (error) throw error })])
+    if (reason === 'abort') controller.abort()
+    const error = await settled
+    expect(error).toBeInstanceOf(Error)
+    expect(error.name).toBe(reason === 'abort' ? 'AbortError' : 'TimeoutError')
+  } finally {
+    for (const socket of sockets) socket.destroy()
+    service.closeAllConnections()
+    await new Promise((resolve) => service.close(resolve))
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
 
 describe('buildControlDocs', () => {
   const docs = buildControlDocs({

@@ -30,7 +30,7 @@
 ## 重试与中止
 
 - turn 级重试最多 5 次、间隔 10s；仅在错误可重试且本轮没有非只读工具调用时自动重试，先恢复 pre-turn snapshot。
-- 回滚快照只复制 provider 状态，不构建展示消息；每次恢复复制基线，避免失败尝试污染下一次回滚。禁用 turn 重试时不建立副本，发生非只读工具调用后尽早释放副本。持久化快照使用 `getSnapshot({ includeConversation: false })`，展示消息由运行时自己的展示记录提供。
+- 回滚快照只复制 provider 状态，不构建展示消息；每次恢复复制基线，避免失败尝试污染下一次回滚。整轮重试的 `restoreClientSnapshot(snapshot, { preserveUsage: true })` 只回滚消息/推理，保留当前请求账本和 lastUsage，不重放 usage 事件；历史替换的默认完整恢复语义不变。禁用 turn 重试时不建立副本，发生非只读工具调用后尽早释放副本。持久化快照使用 `getSnapshot({ includeConversation: false })`，展示消息由运行时自己的展示记录提供。
 - provider 的 `withRetry` 只在无不可回滚输出时重发；展示端提供文本和思考回滚能力时按尝试恢复。没有回滚能力的消费者收到正文、思考或工具输入后不重发，退避 2/4/8/16/30s。pi SDK 自动重试关闭，避免双层重试和不可见尝试。
 - 4xx 一律不重试，唯一例外是网关报告请求体解析失败的 400（`invalid json: invalid character ...`、`invalid_json` 错误码或 codexgo 的「请求体必须是有效 JSON，最大 8MB」）：本地序列化的请求也可能被网关偶发拒绝，按既有次数上限重试；该错误本身不能证明传输抖动，也不能排除网关的大小限制，持续失败仍报错。识别结构化顶层 / `error.code` 和仅保留文案的错误；413 等明确的大小错误不重试。判定在 `core/retry.ts` 的 `isUpstreamBodyParseFailure`。
 - 流空闲超过 60s 视为超时（`core/streamIdleTimeout.ts`）：SDK 的超时只覆盖到响应头，网关握手成功却不再吐事件时由看门狗关流并抛 `TimeoutError`，交给上面的重试判定。

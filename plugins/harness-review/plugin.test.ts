@@ -14,7 +14,9 @@ import {
 import { micaRuntime } from '@packages/mica-runtime/index.js';
 import { toolResultToText, type MicaTool } from '@packages/mica-tools/index.js';
 import setup from './index.js';
-import { CLASSIFIER_VERSION } from './engine.js';
+import { CLASSIFIER_VERSION, HarnessRecorder } from './engine.js';
+import { acquireProcessLock } from '@packages/mica-common/processLock.js';
+import { LIST_MAX_CHARS } from './list.js';
 
 const cleanup: Array<() => Promise<void>> = [];
 afterEach(async () => {
@@ -109,10 +111,73 @@ function harness(
     review,
     readSettings,
     describeSession,
+    logger: ctx.logger,
   };
 }
 
 describe('harness-review plugin', () => {
+  it('does not hold the status publication lock while replaying and skips automatic lock contention without a warning', async () => {
+    let entered!: () => void;
+    let resume!: () => void;
+    const waiting = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const gate = new Promise<void>((resolve) => {
+      resume = resolve;
+    });
+    const original = HarnessRecorder.prototype.review;
+    const spy = vi.spyOn(HarnessRecorder.prototype, 'review').mockImplementationOnce(async function (
+      this: HarnessRecorder,
+      cwd?: string,
+    ) {
+      entered();
+      await gate;
+      return original.call(this, cwd);
+    });
+    const h = harness();
+    try {
+      await waiting;
+      const root = join(h.home, 'plugin-data', 'harness-review');
+      const release = acquireProcessLock(join(root, 'status.lock'));
+      expect(release).not.toBeNull();
+      try {
+        resume();
+        // Queue an explicit list behind startup work and wait until the optional publication was skipped.
+        await h.review();
+        await new Promise((resolve) => setImmediate(resolve));
+        expect(h.logger.warn).not.toHaveBeenCalled();
+        expect(h.reports).toEqual([]);
+      } finally {
+        release?.();
+      }
+      await h.hooks.emit('turn:after', {});
+      expect(
+        await waitForStatus(h.home, (value) => Boolean((value as Record<string, unknown>).generatedAt)),
+      ).toMatchObject({ scope: '所有工作区' });
+    } finally {
+      resume();
+      spy.mockRestore();
+    }
+  });
+
+  it('skips another host automatic refresh claim rather than reporting a plugin failure', async () => {
+    const seed = harness({ mode: 'one-shot' });
+    const root = join(seed.home, 'plugin-data', 'harness-review');
+    const release = acquireProcessLock(join(root, 'refresh.lock'));
+    expect(release).not.toBeNull();
+    try {
+      const h = harness({ home: seed.home });
+      await new Promise((resolve) => setImmediate(resolve));
+      await h.hooks.emit('turn:after', {});
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(h.logger.warn).not.toHaveBeenCalled();
+      expect(h.reports).toEqual([]);
+      expect(existsSync(join(root, 'data.json'))).toBe(false);
+    } finally {
+      release?.();
+    }
+  });
+
   it('reads settings and session metadata once per run across a high-frequency event stream', async () => {
     const h = harness();
     await h.start();
@@ -155,6 +220,36 @@ describe('harness-review plugin', () => {
     h.settings.enabled = 'false';
     await h.finish();
     expect((await h.review()).runs[0].outcome).toBe('completed');
+  });
+
+  it('returns a character-budgeted default list and exports the same snapshot for details', async () => {
+    const h = harness({ mode: 'one-shot' });
+    await h.start();
+    for (let index = 0; index < 40; index++) {
+      await h.emit({ type: 'tool:call', id: `c${index}`, name: `tool_${index}`, args: '{}' } as never);
+      await h.emit({
+        type: 'tool:result',
+        id: `c${index}`,
+        name: `tool_${index}`,
+        result: 'Error: permission denied',
+      } as never);
+    }
+    await h.finish();
+    const output = toolResultToText(await h.tools[0].execute({}));
+    expect(output.length).toBeLessThanOrEqual(LIST_MAX_CHARS);
+    const report = JSON.parse(output);
+    expect(report.totalFindings).toBe(40);
+    expect(report.progress.recentSingle).toBe(40);
+    expect(report.toolHealth.length).toBeGreaterThan(0);
+    expect(report.coverage.includedRuns).toBe(1);
+    expect(report.outputBudget.omittedFindings).toBeGreaterThan(0);
+    expect(existsSync(report.reportPath)).toBe(true);
+    const markdown = await readFile(report.reportPath, 'utf8');
+    expect(markdown).toContain('40 aggregated findings');
+    expect(markdown).toContain('Tool error in tool\\_39: permission');
+    const command = await h.commands.execute('/harness-review list');
+    expect(command.ok).toBe(true);
+    expect(command.message!.length).toBeLessThanOrEqual(LIST_MAX_CHARS);
   });
 
   it('requires an explicit reason and workspace-visible finding for assessments', async () => {
@@ -353,10 +448,12 @@ describe('harness-review plugin', () => {
       await h.start();
       await h.finish();
       const [run] = (await h.review()).runs;
+      const file = join(h.home, 'plugin-data', 'harness-review', 'runs', run.id, 'summary.json');
+      const stored = JSON.parse(await readFile(file, 'utf8'));
       await writeFile(
-        join(h.home, 'plugin-data', 'harness-review', 'runs', run.id, 'summary.json'),
+        file,
         JSON.stringify({
-          ...run,
+          ...stored,
           findings: [],
           startedAt: '2020-01-01T00:00:00.000Z',
           finishedAt: '2020-01-01T00:00:01.000Z',

@@ -257,6 +257,8 @@ export { createPluginExperience, EXPERIENCE_SCHEMA_VERSION, EXPERIENCE_LOG_EVENT
 export type { ExperienceEvent, ExperienceFields, ExperienceRecord } from './PluginExperience.js';
 export { summarizePluginExperience } from './PluginExperienceReport.js';
 export type { ExperienceSummary } from './PluginExperienceReport.js';
+export { createPluginOperations } from './PluginOperations.js';
+export type { PluginOperations } from './PluginOperations.js';
 export type { PluginLogOptions, PluginLogger } from './PluginLog.js';
 export {
   PLUGIN_STATE_FILE,
@@ -421,7 +423,7 @@ export {
   createPluginHealthStore,
   resolvePluginHealthPath,
 } from './PluginHealth.js';
-export type { PluginHealthLevel, PluginHealthReport, PluginHealthStore } from './PluginHealth.js';
+export type { PluginHealthLevel, PluginHealthReport, PluginHealthInput, PluginHealthStore } from './PluginHealth.js';
 export type {
   PluginPanelCard,
   PluginPanelCardAction,

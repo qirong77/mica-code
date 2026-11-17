@@ -5,6 +5,7 @@ import { PluginIcon } from '@mica-config-ui/plugin-icons'
 import { useIsMobile } from './hooks'
 import { createPluginHostApi, notifySessionIdle } from './plugin-host'
 import { usePluginEntries } from './plugin-entries'
+import { PluginSurface } from './PluginSurface'
 
 /**
  * 插件在桌面端的入口容器 + 卡片。
@@ -95,7 +96,7 @@ function PluginHeaderEntry({ entry, onOpenPage, session }) {
 
   const Card = entry.module.default
   const card = Card ? (
-    <section
+    <PluginSurface as="section" api={api} surface="card"
       data-plugin-entry-card
       // 卡片的控件与设置页是同一批（`@mica-config-ui/web`），样式限定在这个作用域里；
       // 由宿主统一套上，插件不必各自再包一层。
@@ -103,7 +104,7 @@ function PluginHeaderEntry({ entry, onOpenPage, session }) {
       style={{ width: entry.cardWidth ?? CARD_WIDTH, maxWidth: 'calc(100vw - 24px)' }}
     >
       <Card api={api} onClose={() => setOpen(false)} />
-    </section>
+    </PluginSurface>
   ) : null
 
   return (
@@ -168,13 +169,13 @@ function PluginEntryRow({ entry, onOpenPage, session }) {
   // 入口行右侧那一行状态（「本机」「3 台」）由插件自己给：宿主不知道它的业务含义
   const summary = entry.module.summary?.(api) ?? ''
   const card = Card ? (
-    <section
+    <PluginSurface as="section" api={api} surface="card"
       data-plugin-entry-card
       className="mica-config-ui is-embed rounded-md border border-line p-3.5"
       style={{ width: entry.cardWidth ?? CARD_WIDTH, maxWidth: 'calc(100vw - 24px)' }}
     >
       <Card api={api} onClose={closeRow} />
-    </section>
+    </PluginSurface>
   ) : null
 
   return (

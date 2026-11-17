@@ -6,7 +6,7 @@
 
 ## 统一事件
 
-通过 `createPluginExperience(ctx)` 写入已有的插件 JSONL 日志。外层沿用 `{ time, plugin, level, event, data }`，其中 `event = "plugin:experience"`。`data` 的版本是 `schemaVersion: 1`：
+通过 `createPluginExperience(ctx)` 写入共享写入器托管的插件 JSONL 日志。外层使用 `{ at, scope, pluginId, plugin, level, event, data }`，其中 `at` 为毫秒时间戳、`event = "plugin:experience"`；只读分析也规范化历史 `time/plugin` 日志。`data` 的版本是 `schemaVersion: 1`：
 
 | 字段 | 含义 |
 | --- | --- |
@@ -14,7 +14,7 @@
 | pluginVersion | 插件版本，避免混合不同版本的数据 |
 | event | `impression / click / dismiss / update / failure / check / clear` |
 | sessionKey | 会话 ID 的 SHA-256 截断值，用于本地关联，不是原始会话 ID |
-| surface | `card / panel / tool / background` |
+| surface | `card / panel / tool / background / page / launcher` |
 | action | 代码内固定的动作名，不放用户文本 |
 | outcome | `success / error / stale / dismissed` |
 | revision | 不含内容的版本标识，用于识别旧界面操作 |
@@ -22,7 +22,9 @@
 
 字段按白名单输出，不收集对话正文、文件路径、命令、服务地址、接口响应或错误原文。哈希化会话键仍能关联同一会话的行为，属于本地化名数据，不声称完全匿名。
 
-每个插件的设置中都有“本地使用统计”开关，关闭后立即停止这些事件。不会上传；日志继续遵守插件日志的 2 MB 分片和 7 天保留策略。`MICA_PLUGIN_LOG=0` 会关闭文件输出。日志可能被截断或已过保留期，所以统计只代表现有样本。
+清单声明了 `telemetry` 的插件（目前包括 Mobile Relay）才有“本地使用统计”开关，关闭后立即停记该插件的体验事件；不声称每个插件都有此项。不会上传；`MICA_PLUGIN_LOG=0` 会关闭插件文件输出。日志可能被截断或已过保留期，所以统计只代表现有样本。
+
+随包 card/page/launcher 的共享 `PluginSurface` 自动记录实际展示和通用控件激活：宿主只接受固定的 `view/activate/open/close/save/copy/retry` 动作名，不收 DOM 文本、链接或文档 key。插件内部的业务完成/失败仍由 `operation.start/finish` 和显式业务事件回答；一次点击不是业务成功，也不能据此拼出未经验证的完整转化漏斗。
 
 曝光来自可见卡片的实际呈现，同一挂载会话中按插件、卡片及版本去重；获取视图与后台轮询不计曝光。宿主必须支持 IntersectionObserver v2 并能确认未被遮挡；不支持时跳过曝光，所以可能有点击而没有曝光。页面重新挂载可能产生新的曝光，这里统计的是展示次数，不是人数。点击允许同一曝光后多次发生，`cardClicks / cardImpressions` 是每次展示的点击次数，可能超过 1，不能当作用户转化率。
 
