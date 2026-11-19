@@ -29,6 +29,7 @@ import {EmojiNode} from './EmojiNode';
 import {EquationNode} from './EquationNode';
 import {ExcalidrawNode} from './ExcalidrawNode';
 import {FigmaNode} from './FigmaNode';
+import {HtmlNode} from './HtmlNode';
 import {ImageNode} from './ImageNode';
 import {KeywordNode} from './KeywordNode';
 import {LayoutContainerNode} from './LayoutContainerNode';
@@ -81,6 +82,7 @@ const PlaygroundNodes: Klass<LexicalNode>[] = [
   SlotContainerNode,
   ReviewNode,
   PullQuoteNode,
+  HtmlNode,
 ];
 
 export default PlaygroundNodes;

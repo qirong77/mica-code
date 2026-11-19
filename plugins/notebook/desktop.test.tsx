@@ -24,7 +24,7 @@ describe('Notebook navigation', () => {
       expect(html).toContain('aria-label="定位当前笔记"');
       expect(html).toContain('notebook-book-info');
       expect(html).toContain('查看笔记本的 MCP 接口');
-      expect(html).toMatch(/notebook-rail-add[\s\S]*?>新建<\/span>/);
+      expect(html).not.toMatch(/notebook-rail-add[\s\S]*?>新建<\/span>/);
       // The subtitle reserves its space without briefly showing a false zero count.
       expect(html).not.toContain('0 篇笔记');
       expect(html).not.toContain('AI 对话');

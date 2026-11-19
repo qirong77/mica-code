@@ -1,4 +1,5 @@
 .mica-config-ui.floatingwindow {
+  position: relative;
   height: 100%;
   display: flex;
   flex-direction: column;
@@ -24,6 +25,11 @@
 }
 #root .floatingwindow-toolbar .floatingwindow-address.arco-input { font-size: 13px; }
 .floatingwindow-notice {
+  position: absolute;
+  z-index: 2;
+  top: 40px;
+  right: 0;
+  left: 0;
   display: flex;
   height: 24px;
   flex: 0 0 24px;
@@ -53,16 +59,28 @@
 .floatingwindow-site {
   display: flex;
   align-items: center;
-  gap: 10px;
   min-width: 0;
-  padding: 12px;
   border: 1px solid var(--color-line-soft);
   border-radius: 8px;
   background: var(--color-panel);
   color: var(--color-fg);
+}
+.floatingwindow-site-open {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 12px;
+  border: 0;
+  background: transparent;
+  color: inherit;
   cursor: pointer;
   text-align: left;
 }
-.floatingwindow-site:hover, .floatingwindow-site:focus-visible { background: var(--color-active); }
-.floatingwindow-site > span { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.floatingwindow-site > svg { flex: none; }
+.floatingwindow-site-open:hover, .floatingwindow-site-open:focus-visible { background: var(--color-active); }
+.floatingwindow-site-open > span { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.floatingwindow-site-open > svg { flex: none; }
+.floatingwindow-site-icon { width: 16px; height: 16px; flex: none; object-fit: contain; }
+.floatingwindow-site-star { flex: none; margin-right: 4px; color: var(--color-fg-muted); }
+.floatingwindow-site-star:hover, .floatingwindow-site-star:focus-visible { color: var(--color-accent); }

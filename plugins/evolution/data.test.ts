@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { configModelDiscovery } from './data/config.js';
+import { floatingWindowFavorites } from './data/floatingwindow.js';
 import { memoryScopes } from './data/memory.js';
 import { sessionTagSlots } from './data/session-tags.js';
 
@@ -202,5 +203,29 @@ describe('config 旧模型发现字段迁移', () => {
     const root = home();
     expect(run(configModelDiscovery, root)).toBe(0);
     expect(readdirSync(root)).toEqual([]);
+  });
+});
+
+describe('Floating Window 收藏数据迁移', () => {
+  it('给已有最近地址数据补上空收藏集合，并保持幂等', () => {
+    const root = home();
+    const file = join(root, 'plugin-data', 'floatingwindow', 'data.json');
+    write(file, JSON.stringify({ recentUrls: ['https://example.com/'] }));
+
+    expect(run(floatingWindowFavorites, root)).toBe(1);
+    expect(JSON.parse(readFileSync(file, 'utf-8'))).toEqual({
+      recentUrls: ['https://example.com/'],
+      favoriteUrls: [],
+      favicons: {},
+    });
+    expect(run(floatingWindowFavorites, root)).toBe(0);
+  });
+
+  it('没有 Floating Window 数据或已有收藏字段时不写盘', () => {
+    const root = home();
+    expect(run(floatingWindowFavorites, root)).toBe(0);
+    const file = join(root, 'plugin-data', 'floatingwindow', 'data.json');
+    write(file, JSON.stringify({ recentUrls: [], favoriteUrls: ['https://example.com/'], favicons: {} }));
+    expect(run(floatingWindowFavorites, root)).toBe(0);
   });
 });

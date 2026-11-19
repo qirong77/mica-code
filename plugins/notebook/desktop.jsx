@@ -174,9 +174,7 @@ function CreateMenu({ open, onOpen, onClose, onCreate, label, title = label, dis
             pressed={open}
             disabled={disabled}
             tabIndex={tabIndex}
-          >
-            {toolbar ? '新建' : null}
-          </Button>
+          />
         </span>
       }
     >

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import createLauncher, { MAX_RECENT_SITES } from './launcher.js';
+import createLauncher, { MAX_FAVORITE_SITES, MAX_RECENT_SITES } from './launcher.js';
 import { MAX_URL_LENGTH, normalizeAddress, persistableAddress } from './address.js';
 
 function context(conflicts = 0) {
@@ -37,17 +37,22 @@ describe('floating window storage', () => {
   it('retries CAS, preserves concurrent data, and loads recent addresses', async () => {
     const ctx = context(2);
     const launcher = createLauncher(ctx);
-    expect(await launcher.request('remember', { url: 'example.com' })).toEqual({ ok: true, saved: true, urls: ['https://example.com/'] });
-    expect((await ctx.readData()).value).toEqual({ other: 'keep', concurrent: 'preserved', recentUrls: ['https://example.com/'] });
-    expect(await launcher.request('recent')).toEqual({ urls: ['https://example.com/'] });
+    expect(await launcher.request('remember', { url: 'example.com' })).toEqual({ ok: true, saved: true, urls: ['https://example.com/'], favicons: {} });
+    expect((await ctx.readData()).value).toEqual({ other: 'keep', concurrent: 'preserved', recentUrls: ['https://example.com/'], favicons: {} });
+    expect(await launcher.request('recent')).toEqual({ urls: ['https://example.com/'], favorites: [], favicons: {} });
   });
   it('remembers the origin without persisting sensitive paths', async () => {
     const ctx = context();
     const launcher = createLauncher(ctx);
     await launcher.request('remember', { url: 'https://example.com/' });
-    expect(await launcher.request('remember', { url: 'https://example.com/private-secret?token=x#secret' })).toEqual({ ok: true, saved: true, urls: ['https://example.com/'] });
+    expect(await launcher.request('remember', { url: 'https://example.com/private-secret?token=x#secret', faviconUrl: 'https://cdn.example/assets/favicon.svg?cache=1' })).toEqual({
+      ok: true,
+      saved: true,
+      urls: ['https://example.com/'],
+      favicons: { 'https://example.com/': 'https://cdn.example/assets/favicon.svg' },
+    });
     expect((await ctx.readData()).value.recentUrls).toEqual(['https://example.com/']);
-    expect(await launcher.request('recent')).toEqual({ urls: ['https://example.com/'] });
+    expect(await launcher.request('recent')).toEqual({ urls: ['https://example.com/'], favorites: [], favicons: { 'https://example.com/': 'https://cdn.example/assets/favicon.svg' } });
   });
   it('reports persistent conflicts and rejects requests after dispose', async () => {
     const launcher = createLauncher(context(20));
@@ -67,7 +72,7 @@ describe('floating window storage', () => {
       launcher.request('remember', { url: 'https://a.example/' }),
       launcher.request('remember', { url: 'https://b.example/' }),
     ]);
-    expect(await launcher.request('recent')).toEqual({ urls: ['https://b.example/', 'https://a.example/'] });
+    expect(await launcher.request('recent')).toEqual({ urls: ['https://b.example/', 'https://a.example/'], favorites: [], favicons: {} });
   });
   it('merges a concurrently added site after a CAS conflict', async () => {
     const ctx = context();
@@ -83,7 +88,7 @@ describe('floating window storage', () => {
     };
     const launcher = createLauncher(ctx);
     await launcher.request('remember', { url: 'https://new.example/secret' });
-    expect(await launcher.request('recent')).toEqual({ urls: ['https://new.example/', 'https://concurrent.example/'] });
+    expect(await launcher.request('recent')).toEqual({ urls: ['https://new.example/', 'https://concurrent.example/'], favorites: [], favicons: {} });
     expect((await ctx.readData()).value.other).toBe('keep');
   });
   it('deduplicates by origin, moves revisited sites to the front, and caps history', async () => {
@@ -91,7 +96,7 @@ describe('floating window storage', () => {
     const launcher = createLauncher(ctx);
     for (let i = 0; i < MAX_RECENT_SITES + 3; i++) await launcher.request('remember', { url: `https://site${i}.example/path?secret=x` });
     await launcher.request('remember', { url: 'https://site5.example/another' });
-    const { urls = [] } = await launcher.request('recent');
+    const { urls = [] } = await launcher.request('recent') as any;
     expect(urls).toHaveLength(MAX_RECENT_SITES);
     expect(urls[0]).toBe('https://site5.example/');
     expect(urls.filter((url: string) => url === 'https://site5.example/')).toHaveLength(1);
@@ -109,6 +114,33 @@ describe('floating window storage', () => {
   it('filters malformed persisted entries and never exposes paths on read', async () => {
     const ctx = context();
     await ctx.writeData({ recentUrls: ['https://a.example/private?token=x', 'https://a.example/', 'javascript:bad', null, 'http://b.example/#secret'] }, { expectedVersion: 0 });
-    expect(await createLauncher(ctx).request('recent')).toEqual({ urls: ['https://a.example/', 'http://b.example/'] });
+    expect(await createLauncher(ctx).request('recent')).toEqual({ urls: ['https://a.example/', 'http://b.example/'], favorites: [], favicons: {} });
+  });
+  it('adds, reorders and removes favorite origins without changing recent sites', async () => {
+    const ctx = context();
+    const launcher = createLauncher(ctx);
+    await launcher.request('remember', { url: 'https://example.com/path' });
+    expect(await launcher.request('favorite', { url: 'https://example.com/private', favorite: true })).toEqual({
+      ok: true,
+      saved: true,
+      favorite: true,
+      favorites: ['https://example.com/'],
+    });
+    expect(await launcher.request('recent')).toEqual({ urls: ['https://example.com/'], favorites: ['https://example.com/'], favicons: {} });
+    expect(await launcher.request('favorite', { url: 'https://example.com/', favorite: false })).toEqual({
+      ok: true,
+      saved: true,
+      favorite: false,
+      favorites: [],
+    });
+    expect((await ctx.readData()).value.recentUrls).toEqual(['https://example.com/']);
+  });
+
+  it('caps and deduplicates favorite origins', async () => {
+    const launcher = createLauncher(context());
+    for (let i = 0; i < MAX_FAVORITE_SITES + 3; i++) await launcher.request('favorite', { url: `https://favorite${i}.example/path`, favorite: true });
+    const result = await launcher.request('recent') as any;
+    expect(result.favorites).toHaveLength(MAX_FAVORITE_SITES);
+    expect(result.favorites[0]).toBe(`https://favorite${MAX_FAVORITE_SITES + 2}.example/`);
   });
 });

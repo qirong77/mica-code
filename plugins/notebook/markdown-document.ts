@@ -17,6 +17,8 @@ export type MarkdownStatistics = {
   tables: number;
   code_blocks: number;
   links: number;
+  images: number;
+  html_blocks: number;
 };
 
 export type MarkdownConversion = {
@@ -36,6 +38,11 @@ const ITALIC = 2;
 const STRIKE = 4;
 const CODE = 16;
 
+/** Inline images arrive base64-encoded and count against the 6 MiB document cap. */
+const MAX_INLINE_IMAGE_BYTES = 512 * 1024;
+const EMPTY_CAPTION_STATE =
+  '{"root":{"children":[{"children":[],"direction":null,"format":"","indent":0,"type":"paragraph","version":1}],"direction":null,"format":"","indent":0,"type":"root","version":1}}';
+
 export function markdownDocument(
   document: NotebookDocument,
   markdown: string,
@@ -47,7 +54,18 @@ export function markdownDocument(
   const context: Context = {
     warnings: [],
     outline: [],
-    statistics: { blocks: 0, text_nodes: 0, characters: 0, headings: 0, lists: 0, tables: 0, code_blocks: 0, links: 0 },
+    statistics: {
+      blocks: 0,
+      text_nodes: 0,
+      characters: 0,
+      headings: 0,
+      lists: 0,
+      tables: 0,
+      code_blocks: 0,
+      links: 0,
+      images: 0,
+      html_blocks: 0,
+    },
   };
   const source = markdown.replace(/\r\n?/g, '\n');
   const frontmatter = /^---\n[\s\S]*?\n(?:---|\.\.\.)(?:\n|$)/.exec(source);
@@ -104,9 +122,7 @@ function blocks(tokens: Token[], context: Context): JsonRecord[] {
         break;
       }
       case 'paragraph':
-        result.push(
-          element('paragraph', {}, inline(item.tokens as Token[] | undefined, context, String(item.text ?? ''))),
-        );
+        result.push(...paragraphBlocks(item, context));
         break;
       case 'text':
         result.push(element('paragraph', {}, inline([token], context)));
@@ -116,6 +132,21 @@ function blocks(tokens: Token[], context: Context): JsonRecord[] {
         {
           const info = typeof item.lang === 'string' ? item.lang.trim() : '';
           const [language = '', ...metadata] = info.split(/\s+/);
+          // ```react is the notebook's component block: the fence body is a
+          // React component using htm + Arco, rendered in an isolated frame.
+          if (language.toLowerCase() === 'react') {
+            context.statistics.html_blocks += 1;
+            result.push({
+              direction: null,
+              format: '',
+              html: String(item.text ?? ''),
+              indent: 0,
+              runtime: 'react',
+              type: 'html',
+              version: 1,
+            });
+            break;
+          }
           if (metadata.length)
             context.warnings.push(
               `Code fence metadata "${metadata.join(' ')}" is not styled; the full info string is retained in node state.`,
@@ -154,8 +185,26 @@ function blocks(tokens: Token[], context: Context): JsonRecord[] {
         result.push({ type: 'horizontalrule', version: 1 });
         break;
       case 'html':
-        context.warnings.push('HTML is not executed; it was inserted as plain text.');
-        result.push(element('paragraph', {}, [textNode(String(item.raw ?? item.text ?? ''), 0, context)]));
+        {
+          const source = htmlBlockSource(String(item.raw ?? item.text ?? ''));
+          if (source) {
+            context.statistics.html_blocks += 1;
+            result.push({
+              direction: null,
+              format: '',
+              html: source,
+              indent: 0,
+              runtime: 'html',
+              type: 'html',
+              version: 1,
+            });
+          } else {
+            context.warnings.push(
+              'HTML that is not one complete element (or is mixed with text) was inserted as plain text.',
+            );
+            result.push(element('paragraph', {}, [textNode(String(item.raw ?? item.text ?? ''), 0, context)]));
+          }
+        }
         break;
       default:
         context.warnings.push(`Unsupported Markdown block "${String(item.type)}" was inserted as plain text.`);
@@ -163,6 +212,156 @@ function blocks(tokens: Token[], context: Context): JsonRecord[] {
     }
   }
   return result;
+}
+
+/**
+ * A paragraph that is nothing but an image becomes an image block; anything
+ * else keeps the inline treatment (links) so no surrounding text is reordered.
+ */
+function paragraphBlocks(token: JsonRecord, context: Context): JsonRecord[] {
+  const tokens = (token.tokens as Token[] | undefined) ?? [];
+  if (!tokens.some((child) => (child as JsonRecord).type === 'image')) {
+    return [element('paragraph', {}, inline(tokens, context, String(token.text ?? '')))];
+  }
+  const result: JsonRecord[] = [];
+  let pending: Token[] = [];
+  const flushText = () => {
+    if (!pending.length) return;
+    const children = inline(pending, context);
+    if (children.length) result.push(element('paragraph', {}, children));
+    pending = [];
+  };
+  for (const child of tokens) {
+    const item = child as JsonRecord;
+    if (item.type === 'image') {
+      const node = imageNode(item, context);
+      if (node) {
+        flushText();
+        result.push(node);
+        continue;
+      }
+    }
+    pending.push(child);
+  }
+  flushText();
+  return result.length ? result : [element('paragraph', {}, [])];
+}
+
+const HTML_BLOCK_ROOTS = new Set([
+  'article',
+  'aside',
+  'blockquote',
+  'details',
+  'div',
+  'dl',
+  'fieldset',
+  'figure',
+  'footer',
+  'form',
+  'h1',
+  'h2',
+  'h3',
+  'h4',
+  'h5',
+  'h6',
+  'header',
+  'main',
+  'nav',
+  'ol',
+  'p',
+  'pre',
+  'section',
+  'svg',
+  'table',
+  'ul',
+]);
+const VOID_TAGS = new Set([
+  'area',
+  'base',
+  'br',
+  'col',
+  'embed',
+  'hr',
+  'img',
+  'input',
+  'link',
+  'meta',
+  'param',
+  'source',
+  'track',
+  'wbr',
+]);
+const MAX_HTML_BLOCK_CHARS = 256 * 1024;
+
+/**
+ * A whole Markdown block becomes an interactive HTML block only when it is one
+ * complete element from {@link HTML_BLOCK_ROOTS}. Anything else (script tags,
+ * fragments mixed with prose, unbalanced markup) keeps the plain-text path, so
+ * a stray `<script>` in a document never turns into live code.
+ */
+function htmlBlockSource(raw: string): string | null {
+  const source = raw.replace(/<!--[\s\S]*?-->/g, '').trim();
+  if (!source.startsWith('<') || source.length > MAX_HTML_BLOCK_CHARS) return null;
+  const tagPattern = /<\/?([a-zA-Z][a-zA-Z0-9-]*)((?:"[^"]*"|'[^']*'|[^>"'])*)>/g;
+  const stack: string[] = [];
+  let roots = 0;
+  let consumed = 0;
+  let match: RegExpExecArray | null;
+  while ((match = tagPattern.exec(source))) {
+    if (!stack.length && source.slice(consumed, match.index).trim()) return null;
+    consumed = tagPattern.lastIndex;
+    const name = match[1].toLowerCase();
+    const closing = match[0].startsWith('</');
+    const selfClosing = VOID_TAGS.has(name) || /\/\s*>$/.test(match[0]);
+    if (!stack.length) {
+      if (closing || !HTML_BLOCK_ROOTS.has(name)) return null;
+      roots += 1;
+      if (roots > 1) return null;
+    }
+    if (closing) {
+      if (stack.pop() !== name) return null;
+    } else if (!selfClosing) {
+      stack.push(name);
+    }
+  }
+  if (stack.length || source.slice(consumed).trim()) return null;
+  return roots === 1 ? source : null;
+}
+
+/**
+ * Only self-contained `data:` images become nodes: a remote URL would make the
+ * editor fetch third-party hosts, so those keep the link fallback.
+ */
+function imageNode(token: JsonRecord, context: Context): JsonRecord | null {
+  const href = String(token.href ?? '').trim();
+  const alt = decodeMarkdownEntities(String(token.text ?? ''));
+  const match = /^data:image\/(?:png|jpe?g|gif|webp|svg\+xml);base64,([A-Za-z0-9+/=\s]+)$/i.exec(href);
+  const base64 = match ? match[1].replace(/\s+/g, '') : '';
+  const bytes = base64 ? Math.floor((base64.length * 3) / 4) : 0;
+  // A truncated or hand-written payload would decode to a broken image, so the
+  // block is only created for complete base64 (length and padding both checked).
+  if (!match || !base64.length || base64.length % 4 !== 0 || !/^[A-Za-z0-9+/]+={0,2}$/.test(base64)) {
+    context.warnings.push(
+      `Image "${alt || href}" was not inserted: only a complete base64 data:image URL becomes an image block, other sources stay a link.`,
+    );
+    return null;
+  }
+  if (bytes > MAX_INLINE_IMAGE_BYTES) {
+    context.warnings.push(
+      `Image "${alt || 'image'}" was not inserted: ${Math.round(bytes / 1024)} KiB exceeds the ${MAX_INLINE_IMAGE_BYTES / 1024} KiB inline limit.`,
+    );
+    return null;
+  }
+  context.statistics.images += 1;
+  return {
+    altText: alt,
+    caption: { editorState: EMPTY_CAPTION_STATE },
+    maxWidth: 500,
+    showCaption: false,
+    src: href,
+    type: 'image',
+    version: 1,
+  };
 }
 
 function inline(tokens: Token[] | undefined, context: Context, fallback = ''): JsonRecord[] {
@@ -210,7 +409,9 @@ function inline(tokens: Token[] | undefined, context: Context, fallback = ''): J
         break;
       case 'image': {
         const alt = String(item.text ?? '');
-        context.warnings.push(`Image "${alt}" was downgraded to text or a safe link; image nodes are not created.`);
+        context.warnings.push(
+          `Image "${alt || String(item.href ?? '')}" was kept as an inline link; only an image that owns its whole paragraph becomes an image block.`,
+        );
         const children = [textNode(decodeMarkdownEntities(alt || String(item.href ?? '') || '[image]'), 0, context)];
         result.push(
           ...linkNodes({ href: String(item.href ?? ''), title: item.title }, children, context),

@@ -3704,7 +3704,9 @@ html[data-appearance='light'] .chat-markdown code:not(pre code) {
   width: 100%;
   min-width: 0;
   min-height: var(--chat-log-row-height);
-  grid-template-columns: 12ch 8ch auto auto minmax(0, 1fr);
+  /* 固定字段不能用 `auto`：auto track 会被 grid 拉伸，导致描述列被推到行中间。
+     用 max-content 锁住 kind/status/runtime/type，描述才会紧跟在固定列后面对齐。 */
+  grid-template-columns: 12ch 8ch max-content max-content minmax(0, 1fr);
   align-items: center;
   column-gap: 8px;
 }
@@ -3738,7 +3740,7 @@ html[data-appearance='light'] .chat-markdown code:not(pre code) {
 }
 
 .chat-todo-dock .chat-task-summary-row {
-  grid-template-columns: 12ch 8ch auto minmax(0, 1fr);
+  grid-template-columns: 12ch 8ch max-content minmax(0, 1fr);
 }
 
 .chat-todo-dock {

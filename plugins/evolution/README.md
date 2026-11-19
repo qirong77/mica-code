@@ -71,6 +71,8 @@ mica 选后者，这个插件就是「洗」的地方。
 | `notebook-mcp` | 将 Notebook 旧插件 skill 索引移到 `plugin-data/evolution/legacy-notebook-skill/` 原文归档，迁移默认能力中的旧工具停用项；不改笔记正文、用户手写 skill 或其它插件索引。旧 skill / 直连工具入口不再支持。 |
 | `prompt-contributions` | 历史回查控制从 `plugin:builtin.command-memory/guidance` 迁到 `plugin:memory/history`，保留正文、开关与顺序，已有新控制优先；撤下 Todo / 会话自治 / Video / Web Search 的静态段落前将原控制文件归档到 `legacy-prompt-controls/`。归档 Schedule 随包 skill 索引到 `legacy-schedule-skill/`，不改排期数据、用户 skill 或能力停用选择（同名用户 skill 可能仍存在）。旧入口不再支持。 |
 
+| `floatingwindow-favorites`         | 给已有 Floating Window 数据补上 `favoriteUrls` 收藏集合和 `favicons` 图标集合。                                                                                                                 |
+
 新增一条迁移 = 在 `migrations.ts` 里加一个 `Migration`（`id`、`description`、纯函数 `apply`），
 然后写进 `MIGRATIONS`。账本按 id 记进度，所以追加迁移会让所有会话重新评估一次；已经洗过的
 数据改动数为 0，不会重复改写。

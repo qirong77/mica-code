@@ -348,7 +348,13 @@ describe('Notebook MCP', () => {
         expected_version: first.version,
       }),
     );
-    expect(warning.warnings.join(' ')).toMatch(/Image.*HTML/);
+    expect(warning.warnings.join(' ')).toMatch(/only a complete base64 data:image URL/);
+    const withHtmlBlock = json(
+      await call(read, { operation: 'read', node_id: note.id, include_editor_state: true }),
+    );
+    expect(JSON.parse(withHtmlBlock.editor_state).root.children).toEqual(
+      expect.arrayContaining([expect.objectContaining({ type: 'html', html: '<div>literal</div>' })]),
+    );
     expect(warning).not.toHaveProperty('text');
     const cleared = json(
       await call(write, {

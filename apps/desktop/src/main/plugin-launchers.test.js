@@ -192,6 +192,10 @@ describe('manifest desktop launchers', () => {
     expect(await f.control('web.state')).toEqual({ url: 'https://example.com/', home: false, canGoBack: false, canGoForward: false, loading: false })
     expect(win.view).toBe(view)
     expect(win.script).toContain('mica:launcher-web-state')
+    view.webContents.emit('page-favicon-updated', {}, ['javascript:alert(1)', 'https://cdn.example/icon.svg?cache=1'])
+    expect(await f.control('web.state')).toMatchObject({ faviconUrl: 'https://cdn.example/icon.svg?cache=1' })
+    view.webContents.emit('did-start-loading')
+    expect((await f.control('web.state')).faviconUrl).toBeUndefined()
     for (const url of ['javascript:alert(1)', 'file:///tmp/a', 'http://127.0.0.1:8787/', ' http://example.com', 'http://x:bad', 'http://u:p@example.com']) {
       await expect(f.control('web.navigate', { url })).rejects.toThrow()
     }

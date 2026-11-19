@@ -153,6 +153,75 @@ describe('Notebook Markdown document conversion', () => {
     expect(result.warnings.join(' ')).toMatch(/HTML.*Unsafe URL.*Image/);
   });
 
+  it('turns a paragraph that is only a base64 data image into an image block', () => {
+    const result = markdownDocument(empty, '![侧边栏](data:image/svg+xml;base64,PHN2Zz48L3N2Zz4=)\n\n后一段');
+    const root = rootOf(result.document);
+    expect(root.children.map((node: Record<string, unknown>) => node.type)).toEqual(['image', 'paragraph']);
+    expect(root.children[0]).toMatchObject({
+      altText: '侧边栏',
+      maxWidth: 500,
+      showCaption: false,
+      src: 'data:image/svg+xml;base64,PHN2Zz48L3N2Zz4=',
+      type: 'image',
+    });
+    expect(result.statistics.images).toBe(1);
+    expect(result.warnings).toEqual([]);
+  });
+
+  it('keeps a remote image as a link and reports why it was not inserted', () => {
+    const result = markdownDocument(empty, '![](https://example.com/a.png)');
+    const root = rootOf(result.document);
+    expect(root.children.map((node: Record<string, unknown>) => node.type)).toEqual(['paragraph']);
+    expect(result.statistics.images).toBe(0);
+    expect(result.warnings.join(' ')).toMatch(/only a complete base64 data:image URL/);
+  });
+
+  it('refuses an inline image past the size limit instead of writing it into the document', () => {
+    const huge = 'data:image/png;base64,' + 'A'.repeat(1024 * 1024);
+    const result = markdownDocument(empty, `![大图](${huge})`);
+    expect(rootOf(result.document).children.some((node: Record<string, unknown>) => node.type === 'image')).toBe(
+      false,
+    );
+    expect(result.statistics.images).toBe(0);
+    expect(result.warnings.join(' ')).toMatch(/exceeds the 512 KiB inline limit/);
+  });
+
+  it('turns one complete HTML element into an interactive html block', () => {
+    const html = '<div class="card"><p>一键建群</p><button type="button">建群</button></div>';
+    const result = markdownDocument(empty, `${html}\n\n下一段`);
+    const root = rootOf(result.document);
+    expect(root.children.map((node: Record<string, unknown>) => node.type)).toEqual(['html', 'paragraph']);
+    expect(root.children[0]).toMatchObject({ html, type: 'html' });
+    expect(result.statistics.html_blocks).toBe(1);
+    expect(result.warnings).toEqual([]);
+  });
+
+  it('keeps HTML as text when it is a fragment, several roots, or a script', () => {
+    for (const source of [
+      '文字 <div>x</div>',
+      '<div>a</div><div>b</div>',
+      '<script>alert(1)</script>',
+      '<div>没有闭合',
+    ]) {
+      const result = markdownDocument(empty, source);
+      expect(result.statistics.html_blocks).toBe(0);
+      expect(rootOf(result.document).children.some((node: Record<string, unknown>) => node.type === 'html')).toBe(
+        false,
+      );
+    }
+  });
+
+  it('turns a react fence into a component block and leaves other fences as code', () => {
+    const code = 'function App({html, Arco}) { return html`<${Arco.Button}>建群</${Arco.Button}>`; }';
+    const result = markdownDocument(empty, '```react\n' + code + '\n```\n\n```js\nconst a = 1;\n```');
+    const root = rootOf(result.document);
+    expect(root.children.map((node: Record<string, unknown>) => node.type)).toEqual(['html', 'code']);
+    expect(root.children[0]).toMatchObject({ html: code, runtime: 'react', type: 'html' });
+    expect(root.children[1]).toMatchObject({ language: 'js', type: 'code' });
+    expect(result.statistics.html_blocks).toBe(1);
+    expect(result.statistics.code_blocks).toBe(2);
+  });
+
   it.each([
     'https://example.com/a?q=1&x=2',
     'http://example.com',

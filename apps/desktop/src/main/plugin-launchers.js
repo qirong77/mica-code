@@ -61,7 +61,8 @@ export function createPluginLaunchers({
         loading: null,
         registered: false,
         error: '',
-        webError: ''
+        webError: '',
+        webFavicon: ''
       }
       records.set(id, record)
       register(id, record)
@@ -110,6 +111,7 @@ export function createPluginLaunchers({
       canGoBack: wc.navigationHistory.canGoBack(),
       canGoForward: wc.navigationHistory.canGoForward(),
       loading: wc.isLoading(),
+      ...(record.webFavicon ? { faviconUrl: record.webFavicon } : {}),
       ...(record.webError ? { error: record.webError } : {})
     }
   }
@@ -167,10 +169,21 @@ export function createPluginLaunchers({
     })
     for (const event of ['did-navigate', 'did-navigate-in-page', 'did-start-loading', 'did-stop-loading']) {
       wc.on(event, () => {
-        if (event === 'did-start-loading') record.webError = ''
+        if (event === 'did-start-loading') {
+          record.webError = ''
+          record.webFavicon = ''
+        }
         pushWebState(id, record)
       })
     }
+    wc.on('page-favicon-updated', (_event, favicons) => {
+      if (record.webHome) return
+      const candidate = Array.isArray(favicons) ? favicons.find((value) => {
+        return allowedWebUrl(value)
+      }) : ''
+      record.webFavicon = candidate || ''
+      pushWebState(id, record)
+    })
     wc.on('did-fail-load', (_event, code, description, _url, mainFrame) => {
       if (mainFrame && code !== -3) { record.webError = description; pushWebState(id, record) }
     })
@@ -286,10 +299,12 @@ export function createPluginLaunchers({
         showWebContent(record)
         record.webHome = false
         record.webError = ''
+        record.webFavicon = ''
         void wc.loadURL(url).catch(() => {})
       } else if (action === 'web.home') {
         record.webHome = true
         record.webError = ''
+        record.webFavicon = ''
         hideWebContent(record)
         pushWebState(pluginId, record)
       } else if (action === 'web.back') {

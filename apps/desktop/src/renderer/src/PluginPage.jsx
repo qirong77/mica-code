@@ -178,7 +178,7 @@ export function PluginPage({
           </span>
         </div>
         {!isMobile && (
-          <div className="no-drag flex h-5 min-w-0 max-w-[min(560px,45vw)] items-center gap-1 rounded-full border border-line bg-canvas px-2">
+          <div className="no-drag flex h-5 min-w-0 max-w-[min(560px,45vw)] items-center gap-1 rounded border border-line bg-canvas px-2">
             <span
               className="min-w-0 select-text truncate font-mono text-[11px] leading-none text-fg-muted"
               title={address}
