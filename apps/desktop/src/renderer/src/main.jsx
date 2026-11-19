@@ -1,11 +1,11 @@
 import { createRoot } from 'react-dom/client'
+import { lazy, Suspense } from 'react'
 import {
   ArcoProvider,
   setConfigWebClient,
   setConfigWebEditor,
   setConfigWebThemeHost
 } from '@mica-config-ui/web'
-import { DesktopDialogHost } from './desktop-dialog'
 import { NotificationHost } from './NotificationHost'
 import { ErrorBoundary } from './ErrorBoundary'
 import '../assets/app.css'
@@ -25,6 +25,31 @@ import { createStartupTiming } from './startup-timing'
 
 const startup = createStartupTiming(window)
 startup.mark('main')
+
+// 不要把所有页面的动态 import 写在一个条件表达式里。Rolldown 会把这类表达式的
+// 依赖合并成一张 preload 表，打开 Notebook 也会先拉 App / ChatView / Monaco 等
+// 其它页面的 chunk。每条路由各自一个 loader，才能让 modulepreload 保持按页面隔离。
+const VIEW_LOADERS = {
+  editor: () => import('./EditorWindow'),
+  pluginPage: () => import('./PluginPageWindow'),
+  launcher: () => import('./PluginLauncher'),
+  share: () => import('./ShareIndex'),
+  app: () => import('./App')
+}
+
+// 对话页的确认弹窗依赖 chat-modal；独立插件页没有调用它的宿主动作，不应为一个空
+// 的 DialogHost 把这份公共 chunk 也拉下来。需要弹窗的页面在内容真正挂载后再加载。
+const LazyDesktopDialogHost = lazy(() =>
+  import('./desktop-dialog').then(({ DesktopDialogHost }) => ({ default: DesktopDialogHost }))
+)
+
+function DesktopDialogSlot() {
+  return (
+    <Suspense fallback={null}>
+      <LazyDesktopDialogHost />
+    </Suspense>
+  )
+}
 
 document.body.classList.add('mica-arco-theme')
 
@@ -115,17 +140,8 @@ if (!quickButtonsDemo) {
   const modules = new Map()
   const loadView = (view) => {
     if (!modules.has(view)) {
-      const promise = (
-        view === 'editor'
-          ? import('./EditorWindow')
-          : view === 'pluginPage'
-            ? import('./PluginPageWindow')
-            : view === 'launcher'
-              ? import('./PluginLauncher')
-              : view === 'share'
-                ? import('./ShareIndex')
-                : import('./App')
-      ).then(
+      const loader = VIEW_LOADERS[view] || VIEW_LOADERS.app
+      const promise = loader().then(
         (module) => ({ module, loadedAt: window.performance.now() }),
         (error) => ({ error })
       )
@@ -171,26 +187,25 @@ if (!quickButtonsDemo) {
       view === 'editor' ? (
         <>
           <module.default path={editorTarget} />
-          <DesktopDialogHost />
+          <DesktopDialogSlot />
         </>
       ) : view === 'pluginPage' ? (
         <>
           <NotificationHost />
           <module.default pluginId={pluginPageTarget} />
-          <DesktopDialogHost />
         </>
       ) : view === 'launcher' ? (
         <module.PluginLauncher pluginId={launcherId} />
       ) : view === 'share' ? (
         <>
           <module.default />
-          <DesktopDialogHost />
+          <DesktopDialogSlot />
         </>
       ) : (
         <>
           <NotificationHost />
           <module.default />
-          <DesktopDialogHost />
+          <DesktopDialogSlot />
         </>
       )
     createRoot(document.getElementById('root')).render(

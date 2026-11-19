@@ -441,6 +441,12 @@ export default function NotebookPage({ api }) {
     },
     [save, scheduleTitle],
   );
+  // Index updates change `acceptChange`'s closure. The iframe, however, keeps
+  // the same document and must not lose its ready listener just because the
+  // directory tree was loaded or renamed. Keep the bridge mounted and route
+  // incoming changes through the latest callback instead.
+  const acceptChangeRef = useRef(acceptChange);
+  acceptChangeRef.current = acceptChange;
 
   const flush = useCallback(
     async (includeIndex = true) => {
@@ -635,7 +641,7 @@ export default function NotebookPage({ api }) {
       onOutline(id, next) {
         if (current.current?.id === id) setOutline(next);
       },
-      onChange: acceptChange,
+      onChange: (...args) => acceptChangeRef.current(...args),
       onError(text) {
         setError(text);
         if (current.current && loadedNote.current === current.current.id) {
@@ -682,7 +688,7 @@ export default function NotebookPage({ api }) {
       window.removeEventListener('message', instance.receive);
       instance.dispose();
     };
-  }, [token, acceptChange, lifecycle]);
+  }, [token, lifecycle]);
 
   useEffect(() => {
     const beforeUnload = (event) => {
