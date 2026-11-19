@@ -565,11 +565,8 @@ html[data-appearance='light'] .chat-modal {
 html[data-appearance='light'] .quick-pick-panel {
   box-shadow: 0 12px 44px rgb(0 0 0 / 17%);
 }
-html[data-appearance='light'] .chat-ask-card.is-modal {
-  box-shadow: 0 18px 52px rgb(0 0 0 / 17%);
-}
 /* 亮色底的画布本身就是白，同一份青色的浮光会糊成一片；压淡一档，只靠描边抬起来。 */
-html[data-appearance='light'] .chat-ask-card:not(.is-modal) {
+html[data-appearance='light'] .chat-ask-card {
   box-shadow:
     0 0 0 1px color-mix(in srgb, var(--color-ask) 10%, transparent),
     0 4px 12px color-mix(in srgb, var(--color-ask) 8%, transparent);
@@ -661,7 +658,7 @@ textarea:not([class*="arco-"]):focus-visible {
 /*
  * 全应用不显示滚动条（内容照旧可用滚轮、触控板、键盘滚动）。不要在这里
  * 恢复 ::-webkit-scrollbar 的尺寸或颜色：滚动容器的标记类已随之移除。
- * 只有主对话区与回合日志例外，见下面的 `.chat-scroll` / `.chat-turn-log-scroll`。
+ * 只有主对话区与底部停靠区例外，见下面的 `.chat-scroll` / `.chat-bottom-scroll`。
  */
 * {
   scrollbar-width: none;
@@ -671,18 +668,20 @@ textarea:not([class*="arco-"]):focus-visible {
 }
 
 /*
- * 唯一显示滚动条的两处：主对话区与回合日志（思考与工具日志）都是长内容容器，
- * 需要能看出「还有多少没读完」。其余滚动容器沿用上面的全局隐藏。
+ * 唯一显示滚动条的三处：主对话区、底部停靠区与回合日志（思考与工具日志）都是长
+ * 内容容器，需要能看出「还有多少没读完」。其余滚动容器沿用上面的全局隐藏。
  *
  * 必须显式写回 scrollbar-width: auto —— Chromium 只要 scrollbar-width 不是
  * auto，就整个忽略 ::-webkit-scrollbar，而 `* { scrollbar-width: none }`
  * 已经把它压成 none 了。
  */
 .chat-scroll,
+.chat-bottom-scroll,
 .chat-turn-log-scroll {
   scrollbar-width: auto;
 }
 .chat-scroll::-webkit-scrollbar,
+.chat-bottom-scroll::-webkit-scrollbar,
 .chat-turn-log-scroll::-webkit-scrollbar {
   /* 必须显式 display: block —— 上面 `*::-webkit-scrollbar` 设的是 display: none，
      只写 width/background 覆盖不回可见性，滚动条会一直是隐藏的。 */
@@ -690,11 +689,13 @@ textarea:not([class*="arco-"]):focus-visible {
   width: 10px;
 }
 .chat-scroll::-webkit-scrollbar-track,
+.chat-bottom-scroll::-webkit-scrollbar-track,
 .chat-turn-log-scroll::-webkit-scrollbar-track {
   background: transparent;
 }
 /* 3px 透明边框 + background-clip 让滑块比轨道窄，两侧留出底色间距。 */
 .chat-scroll::-webkit-scrollbar-thumb,
+.chat-bottom-scroll::-webkit-scrollbar-thumb,
 .chat-turn-log-scroll::-webkit-scrollbar-thumb {
   border: 3px solid transparent;
   border-radius: 5px;
@@ -702,10 +703,12 @@ textarea:not([class*="arco-"]):focus-visible {
   background-color: color-mix(in srgb, var(--color-fg-max) 16%, transparent);
 }
 .chat-scroll::-webkit-scrollbar-thumb:hover,
+.chat-bottom-scroll::-webkit-scrollbar-thumb:hover,
 .chat-turn-log-scroll::-webkit-scrollbar-thumb:hover {
   background-color: color-mix(in srgb, var(--color-fg-max) 28%, transparent);
 }
 .chat-scroll::-webkit-scrollbar-thumb:active,
+.chat-bottom-scroll::-webkit-scrollbar-thumb:active,
 .chat-turn-log-scroll::-webkit-scrollbar-thumb:active {
   background-color: color-mix(in srgb, var(--color-fg-max) 38%, transparent);
 }
@@ -2419,6 +2422,29 @@ html[data-appearance='light'] .chat-markdown code:not(pre code) {
   color: color-mix(in srgb, var(--color-fg-max) 70%, transparent);
 }
 
+.chat-bottom-dock {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  max-height: 100%;
+  flex: 0 1 auto;
+  flex-direction: column;
+  /* 这里不能裁剪输入框向上展开的 jump / picker / completion 浮层；动态内容自己的
+     滚动边界在 `.chat-bottom-scroll`。 */
+  overflow: visible;
+  background: var(--color-canvas);
+}
+
+.chat-bottom-scroll {
+  min-width: 0;
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
 .chat-composer-dock {
   position: relative;
   flex: 0 0 auto;
@@ -2427,7 +2453,7 @@ html[data-appearance='light'] .chat-markdown code:not(pre code) {
   padding: 0;
 }
 
-.chat-composer-dock .chat-jump {
+.chat-bottom-dock .chat-jump {
   top: -39px;
   bottom: auto;
 }
@@ -2874,6 +2900,7 @@ html[data-appearance='light'] .chat-markdown code:not(pre code) {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  margin: 8px 12px;
   border: 1px solid color-mix(in srgb, var(--color-ask) 55%, var(--color-line));
   border-radius: 10px;
   background: var(--color-panel);
@@ -2881,12 +2908,6 @@ html[data-appearance='light'] .chat-markdown code:not(pre code) {
   box-shadow:
     0 0 0 1px color-mix(in srgb, var(--color-ask) 14%, transparent),
     0 6px 18px color-mix(in srgb, var(--color-ask) 10%, transparent);
-}
-
-/* 停在输入条上方时左右留边、顶上留一道缝：贴满整行会被读成「输入条又长出来一条」，
-   而它应该是一张插进来的卡。浮层版有自己的宽度与遮罩，不加这份外边距。 */
-.chat-ask-card:not(.is-modal) {
-  margin: 8px 12px;
 }
 
 .chat-ask-head {
@@ -3123,23 +3144,6 @@ html[data-appearance='light'] .chat-markdown code:not(pre code) {
 
 /* hover 往「前景色」方向混：暗色里 fg-max 是白（提亮），亮色里是近黑（加深），
    一条表达式两档都对，不必为 ask 再配一组 hover 值。 */
-
-/* modal：铺一层遮罩居中显示，用于需要打断注意力的事情（例如「上下文快满了，压缩吗」） */
-.chat-ask-overlay {
-  position: fixed;
-  z-index: 60;
-  display: flex;
-  inset: 0;
-  align-items: center;
-  justify-content: center;
-  padding: 24px;
-  background: rgb(0 0 0 / 45%);
-}
-
-.chat-ask-card.is-modal {
-  width: min(520px, 100%);
-  box-shadow: 0 18px 48px rgb(0 0 0 / 45%);
-}
 
 .chat-composer-images {
   display: flex;

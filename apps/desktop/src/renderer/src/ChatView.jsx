@@ -623,8 +623,7 @@ function QueueDock({ items, onRecall, recallingId, running }) {
 // 「两行文字 + 输入框」和「只有一个确认按钮」这两种完全不同的场合。**自由输入框例外**：
 // 它永远在（见下面那段），选项是模型想出来的，它想不全的时候用户要有地方说自己的答案。
 //
-// 位置有两种：默认挂在输入框上方（和排队行同一个位置，都是「这一轮卡在这里」的东西）；
-// `presentation: 'modal'` 时铺一层遮罩居中显示，用于需要打断注意力的事情。
+// 位置固定挂在输入框上方（和排队行同一个位置，都是「这一轮卡在这里」的东西）。
 function AskCountdown({ ask }) {
   const [now, setNow] = useState(() => Date.now())
   useEffect(() => {
@@ -690,7 +689,6 @@ export function AskDock({ ask, submitting, onSubmit, onCancel, onActivity }) {
     ...(ask.display || {})
   }
   const multiple = Boolean(ask.multiple)
-  const modal = ask.presentation === 'modal'
   const canSubmit = selected.length > 0 || custom.trim().length > 0
   // 打了字之后要有看得见的提交入口：选项点了就交，自己写的那句靠回车或这个「确定」。
   const showConfirm = display.confirm || custom.trim().length > 0
@@ -736,9 +734,8 @@ export function AskDock({ ask, submitting, onSubmit, onCancel, onActivity }) {
 
   const card = (
     <section
-      className={`chat-ask-card${modal ? ' is-modal' : ''}`}
-      role="dialog"
-      aria-modal={modal ? 'true' : undefined}
+      className="chat-ask-card"
+      role="region"
       aria-label={ask.passive ? '需要你确认' : '等你做一个选择'}
     >
       <div className="chat-ask-head">
@@ -845,16 +842,7 @@ export function AskDock({ ask, submitting, onSubmit, onCancel, onActivity }) {
     </section>
   )
 
-  if (!modal) return card
-  return (
-    <div
-      className="chat-ask-overlay"
-      // `display.dismiss: false` 是「必须先答」：关掉按钮、点遮罩、按 Esc 都不该取消它。
-      onClick={(event) => event.target === event.currentTarget && display.dismiss && cancel()}
-    >
-      {card}
-    </div>
-  )
+  return card
 }
 
 function isLocalPath(value) {
@@ -3824,6 +3812,7 @@ export function ChatView({
   const listRef = useRef(null)
   const transcriptRef = useRef(null)
   const composerDockRef = useRef(null)
+  const bottomScrollRef = useRef(null)
   const textareaRef = useRef(null)
   const attachInputRef = useRef(null)
   // 动作区合并成一个「+」：悬停展开、点击也能开（触屏没有 hover）。
@@ -5749,7 +5738,9 @@ export function ChatView({
         previousLayout = null
         return
       }
-      const log = target.parentElement?.querySelector(':scope > .chat-turn-log')
+      const log = target.parentElement?.querySelector(
+        ':scope > .chat-bottom-dock > .chat-bottom-scroll > .chat-turn-log'
+      )
       const layout = { viewportHeight, logHeight: log?.getBoundingClientRect().height ?? 0 }
       const offset = turnLogScrollOffset(previousLayout, layout)
       previousLayout = layout
@@ -5763,6 +5754,40 @@ export function ChatView({
     if (list) observer.observe(list)
     return () => observer.disconnect()
   }, [nodeId])
+
+  // 输入框也可以手动拖高，但窗口变矮时不能让这份用户偏好反过来突破底部停靠区。
+  // 只在真的有尺寸时夹紧，隐藏的缓存会话不应因为 clientHeight=0 被改成最小高度。
+  useEffect(() => {
+    const dock = composerDockRef.current
+    const layout = dock?.parentElement
+    if (!dock || !layout || typeof ResizeObserver === 'undefined') return undefined
+    const clampComposerHeight = () => {
+      if (composerMinHeight == null) return
+      const available = layout.getBoundingClientRect().height
+      if (available <= 0) return
+      const composer = dock.querySelector('.chat-composer')
+      const textarea = dock.querySelector('.chat-composer textarea')
+      const chrome = composer && textarea
+        ? Math.max(0, composer.getBoundingClientRect().height - textarea.getBoundingClientRect().height)
+        : 54
+      const maxHeight = Math.max(30, Math.min(400, available - chrome))
+      if (composerMinHeight > maxHeight) setComposerMinHeight(maxHeight)
+    }
+    const observer = new ResizeObserver(clampComposerHeight)
+    observer.observe(layout)
+    observer.observe(dock)
+    clampComposerHeight()
+    return () => observer.disconnect()
+  }, [composerMinHeight])
+
+  // Ask 卡片是这一轮真正的阻塞点。底部动态区有自己的滚动边界，问题刚出现时把它
+  // 送到该边界的底部，确保用户不用先在长日志/任务列表里找卡片才能回答。
+  useLayoutEffect(() => {
+    if (!pendingAsk?.id || !visible) return
+    const scroll = bottomScrollRef.current
+    if (!scroll) return
+    scroll.scrollTop = scroll.scrollHeight
+  }, [pendingAsk?.id, visible])
 
   useEffect(() => {
     if (!visible || !nodeId || !historyLoaded) return
@@ -7704,16 +7729,6 @@ export function ChatView({
           </div>
         </div>
 
-        {/* 回合日志是停靠区，不是对话的一部分：放在滚动区外面，它才永远贴着输入条。
-            放在里面时内容一短就浮在顶上、下面留一大块空白，收起成一行尤其明显。 */}
-        <TurnLogDock
-          rounds={turnLogRounds}
-          now={Date.now()}
-          running={running}
-          onOpenActivity={openActivityDetail}
-          interrupted={todoInterrupted}
-        />
-
         <ChatFind
           open={findOpen}
           focusSignal={findFocusSignal}
@@ -7723,28 +7738,18 @@ export function ChatView({
           onClose={closeFind}
         />
 
-        <div ref={composerDockRef} className="chat-composer-dock">
-          {showJump && (
-            <div className="chat-jump">
-              <ArcoAction
-                type="button"
-                onClick={() => jumpConversation('previous')}
-                disabled={!canPrevConversation}
-                title="跳到上一轮对话"
-                aria-label="上一个对话"
-              >
-                <IconArrowUp size={13} /> 上一个对话
-              </ArcoAction>
-              <ArcoAction
-                type="button"
-                onClick={() => jumpConversation('next')}
-                title="跳到下一轮对话，已经在最后一轮时回到最新消息"
-                aria-label="下一个对话"
-              >
-                <IconArrowDown size={13} /> 下一个对话
-              </ArcoAction>
-            </div>
-          )}
+        {/* 输入条本身固定在最底下；日志、任务与 Ask 卡片统一放进上面的可滚动区。
+            这些区域再长也只能挤压自己的滚动视口，不能把真正的输入框推出聊天区域。 */}
+        <div ref={composerDockRef} className="chat-bottom-dock">
+          <div ref={bottomScrollRef} className="chat-bottom-scroll">
+            {/* 回合日志仍在对话滚动区外，但与其它底部状态一起共享可滚动的剩余空间。 */}
+            <TurnLogDock
+              rounds={turnLogRounds}
+              now={Date.now()}
+              running={running}
+              onOpenActivity={openActivityDetail}
+              interrupted={todoInterrupted}
+            />
           <TodoDock key={`${nodeId}:${activityTurnId}`} panel={todoPanel} />
           <SubagentStatusDock
             tasks={subagentTasks.filter((task) => keepsSubagentTaskRow(task))}
@@ -7836,6 +7841,29 @@ export function ChatView({
               onOpenReviewRef.current?.(review)
             }}
           />
+          </div>
+          <div className="chat-composer-dock">
+          {showJump && (
+            <div className="chat-jump">
+              <ArcoAction
+                type="button"
+                onClick={() => jumpConversation('previous')}
+                disabled={!canPrevConversation}
+                title="跳到上一轮对话"
+                aria-label="上一个对话"
+              >
+                <IconArrowUp size={13} /> 上一个对话
+              </ArcoAction>
+              <ArcoAction
+                type="button"
+                onClick={() => jumpConversation('next')}
+                title="跳到下一轮对话，已经在最后一轮时回到最新消息"
+                aria-label="下一个对话"
+              >
+                <IconArrowDown size={13} /> 下一个对话
+              </ArcoAction>
+            </div>
+          )}
           <div
             className={`chat-composer ${running ? 'chat-composer-running' : ''} ${queueReady ? 'chat-composer-queue' : ''} ${loopTone}`}
             style={
@@ -8273,6 +8301,7 @@ export function ChatView({
             />
           )}
           {statusLine}
+        </div>
         </div>
         </div>
         {contextDetail && (

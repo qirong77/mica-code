@@ -12,6 +12,7 @@ import {
   FolderOpen,
   FolderPlus,
   Menu,
+  Sparkles,
   MoreHorizontal,
   PanelLeftClose,
   Pencil,
@@ -53,6 +54,9 @@ import {
 import { createEditorBridge } from './bridge';
 import { createNotebookDraft, createNotebookWriter, updateNotebookDraft } from './writer';
 import { createNotebookLifecycle } from './lifecycle';
+import { NotebookChatDock } from './NotebookChatDock';
+import { prepareNotebookReference } from './ai-context';
+import { createNotebookUpdateCheck } from './ai-updates';
 import './notebook.css';
 
 const message = (error) =>
@@ -160,6 +164,26 @@ function NoteMenu({ node, open, onOpen, onClose, onAction, extraRows, trigger, p
   );
 }
 
+/** 会话能力不依赖某篇笔记；入口始终可见，也能从专注模式重新打开面板。 */
+export function NotebookChatButton({ open, focused, onOpenChange, onFocusedChange }) {
+  const visible = open && !focused;
+  return (
+    <Button
+      variant={visible ? 'primary' : 'ghost'}
+      icon={<Sparkles size={16} strokeWidth={1.7} />}
+      className="notebook-ai-button"
+      title={visible ? '收起 AI 对话' : '打开 AI 对话'}
+      aria-label={visible ? '收起 AI 对话' : '打开 AI 对话'}
+      aria-expanded={visible}
+      pressed={visible}
+      onClick={() => {
+        if (!visible) onFocusedChange(false);
+        onOpenChange(!visible);
+      }}
+    />
+  );
+}
+
 export default function NotebookPage({ api }) {
   const [index, setIndex] = useState(emptyIndex);
   const [loaded, setLoaded] = useState(false);
@@ -175,6 +199,7 @@ export default function NotebookPage({ api }) {
   const [layout, setLayout] = useState(() => ({
     mobile: window.innerWidth <= 760,
     overlay: window.innerWidth <= 1100,
+    chatOverlay: window.innerWidth <= 1000,
   }));
   const [focused, setFocused] = useState(false);
   const [outline, setOutline] = useState(emptyOutline);
@@ -183,6 +208,8 @@ export default function NotebookPage({ api }) {
   const [frameState, setFrameState] = useState('loading');
   const [frameKey, setFrameKey] = useState(0);
   const [mcpOpen, setMcpOpen] = useState(false);
+  const [chatOpen, setChatOpen] = useState(false);
+  const [externalUpdate, setExternalUpdate] = useState(null);
   const [copied, setCopied] = useState('');
   const iframe = useRef(null);
   const pageRoot = useRef(null);
@@ -203,6 +230,7 @@ export default function NotebookPage({ api }) {
   const loadedNote = useRef(null);
   const tree = useRef(null);
   const actions = useRef({});
+  const checkUpdates = useRef(async () => {});
   const creating = useRef(false);
   // 深链（`/plugins/pages/notebook?note=<id>`）：首屏要打开的是这一篇，而不是第一篇。
   // 只在挂载时取一次——之后地址由页面自己按当前笔记改写。
@@ -224,11 +252,7 @@ export default function NotebookPage({ api }) {
   // MCP：笔记本跑在 Mica 运行时里，AI 客户端要的就是这台机器上的同一个端口。
   const mcpServer = pluginMcpServerName('notebook');
   const mcpUrl = `${api.currentHost?.() ?? ''}${pluginMcpPath('notebook')}`;
-  const mcpConfig = JSON.stringify(
-    { mcpServers: { [mcpServer]: { type: 'http', url: mcpUrl } } },
-    null,
-    2,
-  );
+  const mcpConfig = JSON.stringify({ mcpServers: { [mcpServer]: { type: 'http', url: mcpUrl } } }, null, 2);
   const copyText = useCallback(async (text, key) => {
     try {
       await navigator.clipboard.writeText(text);
@@ -243,7 +267,8 @@ export default function NotebookPage({ api }) {
     [index, expanded, query, trash],
   );
   const railOverlay = layout.mobile && railOpen && !focused;
-  const outlineOverlay = layout.overlay && !focused && !!active;
+  const outlineOverlay = layout.overlay && !focused && !chatOpen && !!active;
+  const chatOverlay = layout.chatOverlay && chatOpen && !focused;
 
   const save = useCallback(
     async (target = current.current) => {
@@ -346,7 +371,7 @@ export default function NotebookPage({ api }) {
             loadedNote.current = null;
             await loadEditor(draft);
             // 地址跟着当前笔记走：复制出去、刷新页面都还落在这一篇上。
-            api.page?.setSearch?.({ note: id });
+            api.page?.setSearch?.({ ...api.page.search?.(), note: id });
             if (layoutRef.current.mobile) setRailOpen(false);
           },
         );
@@ -362,6 +387,43 @@ export default function NotebookPage({ api }) {
   actions.current = { flush, openNote, save, loadEditor };
 
   useEffect(() => {
+    setExternalUpdate(null);
+  }, [activeId]);
+
+  // AI writes go through MCP/CAS, not through this editor's undo history. Refresh the
+  // directory, but never silently replace a live document or its unsaved input.
+  useEffect(() => {
+    if (!chatOpen || !api.sessions?.onExit) return undefined;
+    const observer = createNotebookUpdateCheck({
+      available: () => !lifecycle.closing && !lifecycle.switching,
+      waitForWrites: () => writer.idle(),
+      refreshIndex: () => (controller.getPendingIndexCount() ? Promise.resolve() : controller.loadIndex()),
+      current: () => current.current,
+      readVersion: async (id) => (await controller.readDocument(id)).version,
+      changed: setExternalUpdate,
+      error: (cause) => setError(`检查笔记更新失败：${message(cause)}`),
+    });
+    const check = () => observer.check();
+    checkUpdates.current = check;
+    const unsubscribe = api.sessions.onExit(() => {
+      void check();
+    });
+    const restore = () => {
+      if (document.visibilityState === 'visible') void check();
+    };
+    window.addEventListener('mica:transport-resync', restore);
+    document.addEventListener('visibilitychange', restore);
+    void check();
+    return () => {
+      observer.dispose();
+      if (checkUpdates.current === check) checkUpdates.current = async () => {};
+      unsubscribe?.();
+      window.removeEventListener('mica:transport-resync', restore);
+      document.removeEventListener('visibilitychange', restore);
+    };
+  }, [api.sessions, chatOpen, controller, writer, lifecycle, activeId, frameState]);
+
+  useEffect(() => {
     let alive = true;
     mounted.current = true;
     void controller
@@ -374,9 +436,7 @@ export default function NotebookPage({ api }) {
         const requested = deepLink.current?.note;
         const target =
           (requested &&
-            result.nodes.find(
-              (node) => node.id === requested && node.kind === 'note' && !node.trashedAt,
-            )) ||
+            result.nodes.find((node) => node.id === requested && node.kind === 'note' && !node.trashedAt)) ||
           result.nodes.find((node) => node.kind === 'note' && !node.trashedAt);
         if (target) await actions.current.openNote(target.id);
       })
@@ -491,9 +551,18 @@ export default function NotebookPage({ api }) {
 
   useEffect(() => {
     const observer = new ResizeObserver(([entry]) => {
-      const next = { mobile: entry.contentRect.width <= 760, overlay: entry.contentRect.width <= 1100 };
+      const next = {
+        mobile: entry.contentRect.width <= 760,
+        overlay: entry.contentRect.width <= 1100,
+        chatOverlay: entry.contentRect.width <= 1000,
+      };
       const previous = layoutRef.current;
-      if (previous.mobile === next.mobile && previous.overlay === next.overlay) return;
+      if (
+        previous.mobile === next.mobile &&
+        previous.overlay === next.overlay &&
+        previous.chatOverlay === next.chatOverlay
+      )
+        return;
       layoutRef.current = next;
       setLayout(next);
       if (next.mobile && !previous.mobile) setRailOpen(false);
@@ -615,6 +684,7 @@ export default function NotebookPage({ api }) {
           current.current = latest;
           await loadEditor(latest);
           setError('');
+          setExternalUpdate(null);
           setDialog(null);
         },
       );
@@ -832,7 +902,7 @@ export default function NotebookPage({ api }) {
   return (
     <div ref={pageRoot} className={`notebook-page ${railOpen ? 'is-rail-open' : ''} ${focused ? 'is-focused' : ''}`}>
       <div className="notebook-layout">
-        <aside ref={rail} className="notebook-rail" aria-label="笔记目录" inert={outlineOverlay}>
+        <aside ref={rail} className="notebook-rail" aria-label="笔记目录" inert={outlineOverlay || chatOverlay}>
           <div className="notebook-rail-title">
             <span className="notebook-book-icon">
               <BookOpen size={15} strokeWidth={1.6} />
@@ -1064,6 +1134,19 @@ export default function NotebookPage({ api }) {
           />
         )}
         <main className="notebook-main" inert={railOverlay}>
+          {externalUpdate === current.current?.id && (
+            <div className="notebook-error" role="status">
+              <span>AI 或其他窗口已更新这篇笔记。编辑器内容未被替换；载入前会备份当前草稿。</span>
+              <Button
+                size="compact"
+                variant="ghost"
+                disabled={busy}
+                onClick={() => setDialog({ type: 'reload', title: '备份草稿并加载最新版' })}
+              >
+                查看更新
+              </Button>
+            </div>
+          )}
           {error && (
             <div className="notebook-error">
               <Alert message={error} />
@@ -1106,8 +1189,8 @@ export default function NotebookPage({ api }) {
               </div>
             </div>
           )}
-          <div className="notebook-document-body">
-            <div className={`notebook-editor-area ${active ? 'has-note' : ''}`} inert={outlineOverlay}>
+          <div className={`notebook-document-body ${chatOpen && !focused ? 'has-chat' : ''}`}>
+            <div className={`notebook-editor-area ${active ? 'has-note' : ''}`} inert={outlineOverlay || chatOverlay}>
               {/* 顶栏与编辑器工具栏是同一条操作栏：只有目录收起时才在左边出现目录开关与位置，
                   右边常驻保存状态与文档操作；工具栏按这两段的实测宽度让位。 */}
               <div className="notebook-bar">
@@ -1212,6 +1295,12 @@ export default function NotebookPage({ api }) {
                       />
                     </>
                   )}
+                  <NotebookChatButton
+                    open={chatOpen}
+                    focused={focused}
+                    onOpenChange={setChatOpen}
+                    onFocusedChange={setFocused}
+                  />
                 </div>
               </div>
               <iframe
@@ -1277,7 +1366,33 @@ export default function NotebookPage({ api }) {
                 </div>
               ) : null}
             </div>
-            {active && !focused && (
+            <NotebookChatDock
+              api={api}
+              open={chatOpen && !focused}
+              note={active || null}
+              reference={
+                active
+                  ? {
+                      label: '引用当前笔记',
+                      getText: () =>
+                        prepareNotebookReference({
+                          note: active,
+                          currentId: () =>
+                            !lifecycle.closing &&
+                            !lifecycle.switching &&
+                            ready.current &&
+                            loadedNote.current === current.current?.id
+                              ? current.current?.id
+                              : null,
+                          save: () => flush(),
+                        }),
+                    }
+                  : null
+              }
+              onCheckUpdates={() => void checkUpdates.current()}
+              onClose={() => setChatOpen(false)}
+            />
+            {active && !focused && !chatOpen && (
               <>
                 <aside ref={outlinePanel} className="notebook-outline" aria-label="文档大纲">
                   <header>
@@ -1315,8 +1430,8 @@ export default function NotebookPage({ api }) {
         <Modal title="Notebook MCP" onClose={() => setMcpOpen(false)} portal>
           <div className="notebook-mcp">
             <p>
-              AI 客户端可以按这个地址读写这台机器上的笔记本：先读目录，再按 node_id 读正文，
-              写回时带上版本号。它只在 Mica 运行时里可用，应用关掉就连不上。
+              AI 客户端可以按这个地址读写这台机器上的笔记本：先读目录，再按 node_id 读正文， 写回时带上版本号。它只在
+              Mica 运行时里可用，应用关掉就连不上。
             </p>
             <div className="notebook-mcp-field">
               <span>接口地址</span>
@@ -1331,18 +1446,14 @@ export default function NotebookPage({ api }) {
               <span>客户端配置</span>
               <pre className="notebook-mcp-code">{mcpConfig}</pre>
               <div className="notebook-mcp-actions">
-                <Button
-                  variant="ghost"
-                  size="compact"
-                  onClick={() => void copyText(mcpConfig, 'config')}
-                >
+                <Button variant="ghost" size="compact" onClick={() => void copyText(mcpConfig, 'config')}>
                   {copied === 'config' ? '已复制' : '复制配置'}
                 </Button>
               </div>
             </div>
             <p className="notebook-mcp-hint">
-              桌面端与 Web 应用会自动注入这份配置，不用手填；TUI 与 <code>mica exec</code>{' '}
-              里没有自动注入，需要把它加进 MCP 配置。
+              桌面端与 Web 应用会自动注入这份配置，不用手填；TUI 与 <code>mica exec</code> 里没有自动注入，需要把它加进
+              MCP 配置。
             </p>
           </div>
         </Modal>

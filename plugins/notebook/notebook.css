@@ -358,6 +358,26 @@
   padding: 0 6px 0 8px;
   gap: 3px;
 }
+.notebook-ai-button {
+  width: 30px;
+  min-width: 30px;
+  height: 30px;
+  padding: 0;
+  flex: none;
+  border: 1px solid var(--color-line);
+  border-radius: 8px;
+  color: var(--color-fg-soft);
+}
+.notebook-ai-button:hover:not(:disabled) {
+  color: var(--color-accent);
+  border-color: color-mix(in srgb, var(--color-accent) 48%, var(--color-line));
+  background: var(--color-accent-subtle);
+}
+.notebook-ai-button[aria-pressed='true'] {
+  color: var(--color-accent);
+  border-color: color-mix(in srgb, var(--color-accent) 62%, var(--color-line));
+  background: var(--color-accent-subtle);
+}
 .notebook-breadcrumb {
   min-width: 0;
   padding-left: 2px;
@@ -797,5 +817,147 @@
 @media (hover: none) {
   .notebook-page .notebook-row-actions {
     opacity: 1;
+  }
+}
+
+/* 右侧对话面板：与编辑器并排，窗口窄时变成浮层。 */
+.notebook-chat {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: var(--notebook-chat-width, clamp(360px, 38cqw, 560px));
+  min-width: 360px;
+  max-width: 56%;
+  min-height: 0;
+  border: 1px solid var(--color-line-soft);
+  border-radius: 10px;
+  background: var(--color-canvas);
+  box-shadow: 0 2px 14px color-mix(in srgb, var(--color-mask-bg) 35%, transparent);
+  container-type: inline-size;
+}
+.notebook-chat-mask {
+  display: none;
+}
+.notebook-chat-resize {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -4px;
+  z-index: 7;
+  width: 8px;
+  cursor: ew-resize;
+  touch-action: none;
+}
+.notebook-chat-resize:focus-visible {
+  outline: 1px solid var(--color-accent);
+  outline-offset: -1px;
+}
+.notebook-chat-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 42px;
+  padding: 7px 7px 7px 10px;
+  border-bottom: 1px solid var(--color-line-soft);
+}
+.notebook-chat-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex: 1;
+}
+.notebook-chat-heading-icon {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  flex: none;
+  border-radius: 8px;
+  color: var(--color-accent);
+  background: var(--color-accent-subtle);
+}
+.notebook-chat-heading-copy {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 1px;
+}
+.notebook-chat-heading-copy strong {
+  color: var(--color-fg-strong);
+  font-size: 12px;
+  line-height: 16px;
+  font-weight: 600;
+}
+.notebook-chat-heading-copy small {
+  color: var(--color-fg-faint);
+  font-size: 10px;
+  line-height: 14px;
+}
+/* Mica owns messages, model controls, tool logs, Ask and composer styling. */
+.notebook-chat-scope {
+  display: flex;
+  flex: none;
+  gap: 4px;
+  padding: 6px 8px 0;
+}
+.notebook-chat-hint {
+  flex: none;
+  margin: 0;
+  padding: 6px 10px;
+  color: var(--color-fg-muted);
+  font-size: 11px;
+  line-height: 1.55;
+}
+.notebook-chat-heading-copy small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 250px;
+}
+.notebook-chat-content {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+.notebook-chat-empty {
+  margin: auto 16px;
+  color: var(--color-fg-muted);
+  font-size: 12px;
+  line-height: 1.6;
+  text-align: center;
+}
+
+@container notebook (max-width: 1000px) {
+  .notebook-chat-mask {
+    position: absolute;
+    inset: 0;
+    z-index: 4;
+    display: block;
+    border: 0;
+    background: var(--color-mask-bg);
+    opacity: 0.35;
+  }
+  .notebook-chat-resize {
+    display: none;
+  }
+  .notebook-chat {
+    position: absolute;
+    inset: 0 0 0 auto;
+    z-index: 5;
+    width: min(var(--notebook-chat-width, 420px), 92cqw);
+    max-width: none;
+    box-shadow: -14px 0 30px var(--color-mask-bg);
+  }
+}
+@container notebook (max-width: 560px) {
+  .notebook-chat {
+    width: 100%;
+    min-width: 0;
+    border-radius: 0;
+    border-right: 0;
+    border-left: 0;
   }
 }

@@ -258,8 +258,8 @@ export type MicaAskPending = {
   detail?: string;
   options: MicaAskOption[];
   multiple?: boolean;
-  /** 画在哪里：输入框上方一条（默认），或居中弹窗。 */
-  presentation: MicaAskPresentation;
+  /** 提问统一画在输入框上方；保留字段以明确 wire payload 的呈现契约。 */
+  presentation: 'dock';
   /**
    * 客户端该画哪几个元素。
    *
@@ -285,8 +285,6 @@ export type MicaAskPending = {
   /** `timeoutRemainingMs` 的时间基准。 */
   timeoutUpdatedAt: string;
 };
-
-export type MicaAskPresentation = 'dock' | 'modal';
 
 export type MicaAskDisplay = {
   /** 左侧的问号徽标。 */

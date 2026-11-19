@@ -1593,15 +1593,15 @@ export default function App() {
     [applyMoveResult, draftGroupsRef, loopsRef, nodesRef, notificationStatesRef]
   )
 
-  const createRightTerm = useCallback(() => {
-    const chatId = activeRef.current
+  const createRightTerm = useCallback((target = {}) => {
+    const chatId = target.chatId || activeRef.current
     if (!chatId) return
     const id = uid('rt')
     rightTermActivityRef.current.set(id, Date.now())
-    const cwd = terminalCwd(chatId) || recentChatCwd() || null
+    const cwd = target.cwd || terminalCwd(chatId) || recentChatCwd() || null
     // 终端是在当前会话的上下文里开的，记下归属会话，左侧会话树才能标出
     // 「这个会话有终端在跑」（右侧终端本身不在 nodes 里，只能靠这份映射关联）。
-    const sessionId = nodesRef.current.find((node) => node.id === chatId)?.sessionId || null
+    const sessionId = target.sessionId || nodesRef.current.find((node) => node.id === chatId)?.sessionId || null
     setRightTermsByChat((prev) => {
       const list = prev[chatId] || []
       return {
@@ -2629,6 +2629,35 @@ export default function App() {
     viewOwnsWindow
   ])
 
+  // Embedded plugin conversations use the same ChatView callbacks as the main page. Keep this
+  // adapter generic: the plugin surface does not know which plugin opened it.
+  const pluginConversationCallbacks = useMemo(() => ({
+    onOpenFile: openChatFile,
+    onOpenDocument: openDocumentInView,
+    onOpenReview: openReviewInView,
+    onOpenTerminal: (target) => {
+      const chatId = target?.sessionId
+        ? openSession({ id: target.sessionId, cwd: target.cwd })
+        : target?.nodeId
+      if (!chatId) return
+      if (!target.sessionId) { setActiveId(chatId); setView('chat') }
+      createRightTerm({ chatId, cwd: target.cwd, sessionId: target.sessionId })
+    },
+    onOpenSettings: () => openConfigPage('config'),
+    onOpenPluginSettings: (pluginId) => openConfigPage('plugins', pluginId),
+    onSessionRenamed: refreshSessions,
+    onShareSession: shareSession
+  }), [
+    openChatFile,
+    openDocumentInView,
+    openReviewInView,
+    openSession,
+    createRightTerm,
+    openConfigPage,
+    refreshSessions,
+    shareSession
+  ])
+
   return (
     <>
       <div
@@ -3062,12 +3091,12 @@ export default function App() {
             )}
             {/* 最近用过的会话各挂一个实例，只有当前这个可见：切走再切回来不重新加载，
                 思考内容 / 回合日志 / TODO 这些只活在事件流里的状态因此不会丢（见 chat-cache.js）。 */}
-            {cachedChats.map((node) => (
+            {(!pluginPage ? cachedChats : []).map((node) => (
               <ChatView
                 key={node.id}
                 node={node}
                 cwd={terminalCwd(node.id)}
-                visible={view === 'chat' && node.id === activeId}
+                visible={view === 'chat' && node.id === activeId && !pluginPage}
                 isMobile={isMobile}
                 loops={loops}
                 findRequest={findRequest?.nodeId === node.id ? findRequest : null}
@@ -3360,6 +3389,8 @@ export default function App() {
           entry={pluginPage}
           onClose={closePluginPage}
           onCreateSession={createPluginPageSession}
+          onSessionBound={setSessionId}
+          conversationCallbacks={pluginConversationCallbacks}
         />
       )}
     </>

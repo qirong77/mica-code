@@ -42,20 +42,51 @@ describe('plugin host read-only web API', () => {
       return { ok: true, status: 200, json: async () => ({ ok: true, result: { count: 3 } }) }
     }
     const controller = new AbortController()
-    const result = await createPluginHostApi('sample').web.read('summary', { filter: 'a & b' }, { signal: controller.signal, url: 'https://other.invalid' })
+    const result = await createPluginHostApi('sample').web.read(
+      'summary',
+      { filter: 'a & b' },
+      { signal: controller.signal, url: 'https://other.invalid' }
+    )
     expect(result).toEqual({ count: 3 })
-    expect(requests).toEqual([{
-      url: '/plugins/sample/api/summary?filter=a+%26+b',
-      options: { method: 'GET', credentials: 'same-origin', mode: 'same-origin', redirect: 'error', cache: 'no-store', headers: { accept: 'application/json' }, signal: controller.signal }
-    }])
+    expect(requests).toEqual([
+      {
+        url: '/plugins/sample/api/summary?filter=a+%26+b',
+        options: {
+          method: 'GET',
+          credentials: 'same-origin',
+          mode: 'same-origin',
+          redirect: 'error',
+          cache: 'no-store',
+          headers: { accept: 'application/json' },
+          signal: controller.signal
+        }
+      }
+    ])
   })
 
   test('rejects arbitrary query URLs and invalid or unbounded params without fetching', async () => {
     let fetched = 0
-    globalThis.fetch = async () => { fetched += 1; throw new Error('must-not-fetch') }
+    globalThis.fetch = async () => {
+      fetched += 1
+      throw new Error('must-not-fetch')
+    }
     const api = createPluginHostApi('sample').web
-    for (const query of ['', 'https://other.invalid', '../secret', 'summary?channel=x', '__proto__', 'a'.repeat(65)]) await expect(api.read(query)).rejects.toThrow()
-    for (const params of [null, [], { count: 3 }, { text: 'x'.repeat(2049) }, Object.fromEntries(Array.from({ length: 17 }, (_, i) => [`p${i}`, '1']))]) {
+    for (const query of [
+      '',
+      'https://other.invalid',
+      '../secret',
+      'summary?channel=x',
+      '__proto__',
+      'a'.repeat(65)
+    ])
+      await expect(api.read(query)).rejects.toThrow()
+    for (const params of [
+      null,
+      [],
+      { count: 3 },
+      { text: 'x'.repeat(2049) },
+      Object.fromEntries(Array.from({ length: 17 }, (_, i) => [`p${i}`, '1']))
+    ]) {
       await expect(api.read('summary', params)).rejects.toThrow()
     }
     expect(fetched).toBe(0)
@@ -63,23 +94,47 @@ describe('plugin host read-only web API', () => {
 
   test('rejects HTTP and structured server errors instead of returning successful-looking empty data', async () => {
     const api = createPluginHostApi('sample').web
-    globalThis.fetch = async () => ({ ok: false, status: 504, json: async () => ({ ok: false, code: 'timeout', error: '查询超时' }) })
-    await expect(api.read('summary')).rejects.toMatchObject({ message: '查询超时', status: 504, code: 'timeout' })
-    globalThis.fetch = async () => ({ ok: true, status: 200, json: async () => ({ ok: false, error: '查询失败' }) })
+    globalThis.fetch = async () => ({
+      ok: false,
+      status: 504,
+      json: async () => ({ ok: false, code: 'timeout', error: '查询超时' })
+    })
+    await expect(api.read('summary')).rejects.toMatchObject({
+      message: '查询超时',
+      status: 504,
+      code: 'timeout'
+    })
+    globalThis.fetch = async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ ok: false, error: '查询失败' })
+    })
     await expect(api.read('summary')).rejects.toThrow('查询失败')
     globalThis.fetch = async () => ({ ok: true, status: 200, json: async () => ({ ok: true }) })
     await expect(api.read('summary')).rejects.toThrow('响应无效')
-    globalThis.fetch = async () => ({ ok: true, status: 200, json: async () => { throw new Error('HTML') } })
+    globalThis.fetch = async () => ({
+      ok: true,
+      status: 200,
+      json: async () => {
+        throw new Error('HTML')
+      }
+    })
     await expect(api.read('summary')).rejects.toThrow('响应无效')
   })
 
   test('preserves AbortError when cancellation happens while reading the JSON body', async () => {
     const controller = new AbortController()
-    globalThis.fetch = async () => ({ ok: true, status: 200, json: async () => {
-      controller.abort(new DOMException('cancelled', 'AbortError'))
-      throw controller.signal.reason
-    } })
-    await expect(createPluginHostApi('sample').web.read('summary', {}, { signal: controller.signal })).rejects.toMatchObject({ name: 'AbortError' })
+    globalThis.fetch = async () => ({
+      ok: true,
+      status: 200,
+      json: async () => {
+        controller.abort(new DOMException('cancelled', 'AbortError'))
+        throw controller.signal.reason
+      }
+    })
+    await expect(
+      createPluginHostApi('sample').web.read('summary', {}, { signal: controller.signal })
+    ).rejects.toMatchObject({ name: 'AbortError' })
   })
 
   test('uses the manifest route for page URLs/search and checks exact standalone page declarations', () => {
@@ -87,7 +142,9 @@ describe('plugin host read-only web API', () => {
     const standalone = readFileSync(new URL('./PluginPageWindow.jsx', import.meta.url), 'utf8')
     expect(page).toContain('pluginPagePath(entry.id, entry.page.route)')
     expect(page).toContain('`${pagePath}${next}`')
-    expect(standalone).toContain('matchesPluginPagePath(window.location.pathname, pluginId, plugin.desktopPage?.route)')
+    expect(standalone).toContain(
+      'matchesPluginPagePath(window.location.pathname, pluginId, plugin.desktopPage?.route)'
+    )
     expect(standalone).toContain("plugin?.state !== 'enabled'")
     expect(standalone).toContain('!(plugin.desktopPage || plugin.desktopLauncher)')
   })
@@ -241,13 +298,79 @@ describe('plugin host cross-session chat API', () => {
     expect(await api.sessions.create()).toMatchObject({ id: 'draft-1', title: '新对话' })
     expect(await api.sessions.history('draft-1')).toEqual([])
     await api.sessions.send({ sessionId: 'draft-1', prompt: '直接发送' })
-    expect(starts).toEqual([{
-      id: 'draft-1',
-      sessionId: null,
-      cwd: null,
-      prompt: '直接发送',
-      maxTurns: 9999
-    }])
+    expect(starts).toEqual([
+      {
+        id: 'draft-1',
+        sessionId: null,
+        cwd: null,
+        prompt: '直接发送',
+        maxTurns: 9999
+      }
+    ])
+  })
+
+  test('creates standalone drafts and exposes explicit node/session binding helpers', async () => {
+    hostWith()
+    const api = createPluginHostApi('sample')
+    const draft = await api.sessions.create({ cwd: '/standalone' })
+    expect(draft.id).toMatch(/^plugin-sample-/)
+    expect(draft.cwd).toBe('/standalone')
+    expect(api.sessions.bind({ nodeId: draft.id, sessionId: 'real-1' })).toEqual({
+      nodeId: draft.id,
+      sessionId: 'real-1'
+    })
+    expect(await api.sessions.resolve('real-1')).toEqual({ sessionId: 'real-1', nodeId: draft.id })
+    expect(await api.sessions.attach({ sessionId: 'real-1' })).toEqual({
+      nodeId: draft.id,
+      sessionId: 'real-1'
+    })
+  })
+
+  test('binding updates draft reads and notifies the workspace owner', async () => {
+    hostWith()
+    const bindings = []
+    const api = createPluginHostApi('sample', null, {
+      createSession: async () => ({ id: 'draft-bound' }),
+      bindSession: (...args) => bindings.push(args)
+    })
+    await api.sessions.create()
+    const reads = []
+    window.mica.chat.history = async (id) => {
+      reads.push(id)
+      return []
+    }
+    api.sessions.bind({ nodeId: 'draft-bound', sessionId: 'real-bound' })
+    await api.sessions.history('draft-bound')
+    expect(bindings).toEqual([['draft-bound', 'real-bound']])
+    expect(reads).toEqual(['real-bound'])
+  })
+
+  test('resolves a draft handle through a workspace binding learned by another view', async () => {
+    const api = hostWith()
+    window.mica.uiState = {
+      get: async () => ({
+        workspace: { nodes: [{ id: 'draft', sessionId: 'real', cwd: '/repo' }] }
+      })
+    }
+    expect(await api.sessions.resolve('draft')).toEqual({
+      nodeId: 'draft',
+      sessionId: 'real',
+      cwd: '/repo'
+    })
+  })
+
+  test('a standalone refresh preserves the live node and its draft key from the persisted pointer', async () => {
+    hostWith()
+    window.mica.uiState = { get: async () => ({ workspace: { nodes: [] } }) }
+    const before = createPluginHostApi('sample')
+    const created = await before.sessions.create()
+    before.sessions.bind({ nodeId: created.id, sessionId: 'real-live' })
+    const after = createPluginHostApi('sample')
+    expect(await after.sessions.resolve('real-live', { nodeId: created.id })).toEqual({
+      nodeId: created.id,
+      sessionId: 'real-live'
+    })
+    expect((await after.sessions.attach({ sessionId: 'real-live' })).nodeId).toBe(created.id)
   })
 
   test('sorts before limiting without mutating the host list and rejects malformed rows', async () => {

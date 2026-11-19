@@ -121,12 +121,6 @@ export class AskUserTool extends MicaTool {
             type: 'string',
             description: 'Very short label for the session list while waiting, e.g. "等你选入口". Defaults to `title`.',
           },
-          presentation: {
-            type: 'string',
-            enum: ['dock', 'modal'],
-            description:
-              'Where to draw it: `dock` (default) sits above the composer; `modal` is a centered dialog for something that should interrupt, e.g. "上下文快满了，现在压缩吗".',
-          },
           ui: {
             type: 'object',
             description:
@@ -202,7 +196,6 @@ function toQuestion(input: ToolInput, defaultTimeoutMs: number): PluginAskQuesti
     detail: typeof input?.detail === 'string' ? input.detail : undefined,
     options: options as PluginAskOption[],
     multiple: input?.multiple === true,
-    presentation: input?.presentation === 'modal' ? 'modal' : undefined,
     ...(input?.ui && typeof input.ui === 'object' ? { ui: input.ui as PluginAskQuestion['ui'] } : {}),
     timeoutMs,
     summary: typeof input?.summary === 'string' ? input.summary : undefined,

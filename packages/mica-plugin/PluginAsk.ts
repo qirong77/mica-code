@@ -47,13 +47,6 @@ export type PluginAskQuestion = {
   /** 允许多选。多选时用户点「确定」才提交。 */
   multiple?: boolean;
   /**
-   * 画在哪里。默认 `dock`（输入框上方一条）；`modal` 是居中弹窗。
-   *
-   * 需要打断当前注意力的事情（例如「上下文快满了，要不要现在压缩」）用 modal；
-   * 与这一轮内容连着看更自然的选择用 dock。
-   */
-  presentation?: PluginAskPresentation;
-  /**
    * 逐个元素开关，缺省按数据推导。
    *
    * 用途是让同一套组件适配很不一样的场景：自动压缩的确认弹窗只要标题 + 两个按钮，
@@ -76,8 +69,6 @@ export type PluginAskQuestion = {
    */
   summary?: string;
 };
-
-export type PluginAskPresentation = 'dock' | 'modal';
 
 /**
  * 一道题里每个元素要不要画。不传就按数据推导：
@@ -216,7 +207,6 @@ export function normalizePluginAskQuestion(input: PluginAskQuestion): PluginAskQ
     ...(detail ? { detail } : {}),
     options,
     ...(input?.multiple === true ? { multiple: true } : {}),
-    ...(input?.presentation === 'modal' ? { presentation: 'modal' as const } : {}),
     ...(input?.ui ? { ui: { ...input.ui } } : {}),
     timeoutMs,
     ...(text(input?.summary, MAX_PLUGIN_ASK_SUMMARY) ? { summary: text(input.summary, MAX_PLUGIN_ASK_SUMMARY) } : {}),

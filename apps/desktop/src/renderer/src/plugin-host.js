@@ -58,7 +58,7 @@ export function openRuntimeTarget(url, { userAgent, open, assign } = {}) {
  * 交给插件 `desktop.jsx` 的那份 api。`pluginId` 由宿主注入，插件不必自己拼——它也
  * 拼不对：配置与独立文档都落在 `$MICA_HOME/plugin-data/<id>/` 下。
  */
-export function createPluginHostApi(pluginId, session = null, { createSession } = {}) {
+export function createPluginHostApi(pluginId, session = null, { createSession, bindSession } = {}) {
   const host = window.mica?.pluginHost
   const chat = window.mica?.chat
   const stats = window.mica?.stats
@@ -97,6 +97,11 @@ export function createPluginHostApi(pluginId, session = null, { createSession } 
   }
   const actualSessionId = (sessionId) =>
     draftSessions.has(sessionId) ? draftSessionIds.get(sessionId) || '' : sessionId
+  const createStandaloneDraftId = () => {
+    const random = globalThis.crypto?.randomUUID?.()
+    const safePluginId = String(pluginId || 'plugin').replace(/[^a-zA-Z0-9_-]/g, '_')
+    return `plugin-${safePluginId}-${random || `${Date.now()}-${Math.random().toString(36).slice(2)}`}`
+  }
   const resolveNode = async (sessionId) => {
     if (draftSessions.has(sessionId)) return sessionId
     // 独立插件页也读同一份工作区，刷新后尚未收到任何事件时仍能附着主界面的 run。
@@ -136,9 +141,14 @@ export function createPluginHostApi(pluginId, session = null, { createSession } 
   const launcherControl = (action, path) => {
     if (isElectronShell(navigator.userAgent)) return host.launcherControl(pluginId, action, path)
     if (action === 'status') return Promise.resolve({ native: false, registered: false })
-    const intent = action === 'openPath' ? { type: 'openPath', path }
-      : action === 'configure' ? { type: 'configurePlugin', pluginId }
-      : action === 'close' ? { type: 'closePluginPage' } : null
+    const intent =
+      action === 'openPath'
+        ? { type: 'openPath', path }
+        : action === 'configure'
+          ? { type: 'configurePlugin', pluginId }
+          : action === 'close'
+            ? { type: 'closePluginPage' }
+            : null
     if (intent && window.__micaDesktopAction?.(intent)) return Promise.resolve({ ok: true })
     return Promise.reject(new Error('系统快捷键和独立浮窗需要 Mica 桌面应用'))
   }
@@ -148,28 +158,40 @@ export function createPluginHostApi(pluginId, session = null, { createSession } 
       /** A same-origin read, not a write-capable invoke alias or arbitrary URL fetch. */
       async read(query, params = {}, { signal } = {}) {
         const path = pluginWebPath(pluginId, query)
-        if (!params || typeof params !== 'object' || Array.isArray(params)) throw new Error('插件只读查询参数必须是字符串对象')
+        if (!params || typeof params !== 'object' || Array.isArray(params))
+          throw new Error('插件只读查询参数必须是字符串对象')
         const entries = Object.entries(params)
         if (entries.length > 16) throw new Error('插件只读查询参数过多')
         const search = new URLSearchParams()
         for (const [key, value] of entries) {
-          if (!key || key.length > 64 || typeof value !== 'string' || value.length > 2048) throw new Error('插件只读查询参数无效或过长')
+          if (!key || key.length > 64 || typeof value !== 'string' || value.length > 2048)
+            throw new Error('插件只读查询参数无效或过长')
           search.set(key, value)
         }
         const encoded = search.toString()
         if (encoded.length > 8191) throw new Error('插件只读查询参数过长')
         const response = await fetch(`${path}${encoded ? `?${encoded}` : ''}`, {
-          method: 'GET', credentials: 'same-origin', mode: 'same-origin', redirect: 'error',
-          cache: 'no-store', headers: { accept: 'application/json' }, signal
+          method: 'GET',
+          credentials: 'same-origin',
+          mode: 'same-origin',
+          redirect: 'error',
+          cache: 'no-store',
+          headers: { accept: 'application/json' },
+          signal
         })
         let body
-        try { body = await response.json() }
-        catch (error) {
+        try {
+          body = await response.json()
+        } catch (error) {
           if (signal?.aborted) throw signal.reason ?? error
           throw new Error('插件只读接口响应无效')
         }
         if (!response.ok || body?.ok !== true) {
-          const error = new Error(typeof body?.error === 'string' ? body.error : `插件只读查询失败（HTTP ${response.status}）`)
+          const error = new Error(
+            typeof body?.error === 'string'
+              ? body.error
+              : `插件只读查询失败（HTTP ${response.status}）`
+          )
           error.status = response.status
           error.code = typeof body?.code === 'string' ? body.code : 'query_failed'
           throw error
@@ -180,7 +202,11 @@ export function createPluginHostApi(pluginId, session = null, { createSession } 
     },
     /** Optional local metadata; failures never block the user's operation. */
     experience: (event, fields = {}) => {
-      try { void Promise.resolve(host?.experience?.(pluginId, event, fields)).catch(() => {}) } catch { /* optional observation */ }
+      try {
+        void Promise.resolve(host?.experience?.(pluginId, event, fields)).catch(() => {})
+      } catch {
+        /* optional observation */
+      }
     },
     launcher: {
       request: (action, input = {}) => host.launcherRequest(pluginId, action, input),
@@ -286,11 +312,15 @@ export function createPluginHostApi(pluginId, session = null, { createSession } 
              * uses; the first send then starts the normal Mica app-server.
              */
             create: async (options = {}) => {
-              if (typeof createSession !== 'function')
-                throw new Error('当前页面不能创建 Mica 会话，请从桌面端打开笔记本')
-              const result = await createSession({
-                cwd: typeof options?.cwd === 'string' && options.cwd.trim() ? options.cwd.trim() : null
-              })
+              const cwd =
+                typeof options?.cwd === 'string' && options.cwd.trim() ? options.cwd.trim() : null
+              // The standalone plugin page has no App.jsx callback, but it can still create a
+              // normal draft node. The first send uses this node and binds its real session id
+              // through the same chat host; no second model chain is started.
+              const result =
+                typeof createSession === 'function'
+                  ? await createSession({ cwd })
+                  : { id: createStandaloneDraftId(), cwd }
               const id = typeof result === 'string' ? result : result?.id
               if (!id) throw new Error('Mica 会话创建失败')
               draftSessions.add(id)
@@ -300,6 +330,45 @@ export function createPluginHostApi(pluginId, session = null, { createSession } 
                 cwd: result?.cwd || null,
                 updatedAt: null
               }
+            },
+            /** Resolve a persisted session to the shared workspace node when one exists. */
+            resolve: async (sessionId, { nodeId: savedNodeId } = {}) => {
+              if (!sessionId) return null
+              const handle = String(sessionId)
+              const snapshot = await window.mica?.uiState?.get?.()
+              const nodes = snapshot?.workspace?.nodes
+              const node = Array.isArray(nodes)
+                ? nodes.find((item) => item?.id === handle || item?.sessionId === handle)
+                : null
+              if (node) {
+                if (node.sessionId) rememberNode(node.id, node.sessionId)
+                return { nodeId: node.id, sessionId: node.sessionId || null, cwd: node.cwd || null }
+              }
+              // Detached plugin pages have no workspace tab. The persisted pointer is also the
+              // live run/draft key, so a refresh must not replace it with the real session id.
+              if (typeof savedNodeId === 'string' && savedNodeId) {
+                rememberNode(savedNodeId, handle)
+                return { sessionId: handle, nodeId: savedNodeId }
+              }
+              const nodeId = await resolveNode(handle)
+              return { sessionId: actualSessionId(handle) || null, nodeId }
+            },
+            /** Remember a node/real-session binding learned by an embedded ChatView. */
+            bind: ({ nodeId, sessionId } = {}) => {
+              if (!nodeId || !sessionId) return null
+              rememberNode(String(nodeId), String(sessionId))
+              if (draftSessions.has(nodeId)) draftSessionIds.set(nodeId, String(sessionId))
+              bindSession?.(String(nodeId), String(sessionId))
+              return { nodeId: String(nodeId), sessionId: String(sessionId) }
+            },
+            /** Alias for adapters that attach an existing session to an embedded surface. */
+            attach: async ({ nodeId, sessionId } = {}) => {
+              if (nodeId && sessionId) rememberNode(String(nodeId), String(sessionId))
+              const resolvedNodeId =
+                nodeId || (sessionId ? await resolveNode(String(sessionId)) : '')
+              return resolvedNodeId
+                ? { nodeId: resolvedNodeId, sessionId: String(sessionId || '') }
+                : null
             },
             /** 最近的会话（按更新时间倒序），只带页面挑会话需要的字段。 */
             list: async (options = {}) => {

@@ -385,8 +385,7 @@ describe('app.css 颜色 token 主题契约', () => {
       '.chat-command-palette',
       '.chat-popover',
       '.chat-image-preview img',
-      '.quick-pick-panel',
-      '.chat-ask-card.is-modal'
+      '.quick-pick-panel'
     ]
 
     for (const selector of shadowedRules) {

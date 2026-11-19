@@ -9,6 +9,8 @@ lease 并应用配置后、保存用户输入前执行，可通过事件上的 `
 
 ## 主要能力
 
+- 随包插件整页可使用宿主提供的 `api.ui.Conversation`，按稳定业务 `scope` 嵌入完整 Mica 对话；模型/角色/推理、工具过程、Ask、队列与会话设置复用同一个 ChatView。宿主保存范围到会话的指针并解析共享 node，正文仍在普通会话中。`reference: { label, getText }` 只在明确点击时读取并追加草稿，不自动发送；业务保存及写回保护由插件负责。完整前端契约见根 [插件文档](../../plugins/README.md#嵌入-mica-对话)，不是 app-server `PluginContext` 的新模型请求能力。
+
 - 客户端插件数据授权：清单 `desktop.clientData`（默认 false，解析为 `PluginManifest.desktopClientData`）
   允许随包插件的前端通过 `api.client.readData/writeData` 访问启动桌面客户端的本机数据。
   授权由本机外壳按随包清单和启停状态检查，远程页面不决定访问范围；原有数据 API 仍访问当前运行时。

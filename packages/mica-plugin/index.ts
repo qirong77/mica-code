@@ -323,7 +323,6 @@ export type {
   PluginAskDisplay,
   PluginAskHandle,
   PluginAskOption,
-  PluginAskPresentation,
   PluginAskQuestion,
   PluginAskReason,
   PluginAskRequestOptions,

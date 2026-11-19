@@ -2914,7 +2914,7 @@ function normalizeAsk(raw) {
     ...(typeof raw.detail === 'string' ? { detail: raw.detail } : {}),
     options,
     multiple: raw.multiple === true,
-    presentation: raw.presentation === 'modal' ? 'modal' : 'dock',
+    presentation: 'dock',
     display,
     passive: raw.passive === true
   }

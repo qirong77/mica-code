@@ -46,6 +46,15 @@ describe('composer presentation', () => {
     expect(css.match(/\.chat-plugin-quickbar-preview-content\s*\{([^}]+)\}/)?.[1]).not.toMatch(/box-shadow|background|border-radius/)
   })
 
+  test('keeps ask questions inline above the composer', () => {
+    expect(chat).toContain('className="chat-ask-card"')
+    expect(chat).toContain('role="region"')
+    expect(chat).not.toContain('chat-ask-overlay')
+    expect(chat).not.toContain('is-modal')
+    expect(css).not.toContain('.chat-ask-overlay')
+    expect(css).not.toContain('.chat-ask-card.is-modal')
+  })
+
   test('search input and both search actions use the same 28px height', () => {
     const source = read('./SessionTree.jsx')
     const toolbar = source.slice(source.indexOf('<div className="flex h-7 items-center gap-1.5">'), source.indexOf('{filterOpen && !searching'))

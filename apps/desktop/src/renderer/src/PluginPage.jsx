@@ -7,8 +7,10 @@ import { useIsMobile } from './hooks'
 import { notify } from './notify'
 import { lazyView } from './lazy-view'
 import { PluginSurface } from './PluginSurface'
+import { createPluginConversation } from './PluginConversation'
 
-// 插件整页复用宿主的 Markdown 排版，不把 ChatView 作为插件依赖，也不另造渲染器。
+// 插件只依赖宿主组件能力，不直接 import ChatView 或另造对话渲染器。
+const EMPTY_CALLBACKS = Object.freeze({})
 const PageMarkdown = lazyView(() => import('./ChatView'), 'Markdown')
 function PluginMarkdown(props) {
   return (
@@ -32,7 +34,14 @@ function PluginMarkdown(props) {
  *
  * 这里不认识任何具体插件：页面标题来自清单，内容来自插件目录的 `desktop.jsx`。
  */
-export function PluginPage({ entry, onClose, onCreateSession, standalone = false }) {
+export function PluginPage({
+  entry,
+  onClose,
+  onCreateSession,
+  conversationCallbacks = EMPTY_CALLBACKS,
+  onSessionBound,
+  standalone = false
+}) {
   const isMobile = useIsMobile()
   const beforeClose = useMemo(() => new Set(), [entry.id])
   const closing = useRef(false)
@@ -70,10 +79,56 @@ export function PluginPage({ entry, onClose, onCreateSession, standalone = false
     [pagePath, standalone]
   )
 
+  const hostApi = useMemo(
+    () =>
+      createPluginHostApi(entry.id, null, {
+        createSession: onCreateSession,
+        bindSession: onSessionBound
+      }),
+    [entry.id, onCreateSession, onSessionBound]
+  )
+  const close = useCallback(async () => {
+    if (closing.current) return false
+    closing.current = true
+    try {
+      for (const handler of beforeClose) if ((await handler()) === false) return false
+      hostApi.experience('dismiss', { surface: 'page', action: 'close' })
+      onClose()
+      return true
+    } catch (error) {
+      notify({
+        key: `plugin-page-close:${entry.id}`,
+        text: '页面暂时无法关闭',
+        detail: error?.message || String(error),
+        level: 'error'
+      })
+      return false
+    } finally {
+      closing.current = false
+    }
+  }, [beforeClose, entry.id, hostApi, onClose])
+  const Conversation = useMemo(() => {
+    const callbacks = { ...conversationCallbacks, createSession: onCreateSession }
+    for (const name of [
+      'onOpenFile',
+      'onOpenDocument',
+      'onOpenReview',
+      'onOpenTerminal',
+      'onOpenSettings',
+      'onOpenPluginSettings'
+    ]) {
+      const action = callbacks[name]
+      if (typeof action !== 'function') continue
+      callbacks[name] = async (...args) => {
+        if (await close()) return action(...args)
+      }
+    }
+    return createPluginConversation(hostApi, callbacks)
+  }, [close, conversationCallbacks, hostApi, onCreateSession])
   const api = useMemo(
     () => ({
-      ...createPluginHostApi(entry.id, null, { createSession: onCreateSession }),
-      ui: { Markdown: PluginMarkdown },
+      ...hostApi,
+      ui: { Markdown: PluginMarkdown, Conversation },
       page: {
         beforeClose(handler) {
           beforeClose.add(handler)
@@ -97,20 +152,9 @@ export function PluginPage({ entry, onClose, onCreateSession, standalone = false
         setSearch: setPageSearch
       }
     }),
-    [entry.id, beforeClose, onCreateSession, pagePath, setPageSearch]
+    [Conversation, hostApi, beforeClose, pagePath, setPageSearch]
   )
   const Page = entry.module.Page ?? entry.module.default
-  const close = async () => {
-    if (closing.current) return
-    closing.current = true
-    try {
-      for (const handler of beforeClose) if ((await handler()) === false) return
-      api.experience('dismiss', { surface: 'page', action: 'close' })
-      onClose()
-    } catch (error) {
-      notify({ key: `plugin-page-close:${entry.id}`, text: '页面暂时无法关闭', detail: error?.message || String(error), level: 'error' })
-    } finally { closing.current = false }
-  }
 
   return (
     <div className="fixed inset-0 z-[9500] flex flex-col bg-canvas">
@@ -179,7 +223,12 @@ function CopyAddress({ address }) {
           setCopied(true)
           setTimeout(() => setCopied(false), 1200)
         } catch (error) {
-          notify({ key: 'plugin-page-copy', text: '复制地址失败', detail: error?.message || String(error), level: 'error' })
+          notify({
+            key: 'plugin-page-copy',
+            text: '复制地址失败',
+            detail: error?.message || String(error),
+            level: 'error'
+          })
         }
       }}
     >

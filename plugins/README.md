@@ -23,11 +23,11 @@
 
 ## Notebook 本地笔记本
 
-随包 `notebook` 在顶栏右侧（与 Schedule 同一排）提供 Notebook 整页：目录树、本地富文本与表格编辑，和会话笔记相互独立；通过应用同端口的 `/plugin/notebook/mcp` 暴露 `notebook_read` / `notebook_write`，让 Mica 或其它 MCP 客户端按 id 查找、读取、创建、整理、软删除、恢复和编辑正文。桌面/Web 会话宿主启动时自动连接，不再提供 Notebook skill 或直连工具入口。正文写入沿用页面的版本比较，不直接改插件 JSON。
+随包 `notebook` 在顶栏右侧（与 Schedule 同一排）提供 Notebook 整页：目录树、本地富文本与表格编辑，和会话笔记相互独立；通过应用同端口的 `/plugin/notebook/mcp` 暴露 `notebook_read` / `notebook_write`，让 Mica 或其它 MCP 客户端按 id 查找、读取、创建、整理、软删除、恢复和编辑正文。桌面/Web 宿主只在选中插件角色 `笔记` 的会话里连接它，不再提供 Notebook skill 或直连工具入口。正文写入沿用页面的版本比较，不直接改插件 JSON。
 编辑器是共享包 `packages/mica-editor`（笔记用其富文本模式，配置页 Role / Skill 用同一份运行时的 Markdown 模式），第三方依赖固定版本从 CDN 运行时加载；数据在 `plugin-data/notebook/data.json` 与 `documents/<id>.json`。首次打开需要 CDN 网络。
 具体能力、限制与开发方式见 [Notebook](./notebook/README.md)。
 
-Notebook 的功能说明与 MCP 使用约束由插件角色 `笔记` 注入；默认角色不会连接 Notebook MCP，也不会在 `/` 快捷列表里占一个 MCP 条目。选择 `笔记` 后，当前会话才接入 Notebook MCP。Notebook MCP 的 `set_markdown` / `append_markdown` / `prepend_markdown` 把 Markdown 确定性转换为原生富文本，保留原有 CAS 与复杂文档保护边界，返回大纲、结构统计与降级警告。
+Notebook 的右侧对话复用通用 `api.ui.Conversation` 与宿主完整 `ChatView`，支持模型/角色/推理切换、工具过程、交互确认和历史恢复；每篇笔记保留自己的讨论，另有跨笔记对话。关闭或刷新不再新建会话；只有显式引用才先保存并将精确笔记 id 追加到草稿，不自动发送正文。AI 写回后提示查看更新，保留编辑器草稿，确认后备份并加载最新版。Notebook 的功能说明与 MCP 使用约束由插件角色 `笔记` 注入；默认角色不会连接 Notebook MCP，也不会在 `/` 快捷列表里占一个 MCP 条目，选 `笔记` 后当前会话才接入。Notebook MCP 的 `set_markdown` / `append_markdown` / `prepend_markdown` 把 Markdown 确定性转换为原生富文本，保留原有 CAS 与复杂文档保护边界，返回大纲、结构统计与降级警告。
 
 ## 目录结构
 
@@ -1127,6 +1127,29 @@ Capabilities 会显示当前会话各插件的工具、技能与提示词来源�
 ### Web 基础控件
 
 插件界面从 `@mica-config-ui/web` 复用 Arco Design React 基础控件：`Button`、`Switch`、`Checkbox`、`SelectMenu`、`DateField`、`Tag`、`Input`、`InputNumber` 等。普通输入的 `onChange` 接收值，不是 DOM event；完整 App 的 `ArcoProvider` 与 `body.mica-arco-theme` 为基础控件及 Portal 提供统一主题；内嵌设置布局才套 `.mica-config-ui is-embed`。普通工具栏动作可用 `ArcoAction`（原生事件与 ref 透传，纯图标传 `iconOnly`），富内容悬浮卡片使用共享 `ArcoPopover`，不要用旧皮肤覆盖 Arco。不要在插件中自绘第二份基础控件；业务布局、专用编辑器与拖拽交互保持原有实现。模型通过 quick-buttons 建立的按钮默认使用主题强调色；其它插件的普通静态入口仍用中性色。
+
+### 嵌入 Mica 对话
+
+随包插件的整页可使用宿主绑定好的 `api.ui.Conversation`，无需直接引用 ChatView 或自己维护模型请求、输入框和流式状态：
+
+```jsx
+const Conversation = api.ui.Conversation;
+<Conversation
+  scope={`document:${documentId}`}
+  visible={open}
+  reference={{
+    label: '引用当前文档',
+    getText: async () => { await saveDocument(); return `文档 id: ${documentId}`; },
+  }}
+/>;
+```
+
+- `scope` 是插件内的稳定业务身份，不用会话 id 冒充业务键。每个范围保留当前对话和历史指针，正文仍存普通 Mica 会话；草稿与主界面共用。新范围先显示新建/恢复入口，不自动产生空会话；关闭、隐藏、专注或刷新不等于新建。
+- 模型、服务商、真实推理档位、角色、附件、工具过程、Ask 确认、停止、排队与会话设置复用完整 Mica 对话。不是只读沙箱，插件应向使用者说明工具权限仍与主对话相同。
+- 引用是显式动作。`getText()` 不是渲染期 getter，只在点击时执行；结果追加当前草稿，不覆盖或发送。插件负责保存并校验业务目标；宿主负责丢弃切范围、换会话、隐藏/卸载后的迟到结果。不要从渲染函数偷偷发送正文。
+- 历史入口包含本范围会话，以及最近最多 60 条 Mica 会话，可按标题/目录/id 过滤；这不是全量正文搜索。旧版没有业务关联的会话保留在普通历史里，不猜测归属。
+- 会话绑定与共享 node 解析由宿主处理。打开文件、设置、评审等主页面操作先等待 `api.page.beforeClose`，失败留在原页；独立插件页不能提供的主页面操作明确提示，仍能新建和恢复普通 Mica 会话。
+- 这是随包前端模块能力，与其它 `desktop.jsx` UI 一样不支持用户插件运行时加载。低层 `api.sessions` 继续用于需要自定义只读视图的插件，提供 create/list/history/send/status/abort、事件订阅及 resolve/bind/attach，不必用它重造聊天界面。
 
 ### 插件独立文档与隔离 Web 页面
 

@@ -28,3 +28,5 @@
 - 只读会话顶层字段（cwd、标题等）用 `host/session-file-head.js` 读文件头，不要为单个字段整份 `JSON.parse`：最大的一份会话 19MB（清掉 `rawUsage` 之前是 153MB，随对话长度这笔开销还会再涨）。
 - TUI 空闲检测会话外部改动先看文件身份（设备/inode/大小/纳秒 mtime/ctime），稳定时不读正文；元信息变动才加载并核对内容，读取期间身份又变化则下次重试。`SessionController` 只保留快照 JSON 的短哈希与 cwd，不长期持有整份序列化 JSON；这不改变会话文件格式，也不替代跨进程 turn lease。
 - 保存仍先读取盘上最新快照并合并元信息；状态、标题或消息/用量条数已变化时跳过全量 JSON 判等，无变化时先结构比较、再保留嵌套可选字段的 JSON 语义回退。思考 checkpoint 先比小字段，重复 checkpoint 不序列化整份历史。
+
+- 插件嵌入对话使用运行时界面状态的新键 `pluginUi.conversation.<plugin>.<scope>`（version 1）：仅存当前选择与会话/node 指针、标题和时间，不存第二份正文。草稿沿用已有 `drafts`。按稳定业务 scope 分键，互不覆盖；旧笔记会话没有关联信息，不猜测迁移归属，普通会话历史保持不变。

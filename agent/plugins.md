@@ -99,7 +99,7 @@ Capabilities 可按插件查看实际工具、技能和提示词贡献。工具�
 - 官方 Ask 的 `ask_user` 默认等待 5 分钟，插件设置 `timeoutMinutes` 可调整为 1–60 分钟，每次提问重新读取，单次 `timeoutMs` 可覆盖。超时后通过 `ctx.ui.notice` 向提问前捕获的会话 owner 提示「等待回复已超时，将先按保守方案实现第一版」，工具结果要求模型继续安全、可逆的工作；不自动执行选项命令，也不把超时当成高风险操作的授权。宿主通用 `ctx.ask` 的默认等待不受此设置影响。
 - **`ctx.ask.post(question)` 不阻塞**，返回 `{ id, answered, dismiss() }`：把卡片发出去插件就继续跑，用户不答也不影响任何东西。用于「后台发现了一件事，问一句要不要处理」这类顺手一问——不要为了问一句把整轮挂住。
 - 同一时刻只显示一个问题（输入框上方只有一块位置，两个问题并排时用户分不清在答哪个）。抢占按「谁真的在等」定：阻塞式 `request` 可以顶掉正在显示的 `post`（那个没人等，撤掉不损失），反过来 `post` 撞上 `request` 直接抛错。
-- **`display` 逐项开关每个元素**（`icon` / `meta` / `detail` / `options` / `input` / `confirm` / `hint` / `dismiss`），不传就按数据推导（`confirm` 只在多选或能自由输入时出现，`meta` 只在两个以上选项时出现）。`presentation` 选呈现位置：`dock`（缺省，输入框上方的一条）与 `modal`（浮层，适合「这一步不决定就没法继续」）。选项少、问题短的当场用 `display` 收窄，比让插件各画一套强。
+- **`display` 逐项开关每个元素**（`icon` / `meta` / `detail` / `options` / `input` / `confirm` / `hint` / `dismiss`），不传就按数据推导（`confirm` 只在多选或能自由输入时出现，`meta` 只在两个以上选项时出现）。提问统一画在输入框上方的 dock 里，不再支持弹窗呈现；选项少、问题短的当场用 `display` 收窄，比让插件各画一套强。
 - **等待期间宿主把会话文件顶部的 `awaitingInput` 写成 `summary`**（缺省用 `title`），侧栏据此在会话列表那一行显示「在等你选」；答案回来或轮次结束时清掉。`summary` 就是给侧栏那一行用的短句，别拿它当标题。
 - 只有能把问题画出来、也能收到点选的宿主提供这一面（桌面端 `mica app-server`）：TUI 与 `mica exec` 没有可点的地方，写进 `requires: ["ask"]` 让它整插件跳过，比装载成功却没人回答强。
 
@@ -182,7 +182,9 @@ macOS 浮窗只取键盘焦点、不连带唤起主应用；原生窗口策略�
 
 ### 前端模块的 api
 
-整页宿主另外提供 `api.ui.Markdown`，复用聊天视图的流式 Markdown 展示，不让插件引入第二套解析 / 排版。跨会话操作用 `api.sessions`（无 chat/stats 通道时为 null）：`create({cwd?})`（仅能创建会话的桌面宿主提供，返回一条尚未持久化的草稿句柄）、`list({limit})`、`history(sessionId)`、`send({sessionId,cwd,prompt,clientMessageId?})`、`abort(sessionId)`、`status/isRunning(sessionId)`，以及 `onEvent/onExit/onQueueError/onQueueState/onRunStarted` 订阅。新草稿先以工作区 node id 作为稳定句柄，第一条消息仍经同一个 Mica app-server 绑定真实 session id，不会另起一条模型链路。宿主从共享工作区解析实际 nodeId，事件按 sessionId 对外归属并保留 nodeId / sequence，发送只透传调用方正文，不追加插件上下文。历史和运行态不是原子快照：读取前暂存事件，按 sequence / 轮次边界合并，异步队列拒绝按 clientMessageId 恢复输入；remoteRunning 属于其它进程，不能冒充可停止的本地 run。
+整页宿主提供 `api.ui.Conversation`：插件用 `<Conversation scope="稳定业务键" visible={bool} reference={{ label, getText }} />` 嵌入完整 Mica 对话。组件由宿主绑定插件身份和会话 API，内部 lazy 复用 `ChatView`，插件不 import 宿主私有文件、不自建聊天控制器。`scope` 按插件 + 稳定业务身份归档当前会话及历史指针（运行时 `ui-state` 的 `pluginUi.conversation.*` 独立键），正文仍是普通 Mica 会话，草稿仍在共享 `drafts`；新 scope 不自动建会话，显式新建或从历史恢复，关闭/隐藏/刷新不是新建。历史显示本范围全部指针与最近 60 条会话（搜索范围有界），不删除旧记录。模型/角色/effort、工具日志、Ask、队列、中止与会话设置由同一个 ChatView 处理。`reference.getText()` 仅在用户点击时执行，结果追加到仍然可见的同一会话草稿，不自动发送；切 scope、换会话、隐藏或卸载后的迟到结果丢弃。宿主解析共享工作区节点后才挂载恢复会话，绑定按原 node 归属，不抢当前会话；插件整页开启时暂停挂载主界面缓存 ChatView，避免同 node 的重复订阅与快捷键争抢。跳出插件页打开文件/设置等先走 `page.beforeClose`，保存成功后再导航；独立页不能提供的主页面动作明确提示。
+
+整页宿主另外提供 `api.ui.Markdown`，复用聊天视图的流式 Markdown 展示，不让插件引入第二套解析 / 排版。跨会话操作用 `api.sessions`（无 chat/stats 通道时为 null）：`create({cwd?})`（返回尚未持久化的草稿句柄；独立插件页也能创建）、`resolve(sessionId, {nodeId?})`（定位共享 node，独立页用已存 node 提示保留运行态与草稿键）、`bind({nodeId,sessionId})`（记住真实身份并通知工作区）、`list({limit})`、`history(sessionId)`、`send({sessionId,cwd,prompt,clientMessageId?})`、`abort(sessionId)`、`status/isRunning(sessionId)`，以及 `onEvent/onExit/onQueueError/onQueueState/onRunStarted` 订阅。新草稿先以工作区 node id 作为稳定句柄，第一条消息仍经同一个 Mica app-server 绑定真实 session id，不会另起一条模型链路。宿主从共享工作区解析实际 nodeId，事件按 sessionId 对外归属并保留 nodeId / sequence，发送只透传调用方正文，不追加插件上下文。历史和运行态不是原子快照：读取前暂存事件，按 sequence / 轮次边界合并，异步队列拒绝按 clientMessageId 恢复输入；remoteRunning 属于其它进程，不能冒充可停止的本地 run。
 
 原生桌面另提供 `api.currentTarget()`（完整页面入口，保留中转机 `t` 身份）与 `api.client`：
 `context()` 返回 `{ localHost }`（客户端实际本机页面地址），`readData/writeData` 访问本机插件数据，
