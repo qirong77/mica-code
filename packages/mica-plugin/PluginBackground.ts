@@ -1,4 +1,5 @@
 import type { Disposable } from '@packages/mica-common/index.js';
+import type { OperationOutcome } from '@packages/mica-diagnostics/operation.js';
 
 /**
  * 插件注册的一段常驻工作（周期轮询、心跳、增量同步）。
@@ -22,7 +23,7 @@ export type PluginBackgroundTask = {
    */
   every: number | (() => number);
   /** 一轮工作。tick 是尝试序号（失败后也递增）；抛错只记日志，不影响后续调度。 */
-  run(context: { signal: AbortSignal; tick: number }): void | Promise<void>;
+  run(context: { signal: AbortSignal; tick: number }): void | Partial<OperationOutcome> | Promise<void | Partial<OperationOutcome>>;
   /** 第一轮之前的等待，默认等于 `every`。 */
   delay?: number;
   /** setup 之后立刻跑第一轮，默认 false。 */

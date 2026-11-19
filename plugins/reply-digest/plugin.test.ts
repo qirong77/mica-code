@@ -78,7 +78,7 @@ describe('reply-digest plugin', () => {
         options: { owner: harness.owner, command: 'reply-digest:input-1', variant: 'digest', status: 'info' },
       },
     ]);
-    expect(harness.health.report).toHaveBeenCalledWith({ level: 'ok', message: '长回复摘要已生成' });
+    expect(harness.health.report).toHaveBeenCalledWith({ issueKey: 'digest', level: 'ok', message: '长回复摘要已生成' });
   });
 
   it('retains the full summary and sends a separate bounded preview when it exceeds the configured limit', async () => {

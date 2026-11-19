@@ -89,6 +89,7 @@ const plugin: MicaPlugin = {
   setup(ctx: PluginContext) {
     if (process.platform !== 'darwin') {
       ctx.health.report({
+        issueKey: 'dependency:platform',
         level: 'warn',
         message: `仅支持 macOS（当前为 ${process.platform}）`,
         hint: '这个能力依赖 macOS 的辅助功能与屏幕录制权限。',
@@ -106,6 +107,7 @@ const plugin: MicaPlugin = {
       const message = error instanceof Error ? error.message : String(error);
       ctx.logger.error('computer-use:runtime-write-failed', { error: message });
       ctx.health.report({
+        issueKey: 'dependency:runtime',
         level: 'error',
         message: `运行时落盘失败：${message}`,
         hint: `检查 ${runtimeDir} 是否可写，或先删掉它让插件重建。`,
@@ -113,6 +115,7 @@ const plugin: MicaPlugin = {
       return;
     }
 
+    ctx.health.report({ issueKey: 'dependency:runtime', level: 'ok', message: '桌面操作运行时已就绪' });
     const registration = ctx.skills.register({
       name: SKILL.name || SKILL_NAME,
       description: SKILL.description || SKILL_NAME,
@@ -128,6 +131,7 @@ const plugin: MicaPlugin = {
     const tool = ctx.tools?.register(createComputerUseTool({ runtimeDir, ask: ctx.ask }));
     if (!tool) {
       ctx.health.report({
+        issueKey: 'dependency:tools',
         level: 'warn',
         message: '当前宿主没有工具能力面，桌面操作只能靠 skill 里的只读命令',
         hint: '在 Mica 桌面端里开会话才有 computer_use 工具。',
@@ -140,6 +144,7 @@ const plugin: MicaPlugin = {
       const names = registration.skipped.map((entry) => entry.name).join('、');
       ctx.logger.warn('computer-use:skill-shadowed', { names });
       ctx.health.report({
+        issueKey: 'skill',
         level: 'warn',
         message: `内置 skill 被磁盘上的同名 skill 覆盖（${names}）`,
         hint: '删掉 $MICA_HOME/skills 下的同名目录后重开会话，才会用内置这份。',
@@ -148,8 +153,9 @@ const plugin: MicaPlugin = {
     }
 
     ctx.health.report({
+      issueKey: 'skill',
       level: 'ok',
-      message: '桌面自动化可用',
+      message: '桌面操作 skill 已就绪',
       hint:
         '键鼠类操作执行前会先弹确认卡；权限没开时到 Settings → Plugins → Computer Use 的「运行条件」里查看状态并跳到系统设置。',
     });

@@ -77,8 +77,36 @@ function writeState(dataDir: string, state: PanelState): void {
     mkdirSync(dataDir, { recursive: true });
     writeFileSync(join(dataDir, PANEL_STATE_FILE), `${JSON.stringify(state, null, 2)}\n`, 'utf8');
   } catch {
-    // 记住草稿状态失败不影响功能
+    throw Object.assign(new Error('面板状态未能保存，请保留表单并重试'), { code: 'state_save_failed' });
   }
+}
+
+type PanelResult = PluginPanelActionResult & {
+  outcome: 'success' | 'error' | 'cancelled' | 'declined' | 'waiting' | 'busy' | 'conflict';
+  code: string;
+};
+
+function panelReply(outcome: PanelResult['outcome'], code: string, result: PluginPanelActionResult = {}): PanelResult {
+  return { ...result, outcome, code };
+}
+
+function panelFailure(error: unknown, fallback: string, prefix = ''): PanelResult {
+  const code = (error as NodeJS.ErrnoException)?.code;
+  const outcome =
+    code === 'busy' ? 'busy' : code === 'conflict' ? 'conflict' : code === 'host_unavailable' ? 'declined' : 'error';
+  const fixed = [
+    'busy',
+    'conflict',
+    'host_unavailable',
+    'invalid_data',
+    'state_save_failed',
+    'connection_failed',
+    'missing_password',
+  ];
+  return panelReply(outcome, code && fixed.includes(code) ? code : fallback, {
+    message: `${prefix}${error instanceof Error ? error.message : String(error)}`,
+    keepDrafts: true,
+  });
 }
 
 function field(values: Record<string, string> | undefined, key: string): string {
@@ -222,7 +250,9 @@ export function createPanelHandler(deps: PanelDeps): PluginPanelHandler {
 
   const toggleSessionHost = (hostId: string, wanted: boolean): string => {
     const data = readData(dataFile);
-    if (!data.hosts.some((host) => host.id === hostId)) return '这台服务器已经不在清单里了';
+    if (!data.hosts.some((host) => host.id === hostId)) {
+      throw Object.assign(new Error('这台服务器已经不在清单里了'), { code: 'host_unavailable' });
+    }
     // 第一次勾选时先按「自动添加」的默认值铺开，再加/减这一台：否则只勾一台会把别的
     // 自动机器全丢掉（那份默认值本来就该算进本次会话）。
     const base = scope.explicit() ?? scopedHosts(data, null).map((host) => host.id);
@@ -230,6 +260,7 @@ export function createPanelHandler(deps: PanelDeps): PluginPanelHandler {
     if (wanted) next.add(hostId);
     else next.delete(hostId);
     scope.set([...next]);
+    if (!wanted) deps.closeSession(hostId);
     return wanted
       ? `已把 ${hostId} 添加到本次会话：下一轮起模型能看到它`
       : `已从本次会话移除 ${hostId}：模型看不到它，也连不上`;
@@ -238,16 +269,14 @@ export function createPanelHandler(deps: PanelDeps): PluginPanelHandler {
   const toggleAutoHost = async (hostId: string, wanted: boolean): Promise<string> => {
     await mutateData(dataFile, (data) => {
       const hosts = data.hosts.map((entry) =>
-        entry.id === hostId
-          ? { ...entry, autoAdd: wanted, updatedAt: new Date().toISOString() }
-          : entry,
+        entry.id === hostId ? { ...entry, autoAdd: wanted, updatedAt: new Date().toISOString() } : entry,
       );
       if (!hosts.some((entry) => entry.id === hostId)) throw new Error(`没有叫 ${hostId} 的服务器`);
       return { data: { ...data, hosts }, result: undefined };
     });
-    return wanted
-      ? `${hostId}：以后新开的会话会自动带上它（当前会话不受影响）`
-      : `${hostId}：新会话不再自动带上它`;
+    // 显式清单尚未建立时，取消自动添加也立即撤销当前授权。
+    if (!wanted && scope.explicit() === null) deps.closeSession(hostId);
+    return wanted ? `${hostId}：以后新开的会话会自动带上它（当前会话不受影响）` : `${hostId}：新会话不再自动带上它`;
   };
 
   return {
@@ -256,9 +285,7 @@ export function createPanelHandler(deps: PanelDeps): PluginPanelHandler {
       const current = state();
       const tests = current.tests ?? {};
       const inSession = new Set(scopedHosts(data, scope.explicit()).map((host) => host.id));
-      const editingHost = current.editingId
-        ? data.hosts.find((host) => host.id === current.editingId) ?? null
-        : null;
+      const editingHost = current.editingId ? (data.hosts.find((host) => host.id === current.editingId) ?? null) : null;
       const draft = draftOf(editingHost, current);
       const editing = editingHost !== null;
 
@@ -334,112 +361,120 @@ export function createPanelHandler(deps: PanelDeps): PluginPanelHandler {
       };
     },
 
-    async action(input): Promise<PluginPanelActionResult> {
-      const current = state();
-      const action = input.action;
-      const values = input.values ?? {};
-      const hostId = input.key ?? '';
-
-      // 表格里的两列勾选：`values.check` 是勾完的状态，`values.column` 是点的那一列。
-      if (action === 'toggle-session' || action === 'toggle-auto') {
-        if (!hostId) return { message: '没有指明是哪台服务器' };
-        const wanted = field(values, 'check') === 'true';
-        if (action === 'toggle-session') return { message: toggleSessionHost(hostId, wanted) };
-        try {
-          return { message: await toggleAutoHost(hostId, wanted) };
-        } catch (error) {
-          return { message: error instanceof Error ? error.message : String(error) };
-        }
+    async action(input): Promise<PanelResult> {
+      try {
+        return await action(input);
+      } catch (error) {
+        return panelFailure(error, 'action_failed');
       }
-
-      // 表单输入先落进草稿：切认证方式、切别处再回来都不该丢已经敲进去的地址。
-      // 密码**不**进草稿（`panel.json` 是普通文件），切走就没了——这是有意为之。
-      if (action === 'draft') {
-        // 面板不再收「用途」：编辑已有机器时保留它原来那个，别因为重开一次表单就清掉。
-        const existing = current.editingId
-          ? readData(dataFile).hosts.find((host) => host.id === current.editingId)
-          : null;
-        saveState({
-          draft: {
-            id: field(values, 'id'),
-            host: field(values, 'host'),
-            port: field(values, 'port') || '22',
-            user: field(values, 'user'),
-            label: field(values, 'label') || existing?.label || '',
-            keyPath: field(values, 'keyPath'),
-            auth: field(values, 'auth') === 'key' ? 'key' : 'password',
-          },
-        });
-        // 自动提交只是把草稿同步过来，不是一次提交：口令不在草稿里（面板永不回填），
-        // 若让页面按新视图重置表单，用户刚敲进去的密码会在停顿 0.5 秒后凭空消失。
-        return { keepDrafts: true };
-      }
-
-      if (action === 'cancel') {
-        saveState({ editingId: undefined, draft: undefined });
-        return { message: '已取消编辑' };
-      }
-      if (action === 'cancel-delete') {
-        saveState({ pendingDelete: undefined });
-        return { message: '已取消' };
-      }
-      if (action === 'confirm-delete') {
-        const target = current.pendingDelete;
-        if (!target) return { message: '没有待确认的删除' };
-        await mutateData(dataFile, (data) => {
-          const next = data.hosts.filter((entry) => entry.id !== target);
-          if (next.length === data.hosts.length) throw new Error(`没有叫 ${target} 的服务器`);
-          return { data: { ...data, hosts: next }, result: target };
-        });
-        deletePassword(target, ctx.dataDir);
-        deps.closeSession(target);
-        // 删掉的机器也要从本次会话里去掉，否则那份清单会留着一个指向不存在机器的 id。
-        const explicit = scope.explicit();
-        if (explicit?.includes(target)) scope.set(explicit.filter((id) => id !== target));
-        const tests = { ...(current.tests ?? {}) };
-        delete tests[target];
-        saveState({ pendingDelete: undefined, editingId: undefined, draft: undefined, tests });
-        deps.onHostsChange?.();
-        return { message: `已删除 ${target}` };
-      }
-      if (action === 'connect') {
-        try {
-          return { message: await connect(values) };
-        } catch (error) {
-          // 失败时保留表单：改个端口、修个拼写再点一次「连接」，不该从空白开始重填。
-          return {
-            message: `连接失败：${error instanceof Error ? error.message : String(error)}`,
-            keepDrafts: true,
-          };
-        }
-      }
-
-      const host = readData(dataFile).hosts.find((entry) => entry.id === hostId);
-      if (!host) return { message: '这台服务器已经不在清单里了' };
-
-      if (action === 'edit') {
-        saveState({
-          editingId: host.id,
-          pendingDelete: undefined,
-          draft: {
-            id: host.id,
-            host: host.host,
-            port: String(host.port),
-            user: host.user,
-            label: host.label ?? '',
-            keyPath: host.keyPath ?? '',
-            auth: host.auth,
-          },
-        });
-        return { message: `正在编辑 ${host.id}` };
-      }
-      if (action === 'delete') {
-        saveState({ pendingDelete: host.id });
-        return { message: `再点一次「确认删除」才会删掉 ${host.id}（密码也一起清掉）` };
-      }
-      return { message: `不认识的动作：${action}` };
     },
   };
+
+  async function action(input: Parameters<PluginPanelHandler['action']>[0]): Promise<PanelResult> {
+    const current = state();
+    const action = input.action;
+    const values = input.values ?? {};
+    const hostId = input.key ?? '';
+
+    // 表格里的两列勾选：`values.check` 是勾完的状态，`values.column` 是点的那一列。
+    if (action === 'toggle-session' || action === 'toggle-auto') {
+      if (!hostId) return panelReply('declined', 'missing_host', { message: '没有指明是哪台服务器' });
+      const wanted = field(values, 'check') === 'true';
+      if (action === 'toggle-session')
+        return panelReply('success', 'session_scope_saved', { message: toggleSessionHost(hostId, wanted) });
+      try {
+        return panelReply('success', 'auto_add_saved', { message: await toggleAutoHost(hostId, wanted) });
+      } catch (error) {
+        return panelFailure(error, 'host_save_failed');
+      }
+    }
+
+    // 表单输入先落进草稿：切认证方式、切别处再回来都不该丢已经敲进去的地址。
+    // 密码**不**进草稿（`panel.json` 是普通文件），切走就没了——这是有意为之。
+    if (action === 'draft') {
+      // 面板不再收「用途」：编辑已有机器时保留它原来那个，别因为重开一次表单就清掉。
+      const existing = current.editingId
+        ? readData(dataFile).hosts.find((host) => host.id === current.editingId)
+        : null;
+      saveState({
+        draft: {
+          id: field(values, 'id'),
+          host: field(values, 'host'),
+          port: field(values, 'port') || '22',
+          user: field(values, 'user'),
+          label: field(values, 'label') || existing?.label || '',
+          keyPath: field(values, 'keyPath'),
+          auth: field(values, 'auth') === 'key' ? 'key' : 'password',
+        },
+      });
+      // 自动提交只是把草稿同步过来，不是一次提交：口令不在草稿里（面板永不回填），
+      // 若让页面按新视图重置表单，用户刚敲进去的密码会在停顿 0.5 秒后凭空消失。
+      return panelReply('success', 'draft_saved', { keepDrafts: true });
+    }
+
+    if (action === 'cancel') {
+      saveState({ editingId: undefined, draft: undefined });
+      return panelReply('cancelled', 'edit_cancelled', { message: '已取消编辑' });
+    }
+    if (action === 'cancel-delete') {
+      saveState({ pendingDelete: undefined });
+      return panelReply('cancelled', 'delete_cancelled', { message: '已取消' });
+    }
+    if (action === 'confirm-delete') {
+      const target = current.pendingDelete;
+      if (!target) return panelReply('declined', 'no_pending_delete', { message: '没有待确认的删除' });
+      await mutateData(dataFile, (data) => {
+        const next = data.hosts.filter((entry) => entry.id !== target);
+        if (next.length === data.hosts.length) throw new Error(`没有叫 ${target} 的服务器`);
+        return { data: { ...data, hosts: next }, result: target };
+      });
+      deletePassword(target, ctx.dataDir);
+      deps.closeSession(target);
+      // 删掉的机器也要从本次会话里去掉，否则那份清单会留着一个指向不存在机器的 id。
+      const explicit = scope.explicit();
+      if (explicit?.includes(target)) scope.set(explicit.filter((id) => id !== target));
+      const tests = { ...(current.tests ?? {}) };
+      delete tests[target];
+      saveState({ pendingDelete: undefined, editingId: undefined, draft: undefined, tests });
+      deps.onHostsChange?.();
+      return panelReply('success', 'host_deleted', { message: `已删除 ${target}` });
+    }
+    if (action === 'connect') {
+      try {
+        return panelReply('success', 'connected', { message: await connect(values) });
+      } catch (error) {
+        // 失败时保留表单：改个端口、修个拼写再点一次「连接」，不该从空白开始重填。
+        return panelFailure(error, 'connect_failed', '连接失败：');
+      }
+    }
+
+    const host = readData(dataFile).hosts.find((entry) => entry.id === hostId);
+    if (!host) return panelReply('declined', 'host_unavailable', { message: '这台服务器已经不在清单里了' });
+
+    if (action === 'edit') {
+      saveState({
+        editingId: host.id,
+        pendingDelete: undefined,
+        draft: {
+          id: host.id,
+          host: host.host,
+          port: String(host.port),
+          user: host.user,
+          label: host.label ?? '',
+          keyPath: host.keyPath ?? '',
+          auth: host.auth,
+        },
+      });
+      return panelReply('success', 'editing', { message: `正在编辑 ${host.id}` });
+    }
+    if (action === 'delete') {
+      saveState({ pendingDelete: host.id });
+      return panelReply('waiting', 'delete_confirmation', {
+        message: `再点一次「确认删除」才会删掉 ${host.id}（密码也一起清掉）`,
+      });
+    }
+    return panelReply('declined', 'unknown_action', { message: `不认识的动作：${action}` });
+  }
 
   /** 保存 + 测试一次走完：这是面板唯一的提交动作，也是「连上了才算配好」的唯一判据。 */
   async function connect(values: Record<string, string>): Promise<string> {
@@ -466,7 +501,9 @@ export function createPanelHandler(deps: PanelDeps): PluginPanelHandler {
     if (auth === 'password') {
       if (password) storePassword(outcome.host.id, password, ctx.dataDir);
       else if (!hasStoredPassword(outcome.host.id, ctx.dataDir)) {
-        throw new Error('密码认证要先填一次密码（只存本机 0600 文件，不会给模型看）');
+        throw Object.assign(new Error('密码认证要先填一次密码（只存本机 0600 文件，不会给模型看）'), {
+          code: 'missing_password',
+        });
       }
     } else {
       // 换成私钥就删掉旧密码：留着只会让下次误以为密码认证还能用。
@@ -498,7 +535,7 @@ export function createPanelHandler(deps: PanelDeps): PluginPanelHandler {
       },
     });
     deps.onHostsChange?.();
-    if (!result.ok) throw new Error(result.message);
+    if (!result.ok) throw Object.assign(new Error(result.message), { code: 'connection_failed' });
 
     // 新机器第一次连上就顺手加进本次会话：用户刚填完地址、点了连接，意图很清楚。
     const explicit = currentInSession(outcome.host.id);

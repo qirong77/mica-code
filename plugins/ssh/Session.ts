@@ -1,8 +1,9 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { buildSshArgs, createAskpass, disposeAskpass, shellQuote, type RemoteContext } from './Remote.js';
-import type { SshHost } from './Hosts.js';
+import { readData, type SshHost } from './Hosts.js';
 import { readPassword } from './Secrets.js';
+import { scopedHosts, type SshScope } from './Scope.js';
 
 /**
  * 持久会话：一台机器上挂着一条 `bash`，状态（`cd`、环境变量、venv）跨调用保留。
@@ -82,23 +83,56 @@ function sentinelPattern(token: string): RegExp {
   return new RegExp(`${MARK}${token} (-?\\d+)${MARK}\\n?`);
 }
 
+export type SessionAccess = { dataFile: string; scope: SshScope };
+
+/** Shell 没有可靠的只读模式：即使 open 也会运行远端 profile 和初始化命令。 */
+export function requireSessionHost(access: SessionAccess, hostId: string): SshHost {
+  const data = readData(access.dataFile);
+  const host = data.hosts.find((entry) => entry.id === hostId);
+  if (!host || !scopedHosts(data, access.scope.explicit()).some((entry) => entry.id === hostId)) {
+    throw Object.assign(new Error(`[${hostId}] 服务器不存在或已从本次会话移除，请用户在 SSH 面板重新授权`), {
+      code: 'host_unavailable',
+    });
+  }
+  if (host.readOnly) {
+    throw Object.assign(new Error(`[${hostId}] 服务器已标为只读，不能使用持久 shell；查询请用 \`ssh_read\``), {
+      code: 'read_only',
+    });
+  }
+  return host;
+}
+
 export class SessionManager {
   private readonly sessions = new Map<string, OpenSession>();
   private closing = false;
 
-  constructor(private readonly ctx: RemoteContext) {}
+  constructor(
+    private readonly ctx: RemoteContext,
+    private readonly access: SessionAccess,
+  ) {}
 
   list(): SessionInfo[] {
-    return [...this.sessions.values()].map((session) => ({
-      id: session.id,
-      hostId: session.host.id,
-      target: `${session.host.user}@${session.host.host}:${session.host.port}`,
-      cwd: session.cwd,
-      createdAt: session.createdAt,
-      lastUsedAt: session.lastUsedAt,
-      running: session.waiter !== null,
-      closed: session.closed,
-    }));
+    return [...this.sessions.values()]
+      .filter((session) => {
+        try {
+          this.authorize(session.host.id, session.host);
+          return true;
+        } catch (error) {
+          const code = (error as NodeJS.ErrnoException).code;
+          if (code === 'host_unavailable' || code === 'read_only' || code === 'session_stale') return false;
+          throw error;
+        }
+      })
+      .map((session) => ({
+        id: session.id,
+        hostId: session.host.id,
+        target: `${session.host.user}@${session.host.host}:${session.host.port}`,
+        cwd: session.cwd,
+        createdAt: session.createdAt,
+        lastUsedAt: session.lastUsedAt,
+        running: session.waiter !== null,
+        closed: session.closed,
+      }));
   }
 
   get(id: string): OpenSession | null {
@@ -109,9 +143,11 @@ export class SessionManager {
 
   async open(host: SshHost, options: { cwd?: string } = {}): Promise<{ info: SessionInfo; banner: string }> {
     if (this.closing) throw new Error('插件正在卸载，会话不再接受新命令');
+    host = this.authorize(host.id, host);
     this.sweepIdle();
     const existing = this.get(host.id);
     if (existing) {
+      this.authorize(host.id, existing.host);
       return { info: this.list().find((entry) => entry.id === existing.id)!, banner: '' };
     }
     const password = host.auth === 'password' ? readPassword(host.id, this.ctx.dataDir) : null;
@@ -197,6 +233,7 @@ export class SessionManager {
   ): Promise<SessionWaitResult> {
     const session = this.get(id);
     if (!session) return { output: '', exitCode: null, timedOut: false, dead: true };
+    this.authorize(session.host.id, session.host);
     session.counter += 1;
     const token = tokenFor(session.counter);
     session.lastUsedAt = Date.now();
@@ -213,6 +250,7 @@ export class SessionManager {
   write(id: string, command: string, onComplete?: (result: SessionWaitResult) => void): { token: string } {
     const session = this.get(id);
     if (!session) throw new Error('会话不存在或已关闭');
+    this.authorize(session.host.id, session.host);
     session.counter += 1;
     const token = tokenFor(session.counter);
     session.lastUsedAt = Date.now();
@@ -221,10 +259,11 @@ export class SessionManager {
     return { token };
   }
 
-  /** 等当前这条命令结束；已经结束过就返回缓冲区里剩下的输出。 */
+  /** wait/read 不发送远端命令，但仍需当前授权；失效 shell 关闭且不再交出缓冲区。 */
   async wait(id: string, timeoutMs: number): Promise<SessionWaitResult> {
     const session = this.get(id);
     if (!session) return { output: '', exitCode: null, timedOut: false, dead: true };
+    this.authorize(session.host.id, session.host);
     if (!session.waiter) {
       const rest = session.buffer;
       session.buffer = '';
@@ -243,11 +282,13 @@ export class SessionManager {
   read(id: string): string {
     const session = this.get(id);
     if (!session) return '';
+    this.authorize(session.host.id, session.host);
     const text = session.buffer;
     session.buffer = '';
     return text;
   }
 
+  /** 本地收尾不需要主机配置或 scope，撤销授权后也始终允许关闭。 */
   close(id: string): void {
     const session = this.sessions.get(id);
     if (!session) return;
@@ -264,6 +305,24 @@ export class SessionManager {
       session.closed = true;
       this.finish(session, { output: '', exitCode: null, timedOut: false, dead: true });
       this.teardown(session);
+    }
+  }
+
+  private authorize(hostId: string, previous: SshHost): SshHost {
+    try {
+      const host = requireSessionHost(this.access, hostId);
+      // 同一个别名换了目标、认证或指纹，不得继续使用连接到旧目标的 shell。
+      // createdAt 可省略，读取时会生成展示默认值，不能作为连接身份。
+      const identity = ['host', 'port', 'user', 'auth', 'keyPath', 'fingerprint'] as const;
+      if (identity.some((key) => host[key] !== previous[key])) {
+        throw Object.assign(new Error(`[${hostId}] 服务器配置已变化，旧 shell 已关闭，请重新 open`), {
+          code: 'session_stale',
+        });
+      }
+      return host;
+    } catch (error) {
+      this.close(hostId);
+      throw error;
     }
   }
 
@@ -299,7 +358,8 @@ export class SessionManager {
   ): Promise<SessionWaitResult> {
     // A wait timeout is not command completion. Never replace its completion
     // marker/audit callback with a second command's marker.
-    if (session.waiter) throw Object.assign(new Error('上一条命令仍在运行，请先 wait/read 或关闭会话'), { code: 'busy' });
+    if (session.waiter)
+      throw Object.assign(new Error('上一条命令仍在运行，请先 wait/read 或关闭会话'), { code: 'busy' });
     return new Promise((resolve) => {
       session.waiter = { token, resolvers: [resolve], onComplete };
       if (session.timer) clearTimeout(session.timer);
@@ -332,7 +392,11 @@ export class SessionManager {
     if (!session.waiter) return;
     if (session.timer) clearTimeout(session.timer);
     session.timer = null;
-    try { session.waiter.onComplete?.(result); } catch { /* audit cannot strand command resolvers */ }
+    try {
+      session.waiter.onComplete?.(result);
+    } catch {
+      /* audit cannot strand command resolvers */
+    }
     session.last = result;
     this.resolveAll(session, result);
     session.waiter = null;

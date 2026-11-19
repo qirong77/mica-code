@@ -1,7 +1,25 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { spawn } from 'node:child_process';
+import { EventEmitter } from 'node:events';
 import type { PluginAskAnswer, PluginAskApi, PluginAskQuestion } from '@packages/mica-plugin/index.js';
 import { resolvePluginAskDisplay } from '@packages/mica-plugin/index.js';
 import { AskUserTool } from './AskTool.js';
+
+vi.mock('node:child_process', async (importOriginal) => ({
+  ...await importOriginal<typeof import('node:child_process')>(),
+  spawn: vi.fn(),
+}));
+
+function fakeCommand() {
+  const child = Object.assign(new EventEmitter(), {
+    pid: 424_242,
+    stdout: new EventEmitter(),
+    stderr: new EventEmitter(),
+    kill: vi.fn(() => true),
+  });
+  vi.mocked(spawn).mockReturnValue(child as never);
+  return child;
+}
 
 function stubAsk(answer: PluginAskAnswer) {
   const seen: PluginAskQuestion[] = [];
@@ -26,6 +44,16 @@ const question = {
 };
 
 describe('AskUserTool', () => {
+  beforeEach(() => { vi.mocked(spawn).mockReset(); });
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.useRealTimers();
+  });
+
+  it('is a write/execute barrier even when a particular question has no commands', () => {
+    expect(new AskUserTool(stubAsk({ optionIds: [], cancelled: true, reason: 'cancelled' }).api).readOnly).toBe(false);
+  });
+
   it('turns a picked option into an instruction the model can act on', async () => {
     const { api, seen } = stubAsk({ optionIds: ['a'], cancelled: false, reason: 'answered' });
     const text = await new AskUserTool(api).execute(question);
@@ -33,6 +61,7 @@ describe('AskUserTool', () => {
     expect(text).toContain('用户选择了「方案 A」');
     // 选项上的 prompt 变成「按这个选项继续」的指令段落。
     expect(text).toContain('先做转账入口');
+    expect(text).toBe('用户选择了「方案 A」。\n\n按这个选项继续：先做转账入口');
   });
 
   it('lists every option when several were picked', async () => {
@@ -162,5 +191,154 @@ describe('AskUserTool', () => {
         question,
       ),
     ).toBe('Asking: 先做哪个入口？');
+  });
+
+  it('captures the initiating owner cwd before waiting and forwards the turn signal to the child', async () => {
+    const { api } = stubAsk({ optionIds: ['a'], cancelled: false, reason: 'answered' });
+    const owner = {};
+    const context = {};
+    let cwd = '/workspace/original-owner';
+    const getCwd = vi.fn(() => cwd);
+    vi.spyOn(api, 'request').mockImplementation(async () => {
+      cwd = '/workspace/another-session';
+      return { optionIds: ['a'], cancelled: false, reason: 'answered' };
+    });
+    const signal = new AbortController().signal;
+    const child = fakeCommand();
+    const tool = new AskUserTool(api, { captureOwner: () => owner, getCwd });
+    const pending = tool.execute({ title: '执行哪一项？', options: [{ id: 'a', label: '运行检查', command: 'fake-command' }] }, { context, signal });
+    await vi.waitFor(() => expect(spawn).toHaveBeenCalledOnce());
+    expect(getCwd).toHaveBeenCalledExactlyOnceWith(owner);
+    expect(spawn).toHaveBeenCalledWith('/bin/bash', ['-lc', 'fake-command'], expect.objectContaining({
+      cwd: '/workspace/original-owner', signal, detached: process.platform !== 'win32',
+    }));
+    child.stdout.emit('data', Buffer.from('fake output'));
+    child.emit('close', 0, null);
+    expect(JSON.parse(await pending)).toMatchObject({ outcome: 'success', code: 'ok', commands: [
+      { optionId: 'a', outcome: 'success', code: 'ok', exitCode: 0, output: 'fake output' },
+    ] });
+  });
+
+  it('does not fall back to an unrelated process cwd when the owner has no cwd', async () => {
+    const { api } = stubAsk({ optionIds: ['a'], cancelled: false, reason: 'answered' });
+    const result = await new AskUserTool(api, { getCwd: () => undefined }).execute({
+      title: '执行哪一项？', options: [{ id: 'a', label: '运行检查', command: 'must-not-run' }],
+    });
+    expect(JSON.parse(result)).toMatchObject({ outcome: 'error', code: 'cwd_unavailable' });
+    expect(spawn).not.toHaveBeenCalled();
+  });
+
+  it('waits for aborted child cleanup, kills the detached group and never starts the next selected command', async () => {
+    const { api } = stubAsk({ optionIds: ['a', 'b'], cancelled: false, reason: 'answered' });
+    const child = fakeCommand();
+    const kill = vi.spyOn(process, 'kill').mockReturnValue(true);
+    const controller = new AbortController();
+    const pending = new AskUserTool(api).execute({
+      title: '执行哪些项？', multiple: true,
+      options: [{ id: 'a', label: '第一项', command: 'fake-first' }, { id: 'b', label: '第二项', command: 'must-not-run' }],
+    }, { signal: controller.signal, context: { cwd: '/workspace/owner' } });
+    let settled = false;
+    void pending.then(() => { settled = true; });
+    await vi.waitFor(() => expect(spawn).toHaveBeenCalledOnce());
+    controller.abort();
+    child.emit('error', new DOMException('The operation was aborted', 'AbortError'));
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    expect(kill).toHaveBeenCalledWith(-child.pid, 'SIGTERM');
+    child.emit('close', null, 'SIGTERM');
+    const result = JSON.parse(await pending);
+    expect(kill).toHaveBeenCalledWith(-child.pid, 'SIGKILL');
+    expect(result).toMatchObject({ outcome: 'cancelled', code: 'aborted', commands: [
+      { optionId: 'a', outcome: 'cancelled', code: 'aborted', aborted: true },
+    ] });
+    expect(spawn).toHaveBeenCalledOnce();
+    expect(result.text).not.toContain('must-not-run');
+  });
+
+  it('checks the signal again between a successful command and the next selection', async () => {
+    const { api } = stubAsk({ optionIds: ['a', 'b'], cancelled: false, reason: 'answered' });
+    const child = fakeCommand();
+    const controller = new AbortController();
+    const pending = new AskUserTool(api).execute({
+      title: '执行哪些项？', multiple: true,
+      options: [{ id: 'a', label: '第一项', command: 'fake-success' }, { id: 'b', label: '第二项', command: 'must-not-run' }],
+    }, { signal: controller.signal });
+    await vi.waitFor(() => expect(spawn).toHaveBeenCalledOnce());
+    child.emit('close', 0, null);
+    controller.abort();
+    expect(JSON.parse(await pending)).toMatchObject({ outcome: 'cancelled', code: 'aborted', commands: [
+      { optionId: 'a', outcome: 'success', code: 'ok' },
+    ] });
+    expect(spawn).toHaveBeenCalledOnce();
+  });
+
+  it('escalates a timed-out fake child and reports a fixed terminal outcome without running later options', async () => {
+    vi.useFakeTimers();
+    const { api } = stubAsk({ optionIds: ['a', 'b'], cancelled: false, reason: 'answered' });
+    const child = fakeCommand();
+    const kill = vi.spyOn(process, 'kill').mockReturnValue(true);
+    const pending = new AskUserTool(api).execute({
+      title: '执行哪些项？', multiple: true,
+      options: [{ id: 'a', label: '第一项', command: 'fake-hold' }, { id: 'b', label: '第二项', command: 'must-not-run' }],
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(spawn).toHaveBeenCalledOnce();
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(kill).toHaveBeenCalledWith(-child.pid, 'SIGTERM');
+    await vi.advanceTimersByTimeAsync(500);
+    expect(kill).toHaveBeenCalledWith(-child.pid, 'SIGKILL');
+    child.emit('close', null, 'SIGKILL');
+    expect(JSON.parse(await pending)).toMatchObject({ outcome: 'timeout', code: 'timeout', commands: [
+      { outcome: 'timeout', code: 'timeout', timedOut: true, aborted: false },
+    ] });
+    expect(spawn).toHaveBeenCalledOnce();
+  });
+
+  it('keeps nonzero exit and spawn failures structural, with no retries or subsequent commands', async () => {
+    const { api } = stubAsk({ optionIds: ['a', 'b'], cancelled: false, reason: 'answered' });
+    const child = fakeCommand();
+    const question = { title: '执行哪些项？', multiple: true, options: [
+      { id: 'a', label: '第一项', command: 'fake-failure' }, { id: 'b', label: '第二项', command: 'must-not-run' },
+    ] };
+    const pending = new AskUserTool(api).execute(question);
+    await vi.waitFor(() => expect(spawn).toHaveBeenCalledOnce());
+    child.stderr.emit('data', Buffer.from('fake failure'));
+    child.emit('close', 3, null);
+    expect(JSON.parse(await pending)).toMatchObject({ outcome: 'error', code: 'nonzero_exit', commands: [
+      { exitCode: 3, output: 'fake failure' },
+    ] });
+    expect(spawn).toHaveBeenCalledOnce();
+    vi.mocked(spawn).mockImplementationOnce(() => { throw new Error('fake spawn failure'); });
+    expect(JSON.parse(await new AskUserTool(api).execute(question))).toMatchObject({ outcome: 'error', code: 'spawn_failed' });
+    expect(spawn).toHaveBeenCalledTimes(2);
+  });
+
+  it('checks cancellation before asking and again after an answer, without starting a command', async () => {
+    const { api } = stubAsk({ optionIds: ['a'], cancelled: false, reason: 'answered' });
+    const request = vi.spyOn(api, 'request');
+    const controller = new AbortController();
+    controller.abort();
+    const tool = new AskUserTool(api);
+    expect(JSON.parse(await tool.execute(question, { signal: controller.signal }))).toMatchObject({ outcome: 'cancelled', code: 'aborted' });
+    expect(request).not.toHaveBeenCalled();
+    const duringAnswer = new AbortController();
+    request.mockImplementation(async () => {
+      duringAnswer.abort();
+      return { optionIds: ['a'], cancelled: false, reason: 'answered' };
+    });
+    expect(JSON.parse(await tool.execute({ ...question, options: [{ id: 'a', label: '第一项', command: 'must-not-run' }] }, { signal: duringAnswer.signal })))
+      .toMatchObject({ outcome: 'cancelled', code: 'aborted' });
+    expect(spawn).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['timeout', 'timeout', 'answer_timeout'],
+    ['cancelled', 'cancelled', 'answer_cancelled'],
+    ['aborted', 'cancelled', 'aborted'],
+  ] as const)('reports %s structurally without executing selected commands', async (reason, outcome, code) => {
+    const { api } = stubAsk({ optionIds: ['a'], cancelled: true, reason });
+    const result = await new AskUserTool(api).execute({ ...question, options: [{ id: 'a', label: '第一项', command: 'must-not-run' }] });
+    expect(JSON.parse(result)).toMatchObject({ outcome, code });
+    expect(spawn).not.toHaveBeenCalled();
   });
 });

@@ -74,6 +74,7 @@ describe('agent roles', () => {
       prompt: '只改 B 端。',
       builtIn: false,
       pluginId: 'user.demand-dev',
+      tag: 'plugin',
       path,
     });
   });

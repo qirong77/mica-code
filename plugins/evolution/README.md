@@ -61,8 +61,11 @@ mica 选后者，这个插件就是「洗」的地方。
 | `config-model-discovery`        | 删掉 config.json 里已无消费方的 `get_model_url` 与空的默认模型（回落到第一个服务商的模型）。                                                                                                                                                                                                                                                                                    |
 | `browser-cookie-sync-extension` | 将识别出的 v1 Chrome 数据库 / 手动同步设置与状态改名归档为同目录 `*.legacy-v1.json`；已有归档保留并使用编号后缀。新版 `target` 连接对象与未知状态字段保留，token 与扩展目录不动；损坏或无法识别的文件不改，旧形态不再支持。                                                                                                                                                     |
 | `harness-review-assessments`    | 将 `plugin-data/harness-review/decisions/<key>.json` 的合法旧人工决策迁入 `<key>/legacy-<digest>.json`，补 `version: 1` 与 `baseline: null`（观测范围未知），保留 id、status、note、updatedAt；已有同内容历史不重复。原文件改名归档为 `*.legacy-v1.json`，已有归档保留并使用编号后缀；未知、损坏、键不匹配或非法路径不动。运行期不再支持旧单文件形态，需运行 `/evolution run`。 |
+| `plugin-events-identity-v2` | 将 `plugin-data/harness-review/plugin-events.jsonl` 与 `.1.jsonl` 的旧失败行补为 `schemaVersion: 2`；合法已有 `pluginVersion/pid/generation` 保留，缺失或非法身份明确为 `unknown/null/unknown`，绝不从当前清单或进程猜历史身份。与生产者共用 `plugin-events.lock`，原始字节私有归档到 `legacy-plugin-events/` 后以 0600 原子替换；旧无版本形态不再支持。 |
 | `plugin-startup-health` | 将旧 `plugin-health/<id>.json` 中宿主写下的「启动失败：…」错误原文归档到 `plugin-data/evolution/legacy-plugin-health/`，不再当作当前运行健康。只识别明确的旧启动错误，真实运行错误、成功记录与损坏文件不动；装配结论由当前宿主的 `plugin-status.json` 负责。 |
 | `plugin-health-issues-v2` | 将旧单条健康状态迁为 `schemaVersion: 2` 的 `issues` 映射：业务状态放 `runtime`，明确的模型降级放 `llm:degraded`；所有原字段随报告保留，替换前完整原文归档到 `plugin-data/evolution/legacy-plugin-health/`。迁移与运行健康写入使用同一跨进程锁；当前形态、损坏内容与符号链接不改。运行时不再解析旧单条形态。 |
+| `plugin-health-runtime-history` | 在上条之后，将 Memory / Web Search / Mobile Relay / Video / Computer Use / Reply Digest / Session Rename / Compact / Tags / Todo / Browser Cookie Sync / Evolution 已改用明确 issueKey 的旧 `runtime` 槽从活动文档移出。冻结的官方插件范围内，明确的旧 manager 后台 / hook / skill / 清单配置与角色故障也归档；其它业务 `runtime` 与用户插件任意健康不动。锁内读取最新原文，0600 归档到 `legacy-plugin-health-runtime/`，只删目标槽、保留其它 issue；历史归档不代表已恢复。 |
+| `ssh-audit-v2` | 将 `plugin-data/ssh/audit.jsonl` 的旧行按固定字段白名单转换为 `schemaVersion: 2`：`script` 仅保留首个物理行的 SHA-256、任意原始 note 改为 `diagnostic_omitted`，固定备注码与安全生成日志路径保留；原有事件时间、退出码、耗时和结果不补造。与 append/trim 共用 `audit.lock`，原文 0600 归档到 `legacy-ssh-audit/` 后原子替换；运行期只认合法 v2，不再解释旧脚本行。 |
 | `subagent-task-files` | 将 `subagent-tasks/<sessionId>.json` 的旧任务数组拆为 `<sessionId>/<taskId>.json`，已有独立任务更新优先；完整原文件改名归档为 `*.legacy-v1.json`，归档重名时加编号。损坏、未知数据与符号链接不改。运行时不再读取旧数组，需经此迁移。 |
 | `notebook-comments` | 评论功能移除后，笔记文档里的 `comments` 讨论记录先归档到 `plugin-data/evolution/legacy-notebook-comments/<noteId>.json`（重名加编号），再删掉该字段；正文里由评论产生的 MarkNode 锚点拆回普通子节点，文字与格式不变。文档只剩 `version` 与 `editorState`，损坏文档与非 `version: 1` 文档不动；重复执行改动数为 0。 |
 | `notebook-mcp` | 将 Notebook 旧插件 skill 索引移到 `plugin-data/evolution/legacy-notebook-skill/` 原文归档，迁移默认能力中的旧工具停用项；不改笔记正文、用户手写 skill 或其它插件索引。旧 skill / 直连工具入口不再支持。 |
@@ -82,6 +85,15 @@ Harness Review 的纯转换 `harnessReviewAssessmentV1` 放在 `migrations.ts`�
 
 同样，`pluginHealthIssuesV2` 在 `migrations.ts` 登记纯转换，只由 `DATA_MIGRATIONS` 的
 `plugin-health-issues-v2` 扫描非会话健康文件，不加入会话 `MIGRATIONS`。
+
+失败流和 SSH 审计迁移只读完整的连续 JSONL：每文件最多 8 MiB、每行 64 KiB、最多 50,000 行，
+不从文件尾截一段当成完整历史。超限、未知版本、损坏 / 不完整记录或符号链接保留整份输入，
+忙锁本轮跳过；不会部分改写文件或编造缺失事件。原文按内容摘要命名私有归档（目录 0700、文件
+0600），重试复用同内容归档、冲突则不覆盖；活动文件也以 0600 原子替换。
+
+`plugin-health-runtime-history` 的归档表示 **unknown/history**：旧 `runtime` 将多个恢复边界混在
+一起，无法可靠映射到新问题；从活动文档移出不是成功、恢复或验收证据。其它 issue 继续按原状态
+显示；移出后没有活动 issue 时仅表示「当前没有已归属的报告」。不产生 `ok` 或伪造恢复时间。
 
 规则只有三条，违反任何一条都会让「删除运行时兼容分支」变成一次数据事故：
 

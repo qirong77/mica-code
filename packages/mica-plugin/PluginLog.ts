@@ -2,6 +2,7 @@ import { mkdirSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { resolveLogDir } from '@packages/mica-config/brand.js';
 import { enqueueLogEntry, flushLogs } from '@packages/mica-diagnostics/index.js';
+import { diagnosticPluginVersion, processIdentity } from '@packages/mica-diagnostics/identity.js';
 
 /**
  * 插件日志：每个插件一份 JSONL，和 desktop 运行时日志同一个目录，出问题时直接 tail / grep。
@@ -29,6 +30,8 @@ export type PluginLogger = {
 };
 
 export type PluginLogOptions = {
+  /** Version of the loaded producer. Never fill historical rows from a new manifest. */
+  pluginVersion?: string;
   /** 覆盖日志目录；测试与需要把日志收进隔离目录时用。 */
   dir?: string;
   /** 关闭落盘（仍然转发）。 */
@@ -86,7 +89,8 @@ export function createPluginLogger(
     if (options.disabled || process.env.MICA_PLUGIN_LOG === '0') return;
     try {
       enqueueLogEntry(
-        { at: Date.now(), scope: 'plugin', pluginId, plugin: pluginId, level, event, data },
+        { at: Date.now(), scope: 'plugin', pluginId, plugin: pluginId,
+          pluginVersion: diagnosticPluginVersion(options.pluginVersion), ...processIdentity(), level, event, data },
         {
           dir: pluginLogDir(options),
           filePrefix: `${PLUGIN_FILE_PREFIX}${safeFileName(pluginId)}`,

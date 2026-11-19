@@ -3,6 +3,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { resolveMicaHome } from '@packages/mica-config/index.js';
 import type { PluginContext } from '@packages/mica-plugin/index.js';
+import type { OperationOutcome } from '@packages/mica-diagnostics/operation.js';
 import { startCookieService } from './service.js';
 import { updatePluginData } from './status.js';
 import { extensionAssets, extensionFiles, extensionFingerprint, extensionVersion } from './extensionSources.js';
@@ -104,8 +105,10 @@ export default function setup(ctx: PluginContext): void {
   let starting = false;
   const degradedDirections = new Map<string, string>();
   const observedDirections = new Set<string>();
-  const start = async () => {
-    if (disposed || starting || service) return;
+  const start = async (): Promise<OperationOutcome> => {
+    if (disposed) return { outcome: 'skipped', code: 'disposed' };
+    if (starting) return { outcome: 'waiting', code: 'starting' };
+    if (service) return { outcome: 'skipped', code: 'listener_running' };
     starting = true;
     try {
       const started = await startCookieService({
@@ -121,35 +124,47 @@ export default function setup(ctx: PluginContext): void {
             if (degradedDirections.get(event.direction) !== event.code)
               ctx.health.report({ issueKey, level: 'warn', message: `Cookie 同步 ${event.direction} 异常（${event.code}），正在自动恢复` });
             degradedDirections.set(event.direction, event.code);
-          } else if (event.outcome === 'recovered' || !observedDirections.has(event.direction)) {
+          } else if (event.outcome === 'recovered' || (!observedDirections.has(event.direction) && !['incremental', 'to-browser'].includes(event.direction))) {
             ctx.logger.info('cookie-sync:recovered', event);
             if (degradedDirections.has(event.direction) || ctx.health.read?.(issueKey)?.level === 'warn')
               ctx.health.report({ issueKey, level: 'ok', message: `Cookie 同步 ${event.direction} 已恢复` });
             degradedDirections.delete(event.direction);
+          }
+          if (event.direction === 'reconcile' && event.outcome !== 'error' && event.repairPending === 0) {
+            for (const direction of ['incremental', 'to-browser']) {
+              if (degradedDirections.has(direction) || ctx.health.read?.(`sync:${direction}`)?.level === 'warn') {
+                ctx.health.report({ issueKey: `sync:${direction}`, level: 'ok', message: 'Cookie 同步补偿已由 Chrome 确认完成' });
+                degradedDirections.delete(direction);
+              }
+            }
           }
           observedDirections.add(event.direction);
         },
       });
       if (disposed) {
         await started.close();
-        return;
+        return { outcome: 'cancelled', code: 'disposed' };
       }
       service = started;
       updatePluginData(dataDir, { target: { text: '等待 Chrome' } });
-      ctx.health.clear();
+      ctx.health.clear('service:listener');
+      return { outcome: 'waiting', code: 'listener_ready' };
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'EADDRINUSE') {
         updatePluginData(dataDir, { target: { text: '服务启动失败', tone: 'error' } });
         ctx.health.report({
+          issueKey: 'service:listener',
           level: 'error',
           message: `Cookie 服务启动失败：${error instanceof Error ? error.message : String(error)}`,
         });
+        return { outcome: 'error', code: 'listener_failed' };
       }
+      return { outcome: 'skipped', code: 'owned_elsewhere' };
     } finally {
       starting = false;
     }
   };
-  void start();
+  void (ctx.operations ? ctx.operations.run('service.start', start) : start());
   ctx.background?.register({ id: 'service-owner', every: 15_000, run: start });
   ctx.onDispose(async () => {
     disposed = true;

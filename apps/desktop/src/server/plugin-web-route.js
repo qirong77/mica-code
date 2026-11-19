@@ -1,6 +1,6 @@
 import { isPluginWebQuery } from '@packages/mica-plugin/PluginWeb.js'
 import { matchesPluginPagePath, readPluginPageId } from '@packages/mica-web-shared/app-paths.js'
-import { observePluginOperation } from '@packages/mica-diagnostics/operation.js'
+import { observePluginOperation, startPluginOperation } from '@packages/mica-diagnostics/operation.js'
 import { PluginWebError } from '../host/plugin-web-runtime.js'
 
 export const PLUGIN_WEB_MAX_BYTES = 1024 * 1024
@@ -15,6 +15,7 @@ export function createPluginWebRoute({
   verifyOrigin, servePage, timeoutMs = PLUGIN_WEB_TIMEOUT_MS, maxConcurrent = 16
 }) {
   const pages = new Map(manifests.filter((manifest) => manifest.desktopPage || manifest.desktopLauncher).map((manifest) => [manifest.id, manifest]))
+  const versions = new Map(manifests.map((manifest) => [manifest.id, manifest.version]))
   let pending = 0
   return async (req, res, pathname) => {
     let namespace = pathname
@@ -58,6 +59,8 @@ export function createPluginWebRoute({
       return true
     }
     if (pending >= maxConcurrent) {
+      startPluginOperation({ plugin: pluginId, pluginVersion: versions.get(pluginId),
+        operation: `web.read.${query}`, surface: 'page' }).finish({ outcome: 'busy', code: 'busy' })
       sendJson(res, 429, { ok: false, code: 'busy', error: '插件只读查询繁忙，请稍后重试' })
       return true
     }

@@ -34,11 +34,14 @@ export type VideoFramesToolOptions = {
   getConfig: () => { ffmpegPath?: string; maxEdge: number; cacheLimitMb: number };
   /** 找不到 ffmpeg 时上报一次健康状态。 */
   onMissingFfmpeg: () => void;
+  /** Fixed metadata only; fallback must not silently look like scene detection succeeded. */
+  onScenePlan?: (result: { outcome: 'success' | 'partial' | 'skipped'; code: string }) => void;
 };
 
 export class VideoFramesTool extends MicaTool {
   private readonly getConfig: VideoFramesToolOptions['getConfig'];
   private readonly onMissingFfmpeg: VideoFramesToolOptions['onMissingFfmpeg'];
+  private readonly onScenePlan: VideoFramesToolOptions['onScenePlan'];
   private tools: FfmpegTools | null = null;
   private resolvedFor: string | undefined;
 
@@ -86,6 +89,7 @@ export class VideoFramesTool extends MicaTool {
     );
     this.getConfig = options.getConfig;
     this.onMissingFfmpeg = options.onMissingFfmpeg;
+    this.onScenePlan = options.onScenePlan;
   }
 
   async execute(
@@ -212,7 +216,13 @@ export class VideoFramesTool extends MicaTool {
     rangeLengthSeconds: number;
     signal?: AbortSignal;
   }): Promise<FramePlan | null> {
-    if (params.rangeLengthSeconds > SCENE_SCAN_MAX_SECONDS) return null;
+    const note = (outcome: 'success' | 'partial' | 'skipped', code: string) => {
+      try { this.onScenePlan?.({ outcome, code }); } catch { /* observation cannot change frame extraction */ }
+    };
+    if (params.rangeLengthSeconds > SCENE_SCAN_MAX_SECONDS) {
+      note('skipped', 'scan_range_limit');
+      return null;
+    }
 
     try {
       const scanKey = `${params.cacheKey}-${params.rangeStartSeconds.toFixed(1)}-${params.rangeLengthSeconds.toFixed(1)}`;
@@ -250,17 +260,21 @@ export class VideoFramesTool extends MicaTool {
           params.count >= 2 && tail - head > 0.5
             ? [{ seconds: round3(head) }, { seconds: round3(tail) }]
             : [{ seconds: round3(Math.min(base + params.rangeLengthSeconds * 0.5, ceiling)) }];
+        note('success', 'static_scene');
         return {
           frames,
           notes: ['整段画面基本没有变化（静态画面），只给少量帧；要确认某处细节可用 at 精确点名'],
         };
       }
       const plan = planFromCuts(cuts, params.rangeLengthSeconds, Math.min(Math.max(1, Math.round(params.count)), 12));
+      note(plan ? 'success' : 'skipped', plan ? 'scene_detected' : 'no_scene_plan');
       // 扫描抓到的时间点是相对区间起点的，换回视频里的绝对时间。
       return plan
         ? { ...plan, frames: plan.frames.map((frame) => ({ ...frame, seconds: round3(frame.seconds + params.rangeStartSeconds) })) }
         : null;
-    } catch {
+    } catch (error) {
+      params.signal?.throwIfAborted();
+      note('partial', error instanceof Error && error.name === 'TimeoutError' ? 'scene_timeout' : 'scene_scan_failed');
       return null;
     }
   }

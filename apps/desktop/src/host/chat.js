@@ -623,6 +623,14 @@ function startRun(sender, id, payload) {
 
   const existing = runs.get(id)
   if (existing?.child) {
+    const requestedRole = typeof payload.role === 'string' && payload.role.trim() ? payload.role.trim() : 'default'
+    // MCP 配置在宿主启动时生成。角色切换如果发生在空闲宿主上，先重启这一条宿主，
+    // 让角色门控的插件 MCP 与新的 system prompt 保持一致；正在运行的 turn 仍按原有
+    // 队列语义处理，界面本身也会阻止运行中切换角色。
+    if (!existing.running && existing.role !== requestedRole) {
+      disposeHost(id)
+      return startRun(sender, id, payload)
+    }
     // Resident host already running. Refresh the sender (a renderer reload
     // creates a new webContents whose listeners must receive streamed events)
     // and dispatch by bus state:
@@ -1001,7 +1009,10 @@ function spawnChatHost(id, sender, payload) {
     origin: process.env[CONTROL_ORIGIN_ENV] || '',
     owner,
     kinds: availableControlKinds(),
-    extraServers: buildPluginMcpServers({ origin: process.env[CONTROL_ORIGIN_ENV] || '' }),
+    extraServers: buildPluginMcpServers({
+      origin: process.env[CONTROL_ORIGIN_ENV] || '',
+      role
+    }),
     separator: process.platform === 'win32' ? '\\' : '/'
   })
 
@@ -1042,6 +1053,7 @@ function spawnChatHost(id, sender, payload) {
     stderr: '',
     sessionId: null,
     requestedSessionId: sessionId || null,
+    role: role || 'default',
     events: [],
     prompt: '',
     startedAt: Date.now(),
@@ -1932,6 +1944,7 @@ async function loadModels() {
 
 function listRoles() {
   const names = new Set()
+  const pluginRoles = new Map()
   try {
     for (const name of readdirSync(join(micaHomeDir(), 'role'))) {
       if (!name.endsWith('.md')) continue
@@ -1959,13 +1972,26 @@ function listRoles() {
       if (typeof parsed.pluginId === 'string' && disabledPlugins.has(parsed.pluginId)) continue
       for (const entry of parsed.roles) {
         const name = typeof entry?.name === 'string' ? entry.name.trim() : ''
-        if (name) names.add(name)
+        if (name && !names.has(name)) {
+          names.add(name)
+          pluginRoles.set(name, {
+            tag: 'plugin',
+            ...(typeof parsed.pluginId === 'string' && parsed.pluginId.trim()
+              ? { pluginId: parsed.pluginId.trim() }
+              : {})
+          })
+        }
       }
     }
   } catch {
     // 没有插件角色就是没有
   }
-  return { ok: true, roles: [...names].sort() }
+  return {
+    ok: true,
+    roles: [...names]
+      .sort()
+      .map((name) => ({ name, ...(pluginRoles.get(name) || {}) }))
+  }
 }
 
 function runCompactSession(sessionId, mode = 'model') {
@@ -2252,11 +2278,13 @@ export function registerChatIpc() {
    * 与 By The Way 的区别是允许草稿会话（还没有 sessionId）：选择只存在内存里，
    * 首轮保存会带上它——用户可以先关掉几个工具再开始第一条消息。
    */
-  function ensureCapabilityRun(id, event, { sessionId, cwd } = {}) {
+  function ensureCapabilityRun(id, event, { sessionId, cwd, role } = {}) {
     let run = runs.get(id)
     if (run?.child?.stdin?.writable) {
       run.sender = event.sender
-      return { run }
+      const requestedRole = typeof role === 'string' && role.trim() ? role.trim() : 'default'
+      if (run.running || run.role === requestedRole) return { run }
+      disposeHost(id)
     }
     const targetSessionId = typeof sessionId === 'string' ? sessionId.trim() : ''
     if (targetSessionId) {
@@ -2265,7 +2293,8 @@ export function registerChatIpc() {
     }
     const spawned = spawnChatHost(id, event.sender, {
       sessionId: targetSessionId,
-      cwd: typeof cwd === 'string' ? cwd : ''
+      cwd: typeof cwd === 'string' ? cwd : '',
+      role: typeof role === 'string' ? role : ''
     })
     if (!spawned.ok) return { error: spawned.error }
     run = runs.get(id)
@@ -2697,9 +2726,9 @@ export function registerChatIpc() {
 
   // 会话级能力（skills / tools / MCP servers）。目录与开关都只有常驻 host 知道，
   // 所以这里必要时按需起一个（与 By The Way 同一条路），再走一次普通请求。
-  ipcMain.handle('chat:capabilities', async (event, { id, sessionId, cwd } = {}) => {
+  ipcMain.handle('chat:capabilities', async (event, { id, sessionId, cwd, role } = {}) => {
     if (!id) return { ok: false, error: 'chat id 缺失' }
-    const ensured = ensureCapabilityRun(id, event, { sessionId, cwd })
+    const ensured = ensureCapabilityRun(id, event, { sessionId, cwd, role })
     if (!ensured.run) return { ok: false, error: ensured.error }
     // hostTaskRequest 回的是 `{ ok, result }` 这一层信封，app-server 的载荷在
     // `result` 里。面板要的是载荷本身，所以这里拆包——否则读到的全是 undefined，
@@ -2707,9 +2736,9 @@ export function registerChatIpc() {
     return unwrapHostResult(await hostTaskRequest(ensured.run, 'mica/capabilities/get', {}))
   })
 
-  ipcMain.handle('chat:set-capabilities', async (event, { id, sessionId, cwd, selection } = {}) => {
+  ipcMain.handle('chat:set-capabilities', async (event, { id, sessionId, cwd, role, selection } = {}) => {
     if (!id) return { ok: false, error: 'chat id 缺失' }
-    const ensured = ensureCapabilityRun(id, event, { sessionId, cwd })
+    const ensured = ensureCapabilityRun(id, event, { sessionId, cwd, role })
     if (!ensured.run) return { ok: false, error: ensured.error }
     return unwrapHostResult(
       await hostTaskRequest(ensured.run, 'mica/capabilities/set', { selection })

@@ -7,7 +7,6 @@ export type ConsoleRun = Pick<
   RunSummary,
   | 'id'
   | 'sessionTitle'
-  | 'cwd'
   | 'outcome'
   | 'startedAt'
   | 'finishedAt'
@@ -19,7 +18,7 @@ export type ConsoleRun = Pick<
   | 'inputTokens'
   | 'outputTokens'
   | 'droppedEvents'
-> & { source: 'main' | 'delegation' | 'helper'; sourceLabel: string; providerId: string; model: string };
+> & { workspaceKey?: string; source: 'main' | 'delegation' | 'helper'; sourceLabel: string; providerId: string; model: string };
 
 export type ConsoleFinding = Pick<
   ReviewFinding,
@@ -28,7 +27,6 @@ export type ConsoleFinding = Pick<
   | 'title'
   | 'module'
   | 'status'
-  | 'cwd'
   | 'occurrences'
   | 'recentOccurrences'
   | 'recentRuns'
@@ -39,6 +37,7 @@ export type ConsoleFinding = Pick<
   | 'evaluation'
   | 'note'
 > & {
+  workspaceKey?: string;
   group: keyof ReviewProgress;
   evidenceCount: number;
   evidence: { runId: string; seq: number; available: boolean }[];
@@ -51,7 +50,23 @@ export type ConsolePlugin = {
   enabled: boolean;
   /** Last shared assembly snapshot, not a claim about all live hosts. */
   loading: 'loaded' | 'failed' | 'skipped' | 'unknown';
-  health: { level: 'ok' | 'warn' | 'error'; message: string; at: string } | null;
+  health: {
+    level: 'ok' | 'warn' | 'error';
+    message: string;
+    at: string;
+    category?:
+      | 'runtime'
+      | 'background'
+      | 'hook'
+      | 'dependency'
+      | 'model'
+      | 'storage'
+      | 'configuration'
+      | 'skill'
+      | 'curator'
+      | 'unknown';
+    versionKnown?: boolean;
+  } | null;
   operationStarts: number;
   operationFinishes: number;
   operationErrors: number;
@@ -64,6 +79,7 @@ export type ConsoleSnapshot = {
   generatedAt: string;
   refreshAfterMs: number;
   classifierVersion: number;
+  cache?: { source: 'live' | 'memory' | 'persistent'; expiresAt: string; stale: boolean; refreshFailed: boolean };
   recording: { enabled: boolean; captureContent: boolean };
   totals: {
     mainRuns: number;

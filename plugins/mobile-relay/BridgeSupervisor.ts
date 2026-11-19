@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { acquireProcessLock } from '@packages/mica-common/processLock.js';
 import { resolveLogDir } from '@packages/mica-config/brand.js';
@@ -28,10 +29,14 @@ import { pageNoticeKey, readPageNotice } from './PageNotice.js';
 const LOCK_NAME = 'bridge.lock';
 const SCRIPT_NAME = 'bridge.mjs';
 const DATA_NAME = 'data.json';
+const RETRY_NAME = 'bridge-retry.json';
+const STABLE_MS = 15_000;
+const SCRIPT_KEY = createHash('sha256').update(BRIDGE_SOURCE).digest('hex');
 /** 随包 skill 的源码位置；正文内嵌在二进制里，这一条只是给人点开看的地方。 */
 const SKILL_URL = 'https://github.com/qirong77/mica-code/tree/main/plugins/mobile-relay/skill';
 
 type LockRecord = { pid: number; startedAt: number; ownerPid?: number };
+type RetryRecord = { key: string; failures: number; retryAt: number; attemptPid: number | null; attemptAt: number };
 
 function isAlive(pid: number): boolean {
   if (!Number.isInteger(pid) || pid <= 0) return false;
@@ -66,6 +71,62 @@ export function materializeBridge(dir: string): string {
 export function createBridgeSupervisor(ctx: PluginContext, options: { dataDir: string | null }) {
   const dir = options.dataDir;
   const lockPath = dir ? join(dir, LOCK_NAME) : null;
+  const retryPath = dir ? join(dir, RETRY_NAME) : null;
+  const reported = new Map<string, string>();
+  const report = (issueKey: string, level: 'ok' | 'warn', message: string, hint?: string) => {
+    const value = JSON.stringify([level, message, hint]);
+    if (reported.get(issueKey) === value) return;
+    ctx.health.report({ issueKey, level, message, ...(hint ? { hint } : {}) });
+    reported.set(issueKey, value);
+  };
+  const retryKey = () => {
+    const values = ctx.settings.get();
+    return createHash('sha256').update(JSON.stringify([
+      values.enabled, values.relayUrl, values.token, process.env.MICA_BRIDGE_NODE || 'node', SCRIPT_KEY,
+    ])).digest('hex');
+  };
+  const readRetry = (): RetryRecord | null => {
+    if (!retryPath) return null;
+    try {
+      const value = JSON.parse(readFileSync(retryPath, 'utf8')) as RetryRecord;
+      if (typeof value.key === 'string' && Number.isInteger(value.failures) && value.failures >= 0 &&
+        Number.isFinite(value.retryAt) && Number.isFinite(value.attemptAt) &&
+        (value.attemptPid === null || (Number.isInteger(value.attemptPid) && value.attemptPid > 0))) return value;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+      return null;
+    }
+    throw new Error('桥启动退避记录损坏，请检查插件日志');
+  };
+  const writeRetry = (value: RetryRecord) => {
+    if (!retryPath || !dir) return;
+    mkdirSync(dir, { recursive: true });
+    const temporary = `${retryPath}.${process.pid}.tmp`;
+    try {
+      writeFileSync(temporary, JSON.stringify(value), { mode: 0o600 });
+      renameSync(temporary, retryPath);
+    } finally { rmSync(temporary, { force: true }); }
+  };
+  const retryFor = (): RetryRecord => {
+    const key = retryKey();
+    const previous = readRetry();
+    return previous?.key === key ? previous : { key, failures: 0, retryAt: 0, attemptPid: null, attemptAt: 0 };
+  };
+  const cancelAttempt = (pid: number) => {
+    const state = readRetry();
+    if (state?.attemptPid === pid) writeRetry({ ...state, attemptPid: null, attemptAt: 0 });
+  };
+  // Called under the same cross-host guard as start/stop. Only the matching attempt can fail.
+  const failAttempt = (key: string, pid: number | null) => {
+    const state = retryFor();
+    if (state.key !== key || (pid !== null && state.attemptPid !== pid && readLock()?.pid !== pid)) return;
+    const failures = Math.min(state.failures + 1, 9);
+    const delay = Math.min(3_000 * 2 ** (failures - 1), 300_000);
+    writeRetry({ key, failures, retryAt: Date.now() + delay, attemptPid: null, attemptAt: 0 });
+    if (pid !== null && readLock()?.pid === pid) clearLock();
+    ctx.logger.warn('bridge:startup-failed', { code: 'process_exit', failures, retryMs: delay });
+    report('bridge:process', 'warn', `桥启动失败，${delay / 1000} 秒后重试`);
+  };
 
   const readLock = (): LockRecord | null => {
     if (!lockPath || !existsSync(lockPath)) return null;
@@ -145,6 +206,7 @@ export function createBridgeSupervisor(ctx: PluginContext, options: { dataDir: s
     }
     // 宿主被 SIGKILL 时 onDispose 跑不到：桥自己盯着父进程，父进程没了就退，避免留下孤儿进程
     let child: ReturnType<typeof spawn>;
+    const attempt = retryFor();
     try {
       child = spawn(nodeBin, [script], {
         detached: true,
@@ -153,20 +215,35 @@ export function createBridgeSupervisor(ctx: PluginContext, options: { dataDir: s
       });
     } catch (error) {
       clearLock();
+      failAttempt(attempt.key, null);
       throw error;
     }
+    let settled = false;
+    const failed = () => {
+      if (settled) return;
+      settled = true;
+      // Intentional stop/replacement has already removed its lock; do not poison the next start.
+      if (child.pid && readLock()?.pid !== child.pid) return;
+      try { withLock(undefined, () => failAttempt(attempt.key, child.pid ?? null)); }
+      catch { ctx.logger.warn('bridge:retry-write-failed', { code: 'storage_error' }); }
+    };
     child.on('error', (error) => {
       ctx.logger.error('bridge:spawn-failed', { error: error instanceof Error ? error.message : String(error) });
+      failed();
     });
+    child.on('exit', failed);
     child.unref();
     if (!child.pid) {
       clearLock();
+      settled = true;
+      failAttempt(attempt.key, null);
       return null;
     }
     ownedPid = child.pid;
     ownedChild = child;
     try {
       writeFileSync(lockPath, JSON.stringify({ pid: child.pid, ownerPid: process.pid, startedAt: Date.now() }), 'utf8');
+      writeRetry({ ...attempt, attemptPid: child.pid, attemptAt: Date.now() });
     } catch (error) {
       child.kill('SIGTERM');
       ownedPid = null;
@@ -181,6 +258,7 @@ export function createBridgeSupervisor(ctx: PluginContext, options: { dataDir: s
   const stop = () => {
     const pid = runningPid();
     if (pid === null) return false;
+    cancelAttempt(pid);
     try {
       process.kill(pid, 'SIGTERM');
     } catch {
@@ -202,21 +280,14 @@ export function createBridgeSupervisor(ctx: PluginContext, options: { dataDir: s
     if (!relayUrl || !token) {
       // 还没接入：不留一个只会失败的进程在外联，也不把「缺哪个字段」当报错甩给用户
       stop();
-      ctx.health.report({
-        level: 'warn',
-        message: '这台机器还没接入中转机',
-        hint: '在插件设置里填「中转地址」，再点「注册到中转机」——口令由插件自己拿到。',
-      });
+      report('configuration', 'warn', '这台机器还没接入中转机', '在插件设置里填「中转地址」，再点「注册到中转机」——口令由插件自己拿到。');
       return { pid: null, changed: false };
     }
     const issues = ctx.settings.validate();
     if (issues.length > 0) {
       // 配置不全时不要留着一个连不上中转机的进程在外联
       stop();
-      ctx.health.report({
-        level: 'warn',
-        message: `配置不完整：${issues.map((issue) => `${issue.key} ${issue.message}`).join('；')}`,
-      });
+      report('configuration', 'warn', `配置不完整：${issues.map((issue) => `${issue.key} ${issue.message}`).join('；')}`);
       return { pid: null, changed: false };
     }
     if (String(values.enabled ?? 'true') === 'false') {
@@ -224,6 +295,10 @@ export function createBridgeSupervisor(ctx: PluginContext, options: { dataDir: s
       if (stopped) ctx.logger.info('bridge:stopped', { reason: 'disabled' });
       return { pid: null, changed: stopped };
     }
+    report('configuration', 'ok', '中转配置已填写');
+    let retry = retryFor();
+    const storedRetry = readRetry();
+    if (storedRetry && storedRetry.key !== retry.key) writeRetry(retry);
     const current = runningPid();
     if (current !== null) {
       const want = configFingerprint();
@@ -240,6 +315,11 @@ export function createBridgeSupervisor(ctx: PluginContext, options: { dataDir: s
       }
       return { pid: current, changed: false };
     }
+    if (retry.attemptPid !== null) {
+      failAttempt(retry.key, retry.attemptPid);
+      retry = retryFor();
+    }
+    if (Date.now() < retry.retryAt) return { pid: null, changed: false };
     const started = start();
     if (started !== null) ctx.logger.info('bridge:started', { pid: started });
     return { pid: started, changed: true };
@@ -248,6 +328,12 @@ export function createBridgeSupervisor(ctx: PluginContext, options: { dataDir: s
   const stopOwned = () => {
     const pid = ownedPid;
     if (pid === null) return false;
+    withLock(false, () => {
+      cancelAttempt(pid);
+      const lock = readLock();
+      if (lock?.pid === pid && lock.ownerPid === process.pid) clearLock();
+      return true;
+    });
     // 子进程归属由启动时的 handle 决定；丢锁或锁已被替换也要释放自己的桥。
     try {
       ownedChild?.kill('SIGTERM');
@@ -256,11 +342,6 @@ export function createBridgeSupervisor(ctx: PluginContext, options: { dataDir: s
     }
     ownedPid = null;
     ownedChild = null;
-    withLock(false, () => {
-      const lock = readLock();
-      if (lock?.pid === pid && lock.ownerPid === process.pid) clearLock();
-      return true;
-    });
     return true;
   };
 
@@ -268,6 +349,14 @@ export function createBridgeSupervisor(ctx: PluginContext, options: { dataDir: s
     ensure: () => withLock({ pid: null, changed: false }, ensure),
     stop: (options: { ownedOnly?: boolean } = {}) => (options.ownedOnly ? stopOwned() : withLock(false, stop)),
     runningPid: () => withLock<number | null>(null, runningPid),
+    markReady: (pid: number) => withLock(false, () => {
+      const lock = readLock();
+      if (lock?.pid !== pid || !isAlive(pid) || Date.now() - lock.startedAt < STABLE_MS) return false;
+      const retry = retryFor();
+      if (retry.failures > 0 || retry.attemptPid !== null) writeRetry({ ...retry, failures: 0, retryAt: 0, attemptPid: null, attemptAt: 0 });
+      report('bridge:process', 'ok', '桥已稳定接通中转机');
+      return true;
+    }),
     scriptPath: () => (dir ? join(dir, SCRIPT_NAME) : null),
   };
 }
@@ -467,13 +556,14 @@ export function registerBridgeSupervisor(ctx: PluginContext, dataDir: string | n
   let relayProbedAt = 0;
   let relayProbedFor = '';
   let published: string | null = null;
+  let connectionReported: boolean | null = null;
   const registration = background.register({
     id: 'bridge',
     every: SUPERVISE_MS,
     immediate: true,
     async run({ signal }) {
       if (signal.aborted) return;
-      const { pid, changed } = supervisor.ensure();
+      const { pid } = supervisor.ensure();
 
       const values = ctx.settings.get();
       const relayUrl = String(values.relayUrl ?? '')
@@ -506,11 +596,16 @@ export function registerBridgeSupervisor(ctx: PluginContext, dataDir: string | n
         return;
 
       published = publishStatus(ctx, dataDir, pid, relay, published);
-      if (!changed) return;
-      ctx.health.report({
-        level: pid ? 'ok' : 'warn',
-        message: pid ? `桥已启动（pid ${pid}）` : '桥未运行：已关闭或配置不完整',
-      });
+      if (String(values.enabled ?? 'true') === 'false') return { outcome: 'skipped', code: 'disabled' };
+      if (!relayUrl || !values.token?.trim()) return { outcome: 'skipped', code: 'unconfigured' };
+      const connected = relay?.agentOnline === true;
+      if (connectionReported !== connected) {
+        ctx.health.report({ issueKey: 'dependency:relay', level: connected ? 'ok' : 'warn',
+          message: connected ? '中转通道已接通' : '中转通道尚未接通，正在等待恢复' });
+        connectionReported = connected;
+      }
+      const ready = connected && pid !== null && supervisor.markReady(pid);
+      return { outcome: ready ? 'success' : 'waiting', code: ready ? 'ready' : 'awaiting_ready' };
     },
   });
 

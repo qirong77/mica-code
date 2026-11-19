@@ -1,47 +1,27 @@
 import { describe, expect, it, vi } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
-import NotebookPage, { createDefaultNote, NotebookChatButton } from './desktop.jsx';
+import NotebookPage, { createDefaultNote } from './desktop.jsx';
 import { createNotebookController } from './controller';
 import { createNode, emptyIndex, trashNode } from './model';
 import type { NotebookIndex } from './model';
 
 const now = '2026-11-01T00:00:00.000Z';
 
-describe('Notebook AI entry', () => {
-  it.each([
-    { open: false, focused: false, visible: false },
-    { open: true, focused: false, visible: true },
-    { open: false, focused: true, visible: false },
-    { open: true, focused: true, visible: false },
-  ])('toggles the visible panel when open=$open and focused=$focused', ({ open, focused, visible }) => {
-    const onOpenChange = vi.fn();
-    const onFocusedChange = vi.fn();
-    const button = NotebookChatButton({ open, focused, onOpenChange, onFocusedChange });
-    expect(button.props.children).toBeUndefined();
-    expect(button.props.icon).toBeTruthy();
-    expect(button.props['aria-expanded']).toBe(visible);
-    expect(button.props.pressed).toBe(visible);
-    expect(button.props['aria-label']).toBe(visible ? '收起 AI 对话' : '打开 AI 对话');
-    button.props.onClick();
-    expect(onOpenChange).toHaveBeenCalledWith(!visible);
-    if (visible) expect(onFocusedChange).not.toHaveBeenCalled();
-    else expect(onFocusedChange).toHaveBeenCalledWith(false);
-  });
-
-  it.each([1440, 390])('shows a labeled AI entry without selecting a note at %ipx', (width) => {
-    vi.stubGlobal('window', {
+describe('Notebook page', () => {
+  it.each([1440, 390])('does not render the removed AI conversation entry at %ipx', (width) => {
+    const previousWindow = globalThis.window;
+    globalThis.window = {
       innerWidth: width,
       matchMedia: () => ({ matches: width <= 760 }),
-    });
+    } as unknown as Window & typeof globalThis;
     try {
       const html = renderToStaticMarkup(<NotebookPage api={{}} />);
       expect(html).toContain('notebook-welcome');
       expect(html).toContain('notebook-bar-actions');
-      expect(html).toContain('notebook-ai-button');
-      expect(html).toContain('aria-label="打开 AI 对话"');
-      expect(html).not.toContain('AI 对话</span>');
+      expect(html).not.toContain('notebook-ai-button');
+      expect(html).not.toContain('AI 对话');
     } finally {
-      vi.unstubAllGlobals();
+      globalThis.window = previousWindow;
     }
   });
 });

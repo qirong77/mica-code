@@ -31,7 +31,7 @@ import {
 // 与运行时、插件同一份探活逻辑（含「中转机链接要带 ?t=」的判定），这里只是为了与
 // 上面那个「端口上是不是我们自己的运行时」的 probeRuntime 区分而改名
 import { probeRuntime as probeRemoteRuntime } from '../host/runtime-probe-core.js'
-import { flushLogs, logger, startMemorySampler } from '@packages/mica-diagnostics/index.js'
+import { flushLogs, logger, processIdentity, startMemorySampler } from '@packages/mica-diagnostics/index.js'
 import { resolveLogDir } from '@packages/mica-config/brand.js'
 import { officialPluginManifests } from '@packages/mica-official-plugins/manifests.js'
 import { readDisabledPluginIds, resolvePluginStatePath } from '@packages/mica-plugin/PluginState.js'
@@ -1002,7 +1002,7 @@ async function takeWindowHeapSnapshot({ windowId } = {}) {
 function startMainDiagnostics() {
   const log = logger('main')
   log.info('boot', {
-    pid: process.pid,
+    ...processIdentity(),
     version: app.getVersion(),
     electron: process.versions.electron,
     node: process.version

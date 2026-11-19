@@ -2,6 +2,7 @@ import { mkdtempSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync 
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawn } from 'node:child_process';
+import { EventEmitter } from 'node:events';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { acquireProcessLock } from '@packages/mica-common/processLock.js';
 import { resolveLogDir } from '@packages/mica-config/brand.js';
@@ -105,6 +106,73 @@ describe('mobile-relay bridge supervisor', () => {
     const supervisor = createBridgeSupervisor(ctx, { dataDir: dir });
     expect(supervisor.ensure()).toEqual({ pid: null, changed: false });
     expect(supervisor.runningPid()).toBeNull();
+  });
+
+  it('shares exponential startup backoff across supervisors and resets after configuration changes', () => {
+    const now = vi.spyOn(Date, 'now').mockReturnValue(100_000);
+    const values = { enabled: 'true', relayUrl: 'https://relay.test', token: 'secret' };
+    const ctx = fakeContext();
+    ctx.settings.get = () => values;
+    vi.mocked(spawn).mockImplementation(() => { throw Object.assign(new Error('missing node'), { code: 'ENOENT' }); });
+    const first = createBridgeSupervisor(ctx, { dataDir: dir });
+    expect(() => first.ensure()).toThrow('missing node');
+    const second = createBridgeSupervisor(ctx, { dataDir: dir });
+    second.ensure();
+    expect(spawn).toHaveBeenCalledTimes(1);
+    now.mockReturnValue(103_001);
+    expect(() => second.ensure()).toThrow('missing node');
+    expect(JSON.parse(readFileSync(join(dir, 'bridge-retry.json'), 'utf8'))).toMatchObject({ failures: 2, retryAt: 109_001 });
+    first.ensure();
+    expect(spawn).toHaveBeenCalledTimes(2);
+    values.token = 'new-secret';
+    expect(() => first.ensure()).toThrow('missing node');
+    expect(spawn).toHaveBeenCalledTimes(3);
+    expect(readFileSync(join(dir, 'bridge-retry.json'), 'utf8')).not.toContain('secret');
+  });
+
+  it('backs off rapid exits and only recovers after a stable ready process', () => {
+    const now = vi.spyOn(Date, 'now').mockReturnValue(100_000);
+    const child = Object.assign(new EventEmitter(), { pid: 44005, unref: vi.fn(), kill: vi.fn() });
+    vi.mocked(spawn).mockReturnValue(child as unknown as ReturnType<typeof spawn>);
+    let alive = true;
+    vi.spyOn(process, 'kill').mockImplementation((pid) => {
+      if (pid === child.pid && !alive) throw Object.assign(new Error('gone'), { code: 'ESRCH' });
+      return true;
+    });
+    const ctx = fakeContext();
+    const supervisor = createBridgeSupervisor(ctx, { dataDir: dir });
+    supervisor.ensure();
+    expect(supervisor.markReady(child.pid)).toBe(false);
+    alive = false;
+    child.emit('exit', 1);
+    supervisor.ensure();
+    expect(spawn).toHaveBeenCalledTimes(1);
+    expect(ctx.healthLog.some((row) => row.level === 'ok' && row.message.includes('稳定接通'))).toBe(false);
+    now.mockReturnValue(103_001);
+    alive = true;
+    supervisor.ensure();
+    now.mockReturnValue(118_002);
+    expect(supervisor.markReady(child.pid)).toBe(true);
+    expect(JSON.parse(readFileSync(join(dir, 'bridge-retry.json'), 'utf8'))).toMatchObject({ failures: 0, attemptPid: null });
+  });
+
+  it('does not count intentional disposal before ready as a startup failure in the next host', () => {
+    let pid = 44006;
+    const children: Array<EventEmitter & { pid: number; unref: ReturnType<typeof vi.fn>; kill: ReturnType<typeof vi.fn> }> = [];
+    vi.spyOn(process, 'kill').mockImplementation(() => true);
+    vi.mocked(spawn).mockImplementation(() => {
+      const child = Object.assign(new EventEmitter(), { pid: pid++, unref: vi.fn(), kill: vi.fn() });
+      children.push(child);
+      return child as unknown as ReturnType<typeof spawn>;
+    });
+    const first = createBridgeSupervisor(fakeContext(), { dataDir: dir });
+    first.ensure();
+    expect(first.stop({ ownedOnly: true })).toBe(true);
+    const second = createBridgeSupervisor(fakeContext(), { dataDir: dir });
+    expect(second.ensure().pid).toBe(44007);
+    children[0]!.emit('exit', 0);
+    expect(JSON.parse(readFileSync(join(dir, 'bridge-retry.json'), 'utf8'))).toMatchObject({ failures: 0, attemptPid: 44007 });
+    second.stop({ ownedOnly: true });
   });
 
   it('refuses to run with incomplete settings and reports why', () => {

@@ -112,6 +112,10 @@ it('failed plugin checkpoints remain retryable without duplicating a newer succe
     const root = directories.at(-1)!;
     const fail = (failures: number) =>
       recorder.notePluginEvent({
+        schemaVersion: 2,
+        pluginVersion: 'unknown',
+        pid: process.pid,
+        generation: 'test-process',
         pluginId: 'sample',
         type: 'hook:failed',
         hook: 'turn:after',

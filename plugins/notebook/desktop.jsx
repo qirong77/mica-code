@@ -12,7 +12,6 @@ import {
   FolderOpen,
   FolderPlus,
   Menu,
-  Sparkles,
   MoreHorizontal,
   PanelLeftClose,
   Pencil,
@@ -54,7 +53,6 @@ import {
 import { createEditorBridge } from './bridge';
 import { createNotebookDraft, createNotebookWriter, updateNotebookDraft } from './writer';
 import { createNotebookLifecycle } from './lifecycle';
-import { NotebookChatDock } from './NotebookChatDock';
 import './notebook.css';
 
 const message = (error) =>
@@ -162,26 +160,6 @@ function NoteMenu({ node, open, onOpen, onClose, onAction, extraRows, trigger, p
   );
 }
 
-/** 会话能力不依赖某篇笔记；入口始终可见，也能从专注模式重新打开面板。 */
-export function NotebookChatButton({ open, focused, onOpenChange, onFocusedChange }) {
-  const visible = open && !focused;
-  return (
-    <Button
-      variant={visible ? 'primary' : 'ghost'}
-      icon={<Sparkles size={16} strokeWidth={1.7} />}
-      className="notebook-ai-button"
-      title={visible ? '收起 AI 对话' : '打开 AI 对话'}
-      aria-label={visible ? '收起 AI 对话' : '打开 AI 对话'}
-      aria-expanded={visible}
-      pressed={visible}
-      onClick={() => {
-        if (!visible) onFocusedChange(false);
-        onOpenChange(!visible);
-      }}
-    />
-  );
-}
-
 export default function NotebookPage({ api }) {
   const [index, setIndex] = useState(emptyIndex);
   const [loaded, setLoaded] = useState(false);
@@ -205,7 +183,6 @@ export default function NotebookPage({ api }) {
   const [frameState, setFrameState] = useState('loading');
   const [frameKey, setFrameKey] = useState(0);
   const [mcpOpen, setMcpOpen] = useState(false);
-  const [chatOpen, setChatOpen] = useState(false);
   const [copied, setCopied] = useState('');
   const iframe = useRef(null);
   const pageRoot = useRef(null);
@@ -266,7 +243,7 @@ export default function NotebookPage({ api }) {
     [index, expanded, query, trash],
   );
   const railOverlay = layout.mobile && railOpen && !focused;
-  const outlineOverlay = layout.overlay && !focused && !chatOpen && !!active;
+  const outlineOverlay = layout.overlay && !focused && !!active;
 
   const save = useCallback(
     async (target = current.current) => {
@@ -1129,7 +1106,7 @@ export default function NotebookPage({ api }) {
               </div>
             </div>
           )}
-          <div className={`notebook-document-body ${chatOpen && !focused ? 'has-chat' : ''}`}>
+          <div className="notebook-document-body">
             <div className={`notebook-editor-area ${active ? 'has-note' : ''}`} inert={outlineOverlay}>
               {/* 顶栏与编辑器工具栏是同一条操作栏：只有目录收起时才在左边出现目录开关与位置，
                   右边常驻保存状态与文档操作；工具栏按这两段的实测宽度让位。 */}
@@ -1235,12 +1212,6 @@ export default function NotebookPage({ api }) {
                       />
                     </>
                   )}
-                  <NotebookChatButton
-                    open={chatOpen}
-                    focused={focused}
-                    onOpenChange={setChatOpen}
-                    onFocusedChange={setFocused}
-                  />
                 </div>
               </div>
               <iframe
@@ -1306,8 +1277,7 @@ export default function NotebookPage({ api }) {
                 </div>
               ) : null}
             </div>
-            <NotebookChatDock api={api} open={chatOpen && !focused} onClose={() => setChatOpen(false)} />
-            {active && !focused && !chatOpen && (
+            {active && !focused && (
               <>
                 <aside ref={outlinePanel} className="notebook-outline" aria-label="文档大纲">
                   <header>

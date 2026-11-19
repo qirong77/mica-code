@@ -1,4 +1,5 @@
 import { constants } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { lstat, open } from 'node:fs/promises';
 import { join } from 'node:path';
 import { setImmediate as yieldImmediate } from 'node:timers/promises';
@@ -10,6 +11,7 @@ import { CLASSIFIER_VERSION, HarnessRecorder, consoleText, type ReviewReport, ty
 import { fileSignature } from './derived-index.js';
 import type { LogEvidence } from './log-evidence.js';
 import { prioritizeFindings, progressGroup, summarizeProgress } from './progress.js';
+import { healthCategory, readConsoleCache, safeHealth, safeTaskId } from './console-cache.js';
 
 export const CONSOLE_TTL_MS = 30_000;
 export const CONSOLE_MAX_BYTES = 900 * 1024;
@@ -33,6 +35,8 @@ type ProjectionOptions = {
 export type ConsoleServiceOptions = {
   now?: () => number;
   readReport?: (signal: AbortSignal) => Promise<ReviewReport>;
+  /** Custom report sources do not implicitly inherit the disk source's cache. */
+  usePersistentCache?: boolean;
 };
 
 function abortError(): DOMException {
@@ -72,7 +76,7 @@ function projectRun(run: RunSummary): ConsoleRun {
   return {
     id: text(run.id, 80),
     sessionTitle: run.sessionTitle === null ? null : text(run.sessionTitle, 180),
-    ...(run.cwd ? { cwd: text(run.cwd) } : {}),
+    ...(run.cwd ? { workspaceKey: workspaceKey(run.cwd) } : {}),
     source,
     sourceLabel: text(run.helper?.kind ?? run.delegation?.type ?? 'main', 100),
     providerId: text(run.config.providerId, 80),
@@ -91,15 +95,19 @@ function projectRun(run: RunSummary): ConsoleRun {
   };
 }
 
+function workspaceKey(cwd: string): string {
+  return `workspace-${createHash('sha256').update(cwd).digest('hex').slice(0, 16)}`;
+}
+
 function projectFinding(finding: ReviewReport['findings'][number]): ConsoleFinding {
   return {
     id: text(finding.id, 240),
     kind: finding.kind,
-    title: text(finding.title, 180),
+    title: finding.kind === 'plugin-background' ? '插件后台任务反复失败' : text(finding.title, 180),
     module: text(finding.module, 120),
     status: finding.status,
     group: progressGroup(finding),
-    ...(finding.cwd ? { cwd: text(finding.cwd) } : {}),
+    ...(finding.cwd ? { workspaceKey: workspaceKey(finding.cwd) } : {}),
     occurrences: count(finding.occurrences),
     ...(finding.recentOccurrences !== undefined ? { recentOccurrences: count(finding.recentOccurrences) } : {}),
     ...(finding.recentRuns !== undefined ? { recentRuns: count(finding.recentRuns) } : {}),
@@ -152,10 +160,36 @@ function projectLogs(logs: LogEvidence | undefined): LogEvidence | null {
         [logs.operations, logs.experience, logs.system, logs.memory].some((rows) => rows.length > 100),
       ...(date(c.earliestAt) ? { earliestAt: date(c.earliestAt) } : {}),
       ...(date(c.latestAt) ? { latestAt: date(c.latestAt) } : {}),
+      metadataFiles: count(c.metadataFiles),
+      selection: 'mtime',
+      heartbeatRecords: count(c.heartbeatRecords),
+      heartbeatCount: count(c.heartbeatCount),
+      writerHealthObserved: c.writerHealthObserved === true,
+      ...(c.groups
+        ? {
+            groups: {
+              operations: count(c.groups.operations),
+              experience: count(c.groups.experience),
+              system: count(c.groups.system),
+              memory: count(c.groups.memory),
+              writerHealth: count(c.groups.writerHealth),
+            },
+          }
+        : {}),
+      domains: (c.domains ?? [])
+        .slice(0, 6)
+        .map((row) => ({
+          domain: row.domain,
+          records: count(row.records),
+          earliestAt: date(row.earliestAt) ?? '',
+          latestAt: date(row.latestAt) ?? '',
+        })),
     },
     operations: logs.operations.slice(0, 100).map((row) => ({
       plugin: text(row.plugin, 160),
       ...(row.pluginVersion ? { pluginVersion: text(row.pluginVersion, 60) } : {}),
+      ...(row.pid !== undefined ? { pid: count(row.pid) } : {}),
+      generation: text(row.generation ?? 'unknown', 80),
       operation: text(row.operation, 80),
       ...(row.surface ? { surface: text(row.surface, 40) } : {}),
       outcome: row.finishes > 0 ? text(row.outcome, 40) || 'unknown' : 'unknown',
@@ -164,6 +198,12 @@ function projectLogs(logs: LogEvidence | undefined): LogEvidence | null {
       finishes: count(row.finishes),
       totalMs: count(row.totalMs),
       maxMs: count(row.maxMs),
+      ...(row.heartbeatCount !== undefined
+        ? {
+            heartbeatCount: count(row.heartbeatCount),
+            durationBuckets: (row.durationBuckets ?? []).slice(0, 5).map(count),
+          }
+        : {}),
     })),
     experience: logs.experience.slice(0, 100).map((row) => ({
       plugin: text(row.plugin, 160),
@@ -181,12 +221,61 @@ function projectLogs(logs: LogEvidence | undefined): LogEvidence | null {
       level: text(row.level, 16),
       count: count(row.count),
       crashes: count(row.crashes),
+      ...(row.pluginId
+        ? {
+            pluginId: text(row.pluginId, 160),
+            pluginVersion: text(row.pluginVersion ?? 'unknown', 60),
+            generation: text(row.generation ?? 'unknown', 80),
+            ...(row.pid !== undefined ? { pid: count(row.pid) } : {}),
+          }
+        : {}),
     })),
     memory: logs.memory.slice(0, 100).map((row) => ({
       ...(row.pid !== undefined ? { pid: count(row.pid) } : {}),
       samples: count(row.samples),
       peakRssMB: count(row.peakRssMB),
       ...(row.peakHeapMB !== undefined ? { peakHeapMB: count(row.peakHeapMB) } : {}),
+    })),
+    ...(logs.totals
+      ? {
+          totals: {
+            operationStarts: count(logs.totals.operationStarts),
+            operationFinishes: count(logs.totals.operationFinishes),
+            operationErrors: count(logs.totals.operationErrors),
+            operationUnknown: count(logs.totals.operationUnknown),
+            experienceRecords: count(logs.totals.experienceRecords),
+            experienceCount: count(logs.totals.experienceCount),
+            systemWarnings: count(logs.totals.systemWarnings),
+            systemErrors: count(logs.totals.systemErrors),
+            crashes: count(logs.totals.crashes),
+            memorySamples: count(logs.totals.memorySamples),
+          },
+        }
+      : {}),
+    pluginTotals: (logs.pluginTotals ?? []).slice(0, 100).map((row) => ({
+      plugin: text(row.plugin, 160),
+      operationStarts: count(row.operationStarts),
+      operationFinishes: count(row.operationFinishes),
+      operationErrors: count(row.operationErrors),
+      operationUnknown: count(row.operationUnknown),
+      impressions: count(row.impressions),
+      clicks: count(row.clicks),
+      warnings: count(row.warnings),
+      errors: count(row.errors),
+    })),
+    writerHealth: (logs.writerHealth ?? []).slice(0, 100).map((row) => ({
+      pid: count(row.pid),
+      generation: text(row.generation, 80),
+      at: date(row.at) ?? '',
+      dropped: count(row.dropped),
+      overflowDrops: count(row.overflowDrops),
+      serializationFailures: count(row.serializationFailures),
+      writeFailures: count(row.writeFailures),
+      lostLowerBound: count(row.lostLowerBound),
+      checkpointFailures: count(row.checkpointFailures),
+      logLevel: text(row.logLevel, 20),
+      pluginLogEnabled: row.pluginLogEnabled === true,
+      closePolicy: 'best_effort_sync_exit',
     })),
     interpretation:
       'Machine-wide bounded log tails, not run/workspace attribution. Starts without finishes are unknown; success is not user validation. Counts/peaks cover inspected records only; raw errors, commands, URLs and bodies are omitted.',
@@ -284,7 +373,10 @@ export function projectConsoleSnapshot(report: ReviewReport, options: Projection
     })),
     pluginFailures: report.pluginFailures.slice(0, LIMITS.pluginFailures).map((row) => ({
       pluginId: text(row.pluginId, 160),
-      taskId: text(row.taskId, 160),
+      pluginVersion: text(row.pluginVersion ?? 'unknown', 60),
+      generation: text(row.generation ?? 'unknown', 80),
+      ...(row.pid !== undefined ? { pid: count(row.pid) } : {}),
+      taskId: safeTaskId(row.taskId),
       count: count(row.count),
       lastAt: date(row.lastAt) ?? '',
       lastError: '',
@@ -295,9 +387,7 @@ export function projectConsoleSnapshot(report: ReviewReport, options: Projection
       ...(row.version ? { version: text(row.version, 60) } : {}),
       enabled: row.enabled === true,
       loading: row.loading,
-      health: row.health
-        ? { level: row.health.level, message: text(row.health.message, 200), at: date(row.health.at) ?? '' }
-        : null,
+      health: row.health ? safeHealth({ ...row.health, at: date(row.health.at) ?? new Date(0).toISOString() }) : null,
       operationStarts: count(row.operationStarts),
       operationFinishes: count(row.operationFinishes),
       operationErrors: count(row.operationErrors),
@@ -367,6 +457,8 @@ export function projectConsoleSnapshot(report: ReviewReport, options: Projection
         snapshot.logEvidence.experience,
         snapshot.logEvidence.system,
         snapshot.logEvidence.memory,
+        snapshot.logEvidence.pluginTotals ?? [],
+        snapshot.logEvidence.writerHealth ?? [],
       );
     const largest = arrays
       .filter((rows) => rows.length)
@@ -451,7 +543,11 @@ async function readPlugins(
 ): Promise<{ plugins: ConsolePlugin[]; total: number }> {
   const known = new Map(context.catalog.filter((item) => pluginId(item.id)).map((item) => [item.id, item]));
   const ids = new Set([...known.keys(), ...assembly.loading.keys()]);
-  for (const row of [...(report.logEvidence?.operations ?? []), ...(report.logEvidence?.experience ?? [])])
+  for (const row of [
+    ...(report.logEvidence?.operations ?? []),
+    ...(report.logEvidence?.experience ?? []),
+    ...(report.logEvidence?.pluginTotals ?? []),
+  ])
     if (pluginId(row.plugin)) ids.add(row.plugin);
   for (const row of report.pluginFailures) if (pluginId(row.pluginId)) ids.add(row.pluginId);
   checkAbort(signal);
@@ -473,7 +569,9 @@ async function readPlugins(
         health = {
           level: last.level,
           at: date(last.at) ?? '',
-          message: `${manifest?.version ? '' : '上次上报（当前版本未知）：'}${text(last.message, 160)}`,
+          category: healthCategory(last.issueKey),
+          versionKnown: Boolean(manifest?.version),
+          message: '',
         };
     } catch (error) {
       rethrowAbort(error, signal);
@@ -482,6 +580,7 @@ async function readPlugins(
     }
     const operations = report.logEvidence?.operations.filter((row) => row.plugin === id) ?? [];
     const experience = report.logEvidence?.experience.filter((row) => row.plugin === id) ?? [];
+    const totals = report.logEvidence?.pluginTotals?.find((row) => row.plugin === id);
     plugins.push({
       id,
       name: manifest?.name ?? id,
@@ -489,26 +588,55 @@ async function readPlugins(
       enabled: !disabled.has(id),
       loading: assembly.loading.get(id) ?? 'unknown',
       health,
-      operationStarts: operations.reduce((sum, row) => sum + count(row.starts), 0),
-      operationFinishes: operations.reduce((sum, row) => sum + count(row.finishes), 0),
-      operationErrors: operations.reduce(
-        (sum, row) => sum + (row.outcome === 'error' || row.outcome === 'timeout' ? count(row.finishes) : 0),
-        0,
-      ),
-      impressions: experience.reduce((sum, row) => sum + (row.event === 'impression' ? count(row.count) : 0), 0),
-      clicks: experience.reduce((sum, row) => sum + (row.event === 'click' ? count(row.count) : 0), 0),
+      operationStarts: totals?.operationStarts ?? operations.reduce((sum, row) => sum + count(row.starts), 0),
+      operationFinishes: totals?.operationFinishes ?? operations.reduce((sum, row) => sum + count(row.finishes), 0),
+      operationErrors:
+        totals?.operationErrors ??
+        operations.reduce(
+          (sum, row) => sum + (row.outcome === 'error' || row.outcome === 'timeout' ? count(row.finishes) : 0),
+          0,
+        ),
+      impressions:
+        totals?.impressions ??
+        experience.reduce((sum, row) => sum + (row.event === 'impression' ? count(row.count) : 0), 0),
+      clicks:
+        totals?.clicks ?? experience.reduce((sum, row) => sum + (row.event === 'click' ? count(row.count) : 0), 0),
     });
   }
   return { plugins, total: ids.size };
 }
 
-type Flight = { controller: AbortController; promise: Promise<ConsoleSnapshot>; waiters: number };
+/** Shared safe publisher projection. It only reads metadata; callers decide
+ * whether to publish the disposable cache outside the Web request path. */
+export async function createConsoleSnapshot(
+  context: PluginWebContext,
+  report: ReviewReport,
+  signal: AbortSignal,
+): Promise<ConsoleSnapshot> {
+  const assembly = await readAssembly(context.paths.config, signal);
+  const { plugins, total } = await readPlugins(context, report, assembly, signal);
+  checkAbort(signal);
+  const settings = context.settings.get();
+  return projectConsoleSnapshot(report, {
+    recording: { enabled: settings.enabled !== 'false', captureContent: settings.captureContent !== 'false' },
+    plugins,
+    pluginCount: total,
+    assembly: assembly.assembly,
+    warnings: assembly.warnings,
+  });
+}
+
+type Flight = { controller: AbortController; promise: Promise<ConsoleSnapshot>; waiters: number; background: boolean };
 
 /** Lazy per-host read service. No setup, recording, timers, child processes or report export. */
 export class HarnessConsoleService {
   private readonly now: () => number;
   private readonly readReport: (signal: AbortSignal) => Promise<ReviewReport>;
   private cached: { value: ConsoleSnapshot; expiresAt: number } | null = null;
+  private hydration: Promise<void> | null = null;
+  private hydrated = false;
+  private retryAfter = 0;
+  private refreshFailed = false;
   private flight: Flight | null = null;
   private readonly lifetime = new AbortController();
   private disposed = false;
@@ -518,6 +646,8 @@ export class HarnessConsoleService {
     options: ConsoleServiceOptions = {},
   ) {
     this.now = options.now ?? Date.now;
+    this.hydrated =
+      options.usePersistentCache === false || Boolean(options.readReport && options.usePersistentCache !== true);
     // The recorder constructor is IO-free; do not call setup or dispose/flush on
     // this read-only instance. Its only retained data are bounded derived indexes.
     const recorder = options.readReport ? null : new HarnessRecorder(context.paths.data);
@@ -527,7 +657,42 @@ export class HarnessConsoleService {
   async snapshot(signal?: AbortSignal): Promise<ConsoleSnapshot> {
     checkAbort(signal);
     if (this.disposed) throw abortError();
-    if (this.cached && this.now() < this.cached.expiresAt) return this.cached.value;
+    if (!this.hydrated) {
+      this.hydration ??= readConsoleCache(this.context.paths.data, CLASSIFIER_VERSION, this.lifetime.signal).then(
+        (value) => {
+          if (value && !this.disposed) {
+            const expiresAt = Date.parse(value.generatedAt) + CONSOLE_TTL_MS;
+            value.cache = {
+              source: 'persistent',
+              expiresAt: new Date(expiresAt).toISOString(),
+              stale: this.now() >= expiresAt,
+              refreshFailed: false,
+            };
+            freeze(value);
+            this.cached = { value, expiresAt };
+          }
+          this.hydrated = true;
+        },
+      );
+      await this.waitForDrain(this.hydration, signal);
+      checkAbort(signal);
+      if (this.disposed) throw abortError();
+    }
+    if (this.cached) {
+      const stale = this.now() >= this.cached.expiresAt;
+      // Keep safe old data on-screen; refresh only the bounded in-memory view.
+      // The GET path never publishes a file or changes a captured run.
+      if ((stale || this.cached.value.cache?.source === 'persistent') && !this.flight && this.now() >= this.retryAfter)
+        this.start(true);
+      if (stale === this.cached.value.cache?.stale && this.refreshFailed === this.cached.value.cache?.refreshFailed)
+        return this.cached.value;
+      const value = {
+        ...this.cached.value,
+        cache: { ...this.cached.value.cache!, stale, refreshFailed: this.refreshFailed },
+      };
+      freeze(value);
+      return value;
+    }
     if (this.flight?.controller.signal.aborted) {
       // Drain a cancelled scan before starting another. A caller arriving while
       // it drains can itself cancel, and must never leave a queued orphan scan.
@@ -538,34 +703,39 @@ export class HarnessConsoleService {
     return this.join(this.flight!, signal);
   }
 
-  private start(): void {
+  private start(background = false): void {
     const controller = new AbortController();
-    const flight: Flight = { controller, waiters: 0, promise: undefined! };
+    const flight: Flight = { controller, waiters: 0, background, promise: undefined! };
     this.flight = flight;
     flight.promise = Promise.resolve()
       .then(async () => {
         checkAbort(controller.signal);
         const report = await this.readReport(controller.signal);
         checkAbort(controller.signal);
-        const assembly = await readAssembly(this.context.paths.config, controller.signal);
-        const { plugins, total } = await readPlugins(this.context, report, assembly, controller.signal);
-        checkAbort(controller.signal);
-        const settings = this.context.settings.get();
-        const value = projectConsoleSnapshot(report, {
-          recording: { enabled: settings.enabled !== 'false', captureContent: settings.captureContent !== 'false' },
-          plugins,
-          pluginCount: total,
-          assembly: assembly.assembly,
-          warnings: assembly.warnings,
-        });
+        const value = await createConsoleSnapshot(this.context, report, controller.signal);
         // Deliver disconnect/dispose events that arrived during the bounded
         // synchronous projection before publishing its result.
         await yieldImmediate(undefined, { signal: controller.signal });
         checkAbort(controller.signal);
-        if (this.disposed || this.flight !== flight || flight.waiters === 0) throw abortError();
+        if (this.disposed || this.flight !== flight || (flight.waiters === 0 && !flight.background)) throw abortError();
+        const expiresAt = this.now() + CONSOLE_TTL_MS;
+        value.cache = {
+          source: 'live',
+          expiresAt: new Date(expiresAt).toISOString(),
+          stale: false,
+          refreshFailed: false,
+        };
         freeze(value);
-        this.cached = { value, expiresAt: this.now() + CONSOLE_TTL_MS };
+        this.cached = { value, expiresAt };
+        this.refreshFailed = false;
+        this.retryAfter = expiresAt;
         return value;
+      })
+      .catch((error) => {
+        rethrowAbort(error, controller.signal);
+        this.refreshFailed = true;
+        this.retryAfter = this.now() + CONSOLE_TTL_MS;
+        throw new Error('运行控制台数据暂不可用，请稍后重试。');
       })
       .finally(() => {
         if (this.flight === flight) this.flight = null;
@@ -584,7 +754,7 @@ export class HarnessConsoleService {
         signal?.removeEventListener('abort', cancel);
         flight.controller.signal.removeEventListener('abort', cancel);
         flight.waiters--;
-        if (flight.waiters === 0 && !value) flight.controller.abort();
+        if (flight.waiters === 0 && !value && !flight.background) flight.controller.abort();
         if (error !== undefined) reject(error);
         else resolve(value!);
       };
@@ -599,7 +769,7 @@ export class HarnessConsoleService {
     });
   }
 
-  private waitForDrain(promise: Promise<ConsoleSnapshot>, signal?: AbortSignal): Promise<void> {
+  private waitForDrain(promise: Promise<unknown>, signal?: AbortSignal): Promise<void> {
     return new Promise((resolve, reject) => {
       const cleanup = (): void => {
         signal?.removeEventListener('abort', cancel);
@@ -628,6 +798,7 @@ export class HarnessConsoleService {
     // Lifecycle completion means the cooperative readers have actually stopped,
     // not merely that HTTP waiters received cancellation.
     await this.flight?.promise.catch(() => {});
+    await this.hydration?.catch(() => {});
   }
 }
 

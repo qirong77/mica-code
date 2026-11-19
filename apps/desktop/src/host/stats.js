@@ -28,6 +28,7 @@ import { createSessionMover } from './session-move'
 import { createSessionParentWriter } from './session-parent'
 import { HEAD_BYTES, readTopLevelString } from './session-file-head'
 import { readSessionUsageJson } from './session-usage-reader'
+import { logger } from './log'
 
 /**
  * mica 的对话 session 快照统计：直接扫描 ~/.mica/sessions/*.json（真实 AI 会话），
@@ -83,6 +84,7 @@ const statsScanner = createStatsScanner({
   directory: sessionsDir,
   indexFile: statsIndexFile,
   ledgerFile: usageLedgerFile,
+  onRefreshError() { logger('stats').warn('metadata-refresh-failed', { code: 'read_failed' }) },
   onProgress(progress) {
     // 首次构建（升级后的第一次打开）会持续几秒：按节流把已有结果推给页面，
     // 侧栏与统计页因此是「逐渐填充」而不是先空白再一次性出现。
@@ -90,7 +92,7 @@ const statsScanner = createStatsScanner({
       lastBroadcastAt = 0
       // 没读到任何变化，或者只是索引在补齐（没人新建会话）时不必让页面重读整份列表：
       // 每重读一次就是一次全量序列化 + 一次侧栏 diff。新增会话、会话追加写入都必须推。
-      const changed = (progress.parsedFiles || 0) > 0 || (progress.added || 0) > 0
+      const changed = progress.metaChanged === true || (progress.parsedFiles || 0) > 0 || (progress.added || 0) > 0
       if (changed) broadcastStats('stats:changed', { reason: 'built', added: progress.added || 0 })
       return
     }
@@ -294,8 +296,8 @@ function deleteSession(sessionId) {
  * 持有者可能在文件没变的情况下消失），但结果不变时要把数组与行对象的引用原样交回去——
  * 侧栏用引用相等来判断是否需要重渲染，每次 refresh 都换新数组会让它白刷一遍。
  */
-async function scanMeta() {
-  const rows = await statsScanner.scanMeta()
+async function scanMeta(options) {
+  const rows = await statsScanner.scanMeta(options)
   // `interrupted`（running 但没人持锁 = 崩溃残留）与 `remoteRunning`（有活租约 =
   // 某个进程正在写这个会话，可能是另一个窗口/另一个运行时实例）是同一次探测的两种
   // 结论，所以每个会话只读一次锁文件，两个标记也一起进缓存键。
@@ -427,7 +429,7 @@ export function registerStatsIpc() {
     }
   })
   ipcMain.handle('stats:list-sessions', async (_event, options = {}) => {
-    const sessions = await scanMeta()
+    const sessions = await scanMeta({ staleWhileRevalidate: options.refresh !== true })
     // `scanMeta()` 在内容没变时把同一个数组引用交回来（见它的注释），所以引用变了
     // 就等于「会话列表真的变了」。用一个单调递增的版本号当 etag 就够了，不必对
     // 1273 条记录做哈希。

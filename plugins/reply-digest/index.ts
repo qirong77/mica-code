@@ -91,7 +91,7 @@ export default function setup(ctx: PluginContext): void {
       rememberHandled(info.id, event.input.id);
       if (!shouldDigest(reply, limits)) return;
       if (!llm.configured(event.owner)) {
-        ctx.health.report({
+        ctx.health.report({ issueKey: 'configuration',
           level: 'warn',
           message: '检测到长回复，但摘要模型未配置，未生成摘要',
           hint: '请在插件设置里复用当前会话模型，或填写独立模型配置',
@@ -99,6 +99,7 @@ export default function setup(ctx: PluginContext): void {
         return;
       }
 
+      ctx.health.report({ issueKey: 'configuration', level: 'ok', message: '摘要模型配置已填写' });
       const controller = new AbortController();
       // 默认只替换同 command 的 running 项，按 input 隔离以保留每轮摘要。
       const noticeOptions = {
@@ -122,11 +123,12 @@ export default function setup(ctx: PluginContext): void {
       };
       states.set(info.id, state);
       ui.notice('正在整理这次长回复的重点，请稍候…', { ...noticeOptions, status: 'running' });
-      void summarize(ctx, event, digestInput(reply, limits.inputLimit), controller.signal)
+      const generate = () => summarize(ctx, event, digestInput(reply, limits.inputLimit), controller.signal);
+      void (ctx.operations ? ctx.operations.run('digest.generate', generate, { signal: controller.signal }) : generate())
         .then((summary) => {
           if (controller.signal.aborted || disposed || states.get(info.id) !== state) return;
           finish(summary, 'info', summaryPreview(summary, limits.summaryLimit));
-          ctx.health.report({ level: 'ok', message: '长回复摘要已生成' });
+          ctx.health.report({ issueKey: 'digest', level: 'ok', message: '长回复摘要已生成' });
         })
         .catch((error) => {
           if (controller.signal.aborted || disposed || states.get(info.id) !== state) return;
@@ -135,7 +137,7 @@ export default function setup(ctx: PluginContext): void {
             sessionId: info.id,
             error: error instanceof Error ? error.message : String(error),
           });
-          ctx.health.report({
+          ctx.health.report({ issueKey: 'digest',
             level: 'warn',
             message: '长回复摘要生成失败，原回复不受影响',
             hint: error instanceof Error ? error.message : String(error),

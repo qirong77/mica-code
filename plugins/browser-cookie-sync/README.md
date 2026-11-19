@@ -36,3 +36,7 @@ Chrome 不会自己重读已加载的解压扩展，所以扩展每分钟（跟�
 弹窗常驻一行 `扩展 v<版本> · 上次更新 <时间>`；指纹不一致时那行变成「磁盘上是 vX」，并给一个「立即重载」按钮。
 
 修改 `extension/` 后运行 `bun scripts/generate-browser-cookie-extension-sources.mjs`：它同时产出 `extension/version.json`（版本 + 内容指纹）与 `extensionSources.ts`。改了扩展却不重新生成，`index.test.ts` 的「内嵌资源与 `extension/` 一致」会直接失败。
+
+## 业务观察与补偿确认
+
+四条同步路径及 reconcile 分别记录固定失败码、白名单 HTTP 状态/传输原因、投递与补偿计数，不含 cookie 身份/值、地址、口令或错误原文。失败增量增加 repairPending；成功写入单条 cookie 或仅下载快照都不清历史待补偿。扩展 v1.2.1 完成逐项核对与基线保存后，用快照的单次 deliveryId、revision 和 repairEpoch 向 `/ack` 报告 failed/skipped；只有当前世代且无失败/冲突的确认才关闭补偿。旧回执、重复回执或处理期间产生新失败均不能宣布恢复。服务监听、各同步方向与模型/其他运行健康独立；这些计数是当前服务世代观察，不是完整跨重启账本。

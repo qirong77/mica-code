@@ -310,3 +310,7 @@ HTTPS 握手超时）。查 `dmesg | grep oom-kill` 就能看到真凶。
 2. 部署要装包、申请证书、改 nginx，失败模式又杂又长，写在 skill 里能给出可读的原因；
    塞进插件只能抛一句错误。
 3. 版本解耦：relay 改一行只要重新部署，不必发一个插件版本。
+
+## 启动退避与健康口径
+
+监管在同一跨宿主锁内维护 `bridge-retry.json`：启动失败/快速退出按 3 秒指数退避，最多 5 分钟；设置、解释器或随包脚本改变会重置，文件只保存配置摘要而不保存口令。获得 PID 不报告恢复，只有中转机确认 agentOnline 且进程稳定至少 15 秒才恢复 `bridge:process`；`configuration`、`dependency:relay` 与 skill 独立。未配置/停用 tick 返回 skipped，等待 ready 返回 waiting，不当业务成功。

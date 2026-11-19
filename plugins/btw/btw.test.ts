@@ -247,7 +247,7 @@ describe('/btw plugin', () => {
 
   it('reports a failure instead of leaving the running notice on screen', async () => {
     const harness = makeHarness({ ask: vi.fn(async () => Promise.reject(new Error('boom'))) });
-    await harness.run('/btw 问题');
+    expect(await harness.run('/btw 问题')).toMatchObject({ ok: false, outcome: 'error', code: 'answer_failed' });
 
     const last = harness.notices.at(-1);
     expect(last?.content).toContain('btw 出错：boom');
@@ -256,7 +256,7 @@ describe('/btw plugin', () => {
 
   it('reports why the thread could not be created', async () => {
     const harness = makeHarness({ threadError: new Error('未配置 api_key') });
-    await harness.run('/btw 问题');
+    expect(await harness.run('/btw 问题')).toMatchObject({ ok: false, outcome: 'error', code: 'thread_unavailable' });
 
     expect(harness.notices.at(-1)?.content).toContain('btw 暂时不可用：未配置 api_key');
   });

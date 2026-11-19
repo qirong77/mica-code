@@ -92,3 +92,5 @@ desktop 运行时 spawn `mica app-server` 时注入 `MICA_PLUGIN_DESKTOP_HOST=1`
 bun run test -- plugins/computer-use
 node $MICA_HOME/computer-use/scripts/desktop.mjs check
 ```
+
+平台、运行时落盘、工具能力和 skill 注册分别使用 dependency:platform / dependency:runtime / dependency:tools / skill 健康 key；只完成运行时物化或注册 skill 不代表 TCC 或实际桌面链路验收。

@@ -25,6 +25,8 @@ import {
 const options: CaptureOptions = { captureContent: true, maxEventChars: 4000, maxEventsPerRun: 2000 };
 const config = { providerId: 'test-provider', protocol: 'openai', model: 'test-model', effort: 'medium', role: 'main' };
 const at = '2026-06-01T10:00:00.000Z';
+const failureProfile = { pluginVersion: 'unknown', pid: process.pid, generation: 'test-process' };
+const pluginProducer = { schemaVersion: 2 as const, ...failureProfile };
 const sha = (text: string): string => createHash('sha256').update(text).digest('hex');
 type Input = { type: AgentObservationEvent['type']; [key: string]: unknown };
 
@@ -89,9 +91,22 @@ test('neutral results override timeout/error fields and unknown results never co
   const { recorder } = await fixture(t);
   const run = runner(recorder);
   run.start();
-  for (const outcome of ['cancelled', 'declined', 'waiting', 'busy', 'conflict', 'partial', 'skipped', 'expected-exit']) {
+  for (const outcome of [
+    'cancelled',
+    'declined',
+    'waiting',
+    'busy',
+    'conflict',
+    'partial',
+    'skipped',
+    'expected-exit',
+  ]) {
     run.call('{}', 'operation', outcome);
-    run.result(JSON.stringify({ outcome, timedOut: true, error: 'not an operational fault', exitCode: 1 }), 'operation', outcome);
+    run.result(
+      JSON.stringify({ outcome, timedOut: true, error: 'not an operational fault', exitCode: 1 }),
+      'operation',
+      outcome,
+    );
   }
   run.finish();
   const unknown = runner(recorder, { runId: 2 });
@@ -100,7 +115,10 @@ test('neutral results override timeout/error fields and unknown results never co
   unknown.result('{"outcome":"unknown"}', 'operation', 'unknown');
   unknown.finish();
   const report = await recorder.review();
-  assert.equal(report.runs.reduce((sum, entry) => sum + entry.toolErrors, 0), 0);
+  assert.equal(
+    report.runs.reduce((sum, entry) => sum + entry.toolErrors, 0),
+    0,
+  );
   assert.equal(report.toolHealthCoverage.unknownResults, 1);
   assert.equal(report.toolHealthCoverage.excludedRuns, 1);
   assert.ok(!report.findings.some((finding) => finding.kind === 'tool-error'));
@@ -122,7 +140,7 @@ test('recent plugin failure counts use dated event rows, not the lifetime failur
   ];
   await writeFile(
     join(root, 'plugin-events.jsonl'),
-    events.map((event) => JSON.stringify({ ...event, error: 'Connection error' })).join('\n') + '\n',
+    events.map((event) => JSON.stringify({ ...pluginProducer, ...event, error: 'Connection error' })).join('\n') + '\n',
   );
   const report = await recorder.review();
   assert.equal(report.findings.length, 1);
@@ -3035,6 +3053,7 @@ test('metadata without a verdict is unknown rather than a successful tool result
 test('plugin background failures are throttled, aggregated and exposed as a review item', async (t) => {
   const { recorder, root } = await fixture(t);
   const failure = (tick: number, timestamp: string) => ({
+    ...pluginProducer,
     pluginId: 'mobile-relay',
     timestamp,
     type: 'background:failed' as const,
@@ -3050,6 +3069,7 @@ test('plugin background failures are throttled, aggregated and exposed as a revi
   const lines = (await readFile(file, 'utf8')).trim().split('\n');
   assert.equal(lines.length, 1);
   assert.deepEqual(JSON.parse(lines[0]!), {
+    ...pluginProducer,
     at,
     pluginId: 'mobile-relay',
     taskId: 'poll',
@@ -3063,17 +3083,18 @@ test('plugin background failures are throttled, aggregated and exposed as a revi
   // 之前进程留下的记录与一条坏行：坏行不该让整次复盘失败。
   await appendFile(
     file,
-    `${JSON.stringify({ at: '2026-06-01T10:05:00.000Z', pluginId: 'mobile-relay', taskId: 'poll', tick: 2, failures: 2, error: 'connect 2 refused' })}\n`,
+    `${JSON.stringify({ ...pluginProducer, at: '2026-06-01T10:05:00.000Z', pluginId: 'mobile-relay', taskId: 'poll', tick: 2, failures: 2, error: 'connect 2 refused' })}\n`,
   );
   await appendFile(file, 'not-json\n');
   await appendFile(
     file,
-    `${JSON.stringify({ at: '2026-06-01T10:09:00.000Z', pluginId: 'mobile-relay', taskId: 'poll', tick: 3, failures: 3, error: 'connect 3 refused' })}\n`,
+    `${JSON.stringify({ ...pluginProducer, at: '2026-06-01T10:09:00.000Z', pluginId: 'mobile-relay', taskId: 'poll', tick: 3, failures: 3, error: 'connect 3 refused' })}\n`,
   );
 
   const report = await recorder.review();
   assert.deepEqual(report.pluginFailures, [
     {
+      ...failureProfile,
       pluginId: 'mobile-relay',
       taskId: 'poll',
       count: 3,
@@ -3097,13 +3118,14 @@ test('plugin background failures are throttled, aggregated and exposed as a revi
 
   const markdown = await readFile(await recorder.exportReport(), 'utf8');
   assert.match(markdown, /## Plugin health/);
-  assert.match(markdown, /\| mobile-relay \| poll \| 3 \|/);
+  assert.match(markdown, /\| mobile-relay \| unknown \| .* \| poll \| 3 \|/);
 });
 
 test('forty failures in one window keep cumulative counters and flush the latest error', async (t) => {
   const { recorder, root } = await fixture(t);
   for (let failures = 1; failures <= 40; failures++)
     recorder.notePluginEvent({
+      ...pluginProducer,
       pluginId: 'sample',
       type: 'background:failed',
       taskId: 'poll',
@@ -3121,6 +3143,7 @@ test('forty failures in one window keep cumulative counters and flush the latest
   assert.equal(records.length, 2, 'one immediate event plus one merged tail checkpoint');
   assert.equal(records[0].failures, 1);
   assert.deepEqual(records[1], {
+    ...pluginProducer,
     at: '2026-06-01T10:00:40.000Z',
     pluginId: 'sample',
     taskId: 'poll',
@@ -3141,6 +3164,7 @@ test('dispose checkpoints pending hook failures before restart, including reset 
   const { recorder, root } = await fixture(t);
   for (let index = 0; index < 40; index++)
     recorder.notePluginEvent({
+      ...pluginProducer,
       pluginId: 'sample',
       type: 'hook:failed',
       hook: 'turn:after',
@@ -3168,6 +3192,7 @@ test('expired plugin-event windows write the current checkpoint without an expli
   });
   const fail = (failures: number) =>
     recorder.notePluginEvent({
+      ...pluginProducer,
       pluginId: 'sample',
       type: 'hook:failed',
       hook: 'turn:after',
@@ -3194,6 +3219,7 @@ test('plugin-event key eviction checkpoints its pending tail', async (t) => {
   const { recorder, root } = await fixture(t);
   const fail = (taskId: string, failures: number) =>
     recorder.notePluginEvent({
+      ...pluginProducer,
       pluginId: 'sample',
       type: 'background:failed',
       taskId,
@@ -3219,7 +3245,7 @@ test('plugin-event key eviction checkpoints its pending tail', async (t) => {
 test('concurrent recorder rotation keeps both hosts events in a consistent snapshot', async (t) => {
   const { recorder, root, errors } = await fixture(t);
   await mkdir(root, { recursive: true });
-  const old = JSON.stringify({ at, pluginId: 'old', taskId: 'poll', failures: 3, error: 'old' });
+  const old = JSON.stringify({ ...pluginProducer, at, pluginId: 'old', taskId: 'poll', failures: 3, error: 'old' });
   await writeFile(join(root, 'plugin-events.jsonl'), `${old}\n${' '.repeat(4 * 1024 * 1024)}\n`);
   const second = new HarnessRecorder(root, (error) => errors.push(error));
   t.onTestFinished(() => second.dispose());
@@ -3229,6 +3255,7 @@ test('concurrent recorder rotation keeps both hosts events in a consistent snaps
   ] as const) {
     for (let failures = 1; failures <= 40; failures++)
       host.notePluginEvent({
+        ...pluginProducer,
         pluginId,
         type: 'background:failed',
         taskId: 'poll',
@@ -3253,7 +3280,9 @@ test('concurrent recorder rotation keeps both hosts events in a consistent snaps
 test('read-only review does not flush/reclaim or create missing directories and locks', async (t) => {
   const { temporary, root, recorder } = await fixture(t);
   vi.stubEnv('MICA_LOG_DIR', join(temporary, 'missing-logs'));
-  t.onTestFinished(() => { vi.unstubAllEnvs(); });
+  t.onTestFinished(() => {
+    vi.unstubAllEnvs();
+  });
   const flush = vi.spyOn(recorder, 'flush');
   const reclaim = vi.spyOn(recorder, 'reclaim');
   const report = await recorder.review(undefined, { readOnly: true });
@@ -3271,7 +3300,7 @@ test('read-only plugin-event snapshot retries across rotation instead of countin
   const { root, recorder } = await fixture(t);
   await mkdir(root, { recursive: true });
   const row = (pluginId: string) =>
-    `${JSON.stringify({ at, pluginId, taskId: 'poll', failures: 1, error: 'failed' })}\n`;
+    `${JSON.stringify({ ...pluginProducer, at, pluginId, taskId: 'poll', failures: 1, error: 'failed' })}\n`;
   const current = join(root, 'plugin-events.jsonl');
   const rotated = join(root, 'plugin-events.1.jsonl');
   await writeFile(rotated, row('old'));
@@ -3304,7 +3333,8 @@ test('continuously rotating plugin events are omitted with an explicit warning a
   await mkdir(root, { recursive: true });
   const current = join(root, 'plugin-events.jsonl');
   const rotated = join(root, 'plugin-events.1.jsonl');
-  const row = (n: number) => `${JSON.stringify({ at, pluginId: `sample-${n}`, taskId: 'poll', failures: 1 })}\n`;
+  const row = (n: number) =>
+    `${JSON.stringify({ ...pluginProducer, at, pluginId: `sample-${n}`, taskId: 'poll', failures: 1 })}\n`;
   await writeFile(rotated, row(0));
   await writeFile(current, row(1));
   const originalOpen = fsPromises.open;
@@ -3358,7 +3388,7 @@ test('already aborted and in-progress read-only plugin scans propagate cancellat
   await mkdir(root, { recursive: true });
   await writeFile(
     join(root, 'plugin-events.jsonl'),
-    `${JSON.stringify({ at, pluginId: 'sample', taskId: 'poll', failures: 3 })}\n`,
+    `${JSON.stringify({ ...pluginProducer, at, pluginId: 'sample', taskId: 'poll', failures: 3 })}\n`,
   );
   const controller = new AbortController();
   const read = (
@@ -3373,6 +3403,7 @@ test('already aborted and in-progress read-only plugin scans propagate cancellat
 test('hook failures are recorded like background tasks, with a lower-bound count', async (t) => {
   const { recorder, root } = await fixture(t);
   recorder.notePluginEvent({
+    ...pluginProducer,
     pluginId: 'commit',
     timestamp: at,
     type: 'hook:failed',
@@ -3389,12 +3420,12 @@ test('hook failures are recorded like background tasks, with a lower-bound count
   for (const failures of [2, 40])
     await appendFile(
       file,
-      `${JSON.stringify({ at, pluginId: 'commit', taskId: 'hook:turn:after', tick: 0, failures, error: 'boom' })}\n`,
+      `${JSON.stringify({ ...pluginProducer, at, pluginId: 'commit', taskId: 'hook:turn:after', tick: 0, failures, error: 'boom' })}\n`,
     );
 
   const report = await recorder.review();
   assert.deepEqual(report.pluginFailures, [
-    { pluginId: 'commit', taskId: 'hook:turn:after', count: 40, lastAt: at, lastError: 'boom' },
+    { ...failureProfile, pluginId: 'commit', taskId: 'hook:turn:after', count: 40, lastAt: at, lastError: 'boom' },
   ]);
   const finding = report.findings.find((item) => item.kind === 'plugin-background')!;
   assert.equal(finding.occurrences, 40);
@@ -3410,7 +3441,7 @@ test('two tasks whose names sanitize alike keep separate review items', async (t
     for (const tick of [1, 2, 3])
       await appendFile(
         file,
-        `${JSON.stringify({ at, pluginId: 'relay', taskId, tick, failures: tick, error: 'refused' })}\n`,
+        `${JSON.stringify({ ...pluginProducer, at, pluginId: 'relay', taskId, tick, failures: tick, error: 'refused' })}\n`,
       );
 
   const report = await recorder.review();

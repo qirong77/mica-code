@@ -41,8 +41,9 @@ export function createPluginMcpHandler({ runtime }) {
     })
     if (req.aborted || res.destroyed) controller.abort(new DOMException('MCP caller disconnected', 'AbortError'))
     try {
+      const loadedManifest = runtime.manifestOf(pluginId)
       const { handler, manifest } = await observePluginOperation(
-        { plugin: pluginId, surface: 'mcp', operation: 'mcp.load', signal: controller.signal },
+        { plugin: pluginId, pluginVersion: loadedManifest.version, surface: 'mcp', operation: 'mcp.load', signal: controller.signal },
         async () => ({ handler: await runtime.load(pluginId), manifest: runtime.manifestOf(pluginId) })
       )
       server = createPluginMcpServer({ pluginId, version: manifest.version, handler, signal: controller.signal })

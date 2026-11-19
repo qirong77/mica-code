@@ -58,3 +58,5 @@ index.ts         装配：turn:before 钩子、命令、节流与并发保护
 transcript.ts    对话抽取：过滤、压缩、拼成纯文本
 titleRequest.ts  调用模型并清洗标题
 ```
+
+自动改名的脱离 hook 任务单独记录 rename.auto，标题拒绝、跳过与实际完成分开；configuration 与 rename 健康独立。诊断成功日志只留标题长度，不记录标题正文。

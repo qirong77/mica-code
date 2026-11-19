@@ -2,7 +2,7 @@
   "id": "notebook",
   "name": "Notebook",
   "icon": "book-spine",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "description": "本地笔记本：左侧目录树，右侧完整富文本编辑器，支持表格、图片、代码与公式，自动保存到本机。",
   "author": "Mica Code",
   "main": "index.ts",
@@ -11,6 +11,8 @@
   "mica": {"apiVersion": 1},
   "requires": [],
   "mcp": true,
+  "mcpRoles": ["笔记"],
+  "roles": ["roles"],
   "desktop": {
     "entry": {"label": "Notebook", "placement": "header"},
     "page": {"title": "笔记本"}

@@ -9,6 +9,7 @@
  * 只画按钮、把结果（一句话 + 一条链接）显示出来。宿主不认任何具体插件。
  */
 import type { Disposable } from '@packages/mica-common/index.js';
+import type { OperationOutcome } from '@packages/mica-diagnostics/operation.js';
 import type { PluginNewSession } from './PluginNewSession.js';
 import type { PluginSettingValues } from './PluginSettings.js';
 
@@ -39,7 +40,7 @@ export type PluginActionInput = {
   values: PluginSettingValues;
 };
 
-export type PluginActionResult = {
+export type PluginActionResult = (Partial<OperationOutcome> & {
   /** 给用户看的一句话（成功或失败都行）。 */
   message?: string;
   /** 一条可以点开的地址：注册拿到访问链接这类。 */
@@ -52,7 +53,7 @@ export type PluginActionResult = {
    * 由宿主开一个会话、把话递给用户，之后是人和 agent 的事。
    */
   newSession?: PluginNewSession;
-} | void;
+}) | void;
 
 export type PluginActionHandler = (
   input: PluginActionInput,

@@ -343,7 +343,7 @@ function FindingDetail({ finding, onClose }) {
             value: <StateTag value={finding.status} label={findingStatusLabel[finding.status] ?? finding.status} />,
           },
           { label: '模块', value: text(finding.module) },
-          { label: '工作区', value: text(finding.cwd) },
+          { label: '工作区标识', value: text(finding.workspaceKey) },
           { label: '首次出现', value: date(finding.firstSeenAt) },
           { label: '最近出现', value: date(finding.lastSeenAt) },
           { label: '证据条数', value: count(finding.evidenceCount) },
@@ -400,7 +400,7 @@ function Runs({ snapshot }) {
             rows={rows}
             rowKey={(row) => row.id}
             renderCells={(row) => [
-              <span key="run" className="harness-cell-stack" title={row.cwd}>
+              <span key="run" className="harness-cell-stack" title={row.workspaceKey}>
                 <strong>{row.sessionTitle || row.id}</strong>
                 <small>{date(row.startedAt)}</small>
               </span>,
@@ -492,8 +492,20 @@ function Plugins({ snapshot }) {
               { key: 'last', label: '最近发生', align: 'right' },
             ]}
             rows={failures}
-            rowKey={(row) => `${row.pluginId}-${row.taskId}`}
-            renderCells={(row) => [text(row.pluginId), text(row.taskId), count(row.count), date(row.lastAt)]}
+            rowKey={(row) => `${row.pluginId}-${row.pluginVersion}-${row.pid}-${row.generation}-${row.taskId}`}
+            renderCells={(row) => [
+              <span key="identity" className="harness-cell-stack">
+                <strong>
+                  {text(row.pluginId)} · {text(row.pluginVersion ?? 'unknown')}
+                </strong>
+                <small>
+                  PID {text(row.pid ?? 'unknown')} · {text(row.generation ?? 'unknown')}
+                </small>
+              </span>,
+              text(row.taskId),
+              count(row.count),
+              date(row.lastAt),
+            ]}
           />
         ) : (
           <EmptyRows message="未观察到插件后台失败" />
@@ -510,6 +522,11 @@ function OperationTables({ logs }) {
   return (
     <>
       <SectionCard title="操作日志（机器级有界样本）" total={operations.length} shown={operations.length}>
+        <p className="harness-note">
+          已读终态总计：开始 {count(logs?.totals?.operationStarts)} / 结束 {count(logs?.totals?.operationFinishes)} /
+          失败 {count(logs?.totals?.operationErrors)} / 未知 {count(logs?.totals?.operationUnknown)}，独立于下方最多 100
+          组明细。心跳合并 {count(logs?.coverage?.heartbeatCount)} 次健康 tick；success 不是业务验收。
+        </p>
         {operations.length ? (
           <DataTable
             ariaLabel="插件操作日志"
@@ -524,10 +541,26 @@ function OperationTables({ logs }) {
             ]}
             rows={operations}
             rowKey={(row) =>
-              [row.plugin, row.pluginVersion, row.operation, row.surface, row.outcome, row.code].join(':')
+              [
+                row.plugin,
+                row.pluginVersion,
+                row.pid,
+                row.generation,
+                row.operation,
+                row.surface,
+                row.outcome,
+                row.code,
+              ].join(':')
             }
             renderCells={(row) => [
-              text(row.plugin),
+              <span key="identity" className="harness-cell-stack">
+                <strong>
+                  {text(row.plugin)} · {text(row.pluginVersion ?? 'unknown')}
+                </strong>
+                <small>
+                  PID {text(row.pid ?? 'unknown')} · {text(row.generation ?? 'unknown')}
+                </small>
+              </span>,
               text(row.operation),
               text(row.surface),
               <StateTag key="outcome" value={row.outcome} label={operationLabel[row.outcome] ?? row.outcome} />,
@@ -636,6 +669,26 @@ function Coverage({ snapshot }) {
           />
           <CoverageMetric label="日志检查字节" value={logs ? short(logs.coverage.inspectedBytes) : '未知'} />
           <CoverageMetric label="日志截断文件" value={logs ? count(logs.coverage.truncatedFiles) : '未知'} />
+          <CoverageMetric
+            label="已读系统 warn / error / 崩溃"
+            value={
+              logs?.totals
+                ? `${count(logs.totals.systemWarnings)} / ${count(logs.totals.systemErrors)} / ${count(logs.totals.crashes)}`
+                : '未知'
+            }
+          />
+          <CoverageMetric
+            label="Writer 检查点"
+            value={logs?.coverage?.writerHealthObserved ? '已观察到（仍非完整历史）' : '未知，未观察到'}
+          />
+          <CoverageMetric
+            label="已知丢失下界"
+            value={
+              logs?.coverage?.writerHealthObserved
+                ? count((logs.writerHealth ?? []).reduce((sum, row) => sum + n(row.lostLowerBound), 0))
+                : '未知'
+            }
+          />
         </div>
         <div className="harness-flag-list">
           {[
@@ -659,6 +712,13 @@ function Coverage({ snapshot }) {
           {count(snapshot.limits?.runs)} 次运行、每次 {count(snapshot.limits?.findingsPerRun)} 项候选 /{' '}
           {count(snapshot.limits?.distinctCallKeysPerRun)} 种调用键，每项最多{' '}
           {count(snapshot.limits?.evidencePerFinding)} 条证据。
+        </p>
+        <p className="harness-note">
+          日志先检查全部候选元数据再按新鲜度取尾部；各域已读窗口：
+          {(logs?.coverage?.domains ?? [])
+            .map((row) => `${row.domain} ${date(row.earliestAt)} — ${date(row.latestAt)}`)
+            .join('；') || '未知'}
+          。未读域、缺失检查点、保留期及写入失败仍可能遗漏。
         </p>
       </SectionCard>
       <SectionCard title="警告" total={snapshot.counts.warnings} shown={warnings.length}>
@@ -687,7 +747,15 @@ function Coverage({ snapshot }) {
               rows={systemRows}
               rowKey={(row, index) => `${row.scope}-${row.event}-${index}`}
               renderCells={(row) => [
-                text(row.scope),
+                <span key="identity" className="harness-cell-stack">
+                  <strong>{text(row.scope)}</strong>
+                  {row.pluginId ? (
+                    <small>
+                      {row.pluginId} · {row.pluginVersion ?? 'unknown'} · PID {row.pid ?? 'unknown'} ·{' '}
+                      {row.generation ?? 'unknown'}
+                    </small>
+                  ) : null}
+                </span>,
                 text(row.event),
                 <StateTag key="level" value={row.level} label={row.level} />,
                 count(row.count),
@@ -777,6 +845,13 @@ export default function HarnessConsolePage({ api }) {
   const actions = (
     <div className="harness-page-actions">
       <span className="harness-generated-at">统计至 {date(snapshot?.generatedAt)}</span>
+      {snapshot?.cache ? (
+        <span className="harness-generated-at">
+          {snapshot.cache.source === 'persistent' ? '持久安全快照' : '只读快照'} ·{' '}
+          {snapshot.cache.stale ? '已过期，后台刷新' : '缓存有效'} · 到期 {date(snapshot.cache.expiresAt)}
+          {snapshot.cache.refreshFailed ? ' · 刷新失败，保留旧值' : ''}
+        </span>
+      ) : null}
       <Button variant="ghost" size="compact" loading={view.refreshing} onClick={refresh}>
         刷新
       </Button>

@@ -81,7 +81,11 @@ describe('Harness console view refresh policy', () => {
     await controller.refresh();
     expect(controller.getState().snapshot).toEqual(snapshot('first'));
     await expect(controller.refresh()).rejects.toThrow('暂时不可读');
-    expect(controller.getState()).toMatchObject({ snapshot: snapshot('first'), error: '暂时不可读', loading: false });
+    expect(controller.getState()).toMatchObject({
+      snapshot: snapshot('first'),
+      error: '运行快照刷新失败，请稍后重试；已有统计仍保留。',
+      loading: false,
+    });
     unmount();
     controller.dispose();
   });

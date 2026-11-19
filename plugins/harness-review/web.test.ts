@@ -95,7 +95,7 @@ test('read-only GET and dispose leave every file unchanged, including zombie run
   await writeFile(join(context.paths.data, 'plugin-events.lock'), 'existing lock must not be reclaimed');
   await writeFile(
     join(context.paths.data, 'plugin-events.jsonl'),
-    `${JSON.stringify({ at: '2026-01-01T00:00:00.000Z', pluginId: 'sample', taskId: 'poll', failures: 3, error: 'RAW-ERROR-CANARY' })}\n`,
+    `${JSON.stringify({ schemaVersion: 2, at: '2026-01-01T00:00:00.000Z', pluginId: 'sample', pluginVersion: 'unknown', generation: 'unknown', taskId: 'poll', failures: 3, error: 'RAW-ERROR-CANARY' })}\n`,
   );
   const before = await fileTree(root);
   const handler = createWeb(context);

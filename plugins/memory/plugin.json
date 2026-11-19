@@ -9,7 +9,7 @@
   "assets": ["README.md"],
   "required": false,
   "priority": 150,
-  "requires": ["commands", "hooks", "prompt", "session", "settings", "tools", "llm"],
+  "requires": ["commands", "hooks", "prompt", "session", "settings", "tools", "llm", "operations"],
   "settings": [
     {
       "key": "enabled",

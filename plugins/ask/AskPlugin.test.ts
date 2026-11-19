@@ -34,7 +34,7 @@ describe('AskPlugin', () => {
     let tool: AskUserTool | undefined;
     const context = {
       settings: { get: () => ({ timeoutMinutes }) },
-      session: { captureOwner: () => currentOwner },
+      session: { captureOwner: () => currentOwner, describe: vi.fn(() => ({ cwd: '/workspace/original-owner' })) },
       ask: {
         request: async (question: PluginAskQuestion) => {
           questions.push(question);
@@ -72,6 +72,7 @@ describe('AskPlugin', () => {
     const question = { title: '先做哪个入口？', options: [{ id: 'a', label: '入口 A' }] };
     await tool!.execute(question);
     expect(questions[0].timeoutMs).toBe(300_000);
+    expect(context.session!.describe).toHaveBeenCalledExactlyOnceWith(originalOwner);
     expect(notices[0]).toEqual({
       message: expect.stringContaining('等待回复已超时'),
       options: { status: 'warning', owner: originalOwner },

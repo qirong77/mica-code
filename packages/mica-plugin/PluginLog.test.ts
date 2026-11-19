@@ -33,12 +33,12 @@ function mkTempDir(): string {
 describe('createPluginLogger', () => {
   it('writes one JSONL line per event into the given directory', () => {
     const dir = mkTempDir();
-    const logger = createPluginLogger('session-rename', undefined, { dir, force: true });
+    const logger = createPluginLogger('session-rename', undefined, { dir, force: true, pluginVersion: '2.3.0' });
 
     logger.info('session-rename:request', { entries: 2 });
     logger.warn('session-rename:failed', { error: 'boom' });
 
-    const files = readdirSync(dir);
+    const files = readdirSync(dir).filter((file) => file.startsWith('plugin-'));
     expect(files).toHaveLength(1);
     expect(files[0]).toMatch(/^plugin-session-rename-\d{8}\.jsonl$/);
 
@@ -46,11 +46,20 @@ describe('createPluginLogger', () => {
     expect(lines).toHaveLength(2);
     expect(JSON.parse(lines[0]!)).toMatchObject({
       plugin: 'session-rename',
+      pluginVersion: '2.3.0', pid: process.pid, generation: expect.any(String),
       level: 'info',
       event: 'session-rename:request',
       data: { entries: 2 },
     });
     expect(JSON.parse(lines[1]!)).toMatchObject({ level: 'warn', event: 'session-rename:failed' });
+    expect(JSON.parse(lines[0]!).generation).toBe(JSON.parse(lines[1]!).generation);
+  });
+
+  it('leaves an unknown loaded version unknown rather than borrowing a future catalog', () => {
+    const dir = mkTempDir();
+    createPluginLogger('unversioned', undefined, { dir, force: true }).info('event');
+    const file = readdirSync(dir).find((name) => name.startsWith('plugin-unversioned-'))!;
+    expect(JSON.parse(readFileSync(join(dir, file), 'utf8'))).toMatchObject({ pluginVersion: 'unknown', pid: process.pid });
   });
 
   it('still forwards to the host logger', () => {

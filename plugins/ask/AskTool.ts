@@ -1,19 +1,50 @@
-import { execFile } from 'node:child_process';
+import { spawn } from 'node:child_process';
+import { isAbsolute } from 'node:path';
 import type { PluginAskAnswer, PluginAskApi, PluginAskOption, PluginAskQuestion } from '@packages/mica-plugin/index.js';
-import { MicaTool, type ToolExecuteCallbacks, type ToolInput } from '@packages/mica-tools/index.js';
+import { getPathOwnershipContext, MicaTool, type ToolExecuteCallbacks, type ToolInput } from '@packages/mica-tools/index.js';
+import { killChildProcess } from '@packages/mica-tools/ToolRunShellBackground.js';
 
 export const ASK_TOOL_NAME = 'ask_user';
 
 /** 命令输出进工具结果的上限：让模型看到够判断的上下文，又不至于吞掉整段上下文。 */
 const MAX_COMMAND_OUTPUT = 4000;
+const MAX_PROCESS_OUTPUT = 4 * 1024 * 1024;
 const COMMAND_TIMEOUT_MS = 120_000;
+const KILL_GRACE_MS = 500;
 const DEFAULT_TIMEOUT_MS = 5 * 60_000;
 
 type AskUserToolOptions = {
   getTimeoutMs?: () => number;
   captureOwner?: (context?: unknown) => unknown;
+  getCwd?: (owner?: unknown) => string | undefined;
   onTimeout?: (message: string, owner?: unknown) => void;
 };
+
+type CommandResult = {
+  outcome: 'success' | 'error' | 'timeout' | 'cancelled';
+  code: 'ok' | 'aborted' | 'timeout' | 'output_limit' | 'spawn_failed' | 'nonzero_exit' | 'command_failed';
+  exitCode: number | null;
+  signal: NodeJS.Signals | null;
+  timedOut: boolean;
+  aborted: boolean;
+  output: string;
+};
+
+function reply(outcome: string, code: string, text: string, extra: object = {}): string {
+  return JSON.stringify({ outcome, code, text, ...extra });
+}
+
+function cancelledReply(answer: PluginAskAnswer): string {
+  return reply(
+    answer.reason === 'timeout' ? 'timeout' : 'cancelled',
+    answer.reason === 'timeout' ? 'answer_timeout' : answer.reason === 'aborted' ? 'aborted' : 'answer_cancelled',
+    cancelledText(answer),
+  );
+}
+
+function abortedReply(): string {
+  return cancelledReply({ optionIds: [], cancelled: true, reason: 'aborted' });
+}
 
 /**
  * `ask_user`：把「这一步有几种做法，你来定」变成一次真正的点选。
@@ -115,22 +146,32 @@ export class AskUserTool extends MicaTool {
         required: ['title', 'options'],
         additionalProperties: false,
       },
-      { readOnly: true },
+      // A selected option can execute shell commands. The registry uses this
+      // flag for both scheduling and whole-turn retries, not just presentation.
+      { readOnly: false },
     );
   }
 
   async execute(input: ToolInput, callbacks?: ToolExecuteCallbacks): Promise<string> {
+    if (callbacks?.signal?.aborted) return abortedReply();
     const configured = this.options.getTimeoutMs?.();
     const defaultTimeoutMs =
       typeof configured === 'number' && Number.isFinite(configured) && configured > 0 ? configured : DEFAULT_TIMEOUT_MS;
     const question = toQuestion(input, defaultTimeoutMs);
     const owner = this.options.captureOwner?.(callbacks?.context);
+    // Capture before awaiting the answer: another session may become current
+    // while the card is open. Never resolve the cwd from that later session.
+    const cwd = this.options.getCwd
+      ? this.options.getCwd(owner)
+      : getPathOwnershipContext(callbacks?.context)?.cwd ?? process.cwd();
     let answer: PluginAskAnswer;
     try {
       answer = await this.ask.request(question, { signal: callbacks?.signal });
     } catch (error) {
-      return `没能把问题交给用户：${error instanceof Error ? error.message : String(error)}`;
+      if (callbacks?.signal?.aborted || (error instanceof Error && error.name === 'AbortError')) return abortedReply();
+      return reply('error', 'ask_failed', `没能把问题交给用户：${error instanceof Error ? error.message : String(error)}`);
     }
+    if (callbacks?.signal?.aborted) return abortedReply();
     if (answer.cancelled) {
       if (answer.reason === 'timeout') {
         this.options.onTimeout?.(
@@ -138,9 +179,9 @@ export class AskUserTool extends MicaTool {
           owner,
         );
       }
-      return cancelledText(answer);
+      return cancelledReply(answer);
     }
-    return await answeredText(question, answer);
+    return await answeredText(question, answer, cwd, callbacks?.signal);
   }
 
   onToolUseDisplayText(input: ToolInput): string {
@@ -176,11 +217,17 @@ function cancelledText(answer: PluginAskAnswer): string {
   return `${why}。不代表用户选择了任何选项或批准了任何操作。不要重复问同一个问题；任务仍在继续时，只推进安全、可逆的部分，并说明采用的保守假设。`;
 }
 
-async function answeredText(question: PluginAskQuestion, answer: PluginAskAnswer): Promise<string> {
+async function answeredText(
+  question: PluginAskQuestion,
+  answer: PluginAskAnswer,
+  cwd: string | undefined,
+  signal?: AbortSignal,
+): Promise<string> {
   const picked = answer.optionIds
     .map((id) => question.options.find((option) => option.id === id))
     .filter((option): option is PluginAskOption => Boolean(option));
   const lines: string[] = [];
+  const commands: Array<CommandResult & { optionId: string }> = [];
   const custom = answer.custom?.trim() ?? '';
 
   if (picked.length === 0 && !custom) {
@@ -193,42 +240,106 @@ async function answeredText(question: PluginAskQuestion, answer: PluginAskAnswer
   }
 
   for (const option of picked) {
+    if (signal?.aborted) return reply('cancelled', 'aborted', `${lines.join('\n')}\n操作已中止，后面的选项没有执行。`, { commands });
     const prompt = option.prompt?.trim();
     if (prompt) lines.push('', `按这个选项继续：${prompt}`);
     const command = option.command?.trim();
     if (command) {
+      if (!cwd || !isAbsolute(cwd)) {
+        return reply('error', 'cwd_unavailable', `${lines.join('\n')}\n无法确定发起会话的工作目录，选项命令没有执行。`, { commands });
+      }
       lines.push('', `用户的选择要求执行：\`${command}\``);
-      lines.push('执行结果：', await runCommand(command));
+      const result = await runCommand(command, cwd, signal);
+      commands.push({ optionId: option.id, ...result });
+      lines.push('执行结果：', commandText(result));
+      if (signal?.aborted || result.outcome !== 'success') {
+        lines.push('后面的选项没有执行。');
+        if (custom) lines.push('', `用户的补充：${custom}`);
+        return reply(signal?.aborted ? 'cancelled' : result.outcome, signal?.aborted ? 'aborted' : result.code, lines.join('\n').trim(), { commands });
+      }
     }
   }
 
   if (custom) lines.push('', `用户的补充：${custom}`);
-  return lines.join('\n').trim();
+  const text = lines.join('\n').trim();
+  return commands.length ? reply('success', 'ok', text, { commands }) : text;
 }
 
 /**
  * 跑选项上的命令。
  *
- * 失败不是工具失败：用户已经选了这条路，把 stderr / 退出码交回模型，由它决定是修一下
- * 再跑、还是回来重新问。执行前一件事**不能**做——把命令当成用户的授权去静默重试。
+ * 用户已经选了这条路，但失败仍是真实的业务终态。输出与退出码交回模型，不静默重试，
+ * 不在失败/超时/中止后继续执行后面的选项；等待 close 后才返回，避免遗留运行中的脚本。
  */
-function runCommand(command: string): Promise<string> {
+function runCommand(command: string, cwd: string, signal?: AbortSignal): Promise<CommandResult> {
+  if (signal?.aborted) {
+    return Promise.resolve({ outcome: 'cancelled', code: 'aborted', exitCode: null, signal: null, timedOut: false, aborted: true, output: '' });
+  }
   return new Promise((resolve) => {
-    execFile(
-      '/bin/bash',
-      ['-lc', command],
-      { cwd: process.cwd(), timeout: COMMAND_TIMEOUT_MS, maxBuffer: 4 * 1024 * 1024 },
-      (error, stdout, stderr) => {
-        const output = `${stdout || ''}${stderr || ''}`.trim();
-        if (error) {
-          const reason = error.killed ? '执行超时被终止' : error.message;
-          resolve(truncate(`执行失败（${reason}）${output ? `\n${output}` : ''}`));
-          return;
-        }
-        resolve(truncate(output || '（没有输出）'));
-      },
-    );
+    let child: ReturnType<typeof spawn>;
+    try {
+      child = spawn('/bin/bash', ['-lc', command], {
+        cwd,
+        signal,
+        detached: process.platform !== 'win32',
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+    } catch (error) {
+      const aborted = signal?.aborted === true;
+      resolve({ outcome: aborted ? 'cancelled' : 'error', code: aborted ? 'aborted' : 'spawn_failed', exitCode: null, signal: null, timedOut: false, aborted, output: truncate(String(error)) });
+      return;
+    }
+    let output = '';
+    let outputBytes = 0;
+    let failure = '';
+    let stopped: 'aborted' | 'timeout' | 'output_limit' | undefined;
+    let killTimer: ReturnType<typeof setTimeout> | undefined;
+    const stop = (reason: 'aborted' | 'timeout' | 'output_limit') => {
+      if (stopped) return;
+      stopped = reason;
+      killChildProcess(child, 'SIGTERM');
+      killTimer = setTimeout(() => killChildProcess(child, 'SIGKILL'), KILL_GRACE_MS);
+    };
+    const collect = (chunk: Buffer) => {
+      const remaining = MAX_PROCESS_OUTPUT - outputBytes;
+      if (remaining > 0) output += chunk.subarray(0, remaining).toString('utf8');
+      outputBytes += chunk.length;
+      if (outputBytes > MAX_PROCESS_OUTPUT) stop('output_limit');
+    };
+    child.stdout?.on('data', collect);
+    child.stderr?.on('data', collect);
+    child.on('error', (error) => { failure ||= error.message; });
+    const onAbort = () => stop('aborted');
+    const timer = setTimeout(() => stop('timeout'), COMMAND_TIMEOUT_MS);
+    signal?.addEventListener('abort', onAbort, { once: true });
+    if (signal?.aborted) onAbort();
+    child.once('close', (exitCode, exitSignal) => {
+      clearTimeout(timer);
+      if (killTimer) clearTimeout(killTimer);
+      // The shell can exit before a descendant that ignored SIGTERM. Its
+      // detached group must be cleaned even after the direct child closed.
+      if (stopped) killChildProcess(child, 'SIGKILL');
+      signal?.removeEventListener('abort', onAbort);
+      const aborted = signal?.aborted === true || stopped === 'aborted';
+      const timedOut = stopped === 'timeout';
+      const code = aborted ? 'aborted' : stopped ?? (failure ? 'spawn_failed' : exitCode === 0 ? 'ok' : typeof exitCode === 'number' ? 'nonzero_exit' : 'command_failed');
+      resolve({
+        outcome: aborted ? 'cancelled' : timedOut ? 'timeout' : code === 'ok' ? 'success' : 'error',
+        code,
+        exitCode,
+        signal: exitSignal,
+        timedOut,
+        aborted,
+        output: truncate(output || failure),
+      });
+    });
   });
+}
+
+function commandText(result: CommandResult): string {
+  if (result.outcome === 'success') return result.output || '（没有输出）';
+  const reason = result.aborted ? '操作已中止' : result.timedOut ? '执行超时被终止' : `code=${result.code}, exit=${result.exitCode ?? 'unknown'}`;
+  return `执行失败（${reason}）${result.output ? `\n${result.output}` : ''}`;
 }
 
 function truncate(text: string): string {

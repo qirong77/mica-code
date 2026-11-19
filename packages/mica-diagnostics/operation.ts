@@ -1,5 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { logger } from './index.js';
+import { diagnosticPluginVersion, processIdentity } from './identity.js';
+import { combineHeartbeat } from './heartbeat.js';
 
 export type OperationOutcome = {
   outcome: 'success' | 'error' | 'cancelled' | 'timeout' | 'declined' | 'waiting' | 'conflict' | 'busy' | 'partial' | 'unknown' | 'skipped';
@@ -15,13 +17,14 @@ export type OperationContext = {
   operation: string;
   surface?: 'tool' | 'command' | 'panel' | 'action' | 'menu' | 'background' | 'hook' | 'lifecycle' | 'page' | 'mcp' | 'launcher';
   signal?: AbortSignal;
+  /** Fixed background task identity. Routine successful ticks are combined, not sampled. */
+  taskId?: string;
+  heartbeat?: boolean;
   /** Observations never include the value or the exception, only this projection. */
   classify?: (value: unknown) => OperationOutcome;
 };
 
 export function operationResult(value: unknown): OperationOutcome {
-  if (typeof value === 'string' && /^(?:Error:|Tool (?:execution )?(?:error|failed):|工具[^\n]*(?:失败|错误)[:：])/i.test(value.trimStart()))
-    return { outcome: 'error', code: 'explicit_error' };
   if (typeof value === 'string' && value.trimStart().startsWith('{')) {
     try { value = JSON.parse(value); } catch { /* ordinary text, not an envelope */ }
   }
@@ -35,34 +38,46 @@ export function operationResult(value: unknown): OperationOutcome {
   if (value && typeof value === 'object') {
     const result = value as Record<string, unknown>;
     const outcome = result.outcome ?? result.status;
-    const neutral: Record<string, OperationOutcome['outcome']> = {
+    const outcomes: Record<string, OperationOutcome['outcome']> = {
+      success: 'success', error: 'error', failure: 'error', failed: 'error', timeout: 'timeout',
       cancelled: 'cancelled', aborted: 'cancelled', killed: 'cancelled', declined: 'declined', denied: 'declined',
       waiting: 'waiting', running: 'waiting', conflict: 'conflict', busy: 'busy', partial: 'partial', unknown: 'unknown',
       skipped: 'skipped', 'expected-exit': 'success',
     };
-    if (typeof outcome === 'string' && Object.hasOwn(neutral, outcome))
-      return { outcome: neutral[outcome]!, code: outcome };
-    if (result.conflict === true) return { outcome: 'conflict', code: 'conflict' };
-    if (result.cancelled === true || result.canceled === true) return { outcome: 'cancelled', code: 'aborted' };
-    if (result.timedOut === true || result.timed_out === true || outcome === 'timeout')
-      return { outcome: 'timeout', code: 'timeout' };
-    if (result.isError === true) return { outcome: 'error', code: 'mcp_error' };
-    if (result.ok === false || result.success === false || outcome === 'error' || outcome === 'failed' || result.error)
-      return { outcome: 'error', code: 'returned_error' };
+    // The explicit contract wins over structural transport flags, never over prose.
+    if (outcome !== undefined) {
+      if (typeof outcome !== 'string' || !Object.hasOwn(outcomes, outcome))
+        return { outcome: 'unknown', code: 'invalid_outcome' };
+      return { outcome: outcomes[outcome]!, code: resultCode(result.code, outcome) };
+    }
+    if (typeof result.code === 'string' && BUSY_CODES.has(result.code)) return { outcome: 'busy', code: resultCode(result.code, 'busy') };
+    if (result.conflict === true) return { outcome: 'conflict', code: resultCode(result.code, 'conflict') };
+    if (result.cancelled === true || result.canceled === true) return { outcome: 'cancelled', code: resultCode(result.code, 'aborted') };
+    if (result.timedOut === true || result.timed_out === true)
+      return { outcome: 'timeout', code: resultCode(result.code, 'timeout') };
+    if (result.isError === true) return { outcome: 'error', code: resultCode(result.code, 'mcp_error') };
+    if (result.ok === false || result.success === false || result.error)
+      return { outcome: 'error', code: resultCode(result.code, 'returned_error') };
     const exitCode = result.exitCode ?? result.exit_code;
-    if (typeof exitCode === 'number' && exitCode !== 0) return { outcome: 'error', code: 'nonzero_exit' };
+    if (typeof exitCode === 'number' && exitCode !== 0) return { outcome: 'error', code: resultCode(result.code, 'nonzero_exit') };
+    return { outcome: 'success', code: resultCode(result.code, 'ok') };
   }
   return { outcome: 'success', code: 'ok' };
+}
+
+function resultCode(value: unknown, fallback: string): string {
+  return typeof value === 'string' && /^[a-z][a-z0-9._-]{0,59}$/i.test(value) ? value : fallback;
 }
 
 function metadata(context: OperationContext) {
   return {
     schemaVersion: 1, operationId: randomUUID(),
     plugin: /^[a-z0-9][a-z0-9._-]{0,159}$/i.test(context.plugin) ? context.plugin : 'unknown',
-    pluginVersion: context.pluginVersion && /^[a-z0-9._+-]{1,60}$/i.test(context.pluginVersion) ? context.pluginVersion : undefined,
+    pluginVersion: diagnosticPluginVersion(context.pluginVersion),
     operation: /^[a-z][a-z0-9:._-]{0,79}$/i.test(context.operation) ? context.operation : 'custom',
     surface: ['tool', 'command', 'panel', 'action', 'menu', 'background', 'hook', 'lifecycle', 'page', 'mcp', 'launcher'].includes(context.surface ?? '') ? context.surface : undefined,
-    pid: process.pid,
+    taskId: context.taskId && /^[a-z][a-z0-9:._-]{0,79}$/i.test(context.taskId) ? context.taskId : undefined,
+    ...processIdentity(),
   };
 }
 
@@ -76,47 +91,72 @@ function classified(context: OperationContext, value: unknown): OperationOutcome
   } catch { return { outcome: 'unknown', code: 'classification_failed' }; }
 }
 
-function failureOutcome(error: unknown, signal?: AbortSignal): OperationOutcome {
+export function operationFailure(error: unknown, signal?: AbortSignal): OperationOutcome {
   const reason = signal?.aborted ? signal.reason : error;
-  const name = reason instanceof Error ? reason.name : undefined;
+  const value = reason && typeof reason === 'object' ? reason as { name?: unknown; code?: unknown } : {};
+  const name = value.name;
   return name === 'TimeoutError'
     ? { outcome: 'timeout', code: 'timeout' }
     : signal?.aborted || name === 'AbortError' || name === 'AgentAbortError'
       ? { outcome: 'cancelled', code: 'aborted' }
-      : { outcome: 'error', code: 'exception' };
+      : name === 'BusyError' || (typeof value.code === 'string' && BUSY_CODES.has(value.code))
+        ? { outcome: 'busy', code: 'busy' }
+        : { outcome: 'error', code: 'exception' };
 }
+
+const BUSY_CODES = new Set(['busy', 'session_busy', 'turn_busy', 'resource_busy', 'maintenance_busy', 'TURN_LEASE_BUSY', 'EBUSY', 'ERR_BUSY', 'E_BUSY']);
 
 /** Synchronous begin/end handles also cover handlers whose return type cannot become a Promise. */
 export function startPluginOperation(context: OperationContext) {
   const meta = metadata(context);
   const started = Date.now();
-  let finished = false;
-  try { log.info('operation.start', meta); } catch { /* diagnostics are not a task dependency */ }
-  return {
+  let terminal: OperationOutcome | undefined;
+  const combined = context.heartbeat === true && context.surface === 'background';
+  if (!combined) try { log.info('operation.start', meta); } catch { /* diagnostics are not a task dependency */ }
+  const handle = {
     finish(value?: unknown, failure?: { error: unknown }): OperationOutcome {
+      if (terminal) return terminal;
       let outcome: OperationOutcome;
       try {
-        outcome = failure ? failureOutcome(failure.error, context.signal) : classified(context, value);
+        outcome = failure || context.signal?.aborted ? operationFailure(failure?.error, context.signal) : classified(context, value);
       } catch { outcome = { outcome: 'unknown', code: 'classification_failed' }; }
-      if (!finished) {
-        finished = true;
-        try {
-          const fields = { ...meta, ...outcome, ms: Math.max(0, Date.now() - started) };
-          if (outcome.outcome === 'error' || outcome.outcome === 'timeout') log.warn('operation.finish', fields);
-          else log.info('operation.finish', fields);
-        } catch { /* logging must not change the handler's result */ }
-      }
+      terminal = outcome;
+      context.signal?.removeEventListener('abort', onAbort);
+      try {
+        const ms = Math.max(0, Date.now() - started);
+        if (combined && combineHeartbeat(meta, outcome, started, ms)) return outcome;
+        // Routine starts are delayed; failures/transitions keep their actual start
+        // time and an immediate paired finish. Never log handler arguments/results.
+        if (combined) log.info('operation.start', { ...meta, at: started });
+        const fields = { ...meta, ...outcome, ms };
+        if (outcome.outcome === 'error' || outcome.outcome === 'timeout') log.warn('operation.finish', fields);
+        else log.info('operation.finish', fields);
+      } catch { /* logging must not change the handler's result */ }
       return outcome;
     },
   };
+  // A handler may ignore its signal. Record caller cancellation immediately;
+  // a late handler completion cannot rewrite it to success (nor proves it stopped).
+  const onAbort = () => handle.finish(undefined, { error: context.signal?.reason });
+  if (context.signal?.aborted) onAbort();
+  else context.signal?.addEventListener('abort', onAbort, { once: true });
+  return handle;
 }
 
 /** Only an allowlisted projection reaches diagnostics' timer, never results or exception messages. */
 export async function observePluginOperation<T>(context: OperationContext, task: () => T | Promise<T>): Promise<T> {
-  const meta = {
-    ...metadata(context),
-    outcome: 'unknown' as OperationOutcome['outcome'], code: 'unknown',
-  };
+  if (context.heartbeat && context.surface === 'background') {
+    const span = startPluginOperation(context);
+    try {
+      const value = await awaitOperation(task, context.signal);
+      span.finish(value);
+      return value;
+    } catch (error) {
+      span.finish(undefined, { error });
+      throw error;
+    }
+  }
+  const meta = { ...metadata(context), outcome: 'unknown' as OperationOutcome['outcome'], code: 'unknown' };
   try { log.info('operation.start', meta); } catch { /* observation is best effort */ }
   let value: T;
   let failure: { error: unknown } | undefined;
@@ -127,12 +167,13 @@ export async function observePluginOperation<T>(context: OperationContext, task:
       result = classified(context, value);
     } catch (error) {
       failure = { error };
-      result = failureOutcome(error, context.signal);
+      result = operationFailure(error, context.signal);
     }
     Object.assign(meta, result);
     return result.outcome === 'error' || result.outcome === 'timeout' ? { ok: false, error: result.code } : { ok: true };
   };
-  // Never retry execute if logging fails: the task may already have performed a write.
+  // Retain ordinary operation baselines in slowReport. Never retry execute if
+  // diagnostics fail: it may already have performed an irreversible side effect.
   await log.timedResult('operation.finish', execute, undefined, meta);
   if (failure) throw failure.error;
   return value!;

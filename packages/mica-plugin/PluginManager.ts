@@ -1,4 +1,5 @@
 import { statSync, unwatchFile, watchFile } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import type { Disposable } from '@packages/mica-common/index.js';
 import type { MicaPlugin } from './Plugin.js';
@@ -31,6 +32,9 @@ import { createPluginStatus, writePluginStatus, type PluginHostKind } from './Pl
 import type { FilePluginLoadResult } from './FilePluginLoader.js';
 import { micaSkills } from '@packages/mica-skills/index.js';
 import { createPluginOperations, observePluginHandler, observePluginTool, skippedOperation } from './PluginOperations.js';
+import { diagnosticPluginVersion, processIdentity } from '@packages/mica-diagnostics/identity.js';
+import { flushPluginHeartbeats } from '@packages/mica-diagnostics/heartbeat.js';
+import { operationResult } from '@packages/mica-diagnostics/operation.js';
 
 export type PluginSetupReport = {
   loaded: string[];
@@ -169,6 +173,8 @@ export class PluginManager {
   private readonly runs = new Map<string, Disposable[]>();
   /** 每个插件最后一次装配的结论：启停同步据此决定「要不要重新装配」。 */
   private readonly attempts = new Map<string, PluginAttempt>();
+  /** Only verified executions recover faults this manager actually observed. */
+  private readonly runtimeFaults = new Set<string>();
   /** 装配时的能力面：重新启用一个插件要用同一份 baseContext 再 setup 一次。 */
   private baseContext: PluginBaseContext | null = null;
   /** 常驻宿主传的装配选项（`backgroundTasks` 等）：重新启用时沿用它。 */
@@ -287,8 +293,9 @@ export class PluginManager {
       localDisposables.push(registration);
       return registration;
     };
-    const logger = createPluginLogger(plugin.id, baseContext.logger);
+    const logger = createPluginLogger(plugin.id, baseContext.logger, { pluginVersion: plugin.version });
     const observation = { plugin: plugin.id, pluginVersion: plugin.version };
+    const failureIdentity = { schemaVersion: 2 as const, pluginVersion: diagnosticPluginVersion(plugin.version), ...processIdentity() };
     const configDir = baseContext.paths?.config;
     // 这个插件注册成功的 skill 与它声明的角色：每次注册后整份重写它的索引文件
     // （见 PluginSkills.ts）。
@@ -312,6 +319,35 @@ export class PluginManager {
     const settings = createPluginSettingsStore(plugin.id, plugin.manifest?.settings ?? [], { configDir });
     // 健康状态带上是哪一版写的：升级之后上一版留下的结论不该继续挂在页面上。
     const health = createPluginHealthStore(plugin.id, { configDir, version: plugin.version });
+    const failedHandlers = new Map<string, Set<object>>();
+    const recoverExecution = <T>(issueKey: string, owner: object, task: () => T, signal?: AbortSignal): T => {
+      const recover = (value: unknown) => {
+        const key = `${plugin.id}\n${issueKey}`;
+        const owners = failedHandlers.get(issueKey);
+        if (signal?.aborted || !owners?.has(owner)) return;
+        try {
+          if (operationResult(value).outcome !== 'success') return;
+          owners.delete(owner);
+          if (owners.size === 0 && this.runtimeFaults.has(key)) {
+            health.clear(issueKey);
+            this.runtimeFaults.delete(key);
+          }
+        } catch { /* auxiliary state must not change the handler's result */ }
+      };
+      const failed = (error: unknown): never => {
+        const owners = failedHandlers.get(issueKey) ?? new Set<object>();
+        owners.add(owner);
+        failedHandlers.set(issueKey, owners);
+        throw error;
+      };
+      try {
+        const value = task();
+        if (value && typeof (value as { then?: unknown }).then === 'function')
+          return Promise.resolve(value).then((result) => { recover(result); return result; }, failed) as T;
+        recover(value);
+        return value;
+      } catch (error) { return failed(error); }
+    };
     /**
      * 注册一条 skill 并把归属记在这个插件名下。
      *
@@ -325,15 +361,18 @@ export class PluginManager {
       skillOptions: PluginSkillRegistrationOptions = {},
     ): RuntimeSkillRegistration => {
       const registration = micaSkills.registerRuntime(plugin.id, [skill]);
+      const name = skill.name.trim();
+      const issueKey = managerIssueKey('skill', name);
       if (registration.skipped.length > 0) {
         logger.warn('plugin:skill-shadowed', { skipped: registration.skipped });
         health.report({
+          issueKey,
           level: 'warn',
           message: `skill 未注册：${registration.skipped.map((item) => `${item.name}（${item.reason}）`).join('；')}`,
         });
       }
-      const name = skill.name.trim();
       if (!registration.skipped.some((item) => item.name === name)) {
+        health.clear(issueKey);
         publishedSkills.push({ skill, roles: skillOptions.roles ?? [] });
         publishPluginSkills(plugin.id, publishedSkills, { configDir });
       }
@@ -408,12 +447,15 @@ export class PluginManager {
     });
     ctx.hooks = new Proxy(baseContext.hooks, {
       get(target, key) {
-        if (key === 'on') return (name: string, handler: Parameters<typeof target.on>[1], hookOptions: Parameters<typeof target.on>[2]) =>
-          trackRegistration(target.on(name, (...args) => {
+        if (key === 'on') return (name: string, handler: Parameters<typeof target.on>[1], hookOptions: Parameters<typeof target.on>[2]) => {
+          const owner = {};
+          return trackRegistration(target.on(name, (...args) => {
             // Per-token observations must not recursively observe observers.
             if (name === 'agent:observe' || name === 'plugin:observe') return handler(...args);
-            return observePluginHandler({ ...observation, operation: 'hook.execute', surface: 'hook' }, () => handler(...args));
+            return observePluginHandler({ ...observation, operation: 'hook.execute', surface: 'hook' }, () =>
+              recoverExecution(managerIssueKey('hook', name), owner, () => handler(...args)));
           }, { ...hookOptions, pluginId: plugin.id }));
+        };
         const value = Reflect.get(target, key, target);
         return typeof value === 'function' ? value.bind(target) : value;
       },
@@ -448,10 +490,13 @@ export class PluginManager {
       onError: (taskId, error, info) => {
         const message = errorMessage(error);
         logger.warn('plugin:background-failed', { taskId, error: message, failures: info.failures });
-        health.report({ level: 'warn', message: `常驻任务 ${taskId} 失败：${message}` });
+        const issueKey = managerIssueKey('background', taskId);
+        this.runtimeFaults.add(`${plugin.id}\n${issueKey}`);
+        health.report({ issueKey, level: 'warn', message: `常驻任务 ${taskId} 失败：${message}` });
         // 健康状态只留最后一句话，谁也看不到「它失败了 300 次」。事件进观察流，
         // 复盘才能回答「哪个插件的常驻任务一直在坏」。
         baseContext.hooks.notify<PluginObservationEvent>('plugin:observe', {
+          ...failureIdentity,
           pluginId: plugin.id,
           timestamp: new Date().toISOString(),
           type: 'background:failed',
@@ -464,10 +509,16 @@ export class PluginManager {
     });
     ctx.background = {
       ...background,
-      register: (task) => background.register({ ...task, run: (input) => observePluginHandler(
-        { ...observation, operation: 'background.tick', surface: 'background', signal: input.signal }, () => task.run(input),
-      ) }),
+      register: (task) => {
+        const owner = {};
+        return background.register({ ...task, run: (input) => observePluginHandler(
+          { ...observation, operation: 'background.tick', surface: 'background', signal: input.signal,
+            taskId: diagnosticTaskId(task.id), heartbeat: true },
+          () => recoverExecution(managerIssueKey('background', task.id), owner, () => task.run(input), input.signal),
+        ) });
+      },
     };
+    localDisposables.push({ dispose: () => flushPluginHeartbeats(plugin.id) });
     localDisposables.push({ dispose: () => background.disposeAll() });
     const sessionState = sessionStateFor?.(plugin.id);
     if (sessionState) ctx.sessionState = sessionState;
@@ -594,9 +645,12 @@ export class PluginManager {
         classify: () => ({ outcome: 'skipped', code: 'configuration_invalid' }),
       }, () => undefined);
       ctx.health.report({
+        issueKey: 'configuration:settings',
         level: 'warn',
         message: `配置不完整：${settingIssues.map((issue) => `${issue.key} ${issue.message}`).join('；')}`,
       });
+    } else {
+      health.clear('configuration:settings');
     }
 
     // 清单声明的 skill：以插件目录为根读进来，随插件一起装、一起停。放在能力检查之后，
@@ -605,6 +659,7 @@ export class PluginManager {
     if (skillDirs.length > 0) {
       if (!plugin.root) {
         health.report({
+          issueKey: 'skill:manifest',
           level: 'warn',
           message: '清单声明了 skills，但插件不是从目录加载的，读不到 skill 正文',
         });
@@ -612,8 +667,9 @@ export class PluginManager {
         const { skills, problems } = loadManifestSkills(plugin.root, skillDirs);
         for (const problem of problems) {
           logger.warn('plugin:skill-dir', { problem });
-          health.report({ level: 'warn', message: `skill 目录：${problem}` });
+          health.report({ issueKey: 'skill:manifest', level: 'warn', message: `skill 目录：${problem}` });
         }
+        if (problems.length === 0) health.clear('skill:manifest');
         for (const skill of skills) registerSkill(skill);
       }
     }
@@ -621,20 +677,28 @@ export class PluginManager {
     // 清单声明的角色：正文留在插件目录里，索引写到 `$MICA_HOME/plugin-roles`，输入框的
     // 角色切换与 CLI 的 `/role` 只扫索引，不必为此 setup 插件。
     const rolePaths = plugin.manifest?.roles ?? [];
-    if (rolePaths.length > 0) {
+    const embeddedRoles = plugin.embeddedRoles ?? [];
+    if (rolePaths.length > 0 || embeddedRoles.length > 0) {
       if (!plugin.root) {
-        logger.warn('plugin:role-dir', { error: 'no plugin root' });
-        health.report({
-          level: 'warn',
-          message: '清单声明了 roles，但插件不是从目录加载的，读不到角色正文',
-        });
+        if (embeddedRoles.length > 0) {
+          publishPluginRoles(plugin.id, embeddedRoles, { configDir });
+          health.clear('role:manifest');
+        } else {
+          logger.warn('plugin:role-dir', { error: 'no plugin root' });
+          health.report({
+            issueKey: 'role:manifest',
+            level: 'warn',
+            message: '清单声明了 roles，但插件不是从目录加载的，读不到角色正文',
+          });
+        }
       } else {
         const { roles: manifestRoles, problems } = loadManifestRoles(plugin.root, rolePaths);
         for (const problem of problems) {
           logger.warn('plugin:role-dir', { problem });
-          health.report({ level: 'warn', message: `角色目录：${problem}` });
+          health.report({ issueKey: 'role:manifest', level: 'warn', message: `角色目录：${problem}` });
         }
-        publishPluginRoles(plugin.id, manifestRoles, { configDir });
+        if (problems.length === 0) health.clear('role:manifest');
+        publishPluginRoles(plugin.id, [...manifestRoles, ...embeddedRoles], { configDir });
       }
     }
 
@@ -925,23 +989,29 @@ export class PluginManager {
       const owner = pluginId ?? '(unscoped)';
       let logger = loggers.get(owner);
       if (!logger) {
-        logger = createPluginLogger(owner, baseContext.logger);
+        logger = createPluginLogger(owner, baseContext.logger, { pluginVersion: pluginId ? this.plugins.get(pluginId)?.version : undefined });
         loggers.set(owner, logger);
       }
       const message = errorMessage(error);
       logger.error('plugin:hook-failed', { hook, error: message });
-      if (pluginId)
+      if (pluginId) {
+        const issueKey = managerIssueKey('hook', hook);
+        this.runtimeFaults.add(`${pluginId}\n${issueKey}`);
         writePluginHealth(
           pluginId,
-          { level: 'error', message: `钩子 ${hook} 执行失败：${message}` },
+          { issueKey, level: 'error', message: `钩子 ${hook} 执行失败：${message}` },
           { configDir, version: this.plugins.get(pluginId)?.version },
         );
+      }
       // 观察通道自己的 handler 失败不再回灌：那会让 notify 递归调用自己。
       if (pluginId && hook !== 'plugin:observe') {
         const key = `${pluginId}\n${hook}`;
         const failures = (hookFailures.get(key) ?? 0) + 1;
         hookFailures.set(key, failures);
         baseContext.hooks.notify<PluginObservationEvent>('plugin:observe', {
+          schemaVersion: 2,
+          pluginVersion: diagnosticPluginVersion(this.plugins.get(pluginId)?.version),
+          ...processIdentity(),
           pluginId,
           timestamp: new Date().toISOString(),
           type: 'hook:failed',
@@ -955,6 +1025,17 @@ export class PluginManager {
 }
 
 type HookErrorReporterInstaller = (reporter: (error: unknown, hook: string, pluginId?: string) => void) => void;
+
+function managerIssueKey(domain: string, id: string): string {
+  const raw = `${domain}:${id}`;
+  return /^[a-z0-9][a-z0-9:._-]{0,119}$/i.test(raw) ? raw
+    : `${domain}:${createHash('sha256').update(id).digest('hex').slice(0, 24)}`;
+}
+
+function diagnosticTaskId(id: string): string {
+  return /^[a-z][a-z0-9:._-]{0,79}$/i.test(id) ? id
+    : `task.${createHash('sha256').update(id).digest('hex').slice(0, 24)}`;
+}
 
 /**
  * 清单里声明了、但这份 ctx 上真的没有的能力。

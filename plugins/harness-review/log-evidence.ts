@@ -9,6 +9,7 @@ const TAIL_BYTES = 128 * 1024;
 const MAX_BYTES = 4 * 1024 * 1024;
 const MAX_ROWS = 2048;
 const MAX_GROUPS = 100;
+const STAT_CONCURRENCY = 16;
 function rethrowAbort(error: unknown, signal?: AbortSignal): void {
   if (error instanceof Error && error.name === 'AbortError') throw error;
   signal?.throwIfAborted();
@@ -35,7 +36,7 @@ const time = (value: unknown): number | undefined => {
 
 type Row = {
   at: number;
-  kind: 'operation' | 'experience' | 'system' | 'memory';
+  kind: 'operation' | 'heartbeat' | 'experience' | 'system' | 'memory' | 'writer';
   plugin?: string;
   pluginVersion?: string;
   operation?: string;
@@ -47,13 +48,22 @@ type Row = {
   outcome?: string;
   code?: string;
   pid?: number;
+  generation?: string;
   ms?: number;
+  maxMs?: number;
   count?: number;
   scope?: string;
   level?: string;
   crash?: boolean;
   rssMB?: number;
   heapMB?: number;
+  firstAt?: number;
+  lastAt?: number;
+  windowStart?: number;
+  windowEnd?: number;
+  taskId?: string;
+  durationBuckets?: number[];
+  writer?: WriterHealthEvidence;
 };
 type FileProjection = {
   rows: Row[];
@@ -78,6 +88,14 @@ export type LogEvidence = {
     groupLimitReached: boolean;
     earliestAt?: string;
     latestAt?: string;
+    /** Metadata for every candidate is inspected before selecting fresh tails. */
+    metadataFiles?: number;
+    selection?: 'mtime';
+    groups?: Record<'operations' | 'experience' | 'system' | 'memory' | 'writerHealth', number>;
+    domains?: { domain: Row['kind']; records: number; earliestAt: string; latestAt: string }[];
+    heartbeatRecords?: number;
+    heartbeatCount?: number;
+    writerHealthObserved?: boolean;
   };
   operations: {
     plugin: string;
@@ -90,6 +108,10 @@ export type LogEvidence = {
     finishes: number;
     totalMs: number;
     maxMs: number;
+    pid?: number;
+    generation?: string;
+    heartbeatCount?: number;
+    durationBuckets?: number[];
   }[];
   experience: {
     plugin: string;
@@ -101,9 +123,61 @@ export type LogEvidence = {
     records: number;
     count: number;
   }[];
-  system: { scope: string; event: string; level: string; count: number; crashes: number }[];
+  system: {
+    scope: string;
+    event: string;
+    level: string;
+    count: number;
+    crashes: number;
+    pluginId?: string;
+    pluginVersion?: string;
+    pid?: number;
+    generation?: string;
+  }[];
   memory: { pid?: number; samples: number; peakRssMB: number; peakHeapMB?: number }[];
+  /** All inspected records, independent of the 100-row display-group limit. */
+  totals?: LogTotals;
+  pluginTotals?: PluginLogTotals[];
+  writerHealth?: WriterHealthEvidence[];
   interpretation: string;
+};
+
+export type LogTotals = {
+  operationStarts: number;
+  operationFinishes: number;
+  operationErrors: number;
+  operationUnknown: number;
+  experienceRecords: number;
+  experienceCount: number;
+  systemWarnings: number;
+  systemErrors: number;
+  crashes: number;
+  memorySamples: number;
+};
+export type PluginLogTotals = {
+  plugin: string;
+  operationStarts: number;
+  operationFinishes: number;
+  operationErrors: number;
+  operationUnknown: number;
+  impressions: number;
+  clicks: number;
+  warnings: number;
+  errors: number;
+};
+export type WriterHealthEvidence = {
+  pid: number;
+  generation: string;
+  at: string;
+  dropped: number;
+  overflowDrops: number;
+  serializationFailures: number;
+  writeFailures: number;
+  lostLowerBound: number;
+  checkpointFailures: number;
+  logLevel: string;
+  pluginLogEnabled: boolean;
+  closePolicy: 'best_effort_sync_exit';
 };
 
 /** One-way whitelist projection. No spread of a log envelope/data/error is allowed here. */
@@ -112,6 +186,100 @@ function project(raw: unknown): Row | undefined {
   const at = time(row.at ?? row.time);
   if (at === undefined) return;
   const pid = Number.isSafeInteger(row.pid) && Number(row.pid) > 0 ? Number(row.pid) : undefined;
+  const generation = token(row.generation, 80) ?? 'unknown';
+  if (row.scope === 'writer-health' && row.event === 'writer.checkpoint' && row.schemaVersion === 1) {
+    const fields = [
+      'dropped',
+      'overflowDrops',
+      'serializationFailures',
+      'writeFailures',
+      'lostLowerBound',
+      'checkpointFailures',
+    ] as const;
+    if (
+      !pid ||
+      fields.some((key) => !Number.isSafeInteger(row[key]) || Number(row[key]) < 0) ||
+      !['debug', 'info', 'warn', 'error', 'off', 'silent'].includes(String(row.logLevel)) ||
+      typeof row.pluginLogEnabled !== 'boolean' ||
+      row.closePolicy !== 'best_effort_sync_exit'
+    )
+      return;
+    return {
+      at,
+      kind: 'writer',
+      pid,
+      generation,
+      writer: {
+        pid,
+        generation,
+        at: new Date(at).toISOString(),
+        dropped: Number(row.dropped),
+        overflowDrops: Number(row.overflowDrops),
+        serializationFailures: Number(row.serializationFailures),
+        writeFailures: Number(row.writeFailures),
+        lostLowerBound: Number(row.lostLowerBound),
+        checkpointFailures: Number(row.checkpointFailures),
+        logLevel: String(row.logLevel),
+        pluginLogEnabled: row.pluginLogEnabled,
+        closePolicy: 'best_effort_sync_exit',
+      },
+    };
+  }
+  if (row.scope === 'plugin-heartbeat' && row.event === 'background.heartbeat' && row.schemaVersion === 1) {
+    const heartbeatId = token(row.heartbeatId);
+    const plugin = token(row.plugin, 160),
+      operation = token(row.operation);
+    const firstAt = time(row.firstAt),
+      lastAt = time(row.lastAt),
+      windowStart = time(row.windowStart),
+      windowEnd = time(row.windowEnd);
+    const buckets = row.durationBuckets;
+    if (
+      !heartbeatId ||
+      !plugin ||
+      !operation ||
+      !Number.isSafeInteger(row.count) ||
+      Number(row.count) < 1 ||
+      !['success', 'waiting', 'skipped'].includes(String(row.outcome)) ||
+      scalar(row.totalMs) === undefined ||
+      scalar(row.maxMs) === undefined ||
+      firstAt === undefined ||
+      lastAt === undefined ||
+      firstAt > lastAt ||
+      windowStart === undefined ||
+      windowEnd === undefined ||
+      windowStart >= windowEnd ||
+      !Array.isArray(buckets) ||
+      buckets.length !== 5 ||
+      buckets.some((n) => !Number.isSafeInteger(n) || n < 0) ||
+      buckets.reduce((a, b) => a + b, 0) !== row.count ||
+      JSON.stringify(row.durationBoundsMs) !== '[10,100,1000,10000]'
+    )
+      return;
+    return {
+      at,
+      kind: 'heartbeat',
+      eventId: heartbeatId,
+      plugin,
+      operation,
+      pid,
+      generation,
+      pluginVersion: token(row.pluginVersion, 60) ?? 'unknown',
+      surface: 'background',
+      outcome: String(row.outcome),
+      code: token(row.code, 60),
+      taskId: token(row.taskId),
+      count: Number(row.count),
+      ms: Number(row.totalMs),
+      // maxMs is carried separately because ms represents the whole combined window.
+      firstAt,
+      lastAt,
+      windowStart,
+      windowEnd,
+      durationBuckets: buckets as number[],
+      maxMs: Number(row.maxMs),
+    };
+  }
   if (row.scope === 'plugin-operation' && ['operation.start', 'operation.finish'].includes(String(row.event))) {
     const plugin = token(row.plugin, 160);
     const operation = token(row.operation);
@@ -125,7 +293,8 @@ function project(raw: unknown): Row | undefined {
       operation,
       operationId,
       pid,
-      pluginVersion: token(row.pluginVersion, 60),
+      generation,
+      pluginVersion: token(row.pluginVersion, 60) ?? 'unknown',
       event: String(row.event),
       surface: oneOf(row.surface, [
         'tool',
@@ -162,7 +331,8 @@ function project(raw: unknown): Row | undefined {
     const plugin = token(row.pluginId ?? row.plugin, 160);
     const event = oneOf(data.event, ['impression', 'click', 'dismiss', 'update', 'failure', 'check', 'clear']);
     const pluginVersion = token(data.pluginVersion, 60);
-    const eventId = typeof data.eventId === 'string' && /^[a-f0-9-]{36}$/i.test(data.eventId) ? data.eventId : undefined;
+    const eventId =
+      typeof data.eventId === 'string' && /^[a-f0-9-]{36}$/i.test(data.eventId) ? data.eventId : undefined;
     if (data.schemaVersion !== 1 || !plugin || !event || !pluginVersion || !eventId) return;
     return {
       at,
@@ -200,13 +370,27 @@ function project(raw: unknown): Row | undefined {
     row.status === 'killed' ||
     row.outcome === 'killed' ||
     row.signal === 'SIGTERM' ||
+    row.reason === 'killed' ||
     row.exitCode === 15 ||
     row.exit_code === 15;
   const crash =
     !killed &&
-    /(?:^|[.:_-])(?:crash|crashed|exit)$/.test(event) &&
-    (row.level === 'error' || (typeof row.exitCode === 'number' && row.exitCode !== 0) || row.signal === 'SIGKILL');
-  return { at, kind: 'system', scope, event, level: String(row.level), crash };
+    ((['render-process-gone', 'child-process-gone'].includes(event) &&
+      ['crashed', 'oom'].includes(String(row.reason))) ||
+      (/(?:^|[.:_-])(?:crash|crashed|exit)$/.test(event) &&
+        (row.level === 'error' ||
+          (typeof row.exitCode === 'number' && row.exitCode !== 0) ||
+          row.signal === 'SIGKILL')));
+  const plugin = token(row.pluginId ?? row.plugin, 160);
+  return {
+    at,
+    kind: 'system',
+    scope,
+    event,
+    level: String(row.level),
+    crash,
+    ...(plugin ? { plugin, pluginVersion: token(row.pluginVersion, 60) ?? 'unknown', pid, generation } : {}),
+  };
 }
 
 /** Read-only tail reader. The cache holds bounded whitelist scalars, never log bodies. */
@@ -227,6 +411,11 @@ export class LogEvidenceReader {
       partialLines: 0,
       rowLimitReached: false,
       groupLimitReached: false,
+      metadataFiles: 0,
+      selection: 'mtime',
+      heartbeatRecords: 0,
+      heartbeatCount: 0,
+      writerHealthObserved: false,
     };
     const result: LogEvidence = {
       scope: 'machine',
@@ -235,18 +424,28 @@ export class LogEvidenceReader {
       experience: [],
       system: [],
       memory: [],
+      totals: {
+        operationStarts: 0,
+        operationFinishes: 0,
+        operationErrors: 0,
+        operationUnknown: 0,
+        experienceRecords: 0,
+        experienceCount: 0,
+        systemWarnings: 0,
+        systemErrors: 0,
+        crashes: 0,
+        memorySamples: 0,
+      },
+      pluginTotals: [],
+      writerHealth: [],
       interpretation:
-        'Machine-wide bounded log tails, not workspace/run attribution or complete history. Counts and memory peaks cover only inspected records; file/byte/row/group limits, partial lines, unreadable files and retention can omit evidence. Operation success is handler completion, not user validation; starts without a finish are unknown, not failures. Neutral outcomes and normal killed/exit 15 are not crashes. No bodies, paths, URLs, commands or error text are copied.',
+        'Machine-wide bounded log tails, not workspace/run attribution or complete history. Totals cover all inspected/deduplicated records before display-group limits; counts and peaks are lower bounds, not complete history. Routine background heartbeat counts exclude immediate transition records; their duration buckets use [10,100,1000,10000] ms. Domain time bounds describe inspected records only; omitted files/bytes/rows, retention and missing writer checkpoints remain unknown. Operation success is handler completion, not user validation; starts without a finish are unknown. Normal killed/exit 15 are not crashes. No bodies, paths, URLs, commands or error text are copied.',
     };
     let names: string[];
     try {
       const entries = await readdir(directory, { withFileTypes: true });
       signal?.throwIfAborted();
-      names = entries
-        .filter((e) => e.isFile() && /^[A-Za-z0-9._-]+\.jsonl$/.test(e.name))
-        .map((e) => e.name)
-        .sort()
-        .reverse();
+      names = entries.filter((e) => e.isFile() && /^[A-Za-z0-9._-]+\.jsonl$/.test(e.name)).map((e) => e.name);
     } catch (error) {
       rethrowAbort(error, signal);
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') coverage.unreadableFiles++;
@@ -254,19 +453,35 @@ export class LogEvidenceReader {
     }
     coverage.candidateFiles = names.length;
     // File mtime only selects log tails, never Agent runs.
-    const candidates = await Promise.all(
-      names.slice(0, 512).map(async (name) => {
-        signal?.throwIfAborted();
-        try {
-          const info = await stat(join(directory, name));
+    const candidates: { name: string; modified: number }[] = [];
+    // A fixed worker pool inspects all metadata before fresh-tail selection.
+    // Name ordering can no longer exclude a fresh log domain at file 513.
+    let next = 0;
+    const unavailable = new Set<string>();
+    await Promise.all(
+      Array.from({ length: Math.min(STAT_CONCURRENCY, names.length) }, async () => {
+        while (next < names.length) {
+          const name = names[next++];
           signal?.throwIfAborted();
-          return { name, modified: info.mtimeMs };
-        } catch (error) {
-          rethrowAbort(error, signal);
-          return { name, modified: 0 };
+          try {
+            const info = await stat(join(directory, name));
+            signal?.throwIfAborted();
+            coverage.metadataFiles!++;
+            if (!info.isFile()) {
+              unavailable.add(name);
+              continue;
+            }
+            candidates.push({ name, modified: info.mtimeMs });
+            candidates.sort((a, b) => b.modified - a.modified || a.name.localeCompare(b.name));
+            if (candidates.length > MAX_FILES) candidates.pop();
+          } catch (error) {
+            rethrowAbort(error, signal);
+            unavailable.add(name);
+          }
         }
       }),
     );
+    coverage.unreadableFiles = unavailable.size;
     signal?.throwIfAborted();
     candidates.sort((a, b) => b.modified - a.modified || a.name.localeCompare(b.name));
     const keys = new Set<string>();
@@ -282,7 +497,10 @@ export class LogEvidenceReader {
           signal?.throwIfAborted();
           const info = await handle.stat();
           signal?.throwIfAborted();
-          if (!info.isFile()) continue;
+          if (!info.isFile()) {
+            unavailable.add(name);
+            continue;
+          }
           const length = Math.min(info.size, TAIL_BYTES, MAX_BYTES - coverage.inspectedBytes);
           const start = info.size - length;
           const signature = `${fileSignature(info)}:${start}:${length}`;
@@ -322,8 +540,7 @@ export class LogEvidenceReader {
             }
             const after = await handle.stat();
             signal?.throwIfAborted();
-            if (signature === `${fileSignature(after)}:${start}:${length}`)
-              this.cache.set(path, signature, projection);
+            if (signature === `${fileSignature(after)}:${start}:${length}`) this.cache.set(path, signature, projection);
           }
           signal?.throwIfAborted();
           coverage.scannedFiles++;
@@ -339,21 +556,18 @@ export class LogEvidenceReader {
         }
       } catch (error) {
         rethrowAbort(error, signal);
-        coverage.unreadableFiles++;
+        unavailable.add(name);
       }
       signal?.throwIfAborted();
     }
+    coverage.unreadableFiles = unavailable.size;
     coverage.omittedFiles = Math.max(0, names.length - coverage.scannedFiles - coverage.unreadableFiles);
     const groups = new Map<string, number>();
     const seen = new Set<string>();
-    const group = <T>(kind: string, key: string, list: T[], create: () => T): T | undefined => {
+    const group = <T>(kind: string, key: string, list: T[], create: () => T): T => {
       const id = `${kind}:${key}`;
       const index = groups.get(id);
       if (index !== undefined) return list[index];
-      if (list.length >= MAX_GROUPS) {
-        coverage.groupLimitReached = true;
-        return;
-      }
       groups.set(id, list.length);
       const value = create();
       list.push(value);
@@ -361,8 +575,29 @@ export class LogEvidenceReader {
     };
     let earliest = Infinity,
       latest = -Infinity;
-    const operationKey = (row: Row) => `${row.pid}:${row.plugin}:${row.operationId}`;
+    const operationKey = (row: Row) =>
+      `${row.pid}:${row.generation}:${row.plugin}:${row.pluginVersion}:${row.operationId}`;
     const terminals = new Map<string, Row>();
+    const pluginTotals = new Map<string, PluginLogTotals>();
+    const domainTotals = new Map<Row['kind'], { records: number; first: number; last: number }>();
+    const pluginTotal = (plugin: string) => {
+      let value = pluginTotals.get(plugin);
+      if (!value) {
+        value = {
+          plugin,
+          operationStarts: 0,
+          operationFinishes: 0,
+          operationErrors: 0,
+          operationUnknown: 0,
+          impressions: 0,
+          clicks: 0,
+          warnings: 0,
+          errors: 0,
+        };
+        pluginTotals.set(plugin, value);
+      }
+      return value;
+    };
     let rowIndex = 0;
     for (const row of rows) {
       if (signal && rowIndex++ % 128 === 0) await checkpoint(signal);
@@ -374,8 +609,13 @@ export class LogEvidenceReader {
     rowIndex = 0;
     for (const row of rows) {
       if (signal && rowIndex++ % 128 === 0) await checkpoint(signal);
-      earliest = Math.min(earliest, row.at);
-      latest = Math.max(latest, row.at);
+      earliest = Math.min(earliest, row.firstAt ?? row.at);
+      latest = Math.max(latest, row.lastAt ?? row.at);
+      const domain = domainTotals.get(row.kind) ?? { records: 0, first: Infinity, last: -Infinity };
+      domain.records++;
+      domain.first = Math.min(domain.first, row.firstAt ?? row.at);
+      domain.last = Math.max(domain.last, row.lastAt ?? row.at);
+      domainTotals.set(row.kind, domain);
       if (row.kind === 'memory' && row.level && row.event) {
         const warning = group('sys', ['mem', row.event, row.level].join('|'), result.system, () => ({
           scope: 'mem',
@@ -384,19 +624,41 @@ export class LogEvidenceReader {
           count: 0,
           crashes: 0,
         }));
-        if (warning) warning.count++;
+        warning.count++;
+        result.totals![row.level === 'error' ? 'systemErrors' : 'systemWarnings']++;
       }
-      if (row.kind === 'operation') {
-        const id = `${row.pid}:${row.plugin}:${row.operationId}:${row.event}`;
+      if (row.kind === 'operation' || row.kind === 'heartbeat') {
+        const heartbeat = row.kind === 'heartbeat';
+        const id = heartbeat
+          ? [
+              'heartbeat',
+              row.pid,
+              row.generation,
+              row.plugin,
+              row.pluginVersion,
+              row.eventId,
+            ].join(':')
+          : `${operationKey(row)}:${row.event}`;
         if (seen.has(id)) continue;
         seen.add(id);
-        const terminal = terminals.get(operationKey(row));
+        const terminal = heartbeat ? row : terminals.get(operationKey(row));
         const outcome = terminal?.outcome ?? row.outcome ?? 'unknown';
         const code = terminal?.code ?? row.code;
-        const key = [row.plugin, row.pluginVersion, row.operation, row.surface, outcome, code].join('|');
+        const key = [
+          row.plugin,
+          row.pluginVersion,
+          row.pid,
+          row.generation,
+          row.operation,
+          row.surface,
+          outcome,
+          code,
+        ].join('|');
         const item = group('op', key, result.operations, () => ({
           plugin: row.plugin!,
           pluginVersion: row.pluginVersion,
+          pid: row.pid,
+          generation: row.generation,
           operation: row.operation!,
           surface: row.surface,
           outcome,
@@ -406,12 +668,36 @@ export class LogEvidenceReader {
           totalMs: 0,
           maxMs: 0,
         }));
-        if (!item) continue;
-        if (row.event === 'operation.start') item.starts++;
-        else {
-          item.finishes++;
+        const totals = pluginTotal(row.plugin!);
+        const weight = heartbeat ? row.count! : 1;
+        if (row.event === 'operation.start' || heartbeat) {
+          item.starts += weight;
+          totals.operationStarts += weight;
+          result.totals!.operationStarts += weight;
+          if (!terminal && !heartbeat) {
+            totals.operationUnknown++;
+            result.totals!.operationUnknown++;
+          }
+        }
+        if (row.event !== 'operation.start') {
+          item.finishes += weight;
           item.totalMs += row.ms ?? 0;
-          item.maxMs = Math.max(item.maxMs, row.ms ?? 0);
+          item.maxMs = Math.max(item.maxMs, heartbeat ? row.maxMs! : (row.ms ?? 0));
+          totals.operationFinishes += weight;
+          result.totals!.operationFinishes += weight;
+          if (outcome === 'error' || outcome === 'timeout') {
+            totals.operationErrors += weight;
+            result.totals!.operationErrors += weight;
+          } else if (outcome === 'unknown') {
+            totals.operationUnknown += weight;
+            result.totals!.operationUnknown += weight;
+          }
+        }
+        if (heartbeat) {
+          coverage.heartbeatRecords!++;
+          coverage.heartbeatCount! += weight;
+          item.heartbeatCount = (item.heartbeatCount ?? 0) + weight;
+          item.durationBuckets = (item.durationBuckets ?? [0, 0, 0, 0, 0]).map((n, i) => n + row.durationBuckets![i]);
         }
       } else if (row.kind === 'experience') {
         const id = `experience:${row.plugin}:${row.eventId}`;
@@ -428,35 +714,106 @@ export class LogEvidenceReader {
           records: 0,
           count: 0,
         }));
-        if (item) {
-          item.records++;
-          item.count += row.count ?? 1;
-        }
+        item.records++;
+        item.count += row.count ?? 1;
+        result.totals!.experienceRecords++;
+        result.totals!.experienceCount += row.count ?? 1;
+        if (row.event === 'click') pluginTotal(row.plugin!).clicks += row.count ?? 1;
+        if (row.event === 'impression') pluginTotal(row.plugin!).impressions += row.count ?? 1;
       } else if (row.kind === 'system') {
-        const item = group('sys', [row.scope, row.event, row.level].join('|'), result.system, () => ({
-          scope: row.scope!,
-          event: row.event!,
-          level: row.level!,
-          count: 0,
-          crashes: 0,
-        }));
-        if (item) {
-          item.count++;
-          if (row.crash) item.crashes++;
+        const item = group(
+          'sys',
+          [row.scope, row.event, row.level, row.plugin, row.pluginVersion, row.pid, row.generation].join('|'),
+          result.system,
+          () => ({
+            scope: row.scope!,
+            event: row.event!,
+            level: row.level!,
+            count: 0,
+            crashes: 0,
+            ...(row.plugin
+              ? { pluginId: row.plugin, pluginVersion: row.pluginVersion, pid: row.pid, generation: row.generation }
+              : {}),
+          }),
+        );
+        item.count++;
+        if (row.crash) item.crashes++;
+        result.totals![row.level === 'error' ? 'systemErrors' : 'systemWarnings']++;
+        if (row.crash) result.totals!.crashes++;
+        if (row.plugin) pluginTotal(row.plugin)[row.level === 'error' ? 'errors' : 'warnings']++;
+      } else if (row.kind === 'writer') {
+        coverage.writerHealthObserved = true;
+        const item = group('writer', `${row.pid}:${row.generation}`, result.writerHealth!, () => ({ ...row.writer! }));
+        const newest = row.writer!;
+        for (const key of [
+          'dropped',
+          'overflowDrops',
+          'serializationFailures',
+          'writeFailures',
+          'lostLowerBound',
+          'checkpointFailures',
+        ] as const)
+          item[key] = Math.max(item[key], newest[key]);
+        if (newest.at >= item.at) {
+          item.at = newest.at;
+          item.logLevel = newest.logLevel;
+          item.pluginLogEnabled = newest.pluginLogEnabled;
         }
       } else {
         const item = group('mem', String(row.pid), result.memory, () => ({ pid: row.pid, samples: 0, peakRssMB: 0 }));
-        if (item) {
-          item.samples++;
-          item.peakRssMB = Math.max(item.peakRssMB, row.rssMB ?? 0);
-          if (row.heapMB !== undefined) item.peakHeapMB = Math.max(item.peakHeapMB ?? 0, row.heapMB);
-        }
+        item.samples++;
+        item.peakRssMB = Math.max(item.peakRssMB, row.rssMB ?? 0);
+        if (row.heapMB !== undefined) item.peakHeapMB = Math.max(item.peakHeapMB ?? 0, row.heapMB);
+        result.totals!.memorySamples++;
       }
     }
     if (earliest !== Infinity) {
       coverage.earliestAt = new Date(earliest).toISOString();
       coverage.latestAt = new Date(latest).toISOString();
     }
+    const priority = (outcome: string) =>
+      outcome === 'error' || outcome === 'timeout' ? 0 : outcome === 'unknown' ? 1 : outcome === 'success' ? 3 : 2;
+    result.operations.sort(
+      (a, b) =>
+        priority(a.outcome) - priority(b.outcome) || b.finishes - a.finishes || a.plugin.localeCompare(b.plugin),
+    );
+    result.experience.sort(
+      (a, b) =>
+        Number(b.outcome === 'error' || b.event === 'failure') -
+          Number(a.outcome === 'error' || a.event === 'failure') || b.count - a.count,
+    );
+    result.system.sort(
+      (a, b) => b.crashes - a.crashes || Number(b.level === 'error') - Number(a.level === 'error') || b.count - a.count,
+    );
+    result.memory.sort((a, b) => b.peakRssMB - a.peakRssMB);
+    result.writerHealth!.sort(
+      (a, b) => b.lostLowerBound - a.lostLowerBound || b.writeFailures - a.writeFailures || b.at.localeCompare(a.at),
+    );
+    coverage.groups = {
+      operations: result.operations.length,
+      experience: result.experience.length,
+      system: result.system.length,
+      memory: result.memory.length,
+      writerHealth: result.writerHealth!.length,
+    };
+    for (const list of [result.operations, result.experience, result.system, result.memory, result.writerHealth!]) {
+      if (list.length > MAX_GROUPS) coverage.groupLimitReached = true;
+      list.splice(MAX_GROUPS);
+    }
+    result.pluginTotals = [...pluginTotals.values()].sort(
+      (a, b) =>
+        b.operationErrors + b.errors - a.operationErrors - a.errors ||
+        b.operationUnknown - a.operationUnknown ||
+        a.plugin.localeCompare(b.plugin),
+    );
+    if (result.pluginTotals.length > MAX_GROUPS) coverage.groupLimitReached = true;
+    result.pluginTotals.splice(MAX_GROUPS);
+    coverage.domains = [...domainTotals].map(([domain, value]) => ({
+      domain,
+      records: value.records,
+      earliestAt: new Date(value.first).toISOString(),
+      latestAt: new Date(value.last).toISOString(),
+    }));
     signal?.throwIfAborted();
     this.cache.retain(keys);
     return result;

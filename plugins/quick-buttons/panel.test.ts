@@ -180,7 +180,7 @@ describe('快捷按钮面板动作', () => {
       { browser: 'fail' },
     );
     const result = await handler.action({ action: RUN_ACTION, key: shortcutKey(handler, 'doc') });
-    expect(result).toMatchObject({ openExternal: 'https://example.com/1' });
+    expect(result).toMatchObject({ outcome: 'partial', code: 'browser_fallback', openExternal: 'https://example.com/1' });
     expect(result.message).toContain('系统浏览器');
   });
 
@@ -218,7 +218,7 @@ describe('快捷按钮面板动作', () => {
   it('says so when the button is already gone or the action is unknown', async () => {
     const { handler } = harness();
     expect(await handler.action({ action: RUN_ACTION, key: 'nope' })).toEqual({
-      message: '这个按钮已经删掉了',
+      outcome: 'declined', code: 'button_removed', message: '这个按钮已经删掉了',
     });
     expect(messageOf(await handler.action({ action: 'nope' }))).toContain('不认识');
   });
@@ -281,13 +281,13 @@ describe('按钮外观与弹窗', () => {
     const key = shortcutKey(h.handler, original.id);
     expect(key.length).toBeLessThanOrEqual(64);
     h.setButtons(replaceQuickButtons([{ ...original, url: 'https://example.com/b' }]));
-    expect(await h.handler.action({ action: RUN_ACTION, key })).toEqual({ message: '按钮内容已更新，请重新打开' });
+    expect(await h.handler.action({ action: RUN_ACTION, key })).toEqual({ outcome: 'conflict', code: 'stale_button', message: '按钮内容已更新，请重新打开' });
     expect(h.openBrowser).not.toHaveBeenCalled();
     expect(await h.handler.action({ action: RUN_ACTION, key: original.id })).toEqual({
-      message: '按钮内容已更新，请重新打开',
+      outcome: 'conflict', code: 'stale_button', message: '按钮内容已更新，请重新打开',
     });
     h.setButtons([]);
-    expect(await h.handler.action({ action: RUN_ACTION, key })).toEqual({ message: '这个按钮已经删掉了' });
+    expect(await h.handler.action({ action: RUN_ACTION, key })).toEqual({ outcome: 'declined', code: 'button_removed', message: '这个按钮已经删掉了' });
   });
 
   it('rejects old dialogs after actions reorder, content changes, or deletion', async () => {
@@ -303,18 +303,18 @@ describe('按钮外观与弹窗', () => {
     h.setButtons(
       replaceQuickButtons([{ ...original, dialog: { ...original.dialog, actions: [...actions].reverse() } }]),
     );
-    expect(await h.handler.action({ action: DIALOG_ACTION, key })).toEqual({ message: '弹窗内容已更新，请重新打开' });
+    expect(await h.handler.action({ action: DIALOG_ACTION, key })).toEqual({ outcome: 'conflict', code: 'stale_dialog', message: '弹窗内容已更新，请重新打开' });
     h.setButtons(replaceQuickButtons([{ ...original, dialog: { ...original.dialog, text: '新说明' } }]));
-    expect(await h.handler.action({ action: DIALOG_ACTION, key })).toEqual({ message: '弹窗内容已更新，请重新打开' });
+    expect(await h.handler.action({ action: DIALOG_ACTION, key })).toEqual({ outcome: 'conflict', code: 'stale_dialog', message: '弹窗内容已更新，请重新打开' });
     const [current] = await dialogKeys(h.handler, id);
     expect(await h.handler.action({ action: DIALOG_ACTION, key: `${current}:extra` })).toEqual({
-      message: '弹窗内容已更新，请重新打开',
+      outcome: 'conflict', code: 'stale_dialog', message: '弹窗内容已更新，请重新打开',
     });
     expect(await h.handler.action({ action: DIALOG_ACTION, key: current.replace(/:0$/, ':9') })).toEqual({
-      message: '这个做法已经不在弹窗里了',
+      outcome: 'declined', code: 'action_removed', message: '这个做法已经不在弹窗里了',
     });
     h.setButtons([]);
-    expect(await h.handler.action({ action: DIALOG_ACTION, key })).toEqual({ message: '这个按钮已经删掉了' });
+    expect(await h.handler.action({ action: DIALOG_ACTION, key })).toEqual({ outcome: 'declined', code: 'button_removed', message: '这个按钮已经删掉了' });
   });
 
   it('把外观规格原样交给快捷条（颜色 / 图标由宿主按主题画）', () => {

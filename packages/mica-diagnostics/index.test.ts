@@ -4,11 +4,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   collectMemory,
+  enqueueLogEntry,
   flushLogs,
   logger,
   readPerformanceSummary,
   slowReport,
   startMemorySampler,
+  stats,
 } from './index.js';
 
 const originalDir = process.env.MICA_LOG_DIR;
@@ -27,6 +29,27 @@ afterEach(() => {
 });
 
 describe('Performance summary', () => {
+  it('keeps producer stacks free of IO and checkpoints serialization/overflow losses outside the full queue', () => {
+    const before = stats();
+    const data: Record<string, unknown> = {};
+    data.self = data;
+    enqueueLogEntry({ at: Date.now(), scope: 'bounded', event: 'cyclic', level: 'info', data });
+    enqueueLogEntry({ at: Date.now(), scope: 'bounded', event: 'oversize', level: 'info', data: 'x'.repeat(70 * 1024) });
+    for (let index = 0; index < 2001; index++)
+      enqueueLogEntry({ at: Date.now(), scope: 'bounded', event: 'queued', level: 'info', index });
+    expect(readdirSync(dir)).toEqual([]);
+    expect(stats()).toMatchObject({ queued: 2000, dropped: before.dropped + 3,
+      overflowDrops: before.overflowDrops + 2, serializationFailures: before.serializationFailures + 1 });
+    flushLogs();
+    const checkpoints = readdirSync(dir).filter((name) => name.startsWith('writer-health-'))
+      .flatMap((name) => readFileSync(join(dir, name), 'utf8').trim().split('\n').map((line) => JSON.parse(line)));
+    expect(checkpoints.at(-1)).toMatchObject({ dropped: before.dropped + 3,
+      overflowDrops: before.overflowDrops + 2, serializationFailures: before.serializationFailures + 1,
+      lostLowerBound: before.overflowDrops + before.serializationFailures + 3, pid: process.pid,
+      closePolicy: 'best_effort_sync_exit' });
+    expect(stats().queued).toBe(0);
+  });
+
   it('reads each scope independently from file tails, including older shards', () => {
     const at = Date.now();
     const line = (scope: string, event: string, fields: Record<string, unknown> = {}) =>

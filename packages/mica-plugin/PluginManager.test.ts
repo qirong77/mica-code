@@ -13,6 +13,9 @@ import { writePluginState } from './PluginState.js';
 import type { PluginStatusFile } from './PluginStatus.js';
 import { ServiceContainer } from './ServiceContainer.js';
 import { PluginPromptSections } from './PluginPrompt.js';
+import { flushLogs } from '@packages/mica-diagnostics/index.js';
+import { processIdentity } from '@packages/mica-diagnostics/identity.js';
+import { micaSkills } from '@packages/mica-skills/index.js';
 
 let configDir: string;
 let managers: PluginManager[];
@@ -21,6 +24,7 @@ beforeEach(() => {
   configDir = mkdtempSync(join(tmpdir(), 'mica-plugin-manager-'));
   managers = [];
   vi.stubEnv('MICA_HOME', configDir);
+  vi.stubEnv('MICA_LOG_DIR', join(configDir, 'logs'));
   vi.stubEnv('MICA_PLUGIN_LOG', '0');
 });
 
@@ -28,6 +32,8 @@ afterEach(async () => {
   try {
     for (const manager of managers) await manager.disposeAll();
   } finally {
+    flushLogs();
+    vi.useRealTimers();
     vi.unstubAllEnvs();
     rmSync(configDir, { recursive: true, force: true });
   }
@@ -70,6 +76,80 @@ function observeStatus(manager: PluginManager): () => PluginStatusFile {
 }
 
 describe('PluginManager health ownership', () => {
+  it('does not let a successful sibling handler, unrelated hook, or another host clear a hook fault', async () => {
+    const manager = createManager();
+    const host = context();
+    let broken = true;
+    const failures: unknown[] = [];
+    host.hooks.on('plugin:observe', (event) => { failures.push(event); });
+    manager.register({ id: 'hook-owner', version: '3.0.0', setup(ctx) {
+      ctx.hooks.on('turn:after', () => { if (broken) throw new Error('owned hook fault'); });
+      ctx.hooks.on('turn:after', () => undefined); // same hook; not a recovery of the failing handler
+      ctx.hooks.on('turn:before', () => undefined);
+      ctx.health.report({ issueKey: 'llm:degraded', level: 'warn', message: 'dependency fault' });
+    } });
+    await manager.setupAll(host);
+    await host.hooks.emit('turn:after', {});
+    await host.hooks.emit('turn:before', {});
+    expect(readPluginHealth('hook-owner', { configDir, issueKey: 'hook:turn:after' })).toMatchObject({ level: 'error' });
+    expect(failures[0]).toMatchObject({ schemaVersion: 2, pluginVersion: '3.0.0', ...processIdentity(), type: 'hook:failed' });
+    const other = createManager();
+    const otherHost = context();
+    other.register({ id: 'hook-owner', version: '3.0.0', setup(ctx) { ctx.hooks.on('turn:after', () => undefined); } });
+    await other.setupAll(otherHost);
+    await otherHost.hooks.emit('turn:after', {});
+    expect(readPluginHealth('hook-owner', { configDir, issueKey: 'hook:turn:after' })).not.toBeNull();
+    broken = false;
+    await host.hooks.emit('turn:after', {});
+    expect(readPluginHealth('hook-owner', { configDir, issueKey: 'hook:turn:after' })).toBeNull();
+    expect(readPluginHealth('hook-owner', { configDir, issueKey: 'llm:degraded' })).toMatchObject({ level: 'warn' });
+  });
+
+  it('recovers only the background task that actually succeeds again, leaving business/dependency faults intact', async () => {
+    vi.useFakeTimers();
+    const manager = createManager();
+    const host = context();
+    const observed: unknown[] = [];
+    host.hooks.on('plugin:observe', (event) => { observed.push(event); });
+    let broken = true;
+    manager.register({ id: 'background-owner', version: '4.0.0', setup(ctx) {
+      ctx.health.report({ issueKey: 'runtime', level: 'error', message: 'business not verified' });
+      ctx.background!.register({ id: 'recovering', every: 1000, immediate: true, run() { if (broken) throw new Error('first tick'); } });
+      ctx.background!.register({ id: 'still-broken', every: 1000, immediate: true, run() { throw new Error('other tick'); } });
+    } });
+    await manager.setupAll(host);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(readPluginHealth('background-owner', { configDir, issueKey: 'background:recovering' })).toMatchObject({ level: 'warn' });
+    expect(observed[0]).toMatchObject({ schemaVersion: 2, pluginVersion: '4.0.0', ...processIdentity(), type: 'background:failed' });
+    broken = false;
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(readPluginHealth('background-owner', { configDir, issueKey: 'background:recovering' })).toBeNull();
+    expect(readPluginHealth('background-owner', { configDir, issueKey: 'background:still-broken' })).toMatchObject({ level: 'warn' });
+    expect(readPluginHealth('background-owner', { configDir, issueKey: 'runtime' })).toMatchObject({ level: 'error' });
+  });
+
+  it('isolates skill registration failures and clears just that skill after a verified registration', async () => {
+    const skill = { name: 'owned-skill', description: 'skill', content: 'body', baseDir: configDir };
+    writeFileSync(join(configDir, 'SKILL.md'), '---\nname: owned-skill\n---\nbody');
+    const blocker = micaSkills.registerRuntime('skill-owner', [skill]);
+    try {
+      const manager = createManager();
+      manager.register({ id: 'skill-owner', version: '1.0.0', setup(ctx) {
+        ctx.health.report({ issueKey: 'runtime', level: 'error', message: 'business fault' });
+        ctx.skills.register(skill);
+      } });
+      await manager.setupAll(context());
+      expect(readPluginHealth('skill-owner', { configDir, issueKey: 'skill:owned-skill' })).toMatchObject({ level: 'warn' });
+      expect(readPluginHealth('skill-owner', { configDir, issueKey: 'runtime' })).toMatchObject({ level: 'error' });
+      blocker.dispose();
+      const next = createManager();
+      next.register({ id: 'skill-owner', version: '1.0.0', setup(ctx) { ctx.skills.register(skill); } });
+      await next.setupAll(context());
+      expect(readPluginHealth('skill-owner', { configDir, issueKey: 'skill:owned-skill' })).toBeNull();
+      expect(readPluginHealth('skill-owner', { configDir, issueKey: 'runtime' })).toMatchObject({ level: 'error' });
+    } finally { blocker.dispose(); }
+  });
+
   it('passes the registered plugin name into prompt inspection and removes it on disposal', async () => {
     const manager = createManager();
     const sections = new PluginPromptSections();

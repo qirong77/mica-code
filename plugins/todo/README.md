@@ -68,3 +68,5 @@ resume 带得回来。
 
 在配置页 Plugins 里关掉，或者往 `$MICA_HOME/plugins-state.json` 的 `disabled` 里加 `todo`。
 停用后 `todo_write` 工具不再注册，模型也就看不到它。
+
+检查点失败按 checkpoint:read/write/remove 独立报告；只有对应读写/移除真正成功才恢复同类问题，不清其它健康项。计划面板仍可用，不因辅助持久化失败中断主轮次。

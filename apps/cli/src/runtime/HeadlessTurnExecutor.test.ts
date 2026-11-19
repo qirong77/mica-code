@@ -117,6 +117,7 @@ function createHarness(
     maxTurnRetries?: number;
     retryDelayMs?: number;
     applyInputSettings?: (input: RuntimeInput) => void;
+    parseImageRefs?: (text: string) => Promise<string>;
   } = {},
 ) {
   const agent = new MockAgent();
@@ -165,7 +166,7 @@ function createHarness(
     onIdle: () => {
       idleCount++;
     },
-    parseImageRefs: (text: string) => Promise.resolve(text),
+    parseImageRefs: options.parseImageRefs ?? ((text: string) => Promise.resolve(text)),
   });
   return {
     agent,
@@ -190,6 +191,13 @@ function input(text: string, queueMode?: 'after_iteration' | 'after_turn') {
     createdAt: Date.now(),
     ...(queueMode ? { queueMode } : {}),
   };
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no; });
+  return { promise, resolve, reject };
 }
 
 describe('HeadlessTurnExecutor', () => {
@@ -427,6 +435,150 @@ describe('HeadlessTurnExecutor', () => {
     await harness.executor.start(input('hello'));
     await vi.waitFor(() => expect(harness.getIdleCount()).toBe(1));
     expect(steps.slice(0, 5)).toEqual(['settings', 'prepare:true', 'prepared', 'reserve', 'save']);
+  });
+
+  it.each(['resolve', 'reject'] as const)('does not reserve or run after deferred preparation is aborted then %s', async (settle) => {
+    const harness = createHarness({ withPluginLayer: true });
+    const preparation = deferred<void>();
+    const entered = deferred<void>();
+    const reserve = vi.spyOn(harness.agent, 'reserveRunId').mockImplementation(() => {
+      // Real AgentRuntime has no sticky aborted flag: a new reservation would
+      // be current again. The executor must not reach this after cancellation.
+      harness.agent.aborted = false;
+      return ++harness.agent.runId;
+    });
+    harness.hooks!.on('turn:prepare', async () => {
+      entered.resolve();
+      await preparation.promise;
+    }, { failPolicy: 'stop' });
+    let releasedBeforeAfter = false;
+    const after = vi.fn(() => {
+      const lease = micaSession.acquireTurnLease(harness.sessionId);
+      releasedBeforeAfter = lease !== null;
+      lease?.release();
+    });
+    harness.hooks!.on('turn:after', after);
+    const aborted = vi.fn();
+    harness.hooks!.on('turn:abort', aborted);
+    const first = input('prepare then stop');
+    const pending = input('keep queued', 'after_turn');
+    await expect(harness.executor.start(first)).resolves.toBe('started');
+    await entered.promise;
+    await expect(harness.executor.start(pending)).resolves.toBe('queued');
+    harness.executor.abort();
+    if (settle === 'resolve') preparation.resolve();
+    else preparation.reject(new Error('late preparation failure'));
+    await vi.waitFor(() => expect(harness.getIdleCount()).toBe(1));
+    expect(reserve).not.toHaveBeenCalled();
+    expect(harness.agent.runCalls).toEqual([]);
+    expect(harness.events.filter((event) => event.type === 'turn:finish')).toEqual([
+      expect.objectContaining({ input: first, status: 'aborted' }),
+    ]);
+    expect(harness.savedStates).toEqual(['aborted']);
+    expect(after).toHaveBeenCalledOnce();
+    expect(aborted).toHaveBeenCalledOnce();
+    expect(releasedBeforeAfter).toBe(true);
+    expect(harness.executor.pendingInputs).toEqual([pending]);
+    expect(harness.noticeLog.size).toBe(0);
+    expect(harness.subagentSettleCalls).toEqual([{ owner: harness.agent, reason: 'Parent turn was aborted.' }]);
+    expect(existsSync(join(process.env.MICA_HOME!, 'sessions', '.turn-locks', `${harness.sessionId}.lock`))).toBe(false);
+  });
+
+  it.each(['resolve', 'reject'] as const)('finishes an abort during image parsing once when parsing later %s', async (settle) => {
+    const image = deferred<string>();
+    const parse = vi.fn(() => image.promise);
+    const harness = createHarness({ withPluginLayer: true, parseImageRefs: parse });
+    const reserve = vi.spyOn(harness.agent, 'reserveRunId');
+    const prepare = vi.fn();
+    const after = vi.fn();
+    harness.hooks!.on('turn:prepare', prepare);
+    harness.hooks!.on('turn:after', after);
+    const first = input('[Image](fake.png) stop during parsing');
+    const pending = input('still queued', 'after_turn');
+    await expect(harness.executor.start(first)).resolves.toBe('started');
+    expect(parse).toHaveBeenCalledExactlyOnceWith(first.text);
+    await expect(harness.executor.start(pending)).resolves.toBe('queued');
+    harness.executor.abort();
+    if (settle === 'resolve') image.resolve('parsed image content');
+    else image.reject(new Error('late image parsing failure'));
+    await vi.waitFor(() => expect(harness.getIdleCount()).toBe(1));
+    expect(reserve).not.toHaveBeenCalled();
+    expect(prepare).not.toHaveBeenCalled();
+    expect(harness.agent.runCalls).toEqual([]);
+    expect(harness.events.filter((event) => event.type === 'turn:finish')).toEqual([
+      expect.objectContaining({ status: 'aborted' }),
+    ]);
+    expect(harness.savedStates).toEqual(['aborted']);
+    expect(harness.savedConversations.at(-1)).toContainEqual(expect.objectContaining({ role: 'user', content: first.text }));
+    expect(after).toHaveBeenCalledOnce();
+    expect(harness.executor.pendingInputs).toEqual([pending]);
+    expect(harness.noticeLog.size).toBe(0);
+    const available = micaSession.acquireTurnLease(harness.sessionId);
+    expect(available).not.toBeNull();
+    available?.release();
+  });
+
+  it.each(['lease', 'refresh', 'settings', 'before', 'prompt', 'reserve', 'snapshot'] as const)(
+    'checks the turn cancellation at the %s preparation boundary',
+    async (boundary) => {
+      const harness = createHarness({ withPluginLayer: true, applyInputSettings: () => {
+        if (boundary === 'settings') harness.executor.abort();
+      } });
+      if (boundary === 'lease') {
+        const acquire = harness.sessionController.acquireTurnLease.getMockImplementation()!;
+        harness.sessionController.acquireTurnLease.mockImplementation(() => {
+          const lease = acquire();
+          harness.executor.abort();
+          return lease;
+        });
+      }
+      if (boundary === 'refresh') vi.spyOn(harness.sessionController, 'refreshFromStore').mockImplementation(() => {
+        harness.executor.abort();
+        return null;
+      });
+      if (boundary === 'before') harness.hooks!.on('turn:before', () => harness.executor.abort());
+      if (boundary === 'prompt') harness.hooks!.on('prompt:build', () => harness.executor.abort());
+      if (boundary === 'reserve') vi.spyOn(harness.agent, 'reserveRunId').mockImplementation(() => {
+        const id = ++harness.agent.runId;
+        harness.executor.abort();
+        return id;
+      });
+      if (boundary === 'snapshot') vi.spyOn(harness.agent, 'captureClientSnapshot').mockImplementation(() => {
+        harness.executor.abort();
+        return { marker: 'pre-turn' };
+      });
+      await expect(harness.executor.start(input(`stop at ${boundary}`))).resolves.toBe('started');
+      await vi.waitFor(() => expect(harness.getIdleCount()).toBe(1));
+      expect(harness.agent.runCalls).toEqual([]);
+      expect(harness.events.filter((event) => event.type === 'turn:finish')).toEqual([
+        expect.objectContaining({ status: 'aborted' }),
+      ]);
+      expect(harness.savedStates.filter((state) => state !== 'running')).toEqual(['aborted']);
+      const available = micaSession.acquireTurnLease(harness.sessionId);
+      expect(available).not.toBeNull();
+      available?.release();
+    },
+  );
+
+  it('gives a later turn a fresh cancellation marker after a preparation abort', async () => {
+    const harness = createHarness({ withPluginLayer: true });
+    let first = true;
+    harness.hooks!.on('turn:prepare', () => {
+      if (first) {
+        first = false;
+        harness.executor.abort();
+      }
+    });
+    vi.spyOn(harness.agent, 'reserveRunId').mockImplementation(() => {
+      harness.agent.aborted = false;
+      return ++harness.agent.runId;
+    });
+    await harness.executor.start(input('stop first'));
+    await vi.waitFor(() => expect(harness.getIdleCount()).toBe(1));
+    await expect(harness.executor.start(input('fresh turn'))).resolves.toBe('started');
+    await vi.waitFor(() => expect(harness.getIdleCount()).toBe(2));
+    expect(harness.agent.runCalls).toHaveLength(1);
+    expect(harness.events.filter((event) => event.type === 'turn:finish').map((event) => event.status)).toEqual(['aborted', 'completed']);
   });
 
   it('applies settings to the matching input after each leased refresh and before the first save', async () => {

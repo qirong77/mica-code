@@ -246,6 +246,33 @@ describe('application /plugins namespace', () => {
     expect(disposed).toBe(0)
   })
 
+  it('records the runtime concurrency rejection as busy, preserving the existing HTTP 429 contract', async () => {
+    const gate = deferred()
+    const started = deferred()
+    let count = 0
+    const { call } = fixture({ queries: { summary: async () => {
+      if (++count === 4) started.resolve()
+      await gate.promise
+      return 'ready'
+    } } })
+    const active = Array.from({ length: 4 }, () => call('/plugins/demo/api/summary'))
+    try {
+      await started.promise
+      const busy = (await call('/plugins/demo/api/summary')).res
+      expect(busy.status).toBe(429)
+      expect(JSON.parse(busy.body)).toEqual({ ok: false, code: 'busy', error: '插件只读查询繁忙，请稍后重试' })
+      flushLogs()
+      const rows = readdirSync(process.env.MICA_LOG_DIR).filter((file) => file.startsWith('plugin-operation-'))
+        .flatMap((file) => readFileSync(join(process.env.MICA_LOG_DIR, file), 'utf8').trim().split('\n').map((line) => JSON.parse(line)))
+      const finish = rows.filter((row) => row.operation === 'web.read.summary' && row.event === 'operation.finish')
+      expect(finish).toHaveLength(1)
+      expect(finish[0]).toMatchObject({ outcome: 'busy', code: 'busy', pluginVersion: '1.0.0', pid: process.pid, generation: expect.any(String) })
+    } finally {
+      gate.resolve()
+      await Promise.all(active)
+    }
+  })
+
   it('cancels outstanding HTTP waits on runtime close and refuses disabled endpoints before load', async () => {
     const gate = deferred()
     const started = deferred()

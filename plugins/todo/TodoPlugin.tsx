@@ -77,17 +77,22 @@ export class TodoPlugin implements MicaPlugin {
 
     // 这份 checkpoint 只是「中断后怎么接着做」的缓存：写不进去不该让整轮失败，
     // 更不该把一轮已经答完的对话记成错误。报一次健康状态，然后当它没写过。
-    let checkpointFailureReported = false;
+    const checkpointFailures = new Set<string>();
     const reportCheckpointFailure = (action: string, error: unknown) => {
       const message = error instanceof Error ? error.message : String(error);
-      ctx.logger?.warn(`todo checkpoint ${action} failed: ${message}`);
-      if (checkpointFailureReported) return;
-      checkpointFailureReported = true;
+      ctx.logger?.warn('todo:checkpoint-failed', { action, code: 'storage_error' });
+      if (checkpointFailures.has(action)) return;
+      checkpointFailures.add(action);
       ctx.health?.report({
+        issueKey: `checkpoint:${action}`,
         level: 'warn',
         message: `无法写入 TODO 检查点（${action}）：${message}`,
         hint: '计划面板仍可用，但中断后不会再带上上次的进度：请检查 $MICA_HOME 是否可写、磁盘是否已满。',
       });
+    };
+    const checkpointRecovered = (action: string) => {
+      if (!checkpointFailures.delete(action) && ctx.health?.read?.(`checkpoint:${action}`)?.level !== 'warn') return;
+      ctx.health?.report({ issueKey: `checkpoint:${action}`, level: 'ok', message: `TODO 检查点 ${action} 已恢复` });
     };
 
     const saveCheckpoint = (owner: unknown, state: TodoViewState, items: TodoItem[]) => {
@@ -97,6 +102,7 @@ export class TodoPlugin implements MicaPlugin {
         throw new Error('Todo turn no longer belongs to this session');
       try {
         writeTodoCheckpoint(ctx.paths.config, { version: 1, sessionId: session.id, turnId: state.turnId, items });
+        checkpointRecovered('write');
       } catch (error) {
         reportCheckpointFailure('write', error);
       }
@@ -106,7 +112,9 @@ export class TodoPlugin implements MicaPlugin {
     const loadCheckpoint = (session: { id: string; persistent: boolean }) => {
       if (!ctx.paths?.config) return null;
       try {
-        return readTodoCheckpoint(ctx.paths.config, session.id);
+        const value = readTodoCheckpoint(ctx.paths.config, session.id);
+        if (value) checkpointRecovered('read');
+        return value;
       } catch (error) {
         reportCheckpointFailure('read', error);
         return null;
@@ -195,6 +203,7 @@ export class TodoPlugin implements MicaPlugin {
           if (session?.persistent && ctx.paths?.config) {
             if (!removeTodoCheckpoint(ctx.paths.config, session.id))
               reportCheckpointFailure('remove', new Error('checkpoint file is still there'));
+            else checkpointRecovered('remove');
           }
         }
         patch(owner, (current) => ({ ...createTodoViewState(), sessionId: current.sessionId }));

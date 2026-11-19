@@ -140,6 +140,8 @@ export class HeadlessTurnExecutor {
    */
   private committedResponseBuffer = '';
   private lease: SessionTurnLease | null = null;
+  /** Independent of AgentRuntime.runId, which refresh/prepare can replace. */
+  private activeTurnCancellation: AbortController | null = null;
   /**
    * 轮次之外改会话文件的任务（插件触发的空闲压缩）。与 turn 互斥：它在跑的时候
    * `start()` 先等它收尾，它在 `start()` 已经开始之后就不再接受新任务。
@@ -232,12 +234,17 @@ export class HeadlessTurnExecutor {
     // Take the cross-process lease before the turn is announced: refusing here
     // lets the client roll the optimistic message back instead of discovering
     // the conflict halfway through a turn.
+    const cancellation = new AbortController();
+    this.activeTurnCancellation = cancellation;
     const lease = this.acquireTurnLease();
-    if (this.persistsSession && !lease) return 'busy-remote';
+    if (this.persistsSession && !lease) {
+      if (this.activeTurnCancellation === cancellation) this.activeTurnCancellation = null;
+      return 'busy-remote';
+    }
     this.lease = lease;
     this.running = true;
     this.options.onEvent({ type: 'turn:start', input });
-    void this.loop(input);
+    void this.loop(input, cancellation);
     return 'started';
   }
 
@@ -282,6 +289,7 @@ export class HeadlessTurnExecutor {
    * the queue (recallable) until a turn actually completes.
    */
   abort(): void {
+    this.activeTurnCancellation?.abort();
     this.options.agent.abort();
   }
 
@@ -311,10 +319,12 @@ export class HeadlessTurnExecutor {
     return held ? this.queue.holdQueued(clientMessageId) : this.queue.releaseQueued(clientMessageId);
   }
 
-  private async loop(firstInput: RuntimeInput): Promise<void> {
+  private async loop(firstInput: RuntimeInput, firstCancellation: AbortController): Promise<void> {
     let input: RuntimeInput | null = firstInput;
     let first = true;
     while (input) {
+      const cancellation = first ? firstCancellation : new AbortController();
+      this.activeTurnCancellation = cancellation;
       // `start()` announced the first turn; every drained turn needs its own
       // turn:start too, otherwise consumers that map the event to a per-turn
       // lifecycle (app-server turn/started) never
@@ -343,13 +353,13 @@ export class HeadlessTurnExecutor {
         this.lease = lease;
         const finalization = this.createTurnFinalization(input);
         try {
-          status = await this.runTurn(input, finalization);
+          status = await this.runTurn(input, finalization, cancellation.signal);
         } catch (error) {
           // runTurn normally settles itself.  A failing terminal hook/event is
           // already finalized, so this guard must never emit a second finish.
           if (finalization.status === null) {
             try {
-              await finalization.finish('error', error);
+              await finalization.finish(cancellation.signal.aborted ? 'aborted' : 'error', error);
             } catch {
               // finish always attempts the terminal event, even if a hook fails.
             }
@@ -359,10 +369,11 @@ export class HeadlessTurnExecutor {
           this.releaseTurnLease();
         }
       }
+      if (this.activeTurnCancellation === cancellation) this.activeTurnCancellation = null;
       // 排队输入只在一轮**真的完成**之后才接着跑（message-queue 插件与交互式
       // runtime 的 turn:after 同一条规则）。失败/中止时把它留在队列里：还在排队、
       // 用户仍能撤回，而不是「点了停止之后排队的那条又被偷偷送出去跑一轮」。
-      if (status !== 'completed') break;
+      if (status !== 'completed' || cancellation.signal.aborted) break;
       input = this.queue.dequeue();
       if (input) this.options.onEvent({ type: 'dequeue', input });
     }
@@ -438,26 +449,22 @@ export class HeadlessTurnExecutor {
     };
   }
 
-  private async runTurn(input: RuntimeInput, finalization: TurnFinalization): Promise<HeadlessTurnStatus> {
+  private throwIfTurnStopped(signal: AbortSignal, runId?: number): void {
+    if (signal.aborted || (runId !== undefined && !this.options.agent.isCurrent(runId))) {
+      throw new AgentAbortError(runId);
+    }
+  }
+
+  private async runTurn(input: RuntimeInput, finalization: TurnFinalization, signal: AbortSignal): Promise<HeadlessTurnStatus> {
     const { agent, onEvent } = this.options;
     this.responseBuffer = '';
     this.committedResponseBuffer = '';
-    let content: AgentQueryContent;
-    try {
-      content =
-        input.content !== undefined
-          ? (input.content as AgentQueryContent)
-          : input.source === 'system'
-            ? input.text
-            : await this.parseImageRefs(input.text);
-    } catch (error) {
-      return this.failTurn(input, finalization, error);
-    }
+    let content: AgentQueryContent = runContentOr(input);
     // 除了 `system`（提示词内部注入，用户从没打过这句话）之外都要留下用户消息：
     // 插件提交的一轮（`ctx.runtime.submit`）在客户端没有乐观气泡，不写进去就只剩回答，
     // 会话记录里看不到「这一轮是为什么跑起来的」。`displayText` 优先——插件可以给一句
     // 短标题，而真正发给模型的提示词可能很长。
-    const inFlightUser: InFlightUserMessage | undefined =
+    let inFlightUser: InFlightUserMessage | undefined =
       input.source === 'system'
         ? undefined
         : { message: { role: 'user', content: displayUserContent(input, content) }, rawContent: content };
@@ -470,8 +477,18 @@ export class HeadlessTurnExecutor {
       // Must run before reserveRunId(): loadSnapshot inside the refresh bumps
       // the run id, and reserving first would make this turn look aborted.
       this.options.sessionController.refreshFromStore();
+      this.throwIfTurnStopped(signal);
+      content =
+        input.content !== undefined
+          ? (input.content as AgentQueryContent)
+          : input.source === 'system'
+            ? input.text
+            : await this.parseImageRefs(input.text);
+      this.throwIfTurnStopped(signal);
+      if (inFlightUser) inFlightUser = { message: { role: 'user', content: displayUserContent(input, content) }, rawContent: content };
       const before = this.persistsSession && this.options.hooks ? agent.getSnapshot() : null;
       this.options.applyInputSettings?.(input);
+      this.throwIfTurnStopped(signal);
       if (before && this.options.hooks) {
         const current = agent.getSnapshot();
         const usage = before.lastUsage;
@@ -483,29 +500,36 @@ export class HeadlessTurnExecutor {
           },
           current: { providerId: current.providerId, model: current.model, effort: current.effort },
           compactHistory: async (options) => {
+            this.throwIfTurnStopped(signal);
             const result = await compactIdleSessionHistory({
               agent,
               sessionController: this.options.sessionController,
               conversationMessages: () => agent.toConversationMessages(),
               ...options,
             });
+            this.throwIfTurnStopped(signal);
             return result ? { status: 'applied', ...result } : { status: 'skipped', reason: 'empty' };
           },
         };
         await this.options.hooks.emit('turn:prepare', event);
       }
+      this.throwIfTurnStopped(signal);
       const reservedRunId = agent.reserveRunId();
+      this.throwIfTurnStopped(signal, reservedRunId);
       this.saveCurrent({ allowEmpty: true, turnState: 'running' }, inFlightUser);
       let runContent = content;
       if (this.options.hooks) {
         await this.options.hooks.emit('turn:before', { runtime: this.options.host, owner: agent, input, content });
+        this.throwIfTurnStopped(signal, reservedRunId);
         const promptBuildEvent = await this.options.hooks.pipeline('prompt:build', {
           runtime: this.options.host,
           input,
           content,
         });
+        this.throwIfTurnStopped(signal, reservedRunId);
         if (promptBuildEvent?.content !== undefined) runContent = promptBuildEvent.content;
       }
+      this.throwIfTurnStopped(signal, reservedRunId);
       const maxRetries = this.options.maxTurnRetries ?? MAX_TURN_RETRIES;
       let preTurnSnapshot = maxRetries > 0 ? agent.captureClientSnapshot() : null;
       let hadNonRetryableToolCall = false;
@@ -540,10 +564,12 @@ export class HeadlessTurnExecutor {
         const retryDelayMs = this.options.retryDelayMs ?? TURN_RETRY_DELAY_MS;
         const promptControls = readPromptControls();
         for (let attempt = 0; attempt <= maxRetries; attempt++) {
+          this.throwIfTurnStopped(signal);
           const attemptInputs: AgentQueryContent[] = [];
           const attemptRunId = attempt === 0 ? reservedRunId : agent.reserveRunId();
           try {
             agent.events.emit('thinkingTurnAttemptStart', undefined);
+            this.throwIfTurnStopped(signal, attemptRunId);
             runResult = await agent.run(runContent, {
               reservedRunId: attemptRunId,
               promptControls,
@@ -554,6 +580,7 @@ export class HeadlessTurnExecutor {
                 // results) into the provider history: everything streamed so far
                 // is committed, so an abort from here on only owes the remainder.
                 this.committedResponseBuffer = this.responseBuffer;
+                if (signal.aborted || !agent.isCurrent(attemptRunId)) return null;
                 const replayed = replayInputs.shift();
                 if (replayed !== undefined) {
                   attemptInputs.push(replayed);
@@ -568,6 +595,7 @@ export class HeadlessTurnExecutor {
               // This retry is safe even after a write tool: the provider only
               // calls it when the current request has no replay-unsafe output.
               onRetry: (info) => {
+                if (signal.aborted || !agent.isCurrent(attemptRunId)) return;
                 const notice = createRetryNotice(info.error, info.attempt, MAX_PROVIDER_RETRIES, info.delayMs);
                 try {
                   this.options.notices?.ensure().upsert(notice);
@@ -592,7 +620,7 @@ export class HeadlessTurnExecutor {
             // An abort that lands between reserveRunId() and the agent.run()
             // check is surfaced as an AgentAbortError here; never retry it.
             if (error instanceof AgentAbortError) throw error;
-            if (!agent.isCurrent(attemptRunId)) throw new AgentAbortError(attemptRunId);
+            this.throwIfTurnStopped(signal, attemptRunId);
             if (hadNonRetryableToolCall || !micaAgent.isRetryableError(error) || attempt >= maxRetries) {
               throw error;
             }
@@ -604,11 +632,11 @@ export class HeadlessTurnExecutor {
             this.responseBuffer = '';
             this.committedResponseBuffer = '';
             this.saveCurrent({ allowEmpty: true, turnState: 'running' }, inFlightUser);
-            if (!agent.isCurrent(attemptRunId)) throw new AgentAbortError(attemptRunId);
+            this.throwIfTurnStopped(signal, attemptRunId);
             if (this.options.hooks) {
               await this.options.hooks.emit('turn:error', { runtime: this.options.host, input, content, error });
             }
-            if (!agent.isCurrent(attemptRunId)) throw new AgentAbortError(attemptRunId);
+            this.throwIfTurnStopped(signal, attemptRunId);
             // Persist the hint before announcing the wait: the desktop app shows
             // it inside the conversation, so a client that reconnects during the
             // delay finds it in the session file instead of a frozen run.
@@ -622,15 +650,15 @@ export class HeadlessTurnExecutor {
               delayMs: retryDelayMs,
               error: error instanceof Error ? error.message : String(error),
             });
-            await waitForRetryDelay(agent, retryDelayMs, attemptRunId);
-            if (!agent.isCurrent(attemptRunId)) throw new AgentAbortError(attemptRunId);
+            await waitForRetryDelay(agent, retryDelayMs, attemptRunId, signal);
+            this.throwIfTurnStopped(signal, attemptRunId);
           }
         }
         // A resolved query has committed its final response as well as its
         // tool iterations.  If abort invalidates the result before persistence,
         // preserveAbortedTurn must not append that response a second time.
         this.committedResponseBuffer = this.responseBuffer;
-        if (!agent.isCurrent(runResult!.runId)) {
+        if (signal.aborted || !agent.isCurrent(runResult!.runId)) {
           // `agent.run()` can resolve after an abort has invalidated its run id.
           // Route that stale resolution through the same abort finalization as a
           // rejected AgentAbortError; returning here leaves the persisted turn
@@ -645,7 +673,7 @@ export class HeadlessTurnExecutor {
             result: runResult,
           });
         }
-        if (!agent.isCurrent(runResult!.runId)) throw new AgentAbortError(runResult!.runId);
+        this.throwIfTurnStopped(signal, runResult!.runId);
         return await finalization.finish('completed', undefined, inFlightUser);
       } finally {
         agent.events.off('toolCall', markToolCall);
@@ -658,7 +686,7 @@ export class HeadlessTurnExecutor {
       // A terminal hook/event can throw after the save/after/finish path was
       // claimed.  Never reinterpret it as a second turn failure.
       if (finalization.status !== null) return finalization.status;
-      if (error instanceof AgentAbortError) {
+      if (signal.aborted || error instanceof AgentAbortError) {
         try {
           if (this.options.hooks) {
             await this.options.hooks.emit('turn:abort', { runtime: this.options.host, input, content, error });
@@ -805,9 +833,9 @@ export function displayUserContent(input: RuntimeInput, content: AgentQueryConte
 /** Fixed-delay wait that aborts early (throws AgentAbortError) when the agent
  * run id changes, so an interrupt during a retry delay stops the turn instead
  * of silently waiting out the full 10s. */
-function waitForRetryDelay(agent: AgentRuntime, delayMs: number, delayRunId: number): Promise<void> {
+function waitForRetryDelay(agent: AgentRuntime, delayMs: number, delayRunId: number, signal: AbortSignal): Promise<void> {
   return new Promise<void>((resolve, reject) => {
-    if (!agent.isCurrent(delayRunId)) {
+    if (signal.aborted || !agent.isCurrent(delayRunId)) {
       reject(new AgentAbortError(delayRunId));
       return;
     }
@@ -817,12 +845,14 @@ function waitForRetryDelay(agent: AgentRuntime, delayMs: number, delayRunId: num
       settled = true;
       clearTimeout(timer);
       clearInterval(poll);
+      signal.removeEventListener('abort', onAbort);
       fn();
     };
+    const onAbort = () => finish(() => reject(new AgentAbortError(delayRunId)));
     const timer = setTimeout(
       () =>
         finish(() => {
-          if (!agent.isCurrent(delayRunId)) reject(new AgentAbortError(delayRunId));
+          if (signal.aborted || !agent.isCurrent(delayRunId)) reject(new AgentAbortError(delayRunId));
           else resolve();
         }),
       delayMs,
@@ -833,5 +863,7 @@ function waitForRetryDelay(agent: AgentRuntime, delayMs: number, delayRunId: num
         return;
       }
     }, 250);
+    signal.addEventListener('abort', onAbort, { once: true });
+    if (signal.aborted) onAbort();
   });
 }

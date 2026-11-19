@@ -21,6 +21,8 @@ const CACHE_MS = 60_000
 const FOCUS_REFRESH_MS = 5000
 const READ_RETRY_DELAYS = [300, 1200]
 let cache = { at: 0, promise: null }
+let lastPlugins = []
+let lastSignature = ''
 const listeners = new Set()
 let lastInvalidatedAt = 0
 
@@ -67,7 +69,14 @@ async function fetchPluginsDetails() {
 async function loadPluginsDetails() {
   for (let attempt = 0; ; attempt += 1) {
     const plugins = await fetchPluginsDetails()
-    if (plugins) return { plugins, ok: true }
+    if (plugins) {
+      const signature = JSON.stringify(plugins)
+      if (signature !== lastSignature) {
+        lastPlugins = plugins
+        lastSignature = signature
+      }
+      return { plugins: lastPlugins, ok: true }
+    }
     if (attempt >= READ_RETRY_DELAYS.length) return { plugins: [], ok: false }
     await sleep(READ_RETRY_DELAYS[attempt])
   }
@@ -120,7 +129,7 @@ if (typeof window !== 'undefined') {
 
 /** 组件读插件列表：挂载时取一次，之后跟着清单变化重读。 */
 export function usePluginsDetails() {
-  const [plugins, setPlugins] = useState([])
+  const [plugins, setPlugins] = useState(() => lastPlugins)
   useEffect(() => {
     let alive = true
     const load = () => {

@@ -29,12 +29,14 @@ const plugin: MicaPlugin = {
     const issues = ctx.settings.validate();
     if (issues.length > 0) {
       ctx.health.report({
+        issueKey: 'configuration',
         level: 'warn',
         message: `配置不完整：${issues.map((issue) => `${issue.label} ${issue.message}`).join('；')}`,
         hint: '在配置页的 Plugins → Web Search 里修正。',
       });
     } else {
       ctx.health.report({
+        issueKey: 'configuration',
         level: 'ok',
         message: values.searxngUrl?.trim() ? `搜索服务：${baseUrl}` : `搜索服务：${baseUrl}（未配置，用的是默认地址）`,
         hint: values.searxngUrl?.trim() ? undefined : '地址不对时到插件设置里填自己的 SearXNG。',
@@ -52,8 +54,8 @@ const plugin: MicaPlugin = {
             defaultCount: resolveDefaultCount(current.defaultCount),
           };
         },
-        onFailure: (message, hint) => ctx.health.report({ level: 'error', message, hint }),
-        onSuccess: (url) => ctx.health.report({ level: 'ok', message: `搜索服务：${url}` }),
+        onFailure: (message, hint) => ctx.health.report({ issueKey: 'dependency:search', level: 'error', message, hint }),
+        onSuccess: () => ctx.health.report({ issueKey: 'dependency:search', level: 'ok', message: '搜索服务请求已恢复' }),
       }),
       { icon: '🔍' },
     );

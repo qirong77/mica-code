@@ -137,7 +137,7 @@ describe('TodoPlugin', () => {
     expect(harness.rewrite([{ role: 'user', content: 'one-shot' }], { owner, sessionId: 'session-a' })).toBeNull();
   });
 
-  it('keeps the turn alive when the checkpoint cannot be written, and reports it once', async () => {
+  it('keeps the turn alive and reports checkpoint read/write failures once per issue', async () => {
     const configDir = temporaryDir();
     // 让 `todo-checkpoints` 这一级建不出来：插件只能当它没写成，不能把整轮打挂。
     writeFileSync(join(configDir, 'todo-checkpoints'), 'not a directory');
@@ -150,7 +150,9 @@ describe('TodoPlugin', () => {
       const input = micaRuntime.createRuntimeInput(prompt, 'ui');
       await expect(harness.hooks.emit('turn:before', { owner, runtime: {}, input })).resolves.not.toThrow();
     }
-    expect(harness.reportHealth).toHaveBeenCalledTimes(1);
+    expect(harness.reportHealth).toHaveBeenCalledTimes(2);
+    expect(harness.reportHealth).toHaveBeenCalledWith(expect.objectContaining({ issueKey: 'checkpoint:read', level: 'warn' }));
+    expect(harness.reportHealth).toHaveBeenCalledWith(expect.objectContaining({ issueKey: 'checkpoint:write', level: 'warn' }));
     expect(harness.warn).toHaveBeenCalled();
   });
 

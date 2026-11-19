@@ -15,7 +15,7 @@
 
 [Harness Review](harness-review/README.md) 记录运行轨迹并聚合问题候选，工具错误与健康率共用分类并标出数据覆盖缺口；同端口的 `/plugins/harness-review/console` 是 Arco 只读运行控制台，也可从插件详情打开。条件命令链无法确定非零退出来源时记为未知，不当成功或已确认工具故障。评估按历史追加，验证后的新证据提醒复核但不自动宣判回归。用户纠正独立持久化，仅由下一次同会话主运行消费。它不自动修改代码、提示词或记忆，也不把运行完成当成验收通过。
 
-所有插件（含用户插件和一次性动作）自动接入宿主的 `operation.start/finish` 元数据日志，覆盖工具/命令、面板/动作、菜单、后台 tick、数据、hook 与装配/释放；独立 MCP/launcher 不依赖主对话轨迹。内部步骤可调用 `ctx.operations?.run('固定操作名', task, { signal })`。禁止传正文、命令、路径、地址或异常原文；处理器完成不代表业务验收。随包页面/卡片/启动器的实际曝光与点击由共享容器记录，预取和轮询不算曝光。
+所有插件（含用户插件和一次性动作）自动接入宿主的 `operation.start/finish` 元数据日志， 新信封绑定装载版本及 pid/generation，后台重复 success/skipped/waiting合并为每分钟心跳计数；首次终态、失败、取消与状态转换不采样。覆盖工具/命令、面板/动作、菜单、后台 tick、数据、hook 与装配/释放；独立 MCP/launcher 不依赖主对话轨迹。内部步骤可调用 `ctx.operations?.run('固定操作名', task, { signal })`。禁止传正文、命令、路径、地址或异常原文；处理器完成不代表业务验收。随包页面/卡片/启动器的实际曝光与点击由共享容器记录，预取和轮询不算曝光。
 
 [Subagent](subagent/README.md) 的文件租约限定文件工具的写入路径；shell 可从工作区内包含租约的目录执行，文件租约也能运行测试。外部 checkout 的祖先以最近 `.git` 为界，独立外部路径只放行到直接父目录；cwd 检查不是 shell 沙箱，命令仍须遵守写策略。
 
@@ -27,7 +27,7 @@
 编辑器是共享包 `packages/mica-editor`（笔记用其富文本模式，配置页 Role / Skill 用同一份运行时的 Markdown 模式），第三方依赖固定版本从 CDN 运行时加载；数据在 `plugin-data/notebook/data.json` 与 `documents/<id>.json`。首次打开需要 CDN 网络。
 具体能力、限制与开发方式见 [Notebook](./notebook/README.md)。
 
-Notebook 的右侧对话每次展开都经通用 `api.sessions` 创建一条新的 app-server 会话，输入原样透传、不预填或附加笔记上下文；Markdown 展示由整页宿主提供 `api.ui.Markdown`。Notebook MCP 的 `set_markdown` / `append_markdown` / `prepend_markdown` 把 Markdown 确定性转换为原生富文本，保留原有 CAS 与复杂文档保护边界，返回大纲、结构统计与降级警告。
+Notebook 的功能说明与 MCP 使用约束由插件角色 `笔记` 注入；默认角色不会连接 Notebook MCP，也不会在 `/` 快捷列表里占一个 MCP 条目。选择 `笔记` 后，当前会话才接入 Notebook MCP。Notebook MCP 的 `set_markdown` / `append_markdown` / `prepend_markdown` 把 Markdown 确定性转换为原生富文本，保留原有 CAS 与复杂文档保护边界，返回大纲、结构统计与降级警告。
 
 ## 目录结构
 
@@ -50,6 +50,7 @@ plugins/<id>/
 | `author`          | 否   | 作者                                                                                                                                                                       |
 | `main`            | 否   | 入口文件，默认 `index.js`；必须在插件目录内                                                                                                                                |
 | `mcp`             | 否   | `true` 声明随包 `mcp.ts` 独立模块，挂到应用现有端口 `/plugin/<id>/mcp`，默认关闭；见「独立 MCP」 |
+| `mcpRoles`        | 否   | 角色名数组；声明后 MCP 只在这些角色的会话中接入，也不会出现在默认 `/` 快捷列表里 |
 | `web`             | 否   | `true` 声明随包 `web.ts` 只读查询目录，由应用同端口托管 `/plugins/<id>/api/<query>`；见「只读 Web 查询」 |
 | `assets`          | 否   | 随插件分发的资源（样式、文档、图标），同样不许跳出版块目录                                                                                                                 |
 | `dependencies`    | 否   | 需要先 setup 的插件 id                                                                                                                                                     |
@@ -478,6 +479,7 @@ export default function createWeb(ctx: PluginWebContext): PluginWebHandler {
 
 宿主装配时把索引写到 `$MICA_HOME/plugin-roles/<pluginId>.json`，输入框的角色箭头与 `/role`
 都只读索引，不必为了列一个名字去启动会话进程；索引仍为 `version: 1` 的 `name` / `path` 条目。
+插件角色返回的 `AgentRole` 带 `tag: "plugin"`（以及 `pluginId`），界面可以据此标出它来自插件；磁盘角色没有这个标识。
 磁盘上的同名角色优先并遮蔽插件那条（用户抄一份
 出来改，就以他改的为准）。改角色 = 改插件目录里的文件，重开会话生效。
 
@@ -987,6 +989,8 @@ ctx.desktop.sessionMenu({
 
 插件自身的故障要能被用户看见，而不是只落在日志里：
 
+业务结果显式返回固定 `outcome/code`，不把 `{message}` 正常返回当成业务验证；busy/declined/cancelled/skipped/partial/unknown 和 error 分开。健康使用固定问题 key（`background:<id>`、`hook:<name>`、`skill:<name>`、`dependency:<name>` 等）；只有同一故障的验证动作清除它，配置或启动成功不能清业务依赖故障。
+
 - `ctx.health.report({ issueKey?, level: 'warn' | 'error', message, hint })` 写
   `$MICA_HOME/plugin-health/<id>.json`，配置页据此显示「待配置 / 运行出错」以及原因。
   记录带上是哪一版插件写的，版本一变它就不作数：上一版留下的「连不上 X」不能继续挂在
@@ -1016,7 +1020,7 @@ ctx.desktop.sessionMenu({
 ~/Library/Logs/mica/plugin-<id>-<YYYYMMDD>[-n].jsonl
 ```
 
-插件日志复用 `mica-diagnostics` 的有界批量队列，生产者不再每行同步扫描/写盘；信封为 `at/scope/pluginId/plugin/level/event/data`。单文件超过 2 MiB 分片，7 天与目录总容量由共享 writer 兜底；`MICA_PLUGIN_LOG=0` 关闭。`stats()` 可见溢出、序列化与写失败计数，不能把丢失样本当成功。
+插件日志复用 `mica-diagnostics` 的有界批量队列， writer-health 使用独立检查点持久保存每世代累计丢弃/溢出/序列化/写失败与级别、关闭策略；检查点失败不会递归填满队列。生产者不再每行同步扫描/写盘；信封为 `at/scope/pluginId/plugin/level/event/data`。单文件超过 2 MiB 分片，7 天与目录总容量由共享 writer 兜底；`MICA_PLUGIN_LOG=0` 关闭。`stats()` 可见溢出、序列化与写失败计数，不能把丢失样本当成功。
 排查插件问题时先看这里，配置页插件详情里也会显示当前日志路径。
 
 ## 派生一个子会话（sidecar）

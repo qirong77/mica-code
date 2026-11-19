@@ -298,8 +298,8 @@ function createWebApi(env) {
       roles: () => invoke('chat:roles'),
       // 会话级能力（skills / tools / MCP servers）：读取目录与开关、提交选择。
       // 选择落在会话快照里，同一会话的其他窗口通过 onCapabilitiesUpdated 同步。
-      capabilities: (id, { sessionId, cwd } = {}) =>
-        invoke('chat:capabilities', { id, sessionId: sessionId || null, cwd: cwd || null }),
+      capabilities: (id, { sessionId, cwd, role } = {}) =>
+        invoke('chat:capabilities', { id, sessionId: sessionId || null, cwd: cwd || null, role: role || null }),
       pluginSettings: (id, { sessionId, cwd } = {}) =>
         invoke('chat:plugin-settings', { id, sessionId: sessionId || null, cwd: cwd || null }),
       // 对话右侧的插件面板（清单 `desktop.panel`）：视图与动作都由插件给，宿主只转发。
@@ -348,12 +348,13 @@ function createWebApi(env) {
           pluginId,
           values
         }),
-      setCapabilities: (id, selection, { sessionId, cwd } = {}) =>
+      setCapabilities: (id, selection, { sessionId, cwd, role } = {}) =>
         invoke('chat:set-capabilities', {
           id,
           selection,
           sessionId: sessionId || null,
-          cwd: cwd || null
+          cwd: cwd || null,
+          role: role || null
         }),
       onCapabilitiesUpdated: (callback) => subscribe('chat:capabilities-updated', callback),
       // 插件的会话级状态（存在会话快照里，压缩不动它）。内核不解析值，插件自己定义形状。

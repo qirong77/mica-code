@@ -103,7 +103,7 @@ export function resolvePluginRolesDir(options: PluginRolesOptions = {}): string 
 /** 整份重写：插件把某个角色删掉之后，索引里也不该还留着它。传空列表等于删除。 */
 export function publishPluginRoles(
   pluginId: string,
-  roles: readonly { name: string; path: string }[],
+  roles: readonly { name: string; path?: string; prompt?: string }[],
   options: PluginRolesOptions = {},
 ): string | null {
   const fileName = indexFileName(pluginId);
@@ -112,15 +112,22 @@ export function publishPluginRoles(
   const path = join(dir, fileName);
 
   const unique = new Map<string, string>();
+  const embeddedDir = join(dir, indexFileName(pluginId).replace(/\.json$/, ''));
   for (const role of roles) {
     const name = String(role?.name ?? '').trim();
-    const file = String(role?.path ?? '');
+    let file = String(role?.path ?? '');
+    if (!file && typeof role?.prompt === 'string') {
+      file = join(embeddedDir, `${safeRoleFileName(name)}.md`);
+      mkdirSync(embeddedDir, { recursive: true });
+      writeFileSync(file, role.prompt, 'utf-8');
+    }
     if (!name || !file || unique.has(name) || !existsSync(file)) continue;
     unique.set(name, file);
   }
 
   if (unique.size === 0) {
     rmSync(path, { force: true });
+    rmSync(embeddedDir, { recursive: true, force: true });
     return null;
   }
 
@@ -202,3 +209,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 export const pluginRoleInternals = { roleNameOf, indexFileName, dirname };
+
+function safeRoleFileName(name: string): string {
+  return name.replace(/[^\p{L}\p{N}._-]+/gu, '_').replace(/^\.+/, '') || 'role';
+}

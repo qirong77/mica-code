@@ -1,4 +1,4 @@
-import { timingSafeEqual } from 'node:crypto';
+import { randomUUID, timingSafeEqual } from 'node:crypto';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { fromMicaCookie, normalizeHost, SAME_SITE_NAMES, toMicaPayload, type SyncCookie } from './cookies.js';
 
@@ -8,13 +8,23 @@ const MAX_SNAPSHOT = 16 * 1024 * 1024;
 
 type CookieEvent = { cookie: SyncCookie; removed: boolean };
 export type CookieSyncObservation = {
-  direction: 'upstream' | 'incremental' | 'snapshot' | 'to-browser';
+  direction: 'upstream' | 'incremental' | 'snapshot' | 'to-browser' | 'reconcile';
   outcome: 'success' | 'error' | 'recovered';
-  code: 'ok' | 'invalid-json' | 'stream-ended' | 'timeout' | 'unavailable' | 'request-failed';
+  code: 'ok' | 'invalid-json' | 'stream-ended' | 'timeout' | 'unavailable' | 'request-failed' | 'http-error' | 'invalid-response' | 'write-rejected' | 'reconcile-incomplete';
+  httpStatus?: number;
+  reason: 'none' | 'http' | 'timeout' | 'connection-refused' | 'connection-reset' | 'dns' | 'invalid-response' | 'transport' | 'incomplete';
+  deliveries: number;
+  repairRequested: number;
+  repairCompleted: number;
+  repairPending: number;
   failures: number;
   reconnects: number;
   durationMs: number;
 };
+
+class SyncFailure extends Error {
+  constructor(readonly code: CookieSyncObservation['code'], readonly httpStatus?: number) { super(code); }
+}
 
 function normalizeCookie(value: unknown): SyncCookie | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
@@ -125,16 +135,17 @@ async function readBody(req: IncomingMessage): Promise<unknown> {
 }
 
 async function readJson(response: Response, max: number): Promise<Record<string, unknown>> {
-  if (!response.ok || !response.body) throw new Error('upstream unavailable');
+  if (!response.ok) throw new SyncFailure('http-error', response.status);
+  if (!response.body) throw new SyncFailure('invalid-response');
   const chunks: Uint8Array[] = [];
   let size = 0;
   for await (const chunk of response.body) {
     size += chunk.length;
-    if (size > max) throw new Error('upstream response too large');
+    if (size > max) throw new SyncFailure('invalid-response');
     chunks.push(chunk);
   }
   const body = JSON.parse(Buffer.concat(chunks).toString('utf8')) as Record<string, unknown>;
-  if (!body || typeof body !== 'object' || body.ok === false) throw new Error('upstream rejected request');
+  if (!body || typeof body !== 'object' || body.ok === false) throw new SyncFailure('write-rejected');
   return body;
 }
 
@@ -168,20 +179,37 @@ export async function startCookieService({
   let writes = Promise.resolve();
   let revision = 0;
   let reconnects = 0;
+  let deliveries = 0;
+  let repairEpoch = 0;
+  let repairRequested = 0;
+  let repairCompleted = 0;
+  let repairPending = 0;
+  const snapshots = new Map<string, { revision: number; repairEpoch: number }>();
   const failures = new Map<CookieSyncObservation['direction'], { count: number; since: number; degraded: boolean }>();
-  function note(direction: CookieSyncObservation['direction'], error?: unknown): void {
+  function note(direction: CookieSyncObservation['direction'], error?: unknown, reconciled = false): void {
+    // A stream gap invalidates older in-flight snapshot acknowledgments too.
+    if (direction === 'upstream' && error !== undefined) {
+      repairEpoch++; repairRequested++; repairPending++;
+    }
     const state = failures.get(direction) ?? { count: 0, since: Date.now(), degraded: false };
-    const recovering = state.degraded && error === undefined;
+    const recovering = state.degraded && error === undefined && (reconciled || repairPending === 0 || !['incremental', 'to-browser'].includes(direction));
     if (error !== undefined) {
       if (!state.degraded) state.since = Date.now();
       state.degraded = true;
       state.count++;
-    } else state.degraded = false;
+    } else if (reconciled || repairPending === 0 || !['incremental', 'to-browser'].includes(direction)) state.degraded = false;
     failures.set(direction, state);
     const name = error instanceof Error ? error.name : '';
-    const code = error === undefined ? 'ok' : name === 'SyntaxError' ? 'invalid-json' : name === 'TimeoutError' ? 'timeout'
+    const code = error instanceof SyncFailure ? error.code : error === undefined ? 'ok' : name === 'SyntaxError' ? 'invalid-json' : name === 'TimeoutError' ? 'timeout'
       : error === 'stream-ended' ? 'stream-ended' : direction === 'upstream' ? 'unavailable' : 'request-failed';
-    try { onObservation({ direction, outcome: error === undefined ? (recovering ? 'recovered' : 'success') : 'error', code, failures: state.count, reconnects, durationMs: Math.max(0, Date.now() - state.since) }); }
+    const transportCode = error && typeof error === 'object' ? (error as { cause?: { code?: unknown }; code?: unknown }).cause?.code ?? (error as { code?: unknown }).code : undefined;
+    const reason: CookieSyncObservation['reason'] = error === undefined ? 'none' : code === 'http-error' ? 'http'
+      : code === 'timeout' ? 'timeout' : ['invalid-json', 'invalid-response'].includes(code) ? 'invalid-response'
+      : code === 'reconcile-incomplete' ? 'incomplete' : transportCode === 'ECONNREFUSED' ? 'connection-refused'
+      : ['ECONNRESET', 'EPIPE'].includes(String(transportCode)) ? 'connection-reset' : ['ENOTFOUND', 'EAI_AGAIN'].includes(String(transportCode)) ? 'dns' : 'transport';
+    try { onObservation({ direction, outcome: error === undefined ? (recovering ? 'recovered' : 'success') : 'error', code, reason,
+      ...(error instanceof SyncFailure && error.httpStatus ? { httpStatus: error.httpStatus } : {}),
+      failures: state.count, reconnects, deliveries, repairRequested, repairCompleted, repairPending, durationMs: Math.max(0, Date.now() - state.since) }); }
     catch { /* diagnostics cannot stop cookie synchronization */ }
   }
 
@@ -256,7 +284,10 @@ export async function startCookieService({
             return raw.host !== undefined ? normalizeCookie(raw) : fromMicaCookie(raw);
           });
           if (cookies.some((item) => item === null)) throw new Error('invalid snapshot cookie');
-          return { cookies, revision };
+          const deliveryId = randomUUID();
+          if (snapshots.size >= 16) snapshots.delete(snapshots.keys().next().value!);
+          snapshots.set(deliveryId, { revision, repairEpoch });
+          return { cookies, revision, repairEpoch, deliveryId };
         });
         note('snapshot');
         send(res, 200, snapshot);
@@ -264,6 +295,30 @@ export async function startCookieService({
         note('snapshot', error);
         send(res, 502, { ok: false, error: 'snapshot unavailable or incomplete' });
       }
+      return;
+    }
+    if (req.method === 'POST' && path === '/ack') {
+      try {
+        const value = await readBody(req) as Record<string, unknown>;
+        if (!value || value.kind !== 'snapshot' || typeof value.deliveryId !== 'string' || !Number.isSafeInteger(value.repairEpoch) || !Number.isSafeInteger(value.revision) ||
+          Number(value.revision) < 0 || Number(value.revision) > revision || !Number.isSafeInteger(value.failed) || Number(value.failed) < 0 ||
+          !Number.isSafeInteger(value.skipped) || Number(value.skipped) < 0) { send(res, 400, { ok: false }); return; }
+        const delivered = snapshots.get(value.deliveryId);
+        if (!delivered || delivered.revision !== value.revision || delivered.repairEpoch !== value.repairEpoch) {
+          send(res, 409, { ok: false }); return;
+        }
+        snapshots.delete(value.deliveryId);
+        if (Number(value.failed) > 0 || Number(value.skipped) > 0) note('reconcile', new SyncFailure('reconcile-incomplete'));
+        else if (value.repairEpoch === repairEpoch) {
+          repairCompleted += repairPending;
+          repairPending = 0;
+          note('reconcile', undefined, true);
+          for (const direction of ['incremental', 'to-browser'] as const) {
+            if (failures.get(direction)?.degraded) note(direction, undefined, true);
+          }
+        }
+        send(res, 200, { ok: true });
+      } catch { send(res, 400, { ok: false }); }
       return;
     }
     if (req.method === 'POST' && path === '/events') {
@@ -312,13 +367,15 @@ export async function startCookieService({
           signal: AbortSignal.timeout(20000),
         });
         const result = await readJson(response, MAX_BODY);
-        if (Array.isArray(result.failed) && result.failed.length) throw new Error('cookie write failed');
+        if (Array.isArray(result.failed) && result.failed.length) throw new SyncFailure('write-rejected');
         return ++revision;
       });
       try {
         send(res, 200, { ok: true, revision: await write });
+        deliveries++;
         note('to-browser');
       } catch (error) {
+        repairEpoch++; repairRequested++; repairPending++;
         note('to-browser', error);
         send(res, 502, { ok: false, error: 'browser write failed' });
       }
@@ -352,7 +409,8 @@ export async function startCookieService({
           headers: { accept: 'text/event-stream' },
           signal: controller.signal,
         });
-        if (!response.ok || !response.body) throw new Error('upstream event stream unavailable');
+        if (!response.ok) throw new SyncFailure('http-error', response.status);
+        if (!response.body) throw new SyncFailure('invalid-response');
         note('upstream');
         if (reconnecting) for (const client of clients) client.end();
         let buffer = '';
@@ -387,8 +445,9 @@ export async function startCookieService({
                     }
                     return false;
                   });
-                  if (relayed) note('incremental');
+                  if (relayed) { deliveries++; note('incremental'); }
                 } catch (error) {
+                  repairEpoch++; repairRequested++; repairPending++;
                   note('incremental', error);
                   // Reconnect clients so their snapshot repairs a failed incremental read.
                   for (const client of clients) client.end();

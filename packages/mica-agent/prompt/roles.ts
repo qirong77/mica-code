@@ -22,6 +22,8 @@ export type AgentRole = {
   path?: string;
   /** 来自哪个插件（`user.demand-dev` 这类）；磁盘角色没有这个字段。 */
   pluginId?: string;
+  /** 插件发布的角色，用于界面和调用方与用户角色区分。 */
+  tag?: 'plugin';
 };
 
 export function getRolesDirectory(): string {
@@ -116,7 +118,7 @@ function pluginRoles(): AgentRole[] {
       if (!name || name === DEFAULT_ROLE_NAME || !path || seen.has(name)) continue;
       try {
         if (!statSync(path).isFile()) continue;
-        roles.push({ name, prompt: readFileSync(path, 'utf-8'), builtIn: false, path, pluginId });
+        roles.push({ name, prompt: readFileSync(path, 'utf-8'), builtIn: false, path, pluginId, tag: 'plugin' });
         seen.add(name);
       } catch {
         // 正文被删掉就跳过：列出来也切不过去。

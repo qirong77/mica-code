@@ -100,12 +100,15 @@ describe('session compaction menu', () => {
 
   it('reports why nothing happened instead of failing silently', async () => {
     expect(await createHarness({ status: 'skipped', reason: 'busy' }).run('quick')).toEqual({
+      outcome: 'busy', code: 'session_busy',
       message: '这条会话正忙，等这一轮结束再压',
     });
     expect(await createHarness({ status: 'skipped', reason: 'empty' }).run('quick')).toEqual({
+      outcome: 'skipped', code: 'empty',
       message: '没有可清理的工具结果',
     });
     expect(await createHarness({ status: 'skipped', reason: 'empty' }).run('model')).toEqual({
+      outcome: 'skipped', code: 'empty',
       message: '当前没有可压缩的历史，或压缩后预计不会节省上下文',
     });
   });
@@ -114,6 +117,7 @@ describe('session compaction menu', () => {
     const harness = createHarness(applied(), { configured: false });
 
     expect(await harness.run('model')).toEqual({
+      outcome: 'declined', code: 'unconfigured',
       message: '压缩摘要模型未配置：在插件设置里复用当前会话模型，或填写接口地址与模型',
     });
     expect(harness.calls).toEqual([]);
@@ -121,6 +125,7 @@ describe('session compaction menu', () => {
 
   it('turns a host failure into a readable menu message', async () => {
     expect(await createHarness(new Error('摘要请求超时')).run('model')).toEqual({
+      outcome: 'error', code: 'compact_failed',
       message: '模型压缩失败：摘要请求超时',
     });
   });
@@ -128,7 +133,7 @@ describe('session compaction menu', () => {
   it('ignores unknown actions', async () => {
     const harness = createHarness(applied());
 
-    expect(await harness.run('compact-everything')).toEqual({ message: '未知动作：compact-everything' });
+    expect(await harness.run('compact-everything')).toEqual({ outcome: 'declined', code: 'unknown_action', message: '未知动作：compact-everything' });
     expect(harness.calls).toEqual([]);
   });
 });

@@ -21,10 +21,10 @@ describe('readScheduleData', () => {
     expect(readScheduleData(join(dir, 'data.json').toString())).toMatchObject({ tasks: [], summary: '' });
   });
 
-  it('survives a hand-edited file', () => {
+  it('rejects a damaged file instead of treating it as a new schedule', () => {
     const file = join(dir, 'data.json');
     writeFileSync(file, '{ not json', 'utf8');
-    expect(readScheduleData(file).tasks).toEqual([]);
+    expect(() => readScheduleData(file)).toThrow('原文件未改写');
   });
 });
 

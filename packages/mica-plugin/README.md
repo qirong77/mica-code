@@ -19,8 +19,8 @@ lease 并应用配置后、保存用户输入前执行，可通过事件上的 `
   插件设置与版本化插件数据，停用释放资源。完整约定见根 `plugins/README.md`。
 
 - 只读运行观察：`AgentObservationEvent` 定义 `agent:observe`，由 `HookRegistry.notify()` 按注册顺序调用，观察者抛错或返回挂起的 Promise 均不阻塞任务。异步完成顺序由观察插件负责，磁盘队列在插件 dispose 时 flush。覆盖主运行的起止、实际请求边界与工具定义、最终 prompt、工具调用/结果、用量、重试及历史改写；不在任何一轮里的工作（压缩摘要、旁问线程、插件 `ctx.llm` 请求）作为独立的 helper 运行出现，带 `helper: { kind, pluginId?, purpose? }` 与完整的请求边界。
-- 插件自身的运行事件走独立的 `plugin:observe`（`PluginObservationEvent`）：常驻任务失败（`background:failed`：`taskId` / `tick` / `failures` / `error`）与钩子处理函数抛错（`hook:failed`：`hook` / `failures` / `error`）都不属于任何一条 run，挂到某条 run 上会让那条 run 的耗时与失败原因都变假。观察通道自己的 handler 失败不回报，否则 `notify` 会递归调用自己。
-- `PluginOperations` / `ctx.operations?.run(operation, task, { signal? })` 为插件内部步骤提供同一套脱敏操作观察。manager 自动覆盖注册的工具/命令、面板视图和动作、菜单、配置动作、常驻 tick、数据、非观察 hook、setup/dispose；一次性动作宿主也有效，无需等待 Harness 插件装配。`operation.start/finish` 写入共享 diagnostics，只有固定元数据，不记录输入/输出/异常原文，不制造 Agent run。同步接口不转成 Promise；取消/拒绝/等待/冲突/忙/部分/未知与故障分开，完成不代表用户验收。
+- 插件自身的运行事件走独立的 `plugin:observe`（`PluginObservationEvent`）： 新事件为 `schemaVersion: 2`，带装载时 `pluginVersion`、`pid`、`generation`；历史身份由 Evolution 标为 unknown，不从当前清单补造。常驻任务失败（`background:failed`：`taskId` / `tick` / `failures` / `error`）与钩子处理函数抛错（`hook:failed`：`hook` / `failures` / `error`）都不属于任何一条 run，挂到某条 run 上会让那条 run 的耗时与失败原因都变假。观察通道自己的 handler 失败不回报，否则 `notify` 会递归调用自己。
+- `PluginOperations` / `ctx.operations?.run(operation, task, { signal? })` 的结果可显式携带固定 `outcome/code`；`PluginActionResult`、`PluginPanelActionResult`、`PluginSessionMenuResult` 和 `PluginBackgroundTask.run` 均支持这份可选元数据，为插件内部步骤提供同一套脱敏操作观察。manager 自动覆盖注册的工具/命令、面板视图和动作、菜单、配置动作、常驻 tick、数据、非观察 hook、setup/dispose；一次性动作宿主也有效，无需等待 Harness 插件装配。`operation.start/finish` 写入共享 diagnostics，只有固定元数据，不记录输入/输出/异常原文，不制造 Agent run。同步接口不转成 Promise；取消/拒绝/等待/冲突/忙/部分/未知与故障分开，完成不代表用户验收。
 
 - 定义插件的唯一落盘形态（目录 + `plugin.json` + `setup(ctx)`），以及宿主进程内装配时用的 `Plugin` 基类。
 - 管理插件加载、启动和销毁生命周期。正常卸载与启动失败都按资源注册的逆序释放；单项清理失败仍继续释放其余资源，正常卸载结束后以 `AggregateError` 汇总失败。
@@ -35,7 +35,7 @@ lease 并应用配置后、保存用户输入前执行，可通过事件上的 `
 - 本地使用统计：`createPluginExperience(ctx)` 输出版本化的 `plugin:experience` 元数据事件，白名单限制字段、哈希化会话键，不记录正文、路径和地址；插件设置 `telemetry: "false"` 可立即停记。`summarizePluginExperience(lines, { since?, plugin? })` 只读聚合 JSONL，按插件版本分组、按 eventId 去重。导出脚本和口径见 [会话体验卡与埋点](../../docs/plugin-experience.md)。
 - 桌面共享容器额外覆盖随包 card/page/launcher 的实际可见曝光、通用控件点击与页面关闭；视图预取/轮询不算曝光，未能确认 visibility-v2 时不补造曝光。前端只发固定 event/surface/action，host 从清单绑定插件版本并过滤字段。
 - 面板摘要卡：`PluginPanelView.cards` 在输入框上方展示紧凑摘要（每插件最多 3 张），动作走既有面板通道；`revision` 和动作 `key` 由插件配合校验。可选 `impressionAction` 由宿主在可见展示时触发，轮询视图不算曝光。卡片样式和控件由宿主统一提供。
-- 插件健康：`ctx.health.report()` 原子写入 `$MICA_HOME/plugin-health/<id>.json`，配置页据此显示「正常 / 待配置 / 运行出错」。只有插件运行状态写这里；缺宿主能力与装配失败分别由 manager 记入 `setupReport()` / `plugin-status.json` 的 `skipped` 与 `failed`，不进健康文件。成功装配不清除已有运行故障，恢复由插件自己上报。记录（含钩子失败）带当前插件版本，读的一方传 `version` 就只认这一版写的（升级后旧结论自动失效）。
+- 插件健康：`ctx.health.report()` 通过固定 issueKey 隔离后台任务、hook、skill、配置、依赖与业务任务；成功兄弟处理器、setup 或其他健康宿主不清除已报告故障。 原子写入 `$MICA_HOME/plugin-health/<id>.json`，配置页据此显示「正常 / 待配置 / 运行出错」。只有插件运行状态写这里；缺宿主能力与装配失败分别由 manager 记入 `setupReport()` / `plugin-status.json` 的 `skipped` 与 `failed`，不进健康文件。成功装配不清除已有运行故障，恢复由插件自己上报。记录（含钩子失败）带当前插件版本，读的一方传 `version` 就只认这一版写的（升级后旧结论自动失效）。
 - `PluginHealthInput.issueKey?` 为固定问题标识，缺省 `runtime`；文件使用 `schemaVersion: 2` 的 `issues` 映射。`read()` 聚合最高严重度、`read(key)` 查一项；`report({level:'ok',...})` 和 `clear(key?)` 只恢复指定项，不隐式清全部。LLM 自动降级独立记在 `llm:degraded`，只有原目标/有效新配置请求成功才恢复，缓存降级请求成功不算恢复。旧单条健康形态由 Evolution 迁移并保留原文，运行期不兼容解析。
 - 提示词贡献：`ctx.prompt.section()` 追加一段 system prompt，随插件启停一起出现 / 消失。
 - 会话状态：`ctx.sessionState` 按插件 id 存进会话快照，resume / fork / rewind 跟着走。
@@ -51,6 +51,8 @@ lease 并应用配置后、保存用户输入前执行，可通过事件上的 `
   manager 按 `MicaPlugin.root` 读进来注册，插件不必写代码。注册进来的 skill 与磁盘扫描出来的完全同权
   （system prompt 索引、`skill` 工具、会话能力开关）；磁盘上的同名 skill 优先，被遮蔽的条目会报成一条
   健康状态。正文来自内存 / 需要运行时生成时仍用 `ctx.skills.register()`，`skipped` 同理。
+- 内置角色：普通目录插件从 `MicaPlugin.root` 读取清单 `roles`；编译进产物、没有目录的官方插件可以用
+  `embeddedRoles` 发布同样的角色索引。两者都带 `tag: "plugin"`，正文进入角色 prompt 而不是默认 prompt。
 - 运行条件：清单里的 `desktop.checks` 声明插件依赖的权限与外部工具，取值只能来自
   `DESKTOP_CHECKS` 目录（`PluginDesktop.ts` 是宿主与插件共用的单一事实来源）。状态由桌面端探测
   并渲染在配置页的插件详情里——插件跑在 app-server 子进程里，既探测不到也渲染不了。
@@ -142,7 +144,8 @@ export default function setup(context: PluginContext) {
 ### 独立插件 MCP
 
 清单 `mcp: true` 声明随包 `mcp.ts` 的独立接口，由应用运行时挂在同一端口的
-`/plugin/<id>/mcp`，server 名 `mica-plugin-<id>`。它与会话 `setup(ctx)` 分开装配，
+`/plugin/<id>/mcp`，server 名 `mica-plugin-<id>`。它与会话 `setup(ctx)` 分开装配；清单可用
+`mcpRoles` 将它限制在插件角色中，受角色限制的 MCP 不进入默认 `/` 补全，
 不依赖会话或页面，不为具体插件在宿主写路由分支。当前仅支持随包模块。
 
 - `PluginMcpContext`：`pluginId`、绑定当前插件的 `data: PluginDataApi`、只读 `settings.get()`。

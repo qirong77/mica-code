@@ -300,6 +300,13 @@ async function reconcile(token) {
     }
   }
   await chrome.storage.local.set({ baseline, lastSync: { at: Date.now(), ...stats } });
+  // A delivered snapshot is not a completed repair until Chrome has applied/reconciled it.
+  await request('/ack', token, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ kind: 'snapshot', deliveryId: snapshot.deliveryId, revision: snapshot.revision,
+      repairEpoch: snapshot.repairEpoch, failed: stats.failed, skipped: stats.skipped }),
+  });
   return stats;
 }
 
@@ -365,7 +372,8 @@ function connect() {
         signal: activeController.signal,
       });
       if (!response.ok || !response.body) throw new Error(`Local event stream returned ${response.status}`);
-      await serialize(() => reconcile(token));
+      const stats = await serialize(() => reconcile(token));
+      if (stats.failed > 0) throw new Error('Cookie reconciliation incomplete; retry on reconnect');
       await readEvents(response);
     } finally {
       activeController.abort();

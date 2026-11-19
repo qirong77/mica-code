@@ -1,3 +1,5 @@
+import type { OperationOutcome } from '@packages/mica-diagnostics/operation.js';
+
 export type CommandScope = 'local-only' | 'remote-capable' | 'remote-only';
 
 export type MicaCommand = {
@@ -23,7 +25,7 @@ export type CommandContext = {
   runtime?: unknown;
 };
 
-export type CommandResult =
+export type CommandResult = Partial<OperationOutcome> & (
   | {
       ok: true;
       handled?: boolean;
@@ -36,7 +38,7 @@ export type CommandResult =
        */
       data?: unknown;
     }
-  | { ok: false; error: unknown; message?: string; data?: unknown };
+  | { ok: false; error: unknown; message?: string; data?: unknown });
 
 export type ParsedCommand = {
   command: MicaCommand;

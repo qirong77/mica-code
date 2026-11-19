@@ -19,6 +19,7 @@ async function fixture(extensionInfo?: () => { version: string; fingerprint: str
   const calls: Array<{ path: string; body: any }> = [];
   const observations: CookieSyncObservation[] = [];
   const streams = new Set<ServerResponse>();
+  let writeStatus = 200;
   let snapshot: Record<string, unknown> = { ok: true, cookies: [{ ...cookie }], total: 1, truncated: false };
   const upstream = createServer(async (req, res) => {
     const path = new URL(req.url || '/', 'http://127.0.0.1').pathname;
@@ -34,6 +35,7 @@ async function fixture(extensionInfo?: () => { version: string; fingerprint: str
       const chunks: Buffer[] = [];
       for await (const chunk of req) chunks.push(chunk);
       calls.push({ path, body: JSON.parse(Buffer.concat(chunks).toString()) });
+      res.statusCode = writeStatus;
       res.setHeader('content-type', 'application/json');
       res.end(JSON.stringify({ ok: true, written: 1, removed: 1 }));
     }
@@ -62,6 +64,7 @@ async function fixture(extensionInfo?: () => { version: string; fingerprint: str
     setSnapshot(value: Record<string, unknown>) {
       snapshot = value;
     },
+    setWriteStatus(status: number) { writeStatus = status; },
     emit(value: unknown) {
       for (const stream of streams) stream.write(`data: ${JSON.stringify(value)}\n\n`);
     },
@@ -98,6 +101,30 @@ async function waitFor(predicate: () => boolean) {
 }
 
 describe('cookie loopback service', () => {
+  it('reports safe HTTP failure metadata and requires a current completed snapshot acknowledgment for repair', async () => {
+    const service = await setup();
+    service.setWriteStatus(503);
+    expect((await service.request('/events', post({ cookie, removed: false }))).status).toBe(502);
+    expect(service.observations.find((row) => row.direction === 'to-browser')).toMatchObject({ code: 'http-error', httpStatus: 503, reason: 'http', repairPending: 1 });
+    const first = await (await service.request('/snapshot')).json();
+    const acknowledge = (snapshot: typeof first, failed = 0) => service.request('/ack', post({ kind: 'snapshot',
+      deliveryId: snapshot.deliveryId, revision: snapshot.revision, repairEpoch: snapshot.repairEpoch, failed, skipped: 0 }));
+    // A newer failure makes this delivered snapshot insufficient to prove recovery.
+    await service.request('/events', post({ cookie, removed: false }));
+    await acknowledge(first);
+    expect(service.observations.some((row) => row.outcome === 'recovered')).toBe(false);
+    service.setWriteStatus(200);
+    await service.request('/events', post({ cookie, removed: false }));
+    expect(service.observations.filter((row) => row.direction === 'to-browser').at(-1)).toMatchObject({ outcome: 'success', repairPending: 2 });
+    const partial = await (await service.request('/snapshot')).json();
+    await acknowledge(partial, 1);
+    expect(service.observations.filter((row) => row.direction === 'reconcile').at(-1)).toMatchObject({ outcome: 'error', code: 'reconcile-incomplete', repairPending: 2 });
+    const complete = await (await service.request('/snapshot')).json();
+    expect((await acknowledge(complete)).status).toBe(200);
+    expect(service.observations.filter((row) => row.direction === 'to-browser').at(-1)).toMatchObject({ outcome: 'recovered', repairCompleted: 2, repairPending: 0 });
+    expect((await acknowledge(complete)).status).toBe(409);
+    expect(JSON.stringify(service.observations)).not.toMatch(/secret|example\.com|sid|test-token/);
+  });
   it('reports parse failure and recovery without retaining cookie data or token', async () => {
     const service = await setup();
     await waitFor(() => service.streams.size > 0);
@@ -110,7 +137,13 @@ describe('cookie loopback service', () => {
     await reader.read();
     service.emit({ cookie, removed: false });
     await reader.read();
-    await waitFor(() => service.observations.some((row) => row.direction === 'incremental' && row.outcome === 'recovered'));
+    await waitFor(() => service.observations.some((row) => row.direction === 'incremental' && row.outcome === 'success'));
+    expect(service.observations.some((row) => row.direction === 'incremental' && row.outcome === 'recovered')).toBe(false);
+    const snapshot = await (await service.request('/snapshot')).json();
+    expect(snapshot.repairEpoch).toBeGreaterThan(0);
+    expect((await service.request('/ack', post({ kind: 'snapshot', deliveryId: snapshot.deliveryId,
+      revision: snapshot.revision, repairEpoch: snapshot.repairEpoch, failed: 0, skipped: 0 }))).status).toBe(200);
+    expect(service.observations.filter((row) => row.direction === 'incremental').at(-1)).toMatchObject({ outcome: 'recovered', repairCompleted: 1, repairPending: 0 });
     expect(JSON.stringify(service.observations)).not.toMatch(/PRIVATE|secret|test-token|example.com/);
     const failure = service.observations.find((row) => row.code === 'invalid-json')!;
     expect(failure).toMatchObject({ direction: 'incremental', failures: 1 });
@@ -169,7 +202,7 @@ describe('cookie loopback service', () => {
 
   it('rejects truncated snapshots and returns normalized complete snapshots', async () => {
     const service = await setup();
-    expect(await (await service.request('/snapshot')).json()).toEqual({ cookies: [cookie], revision: 0 });
+    expect(await (await service.request('/snapshot')).json()).toMatchObject({ cookies: [cookie], revision: 0, repairEpoch: 0, deliveryId: expect.any(String) });
     service.setSnapshot({ ok: true, truncated: true, total: 20001, cookies: [cookie] });
     expect((await service.request('/snapshot')).status).toBe(502);
   });

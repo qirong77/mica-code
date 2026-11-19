@@ -69,6 +69,8 @@ export type PluginManifest = {
   main: string;
   /** 随包独立 MCP 模块 mcp.ts，挂载到应用现有端口的 /plugin/<id>/mcp。 */
   mcp?: boolean;
+  /** MCP 只在这些会话角色下接入；省略或空数组表示所有角色。 */
+  mcpRoles?: string[];
   /** 随包只读 web.ts 模块，挂载到现有端口的 /plugins/<id>/api/<query>。 */
   web?: boolean;
   /** 除入口与清单外随插件一起分发的资源文件，相对插件目录。 */
@@ -278,6 +280,8 @@ export function parsePluginManifest(input: unknown): PluginManifestParseResult {
   if (input.mcp !== undefined && typeof input.mcp !== 'boolean') {
     return { ok: false, error: 'mcp 必须是布尔值' };
   }
+  const mcpRoles = readRoleNames(input.mcpRoles, 'mcpRoles');
+  if (!mcpRoles.ok) return mcpRoles;
   if (input.web !== undefined && typeof input.web !== 'boolean') {
     return { ok: false, error: 'web 必须是布尔值' };
   }
@@ -337,6 +341,7 @@ export function parsePluginManifest(input: unknown): PluginManifestParseResult {
       author,
       main,
       mcp: input.mcp === true,
+      ...(mcpRoles.value.length > 0 ? { mcpRoles: mcpRoles.value } : {}),
       ...(input.web !== undefined ? { web: input.web } : {}),
       assets: assets.value,
       dependencies: dependencies.value,
@@ -365,6 +370,18 @@ export function parsePluginManifest(input: unknown): PluginManifestParseResult {
 
 function readRolePaths(input: unknown): { ok: true; value: string[] } | { ok: false; error: string } {
   return readBundlePaths(input, 'roles');
+}
+
+function readRoleNames(input: unknown, field: string): { ok: true; value: string[] } | { ok: false; error: string } {
+  if (input === undefined) return { ok: true, value: [] };
+  if (!Array.isArray(input)) return { ok: false, error: `${field} 必须是数组` };
+  const roles: string[] = [];
+  for (const item of input) {
+    if (typeof item !== 'string' || !item.trim()) return { ok: false, error: `${field} 里只能放非空角色名` };
+    const role = item.trim();
+    if (!roles.includes(role)) roles.push(role);
+  }
+  return { ok: true, value: roles };
 }
 
 function readSkillDirs(input: unknown): { ok: true; value: string[] } | { ok: false; error: string } {

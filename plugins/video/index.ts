@@ -38,7 +38,7 @@ const plugin: MicaPlugin = {
         const configuredPath =
           values.ffmpegPath === undefined ? readConfig().ffmpegPath : values.ffmpegPath.trim() || undefined;
         const tools = await refreshAvailability(ctx, configuredPath);
-        return { message: tools ? `ffmpeg 可用：${tools.version}` : '仍然没有找到 ffmpeg' };
+        return { outcome: tools ? 'success' : 'error', code: tools ? 'dependency_ready' : 'ffmpeg_missing', message: tools ? `ffmpeg 可用：${tools.version}` : '仍然没有找到 ffmpeg' };
       });
       ctx.onDispose(() => action.dispose());
     }
@@ -50,6 +50,7 @@ const plugin: MicaPlugin = {
     const issues = ctx.settings.validate();
     if (issues.length > 0) {
       ctx.health.report({
+        issueKey: 'configuration',
         level: 'warn',
         message: `配置有问题：${issues.map((issue) => `${issue.label} ${issue.message}`).join('；')}`,
         hint: '在配置页的 Plugins → Video 里修正。',
@@ -59,6 +60,10 @@ const plugin: MicaPlugin = {
     const tool = new VideoFramesTool({
       getConfig: readConfig,
       onMissingFfmpeg: () => reportMissing(ctx),
+      onScenePlan: (result) => {
+        if (result.outcome === 'partial') ctx.logger.warn('video:scene-plan', result);
+        else ctx.logger.info('video:scene-plan', result);
+      },
     });
     const registration = ctx.tools.register(tool, { icon: '🎞️' });
     ctx.onDispose(() => registration.dispose());
@@ -77,7 +82,7 @@ async function refreshAvailability(
   if (!tools) {
     reportMissing(ctx);
   } else {
-    ctx.health.report({ level: 'ok', message: `ffmpeg 可用：${tools.version}` });
+    ctx.health.report({ issueKey: 'dependency:ffmpeg', level: 'ok', message: `ffmpeg 可用：${tools.version}` });
   }
 
   publishStatus(ctx, {
@@ -97,6 +102,7 @@ function describeCache(stats: { bytes: number; files: number }): string {
 
 function reportMissing(ctx: PluginContext): void {
   ctx.health.report({
+    issueKey: 'dependency:ffmpeg',
     level: 'warn',
     message: '没有找到 ffmpeg，视频抽帧不可用',
     hint: 'macOS 执行 brew install ffmpeg；已经装了的话，在插件设置里填写 ffmpeg 的绝对路径。',

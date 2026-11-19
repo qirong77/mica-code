@@ -1,6 +1,7 @@
 import { join } from 'node:path';
 import { resolveMicaHome } from '@packages/mica-config/brand.js';
 import type { PluginContext } from '@packages/mica-plugin/index.js';
+import type { OperationOutcome } from '@packages/mica-diagnostics/operation.js';
 import { DATA_MIGRATIONS } from './data/index.js';
 import { MIGRATIONS } from './migrations.js';
 import { runEvolution, type EvolutionRunResult } from './run.js';
@@ -46,8 +47,8 @@ export default function setup(ctx: PluginContext): void {
   // 默认不备份：整份拷贝会让会话目录翻一倍（实测 713MB 备份 / 599MB 会话），而迁移是
   // 幂等的纯函数且有单测。要回滚某次改动时再在设置里临时打开。
   const backup = () => readSwitch(ctx.settings.get().backup, false);
-  const clean = async (reason: string): Promise<EvolutionRunResult | null> => {
-    if (running) return null;
+  const clean = async (reason: string): Promise<OperationOutcome & { result: EvolutionRunResult | null }> => {
+    if (running) return { outcome: 'busy', code: 'already_running', result: null };
     running = true;
     try {
       const result = await runEvolution({
@@ -57,7 +58,7 @@ export default function setup(ctx: PluginContext): void {
       });
       if (result.outcome === 'busy') {
         ctx.logger.info('evolution:busy', { reason });
-        return null;
+        return { outcome: 'busy', code: 'migration_locked', result: null };
       }
       lastResult = result;
       const dataChanged = result.dataFiles.reduce((sum, item) => sum + item.changed, 0);
@@ -98,21 +99,22 @@ export default function setup(ctx: PluginContext): void {
       }
       if (failureReported && !incomplete) {
         failureReported = false;
-        ctx.health.report({ level: 'ok', message: '旧数据清洗恢复正常' });
+        ctx.health.report({ issueKey: 'migration:run', level: 'ok', message: '旧数据清洗恢复正常' });
       }
-      return result;
+      return { outcome: incomplete ? 'partial' : 'success', code: incomplete ? 'migration_incomplete' : 'migration_complete', result };
     } catch (error) {
       const message = errorMessage(error);
       ctx.logger.error('evolution:failed', { reason, error: message });
       if (!failureReported) {
         failureReported = true;
         ctx.health.report({
+          issueKey: 'migration:run',
           level: 'error',
           message: `旧数据清洗失败：${message}`,
-          hint: '数据没有被改动，下一轮会重试。',
+          hint: '失败项保持原样，下一轮会重试；已完成的迁移不回滚。',
         });
       }
-      return null;
+      return { outcome: 'error', code: 'migration_failed', result: null };
     } finally {
       running = false;
     }
@@ -129,11 +131,12 @@ export default function setup(ctx: PluginContext): void {
     run: async () => {
       if (!enabled()) {
         task?.dispose();
-        return;
+        return { outcome: 'skipped', code: 'disabled' };
       }
       attempts += 1;
-      const result = await clean('startup');
-      if (result?.pending === 0 || attempts >= MAX_STARTUP_ROUNDS) task?.dispose();
+      const attempt = await clean('startup');
+      if (attempt.result?.pending === 0 || attempts >= MAX_STARTUP_ROUNDS) task?.dispose();
+      return attempt;
     },
   });
 
@@ -154,10 +157,11 @@ export default function setup(ctx: PluginContext): void {
         return { ok: true };
       }
       if (action === 'run') {
-        const result = await clean('command');
+        const attempt = await clean('command');
+        const result = attempt.result;
         if (!result) {
-          ctx.ui?.showMessage('清洗没有开始：上一轮还在跑，或另一个 mica 进程正在处理。');
-          return { ok: false, error: new Error('evolution run skipped') };
+          ctx.ui?.showMessage(attempt.outcome === 'busy' ? '清洗没有开始：上一轮还在跑，或另一个 mica 进程正在处理。' : '清洗失败，请查看插件日志；已完成的迁移不会回滚。');
+          return { ok: false, outcome: attempt.outcome, code: attempt.code, error: new Error(attempt.code) };
         }
         const dataChanged = result.dataFiles.reduce((sum, item) => sum + item.changed, 0);
         const parts = [
@@ -171,7 +175,7 @@ export default function setup(ctx: PluginContext): void {
           parts.length > 0 ? `${parts.join('；')}。` : `没有需要改写的旧数据（检查了 ${result.scanned} 个会话）。`,
           8000,
         );
-        return { ok: true };
+        return { ok: true, outcome: attempt.outcome, code: attempt.code };
       }
       ctx.ui?.showMessage('Usage: /evolution [status|run]');
       return { ok: true };

@@ -27,6 +27,7 @@ export class AskPlugin implements MicaPlugin {
     const tool = new AskUserTool(ask, {
       getTimeoutMs: () => Number(ctx.settings.get().timeoutMinutes) * 60_000,
       captureOwner: (context) => ctx.session?.captureOwner?.(context),
+      getCwd: (owner) => ctx.session?.describe(owner)?.cwd,
       onTimeout: (message, owner) => ctx.ui?.notice(message, { status: 'warning', owner }),
     });
     const toolRegistration = tools.register(tool, { icon: '❓' });

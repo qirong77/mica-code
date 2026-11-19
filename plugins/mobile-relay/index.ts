@@ -33,6 +33,7 @@ function registerSkill(ctx: PluginContext, dataDir: string | null): void {
     writeFileSync(join(baseDir, 'SKILL.md'), skillContent, 'utf8');
   } catch (error) {
     ctx.health.report({
+      issueKey: 'skill:storage',
       level: 'warn',
       message: `skill 落盘失败：${error instanceof Error ? error.message : String(error)}`,
       hint: `检查 ${baseDir} 是否可写`,
@@ -40,6 +41,7 @@ function registerSkill(ctx: PluginContext, dataDir: string | null): void {
     return;
   }
 
+  ctx.health.report({ issueKey: 'skill:storage', level: 'ok', message: '内置 skill 已写入' });
   const meta = micaSkills.parseMarkdown(skillContent);
   const registration = skills.register({
     name: meta.name || SKILL_NAME,
@@ -54,10 +56,13 @@ function registerSkill(ctx: PluginContext, dataDir: string | null): void {
     const names = registration.skipped.map((entry) => entry.name).join('、');
     ctx.logger.warn('mobile-relay:skill-shadowed', { names });
     ctx.health.report({
+      issueKey: 'skill',
       level: 'warn',
       message: `内置 skill 被磁盘上的同名 skill 覆盖（${names}）`,
       hint: '删掉 $MICA_HOME/skills 下的同名目录后重开会话，才会用内置这份。',
     });
+  } else {
+    ctx.health.report({ issueKey: 'skill', level: 'ok', message: '内置 skill 已注册' });
   }
 }
 

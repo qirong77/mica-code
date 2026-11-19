@@ -1,4 +1,6 @@
 import type { PluginContext, PluginNoticeOptions, PluginSubagentThread } from '@packages/mica-plugin/index.js';
+import type { CommandResult } from '@packages/mica-commands/index.js';
+import type { OperationOutcome } from '@packages/mica-diagnostics/operation.js';
 import { micaAgent } from '@packages/mica-agent/index.js';
 import { buildBtwSystemPrompt, messagesToTranscript } from '@packages/mica-builtin-commands/shared/btwThread.js';
 import { btwHelpText, formatBtwNotice, formatBtwProgress, formatBtwStopped, parseBtwArgs } from './message.js';
@@ -61,8 +63,7 @@ export default function setupBtw(ctx: PluginContext): void {
       { arg: '-stop', label: '-stop', description: '停止正在回答的旁问' },
     ],
     async handler(_commandCtx, args) {
-      await runBtw(ctx, states, args ?? '');
-      return { ok: true };
+      return runBtw(ctx, states, args ?? '');
     },
   });
   ctx.onDispose(() => registration.dispose());
@@ -120,24 +121,26 @@ function ensureState(states: Map<unknown, BtwState>, sessionId: string, owner: u
   return state;
 }
 
-async function runBtw(ctx: PluginContext, states: Map<unknown, BtwState>, rawArgs: string): Promise<void> {
+type BtwResult = CommandResult & OperationOutcome;
+
+async function runBtw(ctx: PluginContext, states: Map<unknown, BtwState>, rawArgs: string): Promise<BtwResult> {
   const parsed = parseBtwArgs(rawArgs);
   if (parsed.kind === 'help') {
     ctx.ui?.notice(btwHelpText(), { command: BTW_COMMAND, status: 'info' });
-    return;
+    return { ok: true, outcome: 'skipped', code: 'help' };
   }
 
   const session = ctx.session?.describe();
   if (!session) {
     ctx.ui?.notice('btw 需要先有一条会话', { command: BTW_COMMAND, status: 'error' });
-    return;
+    return { ok: true, outcome: 'declined', code: 'no_session' };
   }
   const state = ensureState(states, session.id, ctx.session?.captureOwner?.());
 
   if (parsed.kind === 'stop') {
     if (!state.running || !state.controller) {
       ctx.ui?.notice('当前没有正在回答的 btw', { command: BTW_COMMAND, status: 'info' });
-      return;
+      return { ok: true, outcome: 'skipped', code: 'not_running' };
     }
     state.controller.abort();
     state.stopProgress?.();
@@ -147,7 +150,7 @@ async function runBtw(ctx: PluginContext, states: Map<unknown, BtwState>, rawArg
       status: 'running',
       surface: 'command_panel',
     });
-    return;
+    return { ok: true, outcome: 'cancelled', code: 'stop_requested' };
   }
 
   if (state.running) {
@@ -155,7 +158,7 @@ async function runBtw(ctx: PluginContext, states: Map<unknown, BtwState>, rawArg
       command: BTW_COMMAND,
       status: 'warning',
     });
-    return;
+    return { ok: true, outcome: 'busy', code: 'already_running' };
   }
 
   const { question, isContinue } = parsed;
@@ -167,17 +170,17 @@ async function runBtw(ctx: PluginContext, states: Map<unknown, BtwState>, rawArg
   }
   if (!state.thread) {
     const created = createThread(ctx, question, session.role);
-    if (!created) return;
+    if (!created) return { ok: false, error: new Error('btw unavailable'), outcome: 'error', code: 'thread_unavailable' };
     state.thread = created;
   }
 
-  await ask(ctx, state, question, isFallback);
+  return ask(ctx, state, question, isFallback);
 }
 
 /** 问一次当前线程，把过程写进同一条 `/btw` 进度面板。 */
-async function ask(ctx: PluginContext, state: BtwState, question: string, isFallback: boolean): Promise<void> {
+async function ask(ctx: PluginContext, state: BtwState, question: string, isFallback: boolean): Promise<BtwResult> {
   const thread = state.thread;
-  if (!thread) return;
+  if (!thread) return { ok: true, outcome: 'declined', code: 'thread_unavailable' };
   const beforeRequests = thread.usage().requests;
   state.running = true;
   state.controller = new AbortController();
@@ -249,6 +252,7 @@ async function ask(ctx: PluginContext, state: BtwState, question: string, isFall
       command: BTW_COMMAND,
       status: 'success',
     });
+    return { ok: true, outcome: 'success', code: 'answered' };
   } catch (error) {
     if (controller.signal.aborted) {
       // 停止不是失败：已经流出来的那半段就是这一问的答案，不能丢。
@@ -259,12 +263,14 @@ async function ask(ctx: PluginContext, state: BtwState, question: string, isFall
         command: BTW_COMMAND,
         status: 'warning',
       });
+      return { ok: true, outcome: 'cancelled', code: 'aborted' };
     } else {
       const message = error instanceof Error ? error.message : String(error);
       notice(`> ${question}\n\nbtw 出错：${message}`, {
         command: BTW_COMMAND,
         status: 'error',
       });
+      return { ok: false, error, outcome: 'error', code: 'answer_failed' };
     }
   } finally {
     clearInterval(ticker);

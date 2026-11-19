@@ -8,7 +8,12 @@
  * 抛错或永不完成的观察方都不影响插件本身。
  */
 export type PluginObservationEvent = Readonly<{
+  schemaVersion: 2;
   pluginId: string;
+  /** Loaded producer identity. Missing historical identity must remain unknown. */
+  pluginVersion: string;
+  pid: number;
+  generation: string;
   timestamp: string;
 }> &
   (

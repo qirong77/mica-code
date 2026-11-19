@@ -8,11 +8,11 @@ export function setPluginMcpCatalog(read = () => []) {
   readCatalog = read
 }
 
-export function buildPluginMcpServers({ origin, manifests = readCatalog() }) {
+export function buildPluginMcpServers({ origin, role = '', manifests = readCatalog() }) {
   const base = String(origin || '').trim().replace(/\/+$/, '')
   if (!base) return {}
   return Object.fromEntries(
-    manifests.filter((manifest) => manifest.mcp === true).map((manifest) => [
+    manifests.filter((manifest) => isMcpEnabledForRole(manifest, role)).map((manifest) => [
       pluginMcpServerName(manifest.id),
       { type: 'http', url: `${base}${pluginMcpPath(manifest.id)}` }
     ])
@@ -21,8 +21,10 @@ export function buildPluginMcpServers({ origin, manifests = readCatalog() }) {
 
 export function pluginMcpCandidates(origin) {
   const manifests = readCatalog()
-  const servers = buildPluginMcpServers({ origin, manifests })
-  return manifests.flatMap((manifest) => {
+  // 角色门控的 MCP 由对应 role 介绍，不再重复占用 `/` 快捷列表。
+  const candidates = manifests.filter((manifest) => manifest.mcp === true && !hasRoleGate(manifest))
+  const servers = buildPluginMcpServers({ origin, manifests: candidates })
+  return candidates.flatMap((manifest) => {
     const name = pluginMcpServerName(manifest.id)
     const config = servers[name]
     if (!config) return []
@@ -34,4 +36,14 @@ export function pluginMcpCandidates(origin) {
       source: { kind: 'plugin', label: `插件 ${manifest.id}`, detail: manifest.id }
     }]
   })
+}
+
+function hasRoleGate(manifest) {
+  return Array.isArray(manifest?.mcpRoles) && manifest.mcpRoles.length > 0
+}
+
+function isMcpEnabledForRole(manifest, role) {
+  if (manifest?.mcp !== true) return false
+  if (!hasRoleGate(manifest)) return true
+  return typeof role === 'string' && manifest.mcpRoles.includes(role.trim())
 }

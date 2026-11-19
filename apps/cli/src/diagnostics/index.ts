@@ -1,5 +1,6 @@
-import { flushLogs, logger, setLogLevel, startMemorySampler } from '@packages/mica-diagnostics/index.js';
+import { flushLogs, logger, processIdentity, setLogLevel, startMemorySampler } from '@packages/mica-diagnostics/index.js';
 import { VERSION_LABEL } from '@packages/mica-config/brand.js';
+import { BUILD_TIME, VERSION } from '../buildMeta.js';
 
 /**
  * CLI 侧诊断入口：把 TUI / `mica exec` / `mica app-server` 的现场写进和桌面端同一套
@@ -47,12 +48,14 @@ export function startDiagnostics(options: DiagnosticsOptions): DiagnosticsHandle
 
   const log = logger(options.host);
   log.info('boot', {
-    pid: process.pid,
-    version: VERSION_LABEL,
+    ...processIdentity(),
+    app: VERSION_LABEL,
+    version: VERSION,
+    buildTime: BUILD_TIME,
     node: process.version,
     platform: process.platform,
     arch: process.arch,
-    argv: process.argv.slice(2, 6).join(' ').slice(0, 200),
+    mode: options.host,
   });
 
   const stopSampler = options.memory === false ? () => {} : startMemorySampler({

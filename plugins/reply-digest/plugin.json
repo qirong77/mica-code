@@ -56,7 +56,7 @@
       "description": "留空时使用内置提示词。"
     }
   ],
-  "requires": ["agent", "hooks", "llm", "session", "settings", "ui"],
+  "requires": ["agent", "hooks", "llm", "session", "settings", "ui", "operations"],
   "llm": {
     "label": "摘要模型",
     "description": "只有检测到较长的 Agent 回复时才调用；默认复用当前会话模型。",

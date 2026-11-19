@@ -16,6 +16,9 @@ vi.mock('./Hosts.js', () => ({
 vi.mock('node:fs', async (original) => ({
   ...(await original<typeof fs>()),
   appendFileSync: vi.fn(),
+  openSync: vi.fn(() => 42),
+  closeSync: vi.fn(),
+  fchmodSync: vi.fn(),
   mkdirSync: vi.fn(),
   readFileSync: vi.fn(() => ''),
   writeFileSync: vi.fn(),
@@ -35,17 +38,20 @@ function tools() {
   vi.mocked(readData).mockReturnValue({ hosts: [host] } as any);
   const registered: Record<string, PluginToolDescriptor> = {};
   const sessions = {
-    get: vi.fn(() => ({})),
+    get: vi.fn(() => ({ host })),
     list: vi.fn(() => [{ id: 'test', hostId: 'test', target: 'test@example.invalid:22' }]),
+    open: vi.fn(() => Promise.resolve({ info: { id: 'test', cwd: '~' }, banner: '' })),
+    close: vi.fn(),
     run: vi.fn<(...args: any[]) => any>(),
     write: vi.fn<(...args: any[]) => any>(),
     wait: vi.fn<(...args: any[]) => any>(),
   };
+  const scope = { explicit: vi.fn(() => ['test']), set: vi.fn() };
   createTools({
     ctx: { dataDir: '/mock', defaultTimeoutMs: 1000, tailLines: 50 },
     dataFile: '/mock/data.json',
     sessions,
-    scope: { explicit: () => ['test'] },
+    scope,
     register: (tool: PluginToolDescriptor) => {
       registered[tool.name] = tool;
       return { dispose() {} };
@@ -53,7 +59,7 @@ function tools() {
   } as unknown as ToolDeps);
   const execute = async (name: string, input: Record<string, unknown>) =>
     JSON.parse((await registered[name]!.execute!(input)) as string);
-  return { execute, sessions };
+  return { execute, sessions, scope };
 }
 afterEach(() => vi.clearAllMocks());
 
@@ -116,7 +122,8 @@ describe('SSH structured results (no network)', () => {
     await execute('ssh_session', { op: 'wait', session_id: 'test' });
     await execute('ssh_session', { op: 'wait', session_id: 'test' });
     expect(fs.appendFileSync).toHaveBeenCalledTimes(1);
-    expect(String(vi.mocked(fs.appendFileSync).mock.calls[0]![1])).toContain('echo hello');
+    expect(String(vi.mocked(fs.appendFileSync).mock.calls[0]![1])).toContain('sha256:');
+    expect(String(vi.mocked(fs.appendFileSync).mock.calls[0]![1])).not.toContain('echo hello');
   });
   it('counts audit failures and emits only a fixed diagnostic without breaking remote results', async () => {
     const { execute } = tools();
@@ -151,5 +158,47 @@ describe('SSH structured results (no network)', () => {
     expect(auditFailureCount()).toBe(before + 1);
     expect(warning).toHaveBeenCalledWith('ssh.audit_write_failed');
     warning.mockRestore();
+  });
+
+  it('denies read-only open/run/write before the session implementation is called', async () => {
+    const { execute, sessions } = tools();
+    vi.mocked(readData).mockReturnValue({ hosts: [{ ...host, readOnly: true }] } as any);
+    for (const op of ['open', 'run', 'write']) {
+      expect(await execute('ssh_session', { op, host: 'test', command: 'echo must-not-run' })).toMatchObject({
+        outcome: 'declined',
+        code: 'read_only',
+      });
+    }
+    expect(sessions.open).not.toHaveBeenCalled();
+    expect(sessions.run).not.toHaveBeenCalled();
+    expect(sessions.write).not.toHaveBeenCalled();
+    expect(sessions.close).toHaveBeenCalledWith('test');
+  });
+
+  it('rechecks revoked scope and removed hosts for old shells; close remains allowed', async () => {
+    const { execute, sessions, scope } = tools();
+    expect(await execute('ssh_session', { op: 'open', host: 'test' })).toMatchObject({ outcome: 'success' });
+    scope.explicit.mockReturnValue([]);
+    for (const op of ['run', 'write', 'read', 'wait']) {
+      expect(await execute('ssh_session', { op, session_id: 'test', command: 'echo must-not-run' })).toMatchObject({
+        outcome: 'declined',
+        code: 'host_unavailable',
+      });
+    }
+    scope.explicit.mockReturnValue(['test']);
+    vi.mocked(readData).mockReturnValue({ hosts: [] } as any);
+    expect(await execute('ssh_session', { op: 'run', session_id: 'test', command: 'echo must-not-run' })).toMatchObject(
+      {
+        outcome: 'declined',
+        code: 'host_unavailable',
+      },
+    );
+    vi.mocked(readData).mockImplementation(() => {
+      throw new Error('configuration unavailable');
+    });
+    expect(await execute('ssh_session', { op: 'close', session_id: 'test' })).toMatchObject({ outcome: 'success' });
+    expect(sessions.run).not.toHaveBeenCalled();
+    expect(sessions.write).not.toHaveBeenCalled();
+    expect(sessions.wait).not.toHaveBeenCalled();
   });
 });

@@ -76,7 +76,9 @@ export function createConsoleViewController(options) {
       })
       .catch((error) => {
         if (disposed || controller.signal.aborted || error?.name === 'AbortError') return undefined;
-        setState({ error: error instanceof Error ? error.message : String(error) });
+        // The transport may contain paths, service URLs or raw diagnostics.
+        // This surface exposes only a fixed safe failure description.
+        setState({ error: '运行快照刷新失败，请稍后重试；已有统计仍保留。' });
         throw error;
       })
       .finally(() => {

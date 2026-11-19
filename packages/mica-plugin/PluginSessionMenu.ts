@@ -1,4 +1,5 @@
 import type { Disposable } from '@packages/mica-common/index.js';
+import type { OperationOutcome } from '@packages/mica-diagnostics/operation.js';
 
 /**
  * 插件在**会话右键菜单**里的动作。
@@ -62,7 +63,7 @@ export type PluginSessionMenuInput = {
  * - `message`：给用户看的一句话（已复制几条、没有可复制的内容…）。页面把它放进会话的
  *   notice 里——菜单动作没有别的可见位置。
  */
-export type PluginSessionMenuResult = {
+export type PluginSessionMenuResult = Partial<OperationOutcome> & {
   copyText?: string;
   message?: string;
 };

@@ -963,6 +963,16 @@ describe('parsePluginManifest MCP', () => {
   it.each([null, 'mcp.ts', 1, {}, []].map((mcp) => ({ mcp })))('rejects a nonboolean declaration: %j', ({ mcp }) => {
     expect(parsePluginManifest(base({ mcp }))).toEqual({ ok: false, error: 'mcp 必须是布尔值' });
   });
+
+  it('accepts role-gated MCP modules', () => {
+    const result = parsePluginManifest(base({ mcp: true, mcpRoles: ['笔记', ' 笔记 '] }));
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.manifest.mcpRoles).toEqual(['笔记']);
+  });
+
+  it.each([null, '笔记', [1], ['']])('rejects invalid MCP role gates: %j', (mcpRoles) => {
+    expect(parsePluginManifest(base({ mcpRoles })).ok).toBe(false);
+  });
 });
 
 describe('parsePluginManifest skills', () => {

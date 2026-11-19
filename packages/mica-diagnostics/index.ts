@@ -17,8 +17,12 @@ import { appendFileSync, existsSync, mkdirSync, readdirSync, statSync, unlinkSyn
 import { join } from 'node:path';
 import { resolveLogDir } from '@packages/mica-config/brand.js';
 import { clearPerformanceCache, readSummary, readSummaryAsync } from './performance-summary.js';
-export { observePluginOperation, startPluginOperation, operationResult, awaitOperation } from './operation.js';
+import { flushPluginHeartbeats } from './heartbeat.js';
+import { WriterHealth, type WriterCheckpoint } from './writer-health.js';
+export { observePluginOperation, startPluginOperation, operationResult, operationFailure, awaitOperation } from './operation.js';
 export type { OperationContext, OperationOutcome } from './operation.js';
+export { flushPluginHeartbeats } from './heartbeat.js';
+export { processIdentity, diagnosticPluginVersion } from './identity.js';
 
 const MAX_BYTES = 16 * 1024 * 1024;
 const KEEP_DAYS = 7;
@@ -179,6 +183,7 @@ let dropped = 0;
 let writeFailures = 0;
 let serializationFailures = 0;
 let overflowDrops = 0;
+const writerHealth = new Map<string, { health: WriterHealth; touched: boolean }>();
 const lastPrunes = new Map<string, number>();
 // 每个 scope 当天正在写的文件。分片必须按序号递增，不能按时间戳算文件名：
 // 日文件一满，按 flush 时刻取名等于每 2s 新建一个文件（一天几千个）。
@@ -279,10 +284,9 @@ function prune(dir: string, now: number): void {
   }
 }
 
-function writeNow(): void {
+function writeNow(reason: WriterCheckpoint['reason'] = 'periodic'): void {
   if (batchTimer) clearTimeout(batchTimer);
   batchTimer = null;
-  if (queue.length === 0) return;
   const batch = queue;
   queue = [];
   queueBytes = 0;
@@ -307,13 +311,38 @@ function writeNow(): void {
     }
   }
   for (const dir of dirs) prune(dir, now);
+  const counters = { dropped, overflowDrops, serializationFailures, writeFailures };
+  for (const [dir, state] of writerHealth) {
+    // A removed/isolated destination must not be resurrected by an idle timer.
+    if (!state.touched && !existsSync(dir)) { writerHealth.delete(dir); continue; }
+    state.touched = false;
+    state.health.checkpoint(counters, {
+      logLevel: Object.keys(LEVELS).find((level) => LEVELS[level as LogLevel] === threshold) ?? 'unknown',
+      pluginLogEnabled: process.env.MICA_PLUGIN_LOG !== '0',
+      closePolicy: 'best_effort_sync_exit',
+    }, reason);
+  }
 }
 
 function schedule(): void {
   if (flushTimer) return;
-  flushTimer = setInterval(writeNow, FLUSH_MS);
+  flushTimer = setInterval(() => writeNow(), FLUSH_MS);
   // 不要因为这个定时器让进程无法退出
   if (typeof flushTimer.unref === 'function') flushTimer.unref();
+}
+
+function watchWriterHealth(dir: string): void {
+  const existing = writerHealth.get(dir);
+  if (existing) { existing.touched = true; return; }
+  // Normal hosts use a single directory. Bound explicit producer destinations too.
+  if (writerHealth.size >= 64) writerHealth.delete(writerHealth.keys().next().value!);
+  writerHealth.set(dir, { touched: true, health: new WriterHealth((entry) => {
+    const destination = { dir, filePrefix: 'writer-health', maxFileBytes: MAX_BYTES };
+    // No queue/ring/producer logger here. A failed checkpoint only increments its
+    // own counter and is retried at a bounded cadence or explicit close/flush.
+    appendFileSync(fileFor(destination, entry.at), `${JSON.stringify(entry)}\n`, { mode: 0o600 });
+    prune(dir, entry.at);
+  }) });
 }
 
 function record(level: LogLevel, scope: string, event: string, fields?: Record<string, unknown>): void {
@@ -324,6 +353,9 @@ function record(level: LogLevel, scope: string, event: string, fields?: Record<s
 
 /** Shared bounded writer. Explicit producers (plugin logs) apply their own enable/level policy. */
 export function enqueueLogEntry(entry: LogEntry, options: LogDestination = {}): void {
+  const dir = options.dir ?? resolveLogDir();
+  watchWriterHealth(dir);
+  schedule(); // Even a serialization/overflow failure needs a later checkpoint.
   let line: string;
   let copy: LogEntry;
   try {
@@ -342,7 +374,7 @@ export function enqueueLogEntry(entry: LogEntry, options: LogDestination = {}): 
   }
   const prefix = options.filePrefix?.replace(/[^A-Za-z0-9._-]+/g, '_').slice(0, 180);
   const destination = {
-    dir: options.dir ?? resolveLogDir(),
+    dir,
     filePrefix: prefix && prefix !== '.' && prefix !== '..' ? prefix : safeScope(entry.scope),
     maxFileBytes: Math.max(1, options.maxFileBytes || MAX_BYTES),
   };
@@ -358,7 +390,7 @@ export function enqueueLogEntry(entry: LogEntry, options: LogDestination = {}): 
   schedule();
   // Never scan/write in a producer's stack, even when a verbose plugin fills a batch.
   if (queue.length >= FLUSH_BATCH && !batchTimer) {
-    batchTimer = setTimeout(writeNow, 0);
+    batchTimer = setTimeout(() => writeNow(), 0);
     batchTimer.unref?.();
   }
 }
@@ -686,14 +718,20 @@ export function clearLogs(): { removed: number } {
   ringBytes = [];
   ringSizeBytes = 0;
   slowStats = new Map();
-  dropped = 0;
-  writeFailures = 0;
-  serializationFailures = 0;
-  overflowDrops = 0;
+  // Loss counters describe the whole process generation, not the visible ring.
+  // Resetting them here would make a later checkpoint contradict its predecessor.
   return { removed };
 }
 
 /** 退出前把剩余事件写完。 */
 export function flushLogs(): void {
-  writeNow();
+  flushPluginHeartbeats();
+  writeNow('flush');
 }
+
+// Abrupt kills/crashes can still lose the final interval. This is best effort,
+// never a reason to delay business shutdown or install an uncaught-error policy.
+process.once('exit', () => {
+  flushPluginHeartbeats();
+  writeNow('exit');
+});

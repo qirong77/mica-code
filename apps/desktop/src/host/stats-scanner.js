@@ -223,6 +223,7 @@ export function createStatsScanner({
   parseText = parseSessionText,
   indexStore = null,
   onProgress = null,
+  onRefreshError = null,
   indexWriteDelayMs = 1000
 }) {
   if (typeof directory !== 'function') throw new TypeError('directory must be a function')
@@ -232,9 +233,11 @@ export function createStatsScanner({
   // 这里的读法不同），但同样按文件签名只解析一次。
   const textCache = new Map()
   let indexLoaded = false
+  let indexLoadPromise = null
   let indexDirty = false
   let writeTimer = null
   let inFlight = null
+  let metaRefresh = null
   let owners = null
   let ownersDirty = true
   // 行对象来自 entries，引用本来就稳定；数组也一起缓存，侧栏才能靠引用相等跳过重渲染。
@@ -285,7 +288,12 @@ export function createStatsScanner({
     }
   }
 
-  async function loadIndex() {
+  function loadIndex() {
+    if (!indexLoadPromise) indexLoadPromise = readIndex()
+    return indexLoadPromise
+  }
+
+  async function readIndex() {
     if (indexLoaded) return
     indexLoaded = true
     if (!store) return
@@ -428,6 +436,9 @@ export function createStatsScanner({
   }
 
   async function doRefresh() {
+    // These belong to this refresh, including ENOENT and head-only early returns.
+    progress.parsedFiles = 0
+    progress.added = 0
     await loadIndex()
     const dir = directory()
     let names
@@ -601,6 +612,7 @@ export function createStatsScanner({
     if (inFlight) return inFlight
     inFlight = doRefresh().finally(() => {
       inFlight = null
+      progress.building = false
     })
     return inFlight
   }
@@ -658,7 +670,22 @@ export function createStatsScanner({
     progress,
 
     /** 侧栏会话列表：最近更新的在前。 */
-    async scanMeta() {
+    async scanMeta({ staleWhileRevalidate = false } = {}) {
+      if (staleWhileRevalidate) {
+        await loadIndex()
+        if (entries.size > 0) {
+          if (!metaCache) metaCache = metaRows()
+          const previous = metaCache
+          // A sidebar read must not await usage parsing for every changed session.
+          // The existing progress channel publishes the refreshed metadata afterwards.
+          if (!metaRefresh) metaRefresh = refresh().then(() => {
+            if (!metaCache) metaCache = metaRows()
+            if (metaCache !== previous && !progress.parsedFiles && !progress.added)
+              onProgress?.({ ...progress, metaChanged: true })
+          }).catch((error) => onRefreshError?.(error)).finally(() => { metaRefresh = null })
+          return previous
+        }
+      }
       // 索引还在构建时先给已解析的部分：页面收到 stats:changed 重读时能逐步填充，
       // 而不是所有请求一起挂到同一个扫描上、最后一次性出现。
       if (progress.building) return metaRows()

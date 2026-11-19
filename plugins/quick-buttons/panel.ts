@@ -148,7 +148,7 @@ export function createPanelHandler(deps: PanelDeps): PluginPanelHandler {
           return { message: count > 0 ? `已清空 ${count} 个按钮` : '本来就没有按钮' };
         }
         default:
-          return { message: `不认识的动作：${input.action}` };
+          return { outcome: 'declined', code: 'unknown_action', message: `不认识的动作：${input.action}` };
       }
     },
   };
@@ -158,11 +158,11 @@ export function createPanelHandler(deps: PanelDeps): PluginPanelHandler {
 async function runButton(deps: PanelDeps, key: string): Promise<PluginPanelActionResult> {
   const id = key.split(':')[0];
   const button = deps.read().find((entry) => entry.id === id);
-  if (!button) return { message: '这个按钮已经删掉了' };
-  if (buttonKey(button) !== key) return { message: '按钮内容已更新，请重新打开' };
+  if (!button) return { outcome: 'declined', code: 'button_removed', message: '这个按钮已经删掉了' };
+  if (buttonKey(button) !== key) return { outcome: 'conflict', code: 'stale_button', message: '按钮内容已更新，请重新打开' };
   // 弹窗不在这条链上：它交给宿主画，弹窗里的按钮再以 `DIALOG_ACTION` 回来。
   if (button.kind === 'dialog') {
-    return button.dialog ? { dialog: toPanelDialog(button.dialog, key) } : { message: '这个弹窗没有内容' };
+    return button.dialog ? { dialog: toPanelDialog(button.dialog, key) } : { outcome: 'declined', code: 'empty_dialog', message: '这个弹窗没有内容' };
   }
   // 走到这里的按钮一定不是 `dialog`（上面已经返回），窄化一下让类型跟上。
   return runEffect(deps, button as EffectPayload, button.label);
@@ -188,7 +188,7 @@ async function runEffect(deps: PanelDeps, payload: EffectPayload, label: string)
       if (result.ok) return { message: '已在受控浏览器打开' };
       // 受控浏览器不可用（CLI / 还没起来）时退回系统浏览器：用户点的是「打开这个页面」，
       // 用什么打开是次要的；只在旁边说明一句。
-      return { openExternal: payload.url, message: `受控浏览器打不开，已交给系统浏览器：${result.error}` };
+      return { outcome: 'partial', code: 'browser_fallback', openExternal: payload.url, message: `受控浏览器打不开，已交给系统浏览器：${result.error}` };
     }
     case 'compose':
       return { compose: payload.text || '', message: '已放进输入框，按回车发送' };
@@ -220,15 +220,15 @@ type EffectPayload = {
 async function runDialogAction(deps: PanelDeps, key: string): Promise<PluginPanelActionResult> {
   const [buttonId, fingerprint, indexText, extra] = key.split(':');
   const button = deps.read().find((entry) => entry.id === buttonId);
-  if (!button) return { message: '这个按钮已经删掉了' };
+  if (!button) return { outcome: 'declined', code: 'button_removed', message: '这个按钮已经删掉了' };
   if (extra !== undefined || buttonKey(button) !== `${buttonId}:${fingerprint}`) {
-    return { message: '弹窗内容已更新，请重新打开' };
+    return { outcome: 'conflict', code: 'stale_dialog', message: '弹窗内容已更新，请重新打开' };
   }
   const action =
     /^[0-2]$/.test(indexText || '') && button.kind === 'dialog'
       ? button.dialog?.actions?.[Number(indexText)]
       : undefined;
-  if (!action) return { message: '这个做法已经不在弹窗里了' };
+  if (!action) return { outcome: 'declined', code: 'action_removed', message: '这个做法已经不在弹窗里了' };
   return runEffect(deps, action, action.label);
 }
 
@@ -325,8 +325,8 @@ function addButton(deps: PanelDeps, values: Record<string, string>): PluginPanel
   const label = String(values.label || '').trim();
   const kind = String(values.kind || '').trim();
   const value = String(values.value || '').trim();
-  if (!label) return { message: '先给按钮起个名字', keepDrafts: true };
-  if (!value) return { message: '填上要打开的内容', keepDrafts: true };
+  if (!label) return { outcome: 'declined', code: 'invalid_label', message: '先给按钮起个名字', keepDrafts: true };
+  if (!value) return { outcome: 'declined', code: 'invalid_target', message: '填上要打开的内容', keepDrafts: true };
 
   const input =
     kind === 'open'
@@ -340,14 +340,14 @@ function addButton(deps: PanelDeps, values: Record<string, string>): PluginPanel
     // 表单在动作之后会按新视图归位：这正是「填一个，加一个」想要的效果。
     return { message: `已添加「${label}」` };
   } catch (error) {
-    return { message: error instanceof Error ? error.message : String(error), keepDrafts: true };
+    return { outcome: 'error', code: 'save_failed', message: error instanceof Error ? error.message : String(error), keepDrafts: true };
   }
 }
 
 function removeButton(deps: PanelDeps, id: string): PluginPanelActionResult {
   const before = deps.read();
   const next = removeQuickButton(before, id);
-  if (next.length === before.length) return { message: '这个按钮已经删掉了' };
+  if (next.length === before.length) return { outcome: 'declined', code: 'button_removed', message: '这个按钮已经删掉了' };
   deps.write(next);
   return { message: '已删除' };
 }

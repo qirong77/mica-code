@@ -48,3 +48,7 @@
 | `index.ts`    | 注册命令、按会话持有旁问线程、把流式回调折成进度、中断与结果写成 notice   |
 | `message.ts`  | `/btw` 的参数解析（`-continue` / `-stop` / `-h`）与进度、结果、停止的排版 |
 | `btw.test.ts` | 命令行为：进度 → 答案、`-continue` 复用线程、停止、并发拒绝、失败可见     |
+
+## 业务终态
+
+旁问实际失败返回 error/answer_failed，建线程失败返回 error/thread_unavailable，忙/停止/无会话/帮助分别为 busy/cancelled/declined/skipped；原进度与已流出正文保留，不再恒定 ok:true。

@@ -5,6 +5,7 @@ import { extname, join, normalize, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { networkInterfaces, release as osRelease } from 'node:os'
 import { createGzip } from 'node:zlib'
+import { processIdentity } from '@packages/mica-diagnostics/index.js'
 import { setBroadcast, invokeChannel, ipcMain } from './electron-shim.js'
 import {
   registerAccessIpc,
@@ -1235,7 +1236,7 @@ async function main() {
     port: running.port,
     version: process.env.MICA_DESKTOP_CLI_VERSION || undefined,
     node: process.version,
-    pid: process.pid
+    ...processIdentity()
   })
   // 机器可读的就绪行：Electron 容器（src/main/index.js）据此拿到实际端口
   console.log(

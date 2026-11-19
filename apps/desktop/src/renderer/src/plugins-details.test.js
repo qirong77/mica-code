@@ -10,6 +10,13 @@ afterEach(() => {
 })
 
 describe('readPluginsDetails', () => {
+  test('内容未变的刷新复用行数组，不让多个插件界面重复渲染', async () => {
+    stubTransport(async () => ({ plugins: [{ id: 'example', enabled: true }] }))
+    const first = await readPluginsDetails({ force: true })
+    expect(await readPluginsDetails({ force: true })).toBe(first)
+    stubTransport(async () => ({ plugins: [{ id: 'example', enabled: false }] }))
+    expect(await readPluginsDetails({ force: true })).not.toBe(first)
+  })
   test('启动期一次失败后自己重试，读到清单就不再返回空', async () => {
     let calls = 0
     stubTransport(async () => {

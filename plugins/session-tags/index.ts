@@ -50,7 +50,7 @@ export default function setup(ctx: PluginContext): void {
     // 用户可见的故障才上报，而且只报一次：每轮都会走到这里。
     if (!storeErrorReported) {
       storeErrorReported = true;
-      ctx.health.report({ level: 'error', message, hint: `标签文件：${annotationsPath}` });
+      ctx.health.report({ issueKey: 'storage:annotations', level: 'error', message, hint: `标签文件：${annotationsPath}` });
     }
   };
 
@@ -66,7 +66,7 @@ export default function setup(ctx: PluginContext): void {
   const write = (store: TagStore) => {
     try {
       writeStore(home, pluginId, store);
-      if (storeErrorReported) ctx.health.report({ level: 'ok', message: '标签文件读写已恢复' });
+      if (storeErrorReported) ctx.health.report({ issueKey: 'storage:annotations', level: 'ok', message: '标签文件读写已恢复' });
       storeErrorReported = false;
     } catch (error) {
       reportStoreError(error);

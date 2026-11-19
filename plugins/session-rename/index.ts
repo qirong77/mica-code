@@ -112,9 +112,10 @@ export default function setup(ctx: PluginContext): void {
   const reportConfigHealth = (owner?: unknown): boolean => {
     const problem = configProblem(owner);
     if (problem) {
-      ctx.health.report({ level: 'warn', message: problem });
+      ctx.health.report({ issueKey: 'configuration', level: 'warn', message: problem });
       return false;
     }
+    ctx.health.report({ issueKey: 'configuration', level: 'ok', message: '标题模型配置已填写' });
     return true;
   };
 
@@ -202,7 +203,7 @@ export default function setup(ctx: PluginContext): void {
       // 不 await：这里只是发起，重命名失败绝不能拖住或打断 turn。
       void (async () => {
         try {
-          const result = await rename({
+          const execute = () => rename({
             ctx,
             sessionId: info.id,
             currentTitle: info.title,
@@ -212,6 +213,12 @@ export default function setup(ctx: PluginContext): void {
             signal: controller.signal,
             owner,
           });
+          const run = async () => {
+            const result = await execute();
+            return { result, outcome: result === null ? 'skipped' : result.outcome === 'rejected' ? 'declined' : 'success',
+              code: result === null ? 'no_change' : result.outcome === 'rejected' ? 'title_rejected' : 'title_applied' };
+          };
+          const { result } = await (ctx.operations ? ctx.operations.run('rename.auto', run, { signal: controller.signal }) : run());
           if (result === null && states.get(info.id)?.controller === controller) {
             states.get(info.id)!.lastInputId = '';
           }
@@ -225,7 +232,7 @@ export default function setup(ctx: PluginContext): void {
             reason: failureReason(message),
             error: message,
           });
-          ctx.health.report({ level: 'error', message: `上次自动改名失败：${message}` });
+          ctx.health.report({ issueKey: 'rename', level: 'error', message: `上次自动改名失败：${message}` });
         } finally {
           const current = states.get(info.id);
           if (current?.controller === controller) current.controller = null;
@@ -275,13 +282,14 @@ export default function setup(ctx: PluginContext): void {
                 ? `标题未变化：${result.title}`
                 : `已重命名：${result.title}`,
           );
+          return { ok: true, outcome: result.outcome === 'rejected' ? 'declined' : 'success',
+            code: result.outcome === 'rejected' ? 'title_rejected' : result.outcome === 'unchanged' ? 'title_unchanged' : 'title_applied' };
         } catch (error) {
           const message = `手动改名失败：${errorMessage(error)}`;
-          ctx.health.report({ level: 'error', message });
+          ctx.health.report({ issueKey: 'rename', level: 'error', message });
           ctx.ui?.showMessage(message);
           return { ok: false, error: error instanceof Error ? error : new Error(message), message };
         }
-        return { ok: true };
       }
       ctx.ui?.showMessage('Usage: /session-rename [now|status]');
       return { ok: true };
@@ -337,7 +345,7 @@ async function rename(input: {
       elapsedMs: Date.now() - startedAt,
       usage,
     });
-    ctx.health.report({
+    ctx.health.report({ issueKey: 'rename',
       level: 'warn',
       message:
         rejection === 'empty'
@@ -349,18 +357,18 @@ async function rename(input: {
     return { outcome: 'rejected', reason: rejection };
   }
   if (title === current.title) {
-    ctx.health.report({ level: 'ok', message: `最近一次标题校验通过：${title}` });
-    ctx.logger.info('session-rename:unchanged', { sessionId, title });
+    ctx.health.report({ issueKey: 'rename', level: 'ok', message: '最近一次标题校验通过' });
+    ctx.logger.info('session-rename:unchanged', { sessionId, titleChars: title.length });
     return { outcome: 'unchanged', title };
   }
 
   const renamed = session.rename(title, { source: 'auto', ...(owner === undefined ? {} : { owner }) });
   // 成功一次就把「待配置 / 上次失败」的状态收回去，页面上不会一直挂着旧故障。
-  if (renamed) ctx.health.report({ level: 'ok', message: `最近一次改名成功：${title}` });
+  if (renamed) ctx.health.report({ issueKey: 'rename', level: 'ok', message: '最近一次改名成功' });
   ctx.logger.info('session-rename:renamed', {
     sessionId,
-    from: currentTitle,
-    to: title,
+    fromChars: currentTitle.length,
+    toChars: title.length,
     renamed,
     elapsedMs: Date.now() - startedAt,
     usage,

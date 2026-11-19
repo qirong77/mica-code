@@ -159,8 +159,8 @@ export default function setupMemory(ctx: PluginContext): void {
 
   let running = false;
 
-  const runCurator = async (options: { manual: boolean; owner?: unknown }): Promise<MemoryReviewOutcome> => {
-    if (running) return { ok: false, message: '记忆整理正在进行中，稍后再试。' };
+  const runCuratorTask = async (options: { manual: boolean; owner?: unknown }): Promise<MemoryReviewOutcome> => {
+    if (running) return { ok: false, outcome: 'busy', code: 'curator_busy', message: '记忆整理正在进行中，稍后再试。' };
     running = true;
     const controller = new AbortController();
     active = controller;
@@ -168,21 +168,21 @@ export default function setupMemory(ctx: PluginContext): void {
     let attempted: MemorySettings | null = null;
     try {
       const settings = readSettings(ctx, options.owner);
-      if (disposed || !settings.enabled) return { ok: false, message: '记忆已关闭。' };
+      if (disposed || !settings.enabled) return { ok: false, outcome: 'skipped', code: 'disabled', message: '记忆已关闭。' };
       // 一次性运行（`mica exec`）没有「下一次会话」：整理只会多花一次模型调用，
       // 而且写下的记忆这次也用不上。
       if (ctx.agent?.mode === 'one-shot') {
-        return { ok: true, message: '一次性运行不整理记忆。' };
+        return { ok: true, outcome: 'skipped', code: 'one_shot', message: '一次性运行不整理记忆。' };
       }
       if (!options.manual && !settings.autoCapture) {
-        return { ok: true, message: '自动整理未开启。' };
+        return { ok: true, outcome: 'skipped', code: 'auto_disabled', message: '自动整理未开启。' };
       }
 
       release = repository.acquireCuratorLock();
-      if (!release) return { ok: false, message: '其他会话正在整理记忆，稍后再试。' };
+      if (!release) return { ok: false, outcome: 'busy', code: 'curator_locked', message: '其他会话正在整理记忆，稍后再试。' };
       const state = repository.readState();
       if (!options.manual && withinInterval(state.lastRunAt, settings.minIntervalMinutes)) {
-        return { ok: true, message: '距上次整理还不到间隔，跳过。' };
+        return { ok: true, outcome: 'skipped', code: 'interval', message: '距上次整理还不到间隔，跳过。' };
       }
 
       const messages = collectConversation(
@@ -191,7 +191,7 @@ export default function setupMemory(ctx: PluginContext): void {
         Math.max(MIN_CONVERSATION_MESSAGES, settings.maxMessages),
       );
       if (messages.length < MIN_CONVERSATION_MESSAGES) {
-        return { ok: true, message: '对话太短，跳过整理。' };
+        return { ok: true, outcome: 'skipped', code: 'short_conversation', message: '对话太短，跳过整理。' };
       }
 
       // 绑定发起时的上下文：等待模型期间 `/cd` 不能把结果写到另一个仓库。
@@ -227,6 +227,7 @@ export default function setupMemory(ctx: PluginContext): void {
           lastError: requested.error,
         });
         ctx.health.report({
+          issueKey: 'curator',
           level: 'warn',
           message: `记忆整理失败：${requested.error}`,
           hint:
@@ -234,7 +235,7 @@ export default function setupMemory(ctx: PluginContext): void {
               ? '检查插件设置里的整理接口地址 / Key / 模型是否可用。'
               : '检查当前模型配置是否可用；也可以改用独立 provider。',
         });
-        return { ok: false, message: `记忆整理失败：${requested.error}` };
+        return { ok: false, outcome: 'error', code: 'curator_request_failed', message: `记忆整理失败：${requested.error}` };
       }
 
       const outcome = applyCuratorOperations(repository, createCuratorScopeResolver(source), requested.operations);
@@ -248,12 +249,15 @@ export default function setupMemory(ctx: PluginContext): void {
 
       if (error) {
         ctx.health.report({
+          issueKey: 'curator',
           level: 'warn',
           message: `记忆整理有 ${outcome.failures.length} 项未能写入`,
           hint: `${error}（通常是 old_text 对不上或整层超出安全上限；下次整理会重新尝试）`,
         });
-      } else if (outcome.applied > 0) {
-        ctx.health.report({ level: 'ok', message: `记忆已更新：应用 ${outcome.applied} 条操作` });
+      } else if (requested.skipped > 0) {
+        ctx.health.report({ issueKey: 'curator', level: 'warn', message: `记忆整理有 ${requested.skipped} 项建议不合法，已跳过` });
+      } else {
+        ctx.health.report({ issueKey: 'curator', level: 'ok', message: `记忆整理完成：应用 ${outcome.applied} 条操作` });
       }
 
       const summary =
@@ -261,9 +265,10 @@ export default function setupMemory(ctx: PluginContext): void {
           ? `记忆整理完成：应用 ${outcome.applied} 条操作${requested.skipped > 0 ? `（忽略 ${requested.skipped} 条非法操作）` : ''}。`
           : '记忆整理完成：这次没有值得保存的内容。';
       const detail = error ? `\n未能写入：${error}` : '';
-      return { ok: !error, message: `${summary}${detail}` };
+      const partial = Boolean(error) || requested.skipped > 0;
+      return { ok: !error, outcome: partial ? 'partial' : 'success', code: partial ? 'curator_partial' : 'curator_completed', message: `${summary}${detail}` };
     } catch (error) {
-      if (controller.signal.aborted) return { ok: true, message: '记忆整理已取消。' };
+      if (controller.signal.aborted) return { ok: true, outcome: 'cancelled', code: 'aborted', message: '记忆整理已取消。' };
       const message = error instanceof Error ? error.message : String(error);
       if (attempted) {
         try {
@@ -279,17 +284,21 @@ export default function setupMemory(ctx: PluginContext): void {
       }
       ctx.logger.warn('memory:curator-failed', { error: message });
       ctx.health.report({
+        issueKey: 'curator',
         level: 'warn',
         message: `记忆整理出错：${message}`,
         hint: `查看插件日志（${pluginLogPath(ctx.pluginId)}）。`,
       });
-      return { ok: false, message: `记忆整理出错：${message}` };
+      return { ok: false, outcome: 'error', code: 'curator_failed', message: `记忆整理出错：${message}` };
     } finally {
       release?.();
       active = null;
       running = false;
     }
   };
+
+  const runCurator = (options: { manual: boolean; owner?: unknown }): Promise<MemoryReviewOutcome> =>
+    ctx.operations ? ctx.operations.run('curator.review', () => runCuratorTask(options)) : runCuratorTask(options);
 
   const hook = ctx.hooks.on(
     'turn:after',
@@ -535,12 +544,13 @@ function describeRuntime(ctx: PluginContext, repository: MemoryRepository): stri
 
 function reportStartupHealth(ctx: PluginContext, repository: MemoryRepository, contextFor: () => MemoryContext): void {
   if (!readSettings(ctx).enabled) {
-    ctx.health.report({ level: 'ok', message: '记忆已关闭：插件设置里的「启用记忆」关掉了' });
+    ctx.health.report({ issueKey: 'configuration', level: 'ok', message: '记忆已关闭：插件设置里的「启用记忆」关掉了' });
     return;
   }
   const issues = ctx.settings.validate();
   if (issues.length > 0) {
     ctx.health.report({
+      issueKey: 'configuration',
       level: 'warn',
       message: `配置不完整：${issues.map((issue) => `${issue.label} ${issue.message}`).join('；')}`,
       hint: '在配置页的 Plugins → Memory 里修正。',
@@ -558,6 +568,7 @@ function reportStartupHealth(ctx: PluginContext, repository: MemoryRepository, c
 
   if (settings.autoCapture && settings.curatorMode === 'direct' && !curatorReady(ctx.llm)) {
     ctx.health.report({
+      issueKey: 'configuration',
       level: 'warn',
       message: '自动整理已开启，但独立接口还没配置完整',
       hint: '填写接口地址、API Key 与模型名，或把整理模式改回「宿主子代理」。',
@@ -566,6 +577,7 @@ function reportStartupHealth(ctx: PluginContext, repository: MemoryRepository, c
   }
 
   ctx.health.report({
+    issueKey: 'configuration',
     level: 'ok',
     message: `记忆已就绪：本会话注入 ${snapshots.length} 层 · ${total} 条（${usage}）`,
     hint: describeCurator(settings, ctx.llm),

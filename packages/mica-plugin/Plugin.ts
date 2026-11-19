@@ -18,6 +18,8 @@ export type MicaPlugin = {
    * 知道插件自己落在哪儿。
    */
   root?: string;
+  /** 编译进产物的官方插件正文；没有插件目录时用于发布角色。 */
+  embeddedRoles?: readonly { name: string; prompt: string }[];
   setup(ctx: PluginContext): void | Disposable | Promise<void | Disposable>;
 };
 

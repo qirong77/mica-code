@@ -64,6 +64,7 @@ export function SessionSettingsDialog({
   nodeId,
   sessionId,
   cwd,
+  role = 'default',
   running,
   section: initialSection = 'capabilities',
   loopProps = null,
@@ -99,7 +100,7 @@ export function SessionSettingsDialog({
   const load = useCallback(async () => {
     setError('')
     try {
-      const capabilityResult = await window.mica.chat.capabilities(nodeId, { sessionId, cwd })
+      const capabilityResult = await window.mica.chat.capabilities(nodeId, { sessionId, cwd, role })
       if (!capabilityResult?.ok) {
         setError(capabilityResult?.error || '读取能力列表失败')
         return
@@ -115,7 +116,7 @@ export function SessionSettingsDialog({
     } catch (loadError) {
       setError(formatError(loadError))
     }
-  }, [nodeId, sessionId, cwd])
+  }, [nodeId, sessionId, cwd, role])
 
   useEffect(() => {
     void load()
@@ -131,7 +132,7 @@ export function SessionSettingsDialog({
     savingRef.current = true
     setError('')
     try {
-      const result = await window.mica.chat.setCapabilities(nodeId, next, { sessionId, cwd })
+      const result = await window.mica.chat.setCapabilities(nodeId, next, { sessionId, cwd, role })
       if (!result?.ok) {
         pendingSaveRef.current = null
         setSelection(confirmedRef.current)
@@ -155,7 +156,7 @@ export function SessionSettingsDialog({
       savingRef.current = false
       if (pendingSaveRef.current) void flushSave()
     }
-  }, [nodeId, sessionId, cwd])
+  }, [nodeId, sessionId, cwd, role])
 
   const apply = useCallback(
     (next) => {

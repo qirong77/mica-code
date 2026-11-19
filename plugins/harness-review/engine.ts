@@ -1,6 +1,19 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { constants, realpathSync } from 'node:fs';
-import { appendFile, chmod, lstat, mkdir, open, readFile, readdir, rename, rm, stat, unlink, writeFile } from 'node:fs/promises';
+import {
+  appendFile,
+  chmod,
+  lstat,
+  mkdir,
+  open,
+  readFile,
+  readdir,
+  rename,
+  rm,
+  stat,
+  unlink,
+  writeFile,
+} from 'node:fs/promises';
 import { resolve, join, relative } from 'node:path';
 import { setImmediate as yieldImmediate } from 'node:timers/promises';
 import { acquireProcessLock } from '@packages/mica-common/processLock.js';
@@ -230,6 +243,9 @@ export type HelperSummary = { total: number; kinds: HelperKindSummary[] };
  */
 export type PluginFailureSummary = {
   pluginId: string;
+  pluginVersion?: string;
+  pid?: number;
+  generation?: string;
   taskId: string;
   count: number;
   lastAt: string;
@@ -316,6 +332,8 @@ type RunState = {
   onFinding?: (id: string, seq: number) => void;
 };
 const MAX_RUNS = 2000;
+/** Derived replay revision, independent of the persisted capture/assessment formats. */
+const RUN_PROJECTION_VERSION = 2;
 /** 没有 hostPid 的旧记录：summary 超过这么久没被写过，就当宿主已经退出。 */
 const STALE_RUN_MS = 6 * 60 * 60 * 1000;
 const MAX_SCANNED_RUNS = 10_000;
@@ -348,8 +366,12 @@ const MAX_PLUGIN_EVENTS_READ_BYTES = 8 * 1024 * 1024;
 const PLUGIN_EVENTS_FILE = 'plugin-events.jsonl';
 const PLUGIN_EVENTS_ROTATED = 'plugin-events.1.jsonl';
 type PluginEventRecord = {
+  schemaVersion: 2;
   at: string;
   pluginId: string;
+  pluginVersion: string;
+  pid: number | null;
+  generation: string;
   taskId: string;
   tick: number;
   failures: number;
@@ -1098,7 +1120,23 @@ function failureText(value: unknown): string {
 function envelopeCategory(item: Record<string, unknown>, name: string): string | null {
   const outcome = typeof item.outcome === 'string' ? item.outcome : item.status;
   if (outcome === 'unknown') return 'unknown-result';
-  if (typeof outcome === 'string' && ['cancelled', 'aborted', 'declined', 'denied', 'waiting', 'running', 'busy', 'conflict', 'partial', 'skipped', 'expected-exit'].includes(outcome)) return null;
+  if (
+    typeof outcome === 'string' &&
+    [
+      'cancelled',
+      'aborted',
+      'declined',
+      'denied',
+      'waiting',
+      'running',
+      'busy',
+      'conflict',
+      'partial',
+      'skipped',
+      'expected-exit',
+    ].includes(outcome)
+  )
+    return null;
   const explicitFailure =
     item.isError === true ||
     item.success === false ||
@@ -1440,6 +1478,30 @@ function pluginFailureId(pluginId: string, taskId: string): string {
   const rewritten = safePlugin !== pluginId || safeTask !== taskId;
   const task = rewritten ? `${safe(taskId, 111)}-${digest(`${pluginId}\n${taskId}`).slice(0, 8)}` : safeTask;
   return `plugin-background:${safePlugin}:${task}`;
+}
+
+function diagnosticToken(value: unknown, max: number): string | undefined {
+  return typeof value === 'string' && value.length <= max && /^[a-z0-9][a-z0-9:._+-]*$/i.test(value)
+    ? value
+    : undefined;
+}
+
+/** Profiles retain producer identity; manual findings keep the stable task key. */
+function mergePluginFailureTasks(rows: PluginFailureSummary[]): PluginFailureSummary[] {
+  const tasks = new Map<string, PluginFailureSummary>();
+  for (const row of rows) {
+    const key = pluginFailureId(row.pluginId, row.taskId);
+    const old = tasks.get(key);
+    if (!old) tasks.set(key, { ...row });
+    else {
+      old.count += row.count;
+      if (row.lastAt >= old.lastAt) {
+        old.lastAt = row.lastAt;
+        old.lastError = row.lastError;
+      }
+    }
+  }
+  return [...tasks.values()];
 }
 
 /**
@@ -2121,7 +2183,15 @@ export class HarnessRecorder {
       if (!taskId) return;
       const pluginId = boundedText(event.pluginId, 200).trim();
       if (!pluginId) return;
-      const key = `${pluginId}\n${taskId}`;
+      const identity = event as PluginObservationEvent & {
+        pluginVersion?: unknown;
+        pid?: unknown;
+        generation?: unknown;
+      };
+      const pluginVersion = diagnosticToken(identity.pluginVersion, 60) ?? 'unknown';
+      const pid = Number.isSafeInteger(identity.pid) && Number(identity.pid) > 0 ? Number(identity.pid) : undefined;
+      const generation = diagnosticToken(identity.generation, 80) ?? 'unknown';
+      const key = `${pluginId}\n${pluginVersion}\n${pid ?? 'unknown'}\n${generation}\n${taskId}`;
       const now = Date.now();
       let slot = this.pluginEventWrites.get(key);
       if (!slot && this.pluginEventWrites.size >= MAX_PLUGIN_EVENT_KEYS) {
@@ -2130,8 +2200,12 @@ export class HarnessRecorder {
         this.pluginEventWrites.delete(oldKey);
       }
       const record: PluginEventRecord = {
+        schemaVersion: 2,
         at: timestamp(event.timestamp),
         pluginId,
+        pluginVersion,
+        pid: pid ?? null,
+        generation,
         taskId,
         tick: Math.max(slot?.latest.tick ?? 0, finiteCount(event.type === 'background:failed' ? event.tick : 0)),
         failures: Math.max((slot?.latest.failures ?? 0) + 1, finiteCount(event.failures)),
@@ -2235,7 +2309,10 @@ export class HarnessRecorder {
         for (const [index, name] of names.entries()) {
           checkReviewAbort(signal);
           if (before[index] === null) continue;
-          const handle = await open(join(this.root, name), constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+          const handle = await open(
+            join(this.root, name),
+            constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
+          );
           try {
             const info = await handle.stat();
             if (!info.isFile() || fileSignature(info) !== before[index]) {
@@ -2269,8 +2346,14 @@ export class HarnessRecorder {
         checkReviewAbort(signal);
         if (changed || before.some((value, index) => value !== after[index])) continue;
         // A hard link (or a rotation observed halfway through) must not duplicate evidence.
-        if (before[0] && before[1] && before[0].split(':').slice(0, 2).join(':') === before[1].split(':').slice(0, 2).join(':')) {
-          warnings.push('Plugin event files refer to the same file; the snapshot was omitted to avoid duplicate counts.');
+        if (
+          before[0] &&
+          before[1] &&
+          before[0].split(':').slice(0, 2).join(':') === before[1].split(':').slice(0, 2).join(':')
+        ) {
+          warnings.push(
+            'Plugin event files refer to the same file; the snapshot was omitted to avoid duplicate counts.',
+          );
           return [];
         }
         warnings.push(...notes);
@@ -2282,7 +2365,9 @@ export class HarnessRecorder {
         return [];
       }
     }
-    warnings.push('Plugin event files changed during all 3 read attempts (append/rotation); the unstable snapshot was omitted, not counted twice.');
+    warnings.push(
+      'Plugin event files changed during all 3 read attempts (append/rotation); the unstable snapshot was omitted, not counted twice.',
+    );
     return [];
   }
 
@@ -2307,7 +2392,17 @@ export class HarnessRecorder {
       for (const line of text.split('\n')) {
         if (index++ % 128 === 0) await reviewCheckpoint(signal);
         if (!line.trim()) continue;
-        let item: { at?: unknown; pluginId?: unknown; taskId?: unknown; error?: unknown; failures?: unknown };
+        let item: {
+          schemaVersion?: unknown;
+          at?: unknown;
+          pluginId?: unknown;
+          pluginVersion?: unknown;
+          pid?: unknown;
+          generation?: unknown;
+          taskId?: unknown;
+          error?: unknown;
+          failures?: unknown;
+        };
         try {
           item = JSON.parse(line) as typeof item;
         } catch {
@@ -2317,12 +2412,17 @@ export class HarnessRecorder {
         const pluginId = typeof item?.pluginId === 'string' ? boundedText(item.pluginId, 200).trim() : '';
         const taskId = typeof item?.taskId === 'string' ? boundedText(item.taskId, 200).trim() : '';
         const at = typeof item?.at === 'string' && Number.isFinite(Date.parse(item.at)) ? item.at : '';
-        if (!pluginId || !taskId || !at) {
+        // Unversioned failure streams are no longer supported. Evolution adds
+        // explicit unknown identities without guessing a current version/PID.
+        if (item?.schemaVersion !== 2 || !pluginId || !taskId || !at) {
           corrupt++;
           continue;
         }
         const error = typeof item.error === 'string' ? boundedText(item.error, 500) : '';
-        const key = `${pluginId}\n${taskId}`;
+        const pluginVersion = diagnosticToken(item.pluginVersion, 60) ?? 'unknown';
+        const pid = Number.isSafeInteger(item.pid) && Number(item.pid) > 0 ? Number(item.pid) : undefined;
+        const generation = diagnosticToken(item.generation, 80) ?? 'unknown';
+        const key = `${pluginId}\n${pluginVersion}\n${pid ?? 'unknown'}\n${generation}\n${taskId}`;
         const failures = typeof item.failures === 'number' ? finiteCount(item.failures) : 0;
         if (eventTimes) {
           const id = pluginFailureId(pluginId, taskId);
@@ -2333,7 +2433,7 @@ export class HarnessRecorder {
         if (failures > (reported.get(key) ?? 0)) reported.set(key, failures);
         const existing = groups.get(key);
         if (!existing) {
-          groups.set(key, { pluginId, taskId, count: 1, lastAt: at, lastError: error });
+          groups.set(key, { pluginId, pluginVersion, pid, generation, taskId, count: 1, lastAt: at, lastError: error });
           continue;
         }
         existing.count++;
@@ -2787,14 +2887,27 @@ export class HarnessRecorder {
       if (summary.hostPid === undefined) {
         if (Date.now() - writtenAt < STALE_RUN_MS) continue;
       } else if (processAlive(summary.hostPid)) continue;
-      const at = new Date().toISOString();
-      summary.outcome = 'interrupted';
-      summary.reclaimedAt = at;
-      summary.updatedAt = at;
       try {
         checkReviewAbort(signal);
-        await this.atomic(file, JSON.stringify(summary, null, 2));
-        reclaimed++;
+        await this.withSummaryLock(join(this.root, 'runs', id), async () => {
+          // Re-read under the writer's lock. A late finish/checkpoint must not be
+          // replaced by the stale generation used for the liveness check above.
+          const latest = JSON.parse(await readFile(file, { encoding: 'utf8', signal })) as RunSummary;
+          if (!validSummary(latest, id) || latest.outcome !== 'running' || latest.hostPid === process.pid) return;
+          if (latest.hostPid !== undefined && processAlive(latest.hostPid)) return;
+          if (latest.hostPid === undefined && Date.now() - (await stat(file)).mtimeMs < STALE_RUN_MS) return;
+          this.relocate(latest);
+          const warnings: string[] = [];
+          const events = await inspectTrace(latest, warnings, undefined, signal);
+          this.recoverTraceFacts(latest, events, warnings);
+          const at = new Date().toISOString();
+          if (latest.outcome === 'running') latest.outcome = 'interrupted';
+          latest.reclaimedAt = at;
+          latest.updatedAt = at;
+          checkReviewAbort(signal);
+          await this.atomic(file, JSON.stringify(latest, null, 2));
+          reclaimed++;
+        });
       } catch (error) {
         rethrowReviewAbort(error, signal);
         this.onError(error);
@@ -2803,14 +2916,94 @@ export class HarnessRecorder {
     return reclaimed;
   }
 
-  private async projectRun(summary: RunSummary, loadedSignature?: string, signal?: AbortSignal): Promise<RunProjection> {
+  /** Recover only facts confirmed by a stable, lossless, consecutive local trace.
+   * No fabricated finish, elapsed time, error body or user verdict is introduced. */
+  private recoverTraceFacts(
+    summary: RunSummary,
+    events: StoredEvent[] | null,
+    warnings: string[],
+  ): RecoveredFacts | undefined {
+    if (!events?.length || summary.droppedEvents > 0 || !['running', 'interrupted'].includes(summary.outcome)) return;
+    if (
+      events.length < summary.eventCount ||
+      events[0].type !== 'run:start' ||
+      Date.parse(events[0].timestamp) !== Date.parse(summary.startedAt) ||
+      events.some((event, index) => event.seq !== index + 1 || (index > 0 && event.type === 'run:start'))
+    )
+      return;
+    const finishes = events.filter((event) => event.type === 'run:finish');
+    const terminal = finishes[0];
+    if (
+      finishes.length > 1 ||
+      (terminal &&
+        (terminal !== events.at(-1) ||
+          !['completed', 'aborted', 'error', 'paused'].includes(String(terminal.outcome)) ||
+          Date.parse(terminal.timestamp) < Date.parse(summary.startedAt)))
+    ) {
+      warnings.push(`Run ${summary.id} has conflicting terminal trace metadata; recovery is unknown.`);
+      return;
+    }
+    if (events.length === summary.eventCount && !terminal) return;
+    const state = derivationState(summary, events.length);
+    state.summary.compactions = { local: 0, llm: 0, idle: 0 };
+    const memory: InputMemory = new Map();
+    let requests = 0,
+      calls = 0,
+      retries = 0;
+    for (const event of events) {
+      if (event.type === 'request:start') requests++;
+      if (event.type === 'tool:call') calls++;
+      if (event.type === 'retry') retries++;
+      // An old metadata-only runtime record without a category confirms the
+      // retry, but not its cause. Never invent provider-error from absent text.
+      if (
+        (event.type === 'retry' || (event.type === 'run:finish' && event.outcome === 'error')) &&
+        !hasCompleteContent(event.error) &&
+        typeof event.errorCategory !== 'string'
+      )
+        continue;
+      this.replay(state, event, memory);
+    }
+    const candidates = new Map(summary.findings.map((finding) => [finding.id, finding]));
+    for (const finding of state.candidates.values()) {
+      const old = candidates.get(finding.id);
+      if (!old && candidates.size >= MAX_FINDINGS) continue;
+      if (old && old.occurrences > finding.occurrences) continue;
+      for (const evidence of finding.evidence) evidence.available = true;
+      candidates.set(finding.id, finding);
+    }
+    const recovered: RecoveredFacts = {
+      eventCount: events.length,
+      requestCount: Math.max(summary.requestCount, requests),
+      toolCalls: Math.max(summary.toolCalls, calls),
+      retries: Math.max(summary.retries, retries),
+      findings: [...candidates.values()],
+    };
+    if (terminal) {
+      recovered.outcome = terminal.outcome as Outcome;
+      recovered.finishedAt = terminal.timestamp;
+      if (typeof terminal.elapsedMs === 'number' && Number.isFinite(terminal.elapsedMs) && terminal.elapsedMs >= 0)
+        recovered.elapsedMs = terminal.elapsedMs;
+    }
+    Object.assign(summary, recovered);
+    warnings.push(
+      `Run ${summary.id} recovered confirmed counters/findings${terminal ? ' and terminal outcome' : ' only; terminal outcome remains unknown'} from a continuous trace.`,
+    );
+    return recovered;
+  }
+
+  private async projectRun(
+    summary: RunSummary,
+    loadedSignature?: string,
+    signal?: AbortSignal,
+  ): Promise<RunProjection> {
     checkReviewAbort(signal);
     let signature = '';
     const signatureOf = async () => {
       const summarySignature = fileSignature(await stat(join(this.root, 'runs', summary.id, 'summary.json')));
       // The supplied summary must be the same generation as the cache signature.
       if (!loadedSignature || summarySignature !== loadedSignature) return '';
-      return `${CLASSIFIER_VERSION}:${summarySignature}:${fileSignature(await stat(summary.traceFile))}`;
+      return `${RUN_PROJECTION_VERSION}:${CLASSIFIER_VERSION}:${summarySignature}:${fileSignature(await stat(summary.traceFile))}`;
     };
     try {
       signature = await signatureOf();
@@ -2858,6 +3051,16 @@ export class HarnessRecorder {
     };
     const timestamps = new Map<number, string>();
     const events = await inspectTrace(summary, warnings, timestamps, signal);
+    // GET may project a dead writer's confirmed finish, but it never reclaims or
+    // writes that run. Unknown/live capturing processes remain untouched.
+    if (
+      summary.outcome === 'interrupted' ||
+      (summary.outcome === 'running' &&
+        summary.hostPid !== undefined &&
+        summary.hostPid !== process.pid &&
+        !processAlive(summary.hostPid))
+    )
+      result.recovered = this.recoverTraceFacts(summary, events, warnings);
     const observed = new Map<string, Set<number>>();
     const state = derivationState(summary, events?.length ?? 0);
     state.onFinding = (id, seq) => {
@@ -2867,10 +3070,11 @@ export class HarnessRecorder {
     };
     // Replay uncapped occurrence signals, not only the first MAX_EVIDENCE
     // references. Even partial traces can confirm the events actually present.
-    if (events) for (const [index, event] of events.entries()) {
-      if (index % 128 === 0) await reviewCheckpoint(signal);
-      this.replay(state, event, memory);
-    }
+    if (events)
+      for (const [index, event] of events.entries()) {
+        if (index % 128 === 0) await reviewCheckpoint(signal);
+        this.replay(state, event, memory);
+      }
     const recordTimes = (): void => {
       for (const candidate of summary.findings) {
         const eligible =
@@ -2884,7 +3088,13 @@ export class HarnessRecorder {
         if (eligible) result.observed.push([candidate.id, [...(observed.get(candidate.id) ?? [])]]);
       }
     };
-    if (!events || summary.outcome === 'running' || summary.droppedEvents > 0 || events.length !== summary.eventCount) {
+    if (
+      !events ||
+      summary.outcome === 'running' ||
+      summary.droppedEvents > 0 ||
+      events.length !== summary.eventCount ||
+      (summary.outcome === 'interrupted' && events.at(-1)?.type !== 'run:finish')
+    ) {
       result.included = false;
       recordTimes();
       return finish();
@@ -2971,7 +3181,10 @@ export class HarnessRecorder {
     };
     const filter = cwd ? canonicalCwd(cwd) : undefined;
     const warnings = [...this.writeWarnings, ...this.correctionQueue.warnings];
-    if (reclaimed > 0) warnings.push(`已回收 ${reclaimed} 个宿主已退出的未完成运行，标记为 interrupted。`);
+    if (reclaimed > 0)
+      warnings.push(
+        `已回收 ${reclaimed} 个宿主已退出的未完成运行；可信连续轨迹中的终态优先，其余标记为 interrupted（结果未知）。`,
+      );
     // 归属不明的纠正没有落点：如实说出来，而不是悄悄丢掉。
     if (this.droppedCorrections > 0)
       warnings.push(`丢弃了 ${this.droppedCorrections} 次无法确定会话的用户纠正，未记入任何运行。`);
@@ -3055,12 +3268,6 @@ export class HarnessRecorder {
         if (filter && summary.cwd !== filter) continue;
         summarySignatures.set(summary.id, fileSignature(info));
         runs.push(summary);
-        if (summary.outcome === 'running')
-          warnings.push(
-            `Run ${summary.id} has no finish event and remains running; it may still be active or have been interrupted by a process exit.`,
-          );
-        if (summary.outcome === 'interrupted')
-          warnings.push(`Run ${summary.id} was interrupted before a finish event; task success is unknown.`);
         if (summary.droppedEvents > 0)
           warnings.push(
             `Run ${summary.id} omitted ${summary.droppedEvents} trace events at its capture limit; summary counters include them. Evidence without a stored event is marked unavailable.`,
@@ -3082,10 +3289,17 @@ export class HarnessRecorder {
       await reviewCheckpoint(signal);
       const projection = await this.projectRun(summary, summarySignatures.get(summary.id), signal);
       warnings.push(...projection.warnings);
+      if (projection.recovered) Object.assign(summary, projection.recovered);
       summary.findings = projection.findings;
       summary.toolErrors = projection.toolErrors;
       summary.expectedExits = projection.expectedExits;
       summary.derivationDrops = projection.derivationDrops;
+      if (summary.outcome === 'running')
+        warnings.push(
+          `Run ${summary.id} has no finish event and remains running; it may still be active or have been interrupted by a process exit.`,
+        );
+      if (summary.outcome === 'interrupted')
+        warnings.push(`Run ${summary.id} was interrupted before a finish event; task success is unknown.`);
       const times = new Map<string, FindingTiming>();
       for (const candidate of summary.findings)
         times.set(
@@ -3158,7 +3372,8 @@ export class HarnessRecorder {
     }
     // 插件常驻任务的失败不属于任何一条 run（没有 runId、也没有 cwd），但同样要进
     // `merged`：人工判断按 id 落在 decisions/ 里，不经过合并的条目就永远点不动。
-    for (const failure of pluginFailures) {
+    const failureTasks = mergePluginFailureTasks(pluginFailures);
+    for (const failure of failureTasks) {
       checkReviewAbort(signal);
       if (failure.count < PLUGIN_FAILURE_FINDING_COUNT) continue;
       const id = pluginFailureId(failure.pluginId, failure.taskId);
@@ -3209,7 +3424,7 @@ export class HarnessRecorder {
       }
       const baseline = decision.baseline;
       if ('plugin' in baseline) {
-        const failure = pluginFailures.find((item) => pluginFailureId(item.pluginId, item.taskId) === finding.id);
+        const failure = failureTasks.find((item) => pluginFailureId(item.pluginId, item.taskId) === finding.id);
         if (failure && Date.parse(failure.lastAt) > Date.parse(baseline.plugin.lastAt))
           finding.reviewNeeded = {
             reason: 'new-evidence',
@@ -3286,7 +3501,9 @@ export class HarnessRecorder {
     if (typeof note !== 'string' || !note.trim()) throw new Error('Assessment note is required');
     const observedAt = new Date().toISOString();
     const report = await this.review(cwd);
-    const plugin = report.pluginFailures.find((item) => pluginFailureId(item.pluginId, item.taskId) === id);
+    const plugin = mergePluginFailureTasks(report.pluginFailures).find(
+      (item) => pluginFailureId(item.pluginId, item.taskId) === id,
+    );
     const baseline: AssessmentBaseline = plugin
       ? { plugin: { count: plugin.count, lastAt: plugin.lastAt } }
       : {
@@ -3885,7 +4102,10 @@ function validSummary(value: RunSummary, directoryId: string): boolean {
   );
 }
 
+type RecoveredFacts = Pick<RunSummary, 'eventCount' | 'requestCount' | 'toolCalls' | 'retries' | 'findings'> &
+  Partial<Pick<RunSummary, 'outcome' | 'finishedAt' | 'elapsedMs'>>;
 type RunProjection = {
+  recovered?: RecoveredFacts;
   findings: ReviewFinding[];
   toolErrors: number;
   expectedExits: number;
@@ -4010,6 +4230,14 @@ async function inspectTrace(
       return null;
     }
     const text = await readFile(summary.traceFile, { encoding: 'utf8', signal });
+    if (fileSignature(info) !== fileSignature(await stat(summary.traceFile))) {
+      warnings.push(`Run ${summary.id} trace changed during inspection; recovery and complete coverage are unknown.`);
+      return null;
+    }
+    if (text && !text.endsWith('\n')) {
+      warnings.push(`Run ${summary.id} has an incomplete final trace line; recovery is unknown.`);
+      return null;
+    }
     const lines = text.split('\n');
     if (lines.at(-1) === '') lines.pop();
     let previous = 0;
@@ -4207,12 +4435,15 @@ function markdownReport(report: ReviewReport, directory: string): string {
       '',
       'Coverage: `' + JSON.stringify(report.logEvidence.coverage) + '`',
       '',
+      'Inspected totals before display grouping: `' + JSON.stringify(report.logEvidence.totals ?? null) + '`',
+      '',
     );
     for (const [title, rows] of [
       ['Plugin operations', report.logEvidence.operations],
       ['Plugin experience', report.logEvidence.experience],
       ['System warnings / errors', report.logEvidence.system],
       ['Memory peaks (MB)', report.logEvidence.memory],
+      ['Writer health checkpoints (lower bounds)', report.logEvidence.writerHealth ?? []],
     ] as const) {
       lines.push(`### ${title}`, '', '```json', JSON.stringify(rows, null, 2), '```', '');
     }
@@ -4225,10 +4456,13 @@ function markdownReport(report: ReviewReport, directory: string): string {
   );
   if (!report.pluginFailures.length) lines.push('No plugin background failures recorded.', '');
   else {
-    lines.push('| Plugin | Task | Failures | Last failure | Last error |', '| --- | --- | ---: | --- | --- |');
+    lines.push(
+      '| Plugin | Version | PID / generation | Task | Failures | Last failure | Last error |',
+      '| --- | --- | --- | --- | ---: | --- | --- |',
+    );
     for (const failure of report.pluginFailures)
       lines.push(
-        `| ${markdownText(failure.pluginId)} | ${markdownText(failure.taskId)} | ${failure.count} | ${markdownText(failure.lastAt)} | ${markdownText(failure.lastError)} |`,
+        `| ${markdownText(failure.pluginId)} | ${markdownText(failure.pluginVersion ?? 'unknown')} | ${failure.pid ?? 'unknown'} / ${markdownText(failure.generation ?? 'unknown')} | ${markdownText(failure.taskId)} | ${failure.count} | ${markdownText(failure.lastAt)} | ${markdownText(failure.lastError)} |`,
       );
     lines.push('');
   }

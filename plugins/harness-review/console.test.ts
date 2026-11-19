@@ -131,6 +131,7 @@ function deferred<T>() {
 test('console is a whitelist, not a serialized report/run/error/trace or settings document', () => {
   const source = report();
   const item = run();
+  item.cwd = '/Users/private/WORKSPACE-PATH-CANARY';
   item.error = 'ERROR-RAW-CANARY';
   item.input = { sha256: 'hash', chars: 1, excerpt: 'INPUT-CANARY' };
   item.promptHashes = [{ sha256: 'PROMPT-CANARY', chars: 1 }];
@@ -143,6 +144,7 @@ test('console is a whitelist, not a serialized report/run/error/trace or setting
       kind: 'plugin-background',
       title: 'Plugin signal',
       module: 'plugin:sample',
+      cwd: item.cwd,
       suggestion: 'Check configuration',
       evaluation: 'ERROR-RAW-CANARY',
       note: 'apiKey=NOTE-SECRET-CANARY',
@@ -152,7 +154,7 @@ test('console is a whitelist, not a serialized report/run/error/trace or setting
       assessments: [{ status: 'accepted', note: 'HISTORY-CANARY', updatedAt: at }],
     },
   ];
-  source.pluginFailures = [{ pluginId: 'sample', taskId: 'poll', count: 3, lastAt: at, lastError: 'ERROR-RAW-CANARY' }];
+  source.pluginFailures = [{ pluginId: 'sample', taskId: 'https://private.invalid/PRIVATE-TASK-CANARY', count: 3, lastAt: at, lastError: 'ERROR-RAW-CANARY' }];
   source.warnings = [`Run has missing or unreadable trace: ${item.traceFile}`];
   const result = projectConsoleSnapshot(source, projection);
   const json = JSON.stringify(result);
@@ -168,9 +170,15 @@ test('console is a whitelist, not a serialized report/run/error/trace or setting
     'events.jsonl',
     'traceFile',
     '/private/harness',
+    'WORKSPACE-PATH-CANARY',
+    'PRIVATE-TASK-CANARY',
+    'private.invalid',
   ])
     assert.ok(!json.includes(canary), canary);
   assert.equal(result.pluginFailures[0].lastError, '');
+  assert.match(result.pluginFailures[0].taskId, /^task-[a-f0-9]{16}$/);
+  assert.match(result.runs[0].workspaceKey ?? '', /^workspace-[a-f0-9]{16}$/);
+  assert.equal(result.findings[0].workspaceKey, result.runs[0].workspaceKey);
   assert.deepEqual(result.findings[0].evidence, [{ runId: item.id, seq: 1, available: true }]);
   assert.equal(result.findings[0].evidenceCount, 1);
 });
@@ -327,8 +335,11 @@ test('one lazy snapshot is shared for a full 30s TTL; cancelling one waiter does
   for (let i = 0; i < 10; i++) assert.equal(await service.snapshot(), value);
   assert.equal(readReport.mock.calls.length, 1);
   now = CONSOLE_TTL_MS;
-  assert.notEqual(await service.snapshot(), value);
-  assert.equal(readReport.mock.calls.length, 2);
+  const stale = await service.snapshot();
+  assert.equal(stale.generatedAt, value.generatedAt);
+  assert.equal(stale.cache?.stale, true);
+  await vi.waitFor(() => assert.equal(readReport.mock.calls.length, 2));
+  await vi.waitFor(async () => assert.equal((await service.snapshot()).cache?.stale, false));
   assert.deepEqual(await readdir(root), []);
 });
 
@@ -340,7 +351,7 @@ test('failed scans are not cached and the next request retries once', async (t) 
     .mockResolvedValue(report());
   const service = new HarnessConsoleService(context(root), { readReport });
   t.onTestFinished(() => service.dispose());
-  await assert.rejects(service.snapshot(), /scan failed/);
+  await assert.rejects(service.snapshot(), /运行控制台数据暂不可用/);
   await service.snapshot();
   await service.snapshot();
   assert.equal(readReport.mock.calls.length, 2);
@@ -518,7 +529,9 @@ test('corrupt or oversized assembly is explicitly unreadable, not a default load
 test('the default read service returns a real empty state without creating any data directories', async (t) => {
   const root = await temporary(t);
   vi.stubEnv('MICA_LOG_DIR', join(root, 'logs'));
-  t.onTestFinished(() => { vi.unstubAllEnvs(); });
+  t.onTestFinished(() => {
+    vi.unstubAllEnvs();
+  });
   const ctx = context(root);
   const service = new HarnessConsoleService(ctx);
   t.onTestFinished(() => service.dispose());

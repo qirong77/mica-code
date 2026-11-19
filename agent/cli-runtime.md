@@ -39,6 +39,7 @@
 - `turn:retrying` 不得投影为 Codex `error`，否则 desktop 会提前结束 run。
 - 重试与失败写成 notice 存进 `conversationMessages`（`runtime/turnNotices.ts`），不进 provider history。
 - `AgentRuntime.abort()` 递增 runId 并中止 controller；补写只传 `uncommittedResponseText`。
+- headless 准备期还没有 Agent query controller，另以取 lease 前建立的 turn 取消标记覆盖 refresh、图片解析与异步准备钩子；停止不能被之后的 `reserveRunId()` 重新激活，终态与排队规则仍走现有 finalizer（见 `headless.md`）。
 - `mica compact` 把进程 SIGINT / SIGTERM / SIGHUP 转成同一 `AbortSignal`，传入压缩服务与摘要子代理的 `query`；摘要中止或失败仍记实际任务状态与已产生用量，只有压缩成功且未中止才应用快照并保存会话。
 - 流迭代结束后仍须 `throwIfQueryStopped`，防止 SDK 吞掉 AbortError 后提交空 assistant 消息。
 
@@ -48,6 +49,7 @@
 - `piTransport` 调用 pi-ai 的 API 实现，pi 负责 wire 编码、SSE、工具参数增量 JSON、签名重放、多模态结果转换与缺失工具结果修复。`PiModelClient` 只保留共享业务循环、权限/调度、重试回滚、图片字节预算和用量归属；`PiHistoryNormalizer` 提供唯一展示投影。runtime 不拼厂商请求。
 - `executeProviderToolCalls` 把连续只读工具与 `Agent` 调用并发，写/执行工具作为串行屏障；结果按调用顺序回填，每组前后检查 abort。
 - `readOnly: true` 同时允许并发与安全重试，工具必须无共享可变状态。
+- 含命令支路的问答工具整体保守标为非只读，不能把用户已批准的执行重放；执行 cwd 在提问前按发起 owner 捕获，signal 贯穿等待、各项执行和子进程/进程组回收。正常纯问答仍在同一次迭代继续，不增加消息或改变流式路径。
 - 多模态工具结果统一存为 pi `toolResult` 的 text/image 块，目标协议转换由 pi 负责。UI、日志只取文本投影。
 - 两种运行模式的 `[Image](路径)` 都先经 `parseImageRefs` 转成多模态块；headless 直接导入 `mica-ui/utils/imagePaste.js`，避免引入 React/Ink。
 - 运行中改写只能经 `rewriteIterationMessages` 改共享循环的本地数组；钩子输入是 pi 消息，不含 system prompt。每次发送由 pi 组装 system 与工具声明。

@@ -67,7 +67,7 @@ export function registerPluginHostIpc() {
     if (!tracker) {
       tracker = createPluginExperience({
         settings: createPluginSettingsStore(manifest.id, manifest.settings, { configDir: home }),
-        logger: createPluginLogger(manifest.id)
+        logger: createPluginLogger(manifest.id, undefined, { pluginVersion: manifest.version })
       }, manifest.version)
       experience.set(manifest.id, tracker)
     }
@@ -98,7 +98,7 @@ export function registerPluginHostIpc() {
 
   ipcMain.handle('plugin-host:read-data', (_event, payload) => {
     const options = Object.hasOwn(payload ?? {}, 'key') ? { key: payload.key } : {}
-    return observePluginOperation({ plugin: isValidPluginId(payload?.pluginId) ? payload.pluginId : 'unknown', operation: 'data.read', surface: 'page' },
+    return observePluginOperation({ plugin: isValidPluginId(payload?.pluginId) ? payload.pluginId : 'unknown', pluginVersion: officialPluginManifests.find((item) => item.id === payload?.pluginId)?.version, operation: 'data.read', surface: 'page' },
       () => readPluginData(micaHome(), payload?.pluginId, options))
   })
 
@@ -108,7 +108,7 @@ export function registerPluginHostIpc() {
       ? { expectedVersion: payload.expectedVersion }
       : {}
     if (Object.hasOwn(payload ?? {}, 'key')) options.key = payload.key
-    return observePluginOperation({ plugin: isValidPluginId(payload?.pluginId) ? payload.pluginId : 'unknown', operation: 'data.write', surface: 'page' },
+    return observePluginOperation({ plugin: isValidPluginId(payload?.pluginId) ? payload.pluginId : 'unknown', pluginVersion: officialPluginManifests.find((item) => item.id === payload?.pluginId)?.version, operation: 'data.write', surface: 'page' },
       () => writePluginData(micaHome(), payload?.pluginId, payload?.value, options))
   })
 

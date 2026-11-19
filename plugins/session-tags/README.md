@@ -101,3 +101,5 @@ v1 是 macOS Finder 那种**7 个固定色槽**（red / orange / yellow / green 
 
 `model.ts` **不能 import 任何 node 内置模块**：桌面端页面直接 import 它做校验，撞上
 `node:fs` 会让页面构建失败。
+
+标签文件故障与恢复使用 storage:annotations，只清除实际重新读写成功的同类存储问题。

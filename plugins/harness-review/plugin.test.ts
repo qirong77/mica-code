@@ -600,6 +600,10 @@ describe('harness-review plugin', () => {
   it('records a plugin background failure forwarded through plugin:observe', async () => {
     const h = harness();
     h.hooks.notify('plugin:observe', {
+      schemaVersion: 2,
+      pluginVersion: 'unknown',
+      pid: process.pid,
+      generation: 'test-process',
       pluginId: 'mobile-relay',
       timestamp: new Date().toISOString(),
       type: 'background:failed',
@@ -610,6 +614,9 @@ describe('harness-review plugin', () => {
     });
     expect((await h.review()).pluginFailures).toEqual([
       {
+        pluginVersion: 'unknown',
+        pid: process.pid,
+        generation: 'test-process',
         pluginId: 'mobile-relay',
         taskId: 'poll',
         count: 1,

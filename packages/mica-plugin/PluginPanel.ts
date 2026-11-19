@@ -1,4 +1,5 @@
 import type { Disposable } from '@packages/mica-common/index.js';
+import type { OperationOutcome } from '@packages/mica-diagnostics/operation.js';
 import { normalizePluginNewSession, type PluginNewSession } from './PluginNewSession.js';
 import { isValidPluginPanelShortcutId, shortcutStyleOf } from './PluginDesktop.js';
 import type { PluginPanelShortcutStyle } from './PluginDesktop.js';
@@ -474,7 +475,7 @@ export type PluginPanelActionInput = {
  *   宿主已有的能力，插件只声明「打开哪个文件」。
  * - `openExternal` —— 让系统浏览器打开一个地址（表格里整行就是「打开这一条」时用）。
  */
-export type PluginPanelActionResult = {
+export type PluginPanelActionResult = Partial<OperationOutcome> & {
   message?: string;
   compose?: string;
   /**

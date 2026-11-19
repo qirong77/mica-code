@@ -1,12 +1,13 @@
 import type { Disposable } from '@packages/mica-common/index.js';
 import type { CommandResult } from '@packages/mica-commands/index.js';
 import type { PluginContext } from '@packages/mica-plugin/index.js';
+import type { OperationOutcome } from '@packages/mica-diagnostics/operation.js';
 import { ensureDomain, listDomains } from './domains.js';
 import { contextScopes, describeScope, type MemoryContext } from './scope.js';
 import { formatMemoryStatus } from './section.js';
 import type { MemoryRepository } from './store.js';
 
-export type MemoryReviewOutcome = {
+export type MemoryReviewOutcome = Partial<OperationOutcome> & {
   ok: boolean;
   /** 已经准备好展示给用户的一段话。 */
   message: string;
@@ -122,7 +123,7 @@ export function registerMemoryCommand(ctx: PluginContext, deps: MemoryCommandDep
           ctx.ui?.showMessage('记忆整理中…', 3000);
           const outcome = await deps.runReview();
           ctx.ui?.showMessage(outcome.message, 12_000);
-          return outcome.ok ? { ok: true } : { ok: false, error: new Error(outcome.message), message: outcome.message };
+          return outcome.ok ? { ...outcome, ok: true } : { ...outcome, ok: false, error: new Error(outcome.message) };
         }
         case 'refresh': {
           deps.refreshPrompt();

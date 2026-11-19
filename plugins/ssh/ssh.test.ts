@@ -1,7 +1,8 @@
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import * as remote from './Remote.js';
 import { emptyData, findHost, readData, upsertHost, writeData, type SshHost } from './Hosts.js';
 import {
   TailBuffer,
@@ -19,6 +20,17 @@ import { PANEL_STATE_FILE } from './Panel.js';
 import { createNoopScope, normalizeScopeState, scopedHosts, type SshScope } from './Scope.js';
 import type { PluginPanelView } from '@packages/mica-plugin/index.js';
 
+// 参数单测不创建/改权限于运行实例共用的 ControlMaster 目录。
+vi.mock('node:fs', async (original) => {
+  const fs = await original<typeof import('node:fs')>();
+  const isSharedControl = (path: unknown) => /^\/tmp\/mica-ssh-(?:\d+|user)$/.test(String(path));
+  return {
+    ...fs,
+    mkdirSync: (...args: Parameters<typeof fs.mkdirSync>) => isSharedControl(args[0]) ? undefined : fs.mkdirSync(...args),
+    chmodSync: (...args: Parameters<typeof fs.chmodSync>) => { if (!isSharedControl(args[0])) fs.chmodSync(...args); },
+  };
+});
+
 let dir = '';
 let ctx: RemoteContext;
 
@@ -28,6 +40,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.restoreAllMocks();
   rmSync(dir, { recursive: true, force: true });
 });
 
@@ -54,10 +67,10 @@ describe('主机清单', () => {
     expect(readData(join(dir, 'data.json'))).toMatchObject({ version: 1, hosts: [] });
   });
 
-  it('手工改坏的 JSON 当成空清单，不让整个插件起不来', () => {
+  it('损坏 JSON 明确报错，不可当空清单继续写', () => {
     const file = join(dir, 'data.json');
     writeFileSync(file, '{ not json', 'utf8');
-    expect(readData(file).hosts).toEqual([]);
+    expect(() => readData(file)).toThrow('原文件未改写');
   });
 
   it('写盘能原样读回，并记下配置页要显示的那行摘要', () => {
@@ -488,6 +501,8 @@ describe('配置面板', () => {
   });
 
   it('连接成功后把这台机器加进本次会话，并记下状态', async () => {
+    vi.spyOn(remote, 'testConnection').mockResolvedValue({ ok: false, message: 'mock connection refused', fingerprint: null });
+    vi.spyOn(remote, 'readHostFingerprint').mockReturnValue(null);
     const dataFile = join(dir, 'data.json');
     writeData(dataFile, emptyData());
     let explicit: string[] | null = null;
@@ -502,7 +517,7 @@ describe('配置面板', () => {
       },
       closeSession: () => {},
     });
-    // 连不上（地址不可达）时不该加进会话，也不该留下「已连接」。
+    // 模拟连接失败，不访问任何真实网络；不该加进会话，也不该留下「已连接」。
     const result = await panel.action({
       action: 'connect',
       values: { id: 'test', host: '127.0.0.1', port: '1', user: 'root', auth: 'key', keyPath: '~/.ssh/nope' },

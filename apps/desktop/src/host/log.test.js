@@ -33,7 +33,7 @@ describe('log writer', () => {
   it('writes into MICA_LOG_DIR instead of the system temp dir', () => {
     logger('runtime').info('boot', { pid: 1234 })
     flushLogs()
-    const files = readdirSync(dir)
+    const files = readdirSync(dir).filter((name) => !name.startsWith('writer-health-'))
     expect(files).toHaveLength(1)
     const body = readFileSync(path.join(dir, files[0]), 'utf8').trim()
     expect(JSON.parse(body)).toMatchObject({ scope: 'runtime', event: 'boot', pid: 1234 })
@@ -43,7 +43,7 @@ describe('log writer', () => {
   it('keeps a hostile scope inside the log dir', () => {
     logger('../../escaped').warn('boom', {})
     flushLogs()
-    const files = readdirSync(dir)
+    const files = readdirSync(dir).filter((name) => !name.startsWith('writer-health-'))
     expect(files).toHaveLength(1)
     expect(files[0]).not.toContain('/')
     expect(files[0]).not.toContain('..')
@@ -59,7 +59,7 @@ describe('log writer', () => {
     flushLogs()
 
     expect(existsSync(stale)).toBe(false)
-    expect(readdirSync(dir).length).toBe(1)
+    expect(readdirSync(dir).filter((name) => !name.startsWith('writer-health-')).length).toBe(1)
   })
 
   it('rotates to the next shard instead of a new file per flush', () => {

@@ -164,6 +164,59 @@ function createHarness(options = {}) {
 }
 
 describe('incremental session scanner', () => {
+  test('publishes an ENOENT metadata removal after serving the stale sidebar snapshot', async () => {
+    let missing = false
+    const notifications = []
+    const harness = createHarness({ scanner: {
+      fileSystem: { statSync, openSync, readSync, closeSync, readFileSync,
+        readdirSync: (dir) => {
+          if (missing) throw Object.assign(new Error('gone'), { code: 'ENOENT' })
+          return readdirSync(dir)
+        } },
+      onProgress: (value) => notifications.push({ ...value })
+    } })
+    harness.files.write('one', fixture('one'))
+    const before = await harness.scanner.scanMeta()
+    notifications.length = 0
+    missing = true
+    expect(await harness.scanner.scanMeta({ staleWhileRevalidate: true })).toBe(before)
+    await flushReads()
+    expect(notifications.some((value) => value.metaChanged)).toBe(true)
+    expect(await harness.scanner.scanMeta()).toEqual([])
+  })
+  test('serves cached sidebar metadata while changed usage is parsed in the background', async () => {
+    let blocked = false
+    let release
+    let finish
+    const gate = new Promise((resolve) => { release = resolve })
+    const finished = new Promise((resolve) => { finish = resolve })
+    let reads = 0
+    const harness = createHarness({ scanner: {
+      readJson: async (file) => {
+        reads += 1
+        if (blocked) await gate
+        return JSON.parse(readFileSync(file, 'utf8'))
+      },
+      onProgress: (progress) => { if (blocked && !progress.building) finish() }
+    } })
+    harness.files.write('one', fixture('one'))
+    const previous = await harness.scanner.scanMeta()
+    blocked = true
+    harness.files.replace('one', fixture('one', { title: 'Fresh metadata' }))
+    const [first, second] = await Promise.all([
+      harness.scanner.scanMeta({ staleWhileRevalidate: true }),
+      harness.scanner.scanMeta({ staleWhileRevalidate: true })
+    ])
+    expect(first).toBe(previous)
+    expect(second).toBe(previous)
+    expect(first[0].title).toBe('Session one')
+    release()
+    await finished
+    await flushReads()
+    expect((await harness.scanner.scanMeta())[0].title).toBe('Fresh metadata')
+    expect(reads).toBe(2)
+  })
+
   test('real filesystem warm scans yield and observe external changes while preserving array identity', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'mica-stats-async-'))
     temporaryDirectories.push(dir)
@@ -628,7 +681,8 @@ describe('incremental session scanner', () => {
   })
 
   test('updates a huge session from its head instead of re-parsing the whole file', async () => {
-    const harness = createHarness()
+    const notifications = []
+    const harness = createHarness({ scanner: { onProgress: (value) => notifications.push({ ...value }) } })
     // 超过 LARGE_FILE_BYTES（4MB）：真实库里这样的会话一份就要 parse 1s。
     const padding = 'x'.repeat(4 * 1024 * 1024)
     harness.files.write('big', fixture('big', { padding }))
@@ -638,6 +692,10 @@ describe('incremental session scanner', () => {
 
     // 跑完一轮：文件被整份重写，标题也换了。
     harness.files.write('big', fixture('big', { padding, title: 'Renamed big' }))
+    notifications.length = 0
+    expect(await harness.scanner.scanMeta({ staleWhileRevalidate: true })).toBe(first)
+    await flushReads()
+    expect(notifications.some((value) => value.metaChanged)).toBe(true)
     const second = await harness.scanner.scanMeta()
 
     // 标题立刻跟上（读文件头即可），但没有再整份读一遍文件。

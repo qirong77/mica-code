@@ -5956,7 +5956,15 @@ export function ChatView({
                   }))
                 : [
                     { value: 'default', detail: '内置默认系统提示' },
-                    ...(result.roles || []).map((name) => ({ value: name }))
+                    ...(result.roles || []).map((role) => {
+                      const name = typeof role === 'string' ? role : role?.name
+                      return {
+                        value: name,
+                        ...(typeof role === 'object' && role?.tag === 'plugin'
+                          ? { detail: `插件${role.pluginId ? ` · ${role.pluginId}` : ''}` }
+                          : {})
+                      }
+                    })
                   ]
             return { ...current, loading: false, options }
           })
@@ -6468,7 +6476,9 @@ export function ChatView({
           maxTurns: 9999,
           model: overrides.model || null,
           variant: overrides.variant || null,
-          role: overrides.role || null
+          // 传当前生效角色而不是只传临时 override：会话宿主生成 MCP 配置时也要据此
+          // 决定角色门控的插件能力是否接入。
+          role: activeRole || null
         })
         .then((result) => {
           if (!result) return
@@ -6509,6 +6519,7 @@ export function ChatView({
     },
     [
       appendNotice,
+      activeRole,
       cwdRef,
       input,
       nodeId,
@@ -7775,6 +7786,7 @@ export function ChatView({
               nodeId={nodeId}
               sessionId={sessionIdRef.current}
               cwd={cwd}
+              role={activeRole}
               running={running || remoteRunning}
               section={settingsSection}
               onOpenPluginPanel={(id) => {

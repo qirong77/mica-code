@@ -175,7 +175,7 @@
 
 - Notebook 的目录、保存队列与文档栏在 `plugins/notebook/desktop.jsx`；富文本排版、块首键盘行为、文档样式与演示统一在 `packages/mica-editor/runtime/src/workspace/WorkspaceShell.tsx` 装配，仅属于笔记 composer。宿主用经 noteId/loadId 校验的 `action` 消息触发样式/演示，业务不进入桌面内核。正文按约 650ms 防抖自动保存，顶栏不显示保存状态，失败时才在正文上方给出带重试的提示；文档样式使用 Lexical root NodeState，演示只调整视图与临时只读；数据与交互口径见 `packages/mica-editor/README.md`、`plugins/notebook/README.md`。
 
-- Notebook 右侧对话由插件的 `NotebookChatDock.jsx` 与 `chat-controller.js` 承载，打开时暂让大纲位置，关闭 / 专注模式不丢当前页面草稿；共享会话能力与节点映射在 `plugin-host.js` 的 `api.sessions`，不新建模型链路、不自动附加笔记上下文。整页通过 `api.ui.Markdown` 复用宿主排版；恢复和运行态边界见 `plugins.md`。
+- Notebook 不提供右侧 AI 对话；Notebook 的 AI 操作说明由插件角色 `笔记` 注入，默认角色不接入 Notebook MCP，也不在 `/` 快捷列表里列出它。整页只负责本地编辑与 MCP 地址展示，数据和交互口径见 `plugins.md`。
 
 - 会话侧栏顶部保持一行入口的固定顺序：New Session / Stats / Settings / 插件声明的侧栏入口 / Plugins。插件入口由清单 `desktop.entry` 声明、按清单顺序渲染（`Connections` 是浮层卡片）；`placement: "header"` 的入口不占侧栏位置，画在主区顶栏右侧那一簇的最左边（`Schedule` 是整页 + 顶栏图标——顶栏只有 32px 高，所以只画图标，窗口类图标仍贴最右），宿主只画一行与容器，不知道里面是什么；加一个桌面插件只改插件目录，不改侧栏代码。只声明 `desktop.page`、不写 `entry` 的插件不占这一列：它的整页入口是 Plugins 页里那张卡的「打开…」按钮（`plugin-entries.js` 的 `loadPluginPageEntry` 按 id 现取模块，`SettingsView` 经 `onOpenPluginPage` 交回 `App` 打开；标签就这样，不再占侧栏一行）。Plugins 虽然在最末，但它只是一个页面入口——点它进插件整页（目录 → 点一张卡进详情），不做下拉面板、不在侧栏里列插件。
 - 设置与插件页都以覆盖整窗的一层打开（`configPage` 状态 + `fixed inset-0` + 顶部拖拽条），不在对话区右侧再开一栏：配置页自带侧栏导航，套两层侧栏只会把内容挤窄。返回走配置页侧栏顶部的「返回对话」，主区顶栏的返回只管 Files / Stats。
@@ -204,7 +204,7 @@
 
 ## 日志与性能
 
-- **诊断日志只有一份实现**：`@packages/mica-diagnostics`（桌面 `host/log.js` 只是转发 + Electron 两个通道）。运行时、Electron 主进程、`mica app-server`、TUI、`mica exec` 都写同一套 JSONL：落 `resolveLogDir()`（macOS `~/Library/Logs/mica`，与插件日志同目录），2s 批量 flush，留 1000 条环形缓冲；保留 7 天、总容量 256 MB，超了从最旧的删。日志**不放系统 temp**：temp 每次登录被系统清空，重启后就只剩当次运行，跨天的问题无法回头查。`MICA_LOG_DIR` 覆盖目录（测试与隔离实例用），`MICA_LOG_LEVEL` 调级别（常驻宿主默认 info，一次性命令默认 warn）。
+- **诊断日志只有一份实现**： 每个写入器世代另有受保护的 `writer-health/writer.checkpoint`，按分钟与退出补累计丢弃下界/写盘不确定失败及关闭策略，不经普通队列递归；强杀或永久不可写的尾窗仍可能未知。`@packages/mica-diagnostics`（桌面 `host/log.js` 只是转发 + Electron 两个通道）。运行时、Electron 主进程、`mica app-server`、TUI、`mica exec` 都写同一套 JSONL：落 `resolveLogDir()`（macOS `~/Library/Logs/mica`，与插件日志同目录），2s 批量 flush，留 1000 条环形缓冲；保留 7 天、总容量 256 MB，超了从最旧的删。日志**不放系统 temp**：temp 每次登录被系统清空，重启后就只剩当次运行，跨天的问题无法回头查。`MICA_LOG_DIR` 覆盖目录（测试与隔离实例用），`MICA_LOG_LEVEL` 调级别（常驻宿主默认 info，一次性命令默认 warn）。
 - **每个常驻进程自报内存**：`startMemorySampler({ host, describe })` 每 30s 一条 `scope: 'mem'`（`rss` / `heap` / `ext` / `ab`，附会话 id 或宿主数）。运行时报 `host: 'runtime'` + `hosts/busy`，每个 app-server 报自己的会话 id（那才是占用大头，一个能有 1GB），主进程额外带 Electron 各进程类型的分布（`app.getAppMetrics()`），TUI 报当前会话与模型。配置页 Performance 的「进程内存」按进程列出当前 / 峰值 / 窗口内增长；`mem` 的 info 采样不进耗时聚合、也不进事件流。
 - **Bun 进程不写 heap**：`collectMemory()` 在 Bun/JSC 下只留 `rss` 并标 `heapReliable: false`。那套 `heapUsed` / `heapTotal` / `external` 与实际占用对不上（实测 `heapUsed 524MB > heapTotal 374MB`，日志里还出现过 `heap 5014MB / heapT 161MB`、`rss 95MB / ext 430MB`），写进去会让「谁在涨」的判断整体失真。判断进程内存一律看 RSS；要看 JS 堆只能拍快照。
 - **内存尖峰单独记一条**：采样每 30s 一次，一个回合把宿主顶到 2GB 再还回去只会留下两三个点，事后看不出那一刻在跑什么。`startMemorySampler` 在 RSS 越过 `MICA_LOG_SPIKE_MB`（默认 1024）时补一条 `warn` + `event: 'spike'`，带完整 `describe()` 现场；降到阈值以下再越过才会再报一次（10 分钟冷却）。`mem` 的 warn / error 会进事件流，info 采样不会。
@@ -226,7 +226,7 @@
 - 后台 shell、子代理与 wait 的最新快照在页面关闭后仍需跟踪；`starting/running/waiting` 状态阻止宿主回收，已结束的任务行不阻止。已完成轮次重放最多留 40 份、总文本预算 `16 * 1024 * 1024` 字符；超预算回落到磁盘历史，不截断会话内容。
 - 顶栏 Git 徽标（`git:change-counts`）是整棵工作区扫描，自己一层 20s 缓存 + **先回旧值、后台重算**；`worktreeSignature`（HEAD）变了或 `worktreeEpochOf` 变了（stage / discard / 保存文件）时不许回旧值。
 - Git 自动刷新（`git:changed` / turn 结束）传 `invalidate: true`：跳过旧值但共享同代在途扫描；用户手动 `refresh: true` 仍强制独立读取。完成时复核起读的 HEAD/epoch 与请求身份，过时代不能回填或清掉替代请求。仓库根使用 realpath，支持 worktree/submodule 的 `.git` 文件、`commondir` 与 packed refs。
-- 会话列表整份返回，但内容没变时按字段指纹（`session-state.js` 的 `sameSessionSnapshot`）跳过 setState，空闲轮询不触发重渲染。
+- 会话列表整份返回，但内容没变时按字段指纹（`session-state.js` 的 `sameSessionSnapshot`）跳过 setState，空闲轮询不触发重渲染。 `stats:list-sessions` 默认先给磁盘索引/已知元数据、合并后台增量刷新，不等待所有变更会话的用量解析；后台通过同一 `stats:changed` 发布，`refresh: true` 仍等新结果，正文搜索/统计计算保持原有新鲜读取。插件清单成功刷新内容不变时保留数组引用，重新挂载先用上一份已知清单。
 - `stats:changed` 只在**真有变化**时让页面重读：收尾那一帧由扫描器带上 `parsedFiles` / `added`，两者都是 0（这一轮没读任何文件、没有新会话）就不广播；索引补齐过程中的进度帧带 `partial: true`，侧栏（`App.jsx`）直接忽略它，统计页只在可见时跟。之前每批进度都推、页面每批都重读千人列表，一天能攒出上千次多余的全量序列化。
 - 会话统计走磁盘索引：`host/stats-scanner.js` 按文件签名把每个会话的投影缓存在 `$MICA_HOME/desktop-stats-index.json`（与 `sessions/` 同级，不是会话文件），进程重启只解析变过的文件。首次构建（升级后第一次）分批让出事件循环，并经 `stats:changed` 推送进度，界面「逐渐填充」而不是空白几秒。**改 `parseSessionMeta` 的投影字段必须同一步提升 `INDEX_VERSION`**：版本没变时旧缓存行会一直缺这个字段，表现为「界面功能突然失效」。
 - 统计扫描、详情与正文搜索共用 `session-usage-reader.js`：小文件异步读取，≥4MB 的读取/解析/字段投影在 worker 内完成，只把用量或文本投影交回；同文件同身份去重、最多 2 个并行读取，worker 失败或超时先终止再降级。扫描器传入期望身份，排队及读取前后均复核；版本变化或瞬时 IO 失败跳过并重试，只缓存稳定版本的坏 JSON。统计口径和 usage 身份计算只在 `stats-core.js`。

@@ -91,7 +91,7 @@ function text(value: unknown, limit: number): string {
   return typeof value === 'string' ? value.trim().slice(0, limit) : '';
 }
 
-/** 手改过清单的人写 `true` / `"true"` / `"yes"` 都算数，写别的当没有。 */
+/** 输入草稿容许 `true` / `"true"` / `"yes"`；持久化文件由 storedHost 严格校验布尔类型。 */
 function flag(value: unknown): boolean {
   return value === true || value === 'true' || value === 'yes';
 }
@@ -116,7 +116,7 @@ function normalizeHost(input: unknown): SshHost | null {
     auth,
     ...(auth === 'key' && keyPath ? { keyPath } : {}),
     ...(text(raw.label, 60) ? { label: text(raw.label, 60) } : {}),
-    // 手改过清单的人写 `"readOnly": true` 或 `"yes"` 都算数，写别的当没有。
+    // 存储读取前已严格校验；这里仅把可选的 false 归一成不写该字段。
     ...(flag(raw.readOnly) ? { readOnly: true } : {}),
     ...(flag(raw.autoAdd) ? { autoAdd: true } : {}),
     ...(fingerprint ? { fingerprint } : {}),
@@ -125,17 +125,73 @@ function normalizeHost(input: unknown): SshHost | null {
   };
 }
 
-/** 读不出来就当没有：清单坏了应该去面板重配，而不是让插件起不来。 */
-export function readData(file: string): SshData {
-  try {
-    const parsed = JSON.parse(readFileSync(file, 'utf8')) as { hosts?: unknown };
-    const hosts = Array.isArray(parsed.hosts)
-      ? parsed.hosts.map((entry) => normalizeHost(entry)).filter((entry): entry is SshHost => entry !== null)
-      : [];
-    return { version: 1, updatedAt: new Date().toISOString(), hosts };
-  } catch {
-    return emptyData();
+function invalidData(): Error {
+  return Object.assign(new Error('SSH 主机清单损坏或结构不合法；请先修复或恢复文件，原文件未改写'), {
+    code: 'invalid_data',
+  });
+}
+
+/** 文件校验不能用会丢弃条目的 normalize 代替，否则下一次保存会永久丢失原数据。 */
+function storedHost(input: unknown): SshHost {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) throw invalidData();
+  const raw = input as Record<string, unknown>;
+  if (
+    typeof raw.id !== 'string' ||
+    !HOST_ID_PATTERN.test(raw.id) ||
+    typeof raw.host !== 'string' ||
+    !HOST_ADDRESS_PATTERN.test(raw.host) ||
+    typeof raw.user !== 'string' ||
+    !USER_PATTERN.test(raw.user) ||
+    typeof raw.port !== 'number' ||
+    !Number.isInteger(raw.port) ||
+    raw.port < 1 ||
+    raw.port > 65535 ||
+    !SSH_AUTH_TYPES.includes(raw.auth as SshAuth) ||
+    (raw.readOnly !== undefined && typeof raw.readOnly !== 'boolean') ||
+    (raw.autoAdd !== undefined && typeof raw.autoAdd !== 'boolean')
+  )
+    throw invalidData();
+  for (const [key, limit] of [
+    ['keyPath', 512],
+    ['label', 60],
+    ['fingerprint', 200],
+    ['createdAt', 40],
+    ['updatedAt', 40],
+  ] as const) {
+    if (raw[key] !== undefined && (typeof raw[key] !== 'string' || raw[key].length > limit)) throw invalidData();
   }
+  const host = normalizeHost(raw);
+  if (!host) throw invalidData();
+  return host;
+}
+
+/** 只有不存在的文件才是首次使用；解析、结构和 IO 故障都必须阻断后续 mutation。 */
+export function readData(file: string): SshData {
+  let source: string;
+  try {
+    source = readFileSync(file, 'utf8');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return emptyData();
+    throw error;
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(source);
+  } catch {
+    throw invalidData();
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw invalidData();
+  const raw = parsed as Record<string, unknown>;
+  if (
+    raw.version !== 1 ||
+    !Array.isArray(raw.hosts) ||
+    (raw.updatedAt !== undefined && typeof raw.updatedAt !== 'string') ||
+    (raw.hostsSummary !== undefined && typeof raw.hostsSummary !== 'string')
+  )
+    throw invalidData();
+  const hosts = raw.hosts.map(storedHost);
+  if (new Set(hosts.map((host) => host.id)).size !== hosts.length) throw invalidData();
+  return { version: 1, updatedAt: typeof raw.updatedAt === 'string' ? raw.updatedAt : new Date().toISOString(), hosts };
 }
 
 export function writeData(file: string, data: SshData): void {
@@ -164,10 +220,7 @@ const LOCK_ATTEMPTS = 6;
 const LOCK_RETRY_MS = 80;
 
 /** 在跨进程锁里读改写一次；`mutate` 抛错原样抛出去（那是给模型/用户看的原因）。 */
-export async function mutateData<T>(
-  file: string,
-  mutate: (data: SshData) => { data: SshData; result: T },
-): Promise<T> {
+export async function mutateData<T>(file: string, mutate: (data: SshData) => { data: SshData; result: T }): Promise<T> {
   for (let attempt = 0; attempt < LOCK_ATTEMPTS; attempt += 1) {
     const release = acquireProcessLock(`${file}.lock`);
     if (!release) {

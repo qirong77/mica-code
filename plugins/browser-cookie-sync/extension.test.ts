@@ -152,7 +152,8 @@ async function harness(initial: Cookie[] = []) {
   const fetch = vi.fn(async (url: string, init?: RequestInit): Promise<Response> => {
     if (url.startsWith('chrome-extension://')) return Response.json(build);
     if (url.endsWith('/health')) return Response.json({ ok: true, connected: false, extension: health() });
-    if (url.endsWith('/snapshot')) return Response.json({ cookies: snapshot, revision });
+    if (url.endsWith('/snapshot')) return Response.json({ cookies: snapshot, revision, repairEpoch: 0, deliveryId: 'delivery-test' });
+    if (url.endsWith('/ack')) return Response.json({ ok: true });
     if (url.endsWith('/events') && init?.method === 'POST') {
       posts.push(JSON.parse(String(init.body)) as Event);
       return Response.json({ ok: true, revision: ++revision });
@@ -403,6 +404,7 @@ describe('cookie sync extension service worker', () => {
       const stream = eventStream();
       let signal: AbortSignal | null | undefined;
       h.fetch.mockImplementation(async (url, init) => {
+        if (url.endsWith('/ack')) return Response.json({ ok: true });
         if (url.endsWith('/events')) {
           signal = init?.signal;
           if (failure === 'status') return new Response(stream.response.body, { status: 503 });
@@ -428,11 +430,35 @@ describe('cookie sync extension service worker', () => {
     },
   );
 
+  it('retries snapshot repair after a transient Chrome write failure instead of leaving a live unrepaired stream', async () => {
+    const h = await harness();
+    h.snapshot([cookie('repair')]);
+    h.cookies.set.mockRejectedValueOnce(new Error('transient write failure'));
+    const streams = [eventStream(), eventStream()];
+    let opened = 0;
+    const original = h.fetch.getMockImplementation()!;
+    h.fetch.mockImplementation(async (url, init) => {
+      if (url.endsWith('/events') && init?.method !== 'POST') return streams[opened++]!.response;
+      return original(url, init);
+    });
+    await h.worker.connect();
+    expect(h.state.lastSync?.failed).toBe(1);
+    expect(streams[0]!.cancel).toHaveBeenCalledOnce();
+    const reconnecting = h.worker.connect();
+    await vi.waitFor(() => expect(h.state.lastSync?.failed).toBe(0));
+    expect(h.jar[0]?.value).toBe('repair');
+    streams[1]!.close();
+    await reconnecting;
+    const acknowledgments = h.fetch.mock.calls.filter(([url]) => url.endsWith('/ack'));
+    expect(acknowledgments.map(([, init]) => JSON.parse(String(init?.body)).failed)).toEqual([1, 0]);
+  });
+
   it('closes an active stream when the token changes and reconnects with the new token', async () => {
     const h = await harness();
     const streams = [eventStream(), eventStream()];
     const signals: AbortSignal[] = [];
     h.fetch.mockImplementation(async (url, init) => {
+      if (url.endsWith('/ack')) return Response.json({ ok: true });
       if (url.endsWith('/snapshot')) return Response.json({ cookies: [] });
       const stream = streams[signals.length]!;
       const signal = init?.signal as AbortSignal;
@@ -443,7 +469,7 @@ describe('cookie sync extension service worker', () => {
       return stream.response;
     });
     const connecting = h.worker.connect();
-    await vi.waitFor(() => expect(h.fetch).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => expect(h.fetch.mock.calls.filter(([url]) => !url.endsWith('/ack'))).toHaveLength(2));
     h.state.token = 'new-token';
     h.tokenChanged();
     // The mock stream does not implement fetch's abort behavior, so end its pending read.

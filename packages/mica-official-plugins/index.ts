@@ -12,6 +12,7 @@ import harnessReviewSetup from '../../plugins/harness-review/index.js';
 import memorySetup from '../../plugins/memory/index.js';
 import mobileRelaySetup from '../../plugins/mobile-relay/index.js';
 import notebookSetup from '../../plugins/notebook/index.js';
+import notebookRole from '../../plugins/notebook/roles/笔记.md' with { type: 'text' };
 import quickButtonsSetup from '../../plugins/quick-buttons/index.js';
 import replyDigestSetup from '../../plugins/reply-digest/index.js';
 import scheduleSetup from '../../plugins/schedule/index.js';
@@ -77,6 +78,7 @@ export const officialPlugins: MicaPlugin[] = officialPluginManifests.map((manife
     dependencies: manifest.dependencies.length > 0 ? manifest.dependencies : undefined,
     required: manifest.required,
     manifest,
+    ...(manifest.id === 'notebook' ? { embeddedRoles: [{ name: '笔记', prompt: notebookRole }] } : {}),
     setup,
   };
 });

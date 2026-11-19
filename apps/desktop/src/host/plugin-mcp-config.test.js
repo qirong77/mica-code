@@ -8,6 +8,7 @@ import { writeControlMcpConfig } from './control-mcp-config.js'
 
 const manifests = [
   { id: 'demo', name: 'Demo', description: '示例插件', mcp: true },
+  { id: 'notes', name: 'Notes', description: '笔记', mcp: true, mcpRoles: ['笔记'] },
   { id: 'page-only', name: 'Page', mcp: false }
 ]
 const directories = []
@@ -28,6 +29,16 @@ describe('plugin MCP session configuration', () => {
       'mica-plugin-demo': { type: 'http', url: 'http://127.0.0.1:9099/plugin/demo/mcp' }
     })
     expect(buildPluginMcpServers({ origin: '', manifests })).toEqual({})
+  })
+
+  it('keeps role-gated MCP out of the default session and activates it for its role', () => {
+    expect(buildPluginMcpServers({ origin: 'http://127.0.0.1:9099', manifests })).toEqual({
+      'mica-plugin-demo': { type: 'http', url: 'http://127.0.0.1:9099/plugin/demo/mcp' }
+    })
+    expect(buildPluginMcpServers({ origin: 'http://127.0.0.1:9099', role: '笔记', manifests })).toEqual({
+      'mica-plugin-demo': { type: 'http', url: 'http://127.0.0.1:9099/plugin/demo/mcp' },
+      'mica-plugin-notes': { type: 'http', url: 'http://127.0.0.1:9099/plugin/notes/mcp' }
+    })
   })
 
   it('writes plugin servers even when the Web runtime has no native control sockets', () => {
@@ -52,6 +63,7 @@ describe('plugin MCP session configuration', () => {
       name: 'mica-plugin-demo', type: 'http', url: 'http://127.0.0.1:9099/plugin/demo/mcp',
       description: '示例插件', tools: [], source: { kind: 'plugin', label: '插件 demo', detail: 'demo' }
     })
+    expect(listMcpCandidates().find((candidate) => candidate.name === 'mica-plugin-notes')).toBeUndefined()
     enabled = false
     expect(pluginMcpCandidates(process.env.MICA_DESKTOP_ORIGIN)).toEqual([])
     expect(buildPluginMcpServers({ origin: process.env.MICA_DESKTOP_ORIGIN })).toEqual({})

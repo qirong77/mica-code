@@ -8,6 +8,9 @@ import { MicaTool, type ToolInput } from '@packages/mica-tools/index.js';
 import { CLASSIFIER_VERSION, HarnessRecorder, type CaptureOptions, type ReviewReport } from './engine.js';
 import { summarizeProgress } from './progress.js';
 import { summarizeList } from './list.js';
+import { createConsoleSnapshot } from './console.js';
+import { writeConsoleCache } from './console-cache.js';
+import manifest from './plugin.json';
 
 const STATUSES = ['open', 'accepted', 'dismissed', 'validated', 'regressed'] as const;
 const DEFAULT_CAPTURE: CaptureOptions = { captureContent: true, maxEventChars: 4000, maxEventsPerRun: 2000 };
@@ -74,6 +77,22 @@ export default function setup(ctx: PluginContext): void {
     patch: Partial<PluginState> = {},
     automatic = false,
   ): Promise<void> => {
+    // Reuse the existing global maintenance scan. GET never writes this cache.
+    const snapshot = await createConsoleSnapshot(
+      {
+        pluginId: ctx.pluginId,
+        pluginVersion: manifest.version,
+        paths: { config: configHome, data: root },
+        settings: { get: () => ctx.settings.get() },
+        catalog: [],
+      },
+      report,
+      new AbortController().signal,
+    );
+    const cacheNote = '持久快照仅含已观察及最近装配的插件目录；当前清单和版本由后台只读刷新补齐。';
+    if (snapshot.warnings.length < 40) snapshot.warnings.push(cacheNote);
+    else snapshot.warnings[snapshot.warnings.length - 1] = cacheNote;
+    snapshot.counts.warnings++;
     await withStatusLock(
       root,
       async () => {
@@ -84,7 +103,14 @@ export default function setup(ctx: PluginContext): void {
         } catch {
           /* absent */
         }
-        if (latestAt <= Date.parse(report.generatedAt)) writeStatus(root, report, state);
+        if (latestAt <= Date.parse(report.generatedAt)) {
+          writeStatus(root, report, state);
+          try {
+            await writeConsoleCache(root, snapshot);
+          } catch {
+            ctx.logger.warn('harness-review:console-cache-unavailable', { code: 'cache_write_failed' });
+          }
+        }
         writeState(root, state);
       },
       automatic,
@@ -298,7 +324,7 @@ export class HarnessReviewTool extends MicaTool {
     super(
       'harness_review',
       '按用户要求查看当前工作区的 agent 运行复盘。list 返回运行指标与有证据的问题候选；report 导出 Markdown 报告；assess 记录用户的 review 或外部评估结论（需要 id、status、note）。accepted 仅代表认可建议；validated/regressed 需要在 note 写明实际验证证据。记录和聚合自动完成，无需任务结束后调用。不会修改 system prompt、工具、记忆或执行任何评测。' +
-      '同时附整机系统/插件操作与体验日志旁证；机器级日志不冒充本工作区根因。list 为有界摘要，截断/未知覆盖单独说明，完整证据见 reportPath。',
+        '同时附整机系统/插件操作与体验日志旁证；机器级日志不冒充本工作区根因。list 为有界摘要，截断/未知覆盖单独说明，完整证据见 reportPath。',
       {
         type: 'object',
         properties: {

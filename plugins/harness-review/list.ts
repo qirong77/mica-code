@@ -125,6 +125,9 @@ export function summarizeList(report: ReviewReport, reportPath: string) {
       'lower-bound; machine-wide; host restarts, forced exits and rotation may leave history incomplete',
     pluginFailures: report.pluginFailures.slice(0, 5).map((failure) => ({
       pluginId: short(failure.pluginId, 120),
+      pluginVersion: short(failure.pluginVersion ?? 'unknown', 60),
+      pid: failure.pid,
+      generation: short(failure.generation ?? 'unknown', 80),
       taskId: short(failure.taskId, 120),
       count: failure.count,
       lastAt: short(failure.lastAt, 40),
@@ -134,6 +137,8 @@ export function summarizeList(report: ReviewReport, reportPath: string) {
       ? {
           scope: report.logEvidence.scope,
           coverage: report.logEvidence.coverage,
+          totals: report.logEvidence.totals,
+          writerHealth: report.logEvidence.writerHealth?.slice(0, 3),
           operations: report.logEvidence.operations.slice(0, 5),
           experience: report.logEvidence.experience.slice(0, 5),
           system: report.logEvidence.system.slice(0, 5),

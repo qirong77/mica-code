@@ -52,3 +52,7 @@
   不抛异常——抛出去页面只会显示一句更含糊的错误。
 - 没有阈值、计数与空闲提醒：清单里没有 `settings`，除了 `llm` 面板（选摘要模型）之外
   不存任何配置。切换后的快速压缩同样改写当前会话记录，界面随持久化结果同步变化。
+
+## 操作观察
+
+菜单保留原中文 message，并附固定 outcome/code：busy、空内容 skipped、未配置 declined、取消 cancelled、真正失败 error 与 applied success 分开。宿主能力使用 dependency:host 健康，不清摘要模型或业务故障。

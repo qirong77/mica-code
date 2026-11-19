@@ -64,6 +64,14 @@ describe('publishPluginRoles', () => {
     expect(index.version).toBe(1);
   });
 
+  it('materializes embedded role text for bundled plugins', () => {
+    publishPluginRoles('notebook', [{ name: '笔记', prompt: '# Notebook' }], { configDir: root });
+
+    const roles = readPublishedPluginRoles({ configDir: root });
+    expect(roles).toMatchObject([{ pluginId: 'notebook', name: '笔记' }]);
+    expect(readFileSync(roles[0].path, 'utf-8')).toBe('# Notebook');
+  });
+
   it('drops the index when the plugin stops shipping roles', () => {
     const path = writeRole(join(root, 'plugin', 'roles'), '需求开发', '# A');
     publishPluginRoles('user.demand-dev', [{ name: '需求开发', path }], { configDir: root });

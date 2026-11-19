@@ -5,7 +5,7 @@ import type { MicaTool, ToolExecuteCallbacks } from '@packages/mica-tools/index.
 import { appendAudit } from './Audit.js';
 import { findHost, mutateData, readData, upsertHost, type SshHost } from './Hosts.js';
 import { runRemote, runRemoteMany, readHostFingerprint, type RemoteContext, type RemoteRunResult } from './Remote.js';
-import { SessionManager, type SessionWaitResult } from './Session.js';
+import { SessionManager, requireSessionHost, type SessionWaitResult } from './Session.js';
 import { deletePassword } from './Secrets.js';
 import { scopedHosts, type SshScope } from './Scope.js';
 
@@ -179,6 +179,14 @@ function linesOf(value: unknown, fallback: number): number {
 
 export function createTools(deps: ToolDeps): Disposable[] {
   const { ctx, dataFile, sessions } = deps;
+  const sessionHost = (hostId: string): SshHost => {
+    try {
+      return requireSessionHost(deps, hostId);
+    } catch (error) {
+      sessions.close(hostId);
+      throw error;
+    }
+  };
   const auditCompletion = (id: string, command: string) => {
     const started = Date.now();
     const info = sessions.list().find((item) => item.id === id);
@@ -192,7 +200,11 @@ export function createTools(deps: ToolDeps): Disposable[] {
         exitCode: result.exitCode,
         durationMs: Date.now() - started,
         ok: !result.dead && !result.timedOut && result.exitCode === 0,
-        ...(result.dead ? { note: 'session_dead' } : result.timedOut ? { note: 'command_superseded_completion_unknown' } : {}),
+        ...(result.dead
+          ? { note: 'session_dead' }
+          : result.timedOut
+            ? { note: 'command_superseded_completion_unknown' }
+            : {}),
       });
   };
 
@@ -406,8 +418,12 @@ export function createTools(deps: ToolDeps): Disposable[] {
       }
       if (op === 'open') {
         const found = asHost(deps, String(input.host ?? ''));
-        if (!found.host) return failure('host_unavailable', found.error, 'declined');
-        const { info } = await sessions.open(found.host, {
+        if (!found.host) {
+          sessions.close(String(input.host ?? '').trim());
+          return failure('host_unavailable', found.error, 'declined');
+        }
+        const host = sessionHost(found.host.id);
+        const { info } = await sessions.open(host, {
           cwd: typeof input.cwd === 'string' ? input.cwd : undefined,
         });
         appendAudit(ctx.dataDir, {
@@ -424,8 +440,15 @@ export function createTools(deps: ToolDeps): Disposable[] {
       }
       const id = String(input.session_id ?? input.host ?? '').trim();
       if (!id) return failure('missing_session_id', '需要 session_id（等于主机别名，或 open 时返回的 id）');
-      if (!sessions.get(id))
-        return failure('session_not_found', `[${id}] 没有打开的会话：先 \`open\`（或它已被关闭/超时回收）`);
+      // close 是本地清理；无需读取可能损坏的配置，也不依赖已撤销的会话授权。
+      if (op === 'close') {
+        sessions.close(id);
+        return `[${id}] 会话已关闭`;
+      }
+      if (!['run', 'write', 'wait', 'read'].includes(op)) return failure('unknown_operation', `不认识的 op：${op}`);
+      const session = sessions.get(id);
+      if (!session) return failure('session_not_found', `[${id}] 没有打开的会话：先 \`open\`（或它已被关闭/超时回收）`);
+      sessionHost(session.host.id);
       if (op === 'run' || op === 'write') {
         const command = String(input.command ?? '');
         if (!command.trim()) return failure('empty_command', 'command 是空的');
@@ -452,10 +475,6 @@ export function createTools(deps: ToolDeps): Disposable[] {
       if (op === 'read') {
         const text = sessions.read(id);
         return text ? `[${id}] 增量输出：\n${trimSessionOutput(text, tailLines).text}` : `[${id}] 没有新输出`;
-      }
-      if (op === 'close') {
-        sessions.close(id);
-        return `[${id}] 会话已关闭`;
       }
       return failure('unknown_operation', `不认识的 op：${op}`);
     },
@@ -581,9 +600,17 @@ export function createTools(deps: ToolDeps): Disposable[] {
                 ? 'busy'
                 : code === 'conflict'
                   ? 'conflict'
-                  : 'error';
+                  : code === 'host_unavailable' || code === 'read_only' || code === 'session_stale'
+                    ? 'declined'
+                    : 'error';
             return failure(
-              outcome === 'error' ? 'operation_failed' : outcome,
+              outcome === 'declined'
+                ? code!
+                : outcome === 'error'
+                  ? code === 'invalid_data'
+                    ? code
+                    : 'operation_failed'
+                  : outcome,
               error instanceof Error ? error.message : String(error),
               outcome,
             );

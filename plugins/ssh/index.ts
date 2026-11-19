@@ -39,11 +39,11 @@ export default function setup(ctx: PluginContext): void {
   });
   const dataFile = join(dataDir, 'data.json');
 
-  const sessions = new SessionManager(remote);
   const tools = ctx.tools;
   if (!tools) throw new Error('ssh 需要宿主提供 tools 能力');
 
   const scope: SshScope = ctx.sessionState ? createScope(ctx.sessionState) : createNoopScope();
+  const sessions = new SessionManager(remote, { dataFile, scope });
 
   const toolDeps = {
     ctx: remote,
