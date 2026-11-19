@@ -1,4 +1,5 @@
 import {createHeadlessEditor} from '@lexical/headless';
+import {$isHeadingNode, HeadingNode} from '@lexical/rich-text';
 import {$createParagraphNode, $createTextNode, $getRoot} from 'lexical';
 import {beforeAll, describe, expect, it, vi} from 'vitest';
 
@@ -10,6 +11,21 @@ beforeAll(async () => {
 });
 
 describe('notebook persistence boundary', () => {
+  it('creates a fixed first-level title and keeps it aligned with the host name', async () => {
+    const editor = createHeadlessEditor({namespace: 'notebook-title', nodes: [HeadingNode], onError(error) {throw error;}});
+    const session = new NotebookSession('a', {version: 1, editorState: null}, 'title-load', '文件名称');
+    const detach = session.attach(editor);
+    await Promise.resolve();
+    editor.getEditorState().read(() => {
+      const first = $getRoot().getFirstChild();
+      expect($isHeadingNode(first) && first.getTag()).toBe('h1');
+      expect(first?.getTextContent()).toBe('文件名称');
+    });
+    session.setTitle('新的标题');
+    editor.getEditorState().read(() => expect($getRoot().getFirstChild()?.getTextContent()).toBe('新的标题'));
+    detach();
+  });
+
   it('rejects flush until the document editor is mounted', () => {
     const session = new NotebookSession('a', {version: 1, editorState: null});
     expect(() => session.snapshot()).toThrow('尚未就绪');

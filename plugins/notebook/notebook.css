@@ -577,6 +577,11 @@
   line-height: 20px;
   text-align: start;
 }
+.notebook-outline-tree-entry { min-width: 0; }
+.notebook-outline-tree-entry .notebook-outline-entry { display: flex; align-items: center; gap: 4px; }
+.notebook-outline-toggle { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 16px; width: 16px; height: 20px; color: var(--color-fg-muted); }
+.notebook-outline-toggle-empty { opacity: 0; }
+.notebook-outline-toggle:hover { color: var(--color-fg-strong); }
 .notebook-page .notebook-outline-entry:hover:not(:disabled) {
   color: var(--color-fg-strong);
   background: var(--color-overlay);

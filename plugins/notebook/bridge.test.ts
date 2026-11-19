@@ -147,6 +147,8 @@ describe('Notebook iframe boundary', () => {
       f.bridge.action('a', action);
       expect(f.last('action')).toEqual({channel: NOTEBOOK_CHANNEL, token: 'nonce', type: 'action', noteId: 'a', loadId, action});
     }
+    f.bridge.title('a', '新标题');
+    expect(f.last('title')).toEqual({channel: NOTEBOOK_CHANNEL, token: 'nonce', type: 'title', noteId: 'a', loadId, title: '新标题'});
     const replacement = f.bridge.load('b', document);
     vi.mocked(f.target.postMessage).mockClear();
     f.bridge.action('a', 'style');

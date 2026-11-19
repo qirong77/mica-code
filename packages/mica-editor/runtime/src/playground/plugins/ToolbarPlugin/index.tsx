@@ -81,6 +81,7 @@ import {getSelectedNode} from '../../utils/getSelectedNode';
 import {INSERT_COLLAPSIBLE_COMMAND} from '../CollapsibleExtension';
 import {INSERT_DATETIME_COMMAND} from '../DateTimeExtension';
 import {InsertEquationDialog} from '../EquationsExtension';
+import {InsertHtmlDialog, INSERT_HTML_COMMAND} from '../HtmlExtension';
 import {INSERT_EXCALIDRAW_COMMAND} from '../ExcalidrawExtension';
 import {InsertImageDialog} from '../ImagesExtension';
 import InsertLayoutDialog from '../LayoutExtension/InsertLayoutDialog';
@@ -1022,6 +1023,13 @@ export default function ToolbarPlugin({
       onClick: (event: MouseEvent<HTMLButtonElement>) =>
         clearFormatting(activeEditor, isKeyboardInput(event)),
     },
+    title: {
+      id: 'title',
+      label: '一级标题',
+      icon: 'h1',
+      active: toolbarState.blockType === 'h1',
+      onClick: () => formatHeading(activeEditor, toolbarState.blockType, 'h1'),
+    },
     bold: textAction(
       'bold',
       '加粗',
@@ -1220,7 +1228,16 @@ export default function ToolbarPlugin({
       </>
     ),
     clear: actionItem(actions.clear),
-    paragraph: pageItem('paragraph', '段落样式', 'paragraph'),
+    paragraph: (
+      <>
+        {actionItem(actions.title)}
+        <MenuSeparator />
+        <BlockFormatItems
+          editor={activeEditor}
+          blockType={toolbarState.blockType}
+        />
+      </>
+    ),
     'font-family': pageItem('font-family', '字体', 'font-family'),
     'font-size': pageItem('font-size', '字号', 'font-family'),
     strikethrough: actionItem(actions.strikethrough),
@@ -1359,6 +1376,21 @@ export default function ToolbarPlugin({
             </DropDownItem>
 
             <DropDownItem
+              onClick={() => {
+                showModal('插入 HTML 块', onClose => (
+                  <InsertHtmlDialog
+                    activeEditor={activeEditor}
+                    onClose={onClose}
+                    onInsert={payload => activeEditor.dispatchCommand(INSERT_HTML_COMMAND, payload)}
+                  />
+                ));
+              }}
+              className="item">
+              <EditorIcon icon="code" />
+              <span className="text">HTML 页面</span>
+            </DropDownItem>
+
+            <DropDownItem
               onClick={() => dispatchToolbarCommand(INSERT_EXCALIDRAW_COMMAND)}
               className="item">
               <EditorIcon icon="diagram-2" />
@@ -1428,6 +1460,7 @@ export default function ToolbarPlugin({
               rootType={toolbarState.rootType}
               editor={activeEditor}
             />
+            {actionButton(actions.title)}
           </div>
         )}
       {showCodeOptions ? (

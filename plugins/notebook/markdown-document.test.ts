@@ -159,7 +159,7 @@ describe('Notebook Markdown document conversion', () => {
     expect(root.children.map((node: Record<string, unknown>) => node.type)).toEqual(['image', 'paragraph']);
     expect(root.children[0]).toMatchObject({
       altText: '侧边栏',
-      maxWidth: 500,
+      maxWidth: 720,
       showCaption: false,
       src: 'data:image/svg+xml;base64,PHN2Zz48L3N2Zz4=',
       type: 'image',

@@ -1,5 +1,6 @@
 import {useLexicalComposerContext} from '@lexical/react/LexicalComposerContext';
-import {type LexicalEditor} from 'lexical';
+import {$createHeadingNode, $isHeadingNode} from '@lexical/rich-text';
+import {$createTextNode, $getRoot, type LexicalEditor} from 'lexical';
 import {Component, createContext, type ReactNode, useContext, useEffect, useRef, useState} from 'react';
 
 import NotebookOutline, {type NotebookNavigation, type NotebookOutlineSnapshot} from './NotebookOutline';
@@ -9,6 +10,26 @@ import {isNotebookAction, NOTEBOOK_ACTION_COMMAND, type NotebookAction} from './
 export interface NotebookDocument {
   version: 1;
   editorState: string | null;
+}
+
+export const DEFAULT_NOTEBOOK_TITLE = '未命名笔记';
+
+function normalizeNotebookTitle(value: string | undefined): string {
+  const title = value?.trim();
+  return title || DEFAULT_NOTEBOOK_TITLE;
+}
+
+function $readNotebookTitle(editor: LexicalEditor): {key: string | null; text: string; firstIsTitle: boolean} {
+  return editor.getEditorState().read(() => {
+    const root = $getRoot();
+    const first = root.getFirstChild();
+    const title = first && $isHeadingNode(first) && first.getTag() === 'h1' ? first : null;
+    return {
+      key: title?.getKey() ?? null,
+      text: title?.getTextContent() ?? '',
+      firstIsTitle: title !== null && root.getFirstChild() === title,
+    };
+  });
 }
 
 const CHANNEL = 'mica-notebook';
@@ -21,6 +42,7 @@ let mountSequence = 0;
 
 export class NotebookSession {
   readonly mountKey: string;
+  title: string;
   editor: LexicalEditor | null = null;
   nestedEditors = new Set<LexicalEditor>();
   private queued = false;
@@ -30,13 +52,59 @@ export class NotebookSession {
   private presenting = false;
   private frozenBeforeEditable: boolean | null = null;
   private navigateOutline: ((navigation: NotebookNavigation) => void) | null = null;
+  private titleNeedsAlignment: boolean;
+  private unregisterTitle: (() => void) | null = null;
 
   constructor(
     readonly noteId: string,
     readonly document: NotebookDocument,
     readonly requestId?: string,
+    title?: string,
   ) {
     this.mountKey = `${noteId}:${++mountSequence}`;
+    this.title = normalizeNotebookTitle(title);
+    this.titleNeedsAlignment = title !== undefined;
+  }
+
+  /**
+   * Keep the title in the normal Lexical document tree. There is deliberately
+   * no title field in NotebookDocument: a title change is an editor update and
+   * therefore follows the same dirty/snapshot path as every other edit.
+   */
+  setTitle(title: string): boolean {
+    this.title = normalizeNotebookTitle(title);
+    this.titleNeedsAlignment = true;
+    const changed = this.ensureTitle();
+    if (changed) this.dirty();
+    return changed;
+  }
+
+  /** Ensure that the first top-level block is a non-empty H1 title. */
+  ensureTitle(editor = this.editor): boolean {
+    if (!editor) return false;
+
+    const current = $readNotebookTitle(editor);
+    if (!this.titleNeedsAlignment && current.text.trim()) this.title = current.text.trim();
+    const nextTitle = normalizeNotebookTitle(this.title);
+    this.title = nextTitle;
+
+    const needsUpdate = current.key === null || !current.firstIsTitle || !current.text.trim() ||
+      (this.titleNeedsAlignment && current.text !== nextTitle);
+    if (!needsUpdate) {
+      this.titleNeedsAlignment = false;
+      return false;
+    }
+
+    editor.update(() => {
+      const root = $getRoot();
+      const first = root.getFirstChild();
+      const title = first && $isHeadingNode(first) && first.getTag() === 'h1' ? first : null;
+      const heading = title ?? $createHeadingNode('h1');
+      if (root.getFirstChild() !== heading) root.splice(0, 0, [heading]);
+      if (heading.getTextContent() !== nextTitle) heading.clear().append($createTextNode(nextTitle));
+    }, {discrete: true});
+    this.titleNeedsAlignment = false;
+    return true;
   }
 
   performAction(action: NotebookAction): void {
@@ -90,14 +158,34 @@ export class NotebookSession {
   attach(editor: LexicalEditor): () => void {
     this.editor = editor;
     this.active = true;
+    let titleChanged = false;
+    try {
+      titleChanged = this.ensureTitle(editor);
+    } catch {
+      // Keep the session attachable so a malformed editor can report its
+      // snapshot error through the normal load/dirty bridge path.
+    }
+    this.unregisterTitle?.();
+    this.unregisterTitle = typeof editor.registerUpdateListener === 'function'
+      ? editor.registerUpdateListener(({dirtyElements, dirtyLeaves}) => {
+        if (dirtyElements.size || dirtyLeaves.size) this.ensureTitle(editor);
+      })
+      : null;
     this.syncEditability();
     queueMicrotask(() => {
       if (this.active && !this.loaded) {
         this.loaded = true;
         post({type: 'loaded', noteId: this.noteId, requestId: this.requestId, loadId: this.requestId});
+        if (titleChanged) this.dirty();
       }
     });
-    return () => { this.active = false; this.editor = null; this.restoreEditor(editor); };
+    return () => {
+      this.unregisterTitle?.();
+      this.unregisterTitle = null;
+      this.active = false;
+      this.editor = null;
+      this.restoreEditor(editor);
+    };
   }
 
   attachNested(editor: LexicalEditor): () => void {
@@ -196,7 +284,12 @@ export function NotebookFrame({children}: {children: ReactNode}) {
             const parsed = JSON.parse(doc.editorState);
             if (parsed?.root?.type !== 'root' || !Array.isArray(parsed.root.children)) throw new Error('笔记正文格式无效');
           }
-          const next = new NotebookSession(message.noteId, doc, requestId);
+          const next = new NotebookSession(
+            message.noteId,
+            doc,
+            requestId,
+            typeof message.title === 'string' ? message.title : undefined,
+          );
           next.setFrozen(frozen.current);
           current.current = next;
           setSession(next);
@@ -212,6 +305,10 @@ export function NotebookFrame({children}: {children: ReactNode}) {
           // The host rejects this request, leaving the current note mounted.
           post({type: 'error', requestId, loadId: message.loadId, noteId: current.current?.noteId, message: String(error)});
         }
+      } else if ((message.type === 'setTitle' || message.type === 'title') && typeof message.title === 'string') {
+        const active = current.current;
+        if (!active || message.noteId !== active.noteId || message.loadId !== active.requestId) return;
+        active.setTitle(message.title);
       }
     };
     // Portalled menus and native inputs do not all consult Lexical editability.

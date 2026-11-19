@@ -2,14 +2,15 @@ import {createHeadlessEditor} from '@lexical/headless'
 import {CodeNode, $createCodeNode} from '@lexical/code'
 import {HeadingNode, QuoteNode} from '@lexical/rich-text'
 import {ListNode, ListItemNode} from '@lexical/list'
-import {LinkNode} from '@lexical/link'
+import {$isAutoLinkNode, AutoLinkNode, LinkNode} from '@lexical/link'
 import {TRANSFORMERS} from '@lexical/markdown'
-import {$createParagraphNode, $createTextNode, $getRoot, PASTE_COMMAND} from 'lexical'
+import {Window} from 'happy-dom'
+import {$createParagraphNode, $createTextNode, $getRoot, $isElementNode, PASTE_COMMAND} from 'lexical'
 import {describe, expect, it, vi} from 'vitest'
 import {isMarkdownText, registerMarkdownPaste} from '../src/playground/plugins/MarkdownPastePlugin/markdownPaste'
 
 function paste(text: string, code = false, extra: Record<string,string> = {}, existing = '') {
-  const editor = createHeadlessEditor({namespace:'markdown-test', nodes:[CodeNode, HeadingNode, QuoteNode, ListNode, ListItemNode, LinkNode], onError(e){throw e;}});
+  const editor = createHeadlessEditor({namespace:'markdown-test', nodes:[CodeNode, HeadingNode, QuoteNode, ListNode, ListItemNode, LinkNode, AutoLinkNode], onError(e){throw e;}});
   registerMarkdownPaste(editor, TRANSFORMERS);
   const preventDefault = vi.fn();
   const data = {'text/plain':text, ...extra};
@@ -49,6 +50,54 @@ describe('Markdown paste', () => {
     });
   });
   it('leaves source alone inside a code block', () => expect(paste('# 标题',true).handled).toBe(false));
+  it('pastes a bare https URL as an automatic link', () => {
+    const {editor, handled, preventDefault} = paste('https://example.com/docs');
+    expect(handled).toBe(true);
+    expect(preventDefault).toHaveBeenCalled();
+    editor.getEditorState().read(() => {
+      const target = $getRoot().getLastChild()!;
+      const link = $isElementNode(target) ? target.getFirstChild() : null;
+      expect($isAutoLinkNode(link)).toBe(true);
+      expect(link!.getTextContent()).toBe('https://example.com/docs');
+      expect($isAutoLinkNode(link) && link.getURL()).toBe('https://example.com/docs');
+    });
+  });
+  it('pastes a www URL with an https destination', () => {
+    const {editor, handled} = paste('www.example.com/docs');
+    expect(handled).toBe(true);
+    editor.getEditorState().read(() => {
+      const target = $getRoot().getLastChild()!;
+      const link = $isElementNode(target) ? target.getFirstChild() : null;
+      expect($isAutoLinkNode(link)).toBe(true);
+      expect(link!.getTextContent()).toBe('www.example.com/docs');
+      expect($isAutoLinkNode(link) && link.getURL()).toBe('https://www.example.com/docs');
+    });
+  });
+  it('does not intercept URLs in a code block', () => expect(paste('https://example.com', true).handled).toBe(false));
+  it('does not treat Markdown links as bare URLs', () => {
+    const {editor, handled} = paste('[文档](https://example.com)');
+    expect(handled).toBe(true);
+    editor.getEditorState().read(() => {
+      const target = $getRoot().getLastChild()!;
+      expect(target.getTextContent()).toBe('[文档](https://example.com)');
+      expect($isElementNode(target) && target.getFirstChild()!.getType()).toBe('text');
+    });
+  });
+  it('does not intercept rich-text links', () => expect(
+    paste('https://example.com', false, {'text/html':'<a href="https://example.com">https://example.com</a>'}).handled,
+  ).toBe(false));
+  it('accepts a bare URL in a plain HTML wrapper', () => {
+    const previousParser = globalThis.DOMParser;
+    vi.stubGlobal('DOMParser', new Window().DOMParser);
+    try {
+      expect(paste('https://example.com', false, {'text/html':'<span style="white-space: pre-wrap">https://example.com</span>'}).handled).toBe(true);
+    } finally {
+      vi.stubGlobal('DOMParser', previousParser);
+    }
+  });
+  it('does not intercept multi-line text', () => expect(
+    paste('https://example.com\nhttps://example.org').handled,
+  ).toBe(false));
   it('leaves ordinary prose alone', () => expect(paste('普通文字').handled).toBe(false));
   it('preserves internal Lexical clipboard', () => expect(paste('# 标题', false, {'application/x-lexical-editor':'{}'}).handled).toBe(false));
   it('accepts explicit Markdown MIME', () => expect(paste('普通文字', false, {'text/markdown':'普通文字'}).handled).toBe(true));

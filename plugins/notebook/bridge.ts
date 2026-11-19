@@ -4,7 +4,7 @@ import type { NotebookDocument } from './model';
 export const NOTEBOOK_CHANNEL = 'mica-notebook';
 
 export interface NotebookOutline {
-  items: { key: string; text: string; level: number }[];
+  items: { key: string; text: string; level: number; parentKey?: string | null }[];
   activeKey: string | null;
   blocks: { table: boolean; code: boolean; mermaid: boolean; image: boolean };
 }
@@ -47,7 +47,7 @@ export function createEditorBridge(options: {
     }
     pending.clear();
   }
-  function request(type: 'load' | 'flush', document?: NotebookDocument) {
+  function request(type: 'load' | 'flush', document?: NotebookDocument, title?: string) {
     if (disposed) return Promise.reject(new Error('编辑器已关闭'));
     if (!options.target()) return Promise.reject(new Error('编辑器尚未就绪'));
     if (!active || (type === 'flush' && !active.loaded)) return Promise.reject(new Error('笔记尚未完成加载，请重试'));
@@ -60,7 +60,7 @@ export function createEditorBridge(options: {
       }, type === 'load' ? 10000 : 5000);
       pending.set(requestId, { type, noteId, loadId, document, resolve, reject, timer });
       try {
-        send(type, { requestId, noteId, loadId, ...(type === 'load' ? { document } : {}) });
+        send(type, { requestId, noteId, loadId, ...(type === 'load' ? { document, title } : {}) });
       } catch (cause) {
         clearTimeout(timer);
         pending.delete(requestId);
@@ -84,7 +84,8 @@ export function createEditorBridge(options: {
             typeof item.text === 'string' &&
             Number.isInteger(item.level) &&
             item.level >= 1 &&
-            item.level <= 6,
+            item.level <= 6 &&
+            (item.parentKey === undefined || item.parentKey === null || typeof item.parentKey === 'string'),
         ) ||
         !data.blocks ||
         !['table', 'code', 'mermaid', 'image'].every((key) => typeof data.blocks[key] === 'boolean') ||
@@ -167,10 +168,10 @@ export function createEditorBridge(options: {
   }
   return {
     receive,
-    load(noteId: string, document: NotebookDocument): Promise<void> {
+    load(noteId: string, document: NotebookDocument, title = '未命名笔记'): Promise<void> {
       rejectRequests('笔记已切换，请重试');
       active = { noteId, loadId: `load-${++sequence}`, loaded: false };
-      return request('load', document).then(() => undefined);
+      return request('load', document, title).then(() => undefined);
     },
     freeze(frozen: boolean) {
       send('freeze', { frozen });
@@ -187,6 +188,9 @@ export function createEditorBridge(options: {
     },
     action(noteId: string, action: 'style' | 'present') {
       if (active?.loaded && active.noteId === noteId) send('action', { noteId, loadId: active.loadId, action });
+    },
+    title(noteId: string, title: string) {
+      if (active?.loaded && active.noteId === noteId) send('title', {noteId, loadId: active.loadId, title});
     },
     flush(): Promise<{ noteId: string; document: NotebookDocument }> {
       return request('flush');

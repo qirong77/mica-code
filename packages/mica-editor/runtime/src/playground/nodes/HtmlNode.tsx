@@ -26,6 +26,7 @@ import {
   nodeSchema,
   numberValue,
   optional,
+  enumValue,
   type Spread,
   stringValue,
   withAccessors,
@@ -37,7 +38,7 @@ export const HTML_NODE_MAX_HEIGHT = 1200;
 const DEFAULT_HEIGHT = 420;
 
 const htmlNodeSchema = nodeSchema<HtmlNode>()({
-  runtime: withAccessors(stringValue('html'), {getter: {field: '__runtime'}}),
+  runtime: withAccessors(enumValue(['html', 'react']), {getter: {field: '__runtime'}}),
   html: withAccessors(stringValue(), {getter: {field: '__html'}}),
   height: withAccessors(optional(numberValue()), {getter: 'getHeight'}),
 });
@@ -94,7 +95,7 @@ function buildDocument(html: string, theme: HtmlTheme, runtime: HtmlBlockRuntime
   // styles/scripts and remote images work, while fetch/XHR/frames stay closed
   // so a block cannot exfiltrate what it renders.
   const policy =
-    "default-src 'none'; style-src 'unsafe-inline' https://cdn.jsdelivr.net; script-src 'unsafe-inline' https://esm.sh https://cdn.jsdelivr.net; connect-src https://esm.sh https://cdn.jsdelivr.net; img-src data: blob: https:; font-src data: https: https://cdn.jsdelivr.net; media-src data: https:";
+    "default-src 'none'; style-src 'unsafe-inline' https:; script-src 'unsafe-inline' https://esm.sh https://cdn.jsdelivr.net; connect-src https://esm.sh https://cdn.jsdelivr.net; frame-src https:; child-src https:; img-src data: blob: https:; font-src data: https: https://cdn.jsdelivr.net; media-src data: https:";
   if (runtime === 'react') {
     return `<!doctype html><meta charset="utf-8">
 <meta http-equiv="Content-Security-Policy" content="${policy}">

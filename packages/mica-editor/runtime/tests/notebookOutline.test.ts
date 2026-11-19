@@ -26,13 +26,14 @@ const createCaptionEditor = () => buildEditorFromExtensions(defineExtension({
 describe('Notebook outline metadata', () => {
   it('keeps all six heading levels in document order, excluding table and nested-editor headings', () => {
     const editor = createEditor();
-    const expected: {key: string; text: string; level: number}[] = [];
+    const expected: {key: string; text: string; level: number; parentKey: string | null}[] = [];
     const caption = createCaptionEditor();
     editor.update(() => {
       const root = $getRoot();
+      root.append($createHeadingNode('h1').append($createTextNode('固定标题')));
       for (const level of [1, 2, 3, 4, 5, 6]) {
         const heading = $createHeadingNode(`h${level}` as HeadingTagType).append($createTextNode(`  第 ${level} 级  `));
-        expected.push({key: heading.getKey(), text: `第 ${level} 级`, level});
+        expected.push({key: heading.getKey(), text: `第 ${level} 级`, level, parentKey: level === 1 ? null : expected[expected.length - 1]!.key});
         // A heading in an ordinary block container still belongs to this editor.
         root.append(level === 6 ? $createQuoteNode().append(heading) : heading);
         if (level === 2) {
@@ -88,6 +89,7 @@ describe('Notebook outline metadata', () => {
     let first: HeadingNode;
     let second: HeadingNode;
     editor.update(() => {
+      $getRoot().append($createHeadingNode('h1').append($createTextNode('固定标题')));
       first = $createHeadingNode('h1').append($createTextNode('相同标题'));
       second = $createHeadingNode('h2').append($createTextNode('相同标题'));
       $getRoot().append(first, second);
@@ -106,8 +108,8 @@ describe('Notebook outline metadata', () => {
     const unregister = editor.registerUpdateListener(onUpdate);
 
     expect(read(editor).items).toEqual([
-      {key: second!.getKey(), text: '新标题', level: 6},
-      {key: first!.getKey(), text: '相同标题', level: 1},
+      {key: second!.getKey(), text: '新标题', level: 6, parentKey: null},
+      {key: first!.getKey(), text: '相同标题', level: 1, parentKey: null},
     ]);
     read(editor);
     expect(editor.getEditorState()).toBe(state);

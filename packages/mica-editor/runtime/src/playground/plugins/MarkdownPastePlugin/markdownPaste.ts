@@ -1,4 +1,5 @@
 import {$isCodeNode} from '@lexical/code'
+import {$createAutoLinkNode, autoLinkUrlMatcher} from '@lexical/link'
 import {$generateNodesFromMarkdownString, type Transformer} from '@lexical/markdown'
 import {$isTableSelection} from '@lexical/table'
 import {
@@ -125,6 +126,24 @@ function $createPlainParagraphs(markdown: string): ParagraphNode[] {
     })
     return paragraph
   })
+}
+
+function getBareUrlClipboardText(data: DataTransfer): {text: string; url: string} | null {
+  if (data.files?.length || Array.from(data.types).some(t => /lexical|rtf/i.test(t))) return null
+  if (data.getData('text/markdown') || data.getData('text/x-markdown')) return null
+
+  const text = data.getData('text/plain')
+  if (!text) return null
+  const html = data.getData('text/html')
+  if (html) {
+    if (typeof DOMParser === 'undefined') return null
+    const body = new DOMParser().parseFromString(html, 'text/html').body
+    if (!carriesOnlyText(body) || body.textContent !== text) return null
+  }
+
+  const match = autoLinkUrlMatcher(text)
+  if (!match || match.index !== 0 || match.length !== text.length || match.text !== text) return null
+  return {text, url: match.url}
 }
 
 type FlatText = {text: string; starts: Array<{index: number; key: NodeKey; size: number}>}
@@ -289,6 +308,13 @@ export function registerMarkdownPaste(editor: LexicalEditor, transformers: Trans
         if ($isCodeNode(node) || node.getType() === 'tablecell') return false
         node = node.getParent()!
       }
+    }
+    const bareUrl = getBareUrlClipboardText(event.clipboardData)
+    if (bareUrl) {
+      $addUpdateTag(HISTORY_PUSH_TAG)
+      selection.insertNodes([$createAutoLinkNode(bareUrl.url).append($createTextNode(bareUrl.text))])
+      event.preventDefault()
+      return true
     }
     const markdown = getMarkdownClipboardText(event.clipboardData)
     if (!markdown) return false

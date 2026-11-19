@@ -42,10 +42,11 @@ const blocks: BlockKind[] = [...headings, 'quote'];
 const listTypes: ListType[] = ['number', 'bullet', 'check'];
 const content = '标题 1';
 
-function makeEditor({native = true, notebook = true, parentEditor}: {
+function makeEditor({native = true, notebook = true, parentEditor, fixedTitle = false}: {
   native?: boolean;
   notebook?: boolean;
   parentEditor?: LexicalEditor;
+  fixedTitle?: boolean;
 } = {}) {
   // Use the same extension registrations as the notebook, including the
   // CodeExtension Enter handler, rather than replacing them with test mocks.
@@ -60,7 +61,7 @@ function makeEditor({native = true, notebook = true, parentEditor}: {
     onError(error) { throw error; },
   }));
   cleanups.push(() => editor[Symbol.dispose]());
-  if (notebook) cleanups.push(registerNotebookBlockEditing(editor));
+  if (notebook) cleanups.push(registerNotebookBlockEditing(editor, {isFixedTitle: fixedTitle ? undefined : () => false}));
   return editor;
 }
 
@@ -260,6 +261,33 @@ describe('notebook block style removal', () => {
     dispatch(editor, REDO_COMMAND, undefined);
     expect(readBlocks(editor)).toEqual([['paragraph', content]]);
     expectCaretAtStart(editor, textKey);
+  });
+});
+
+describe('fixed notebook title boundary', () => {
+  it.each(['Enter', 'Backspace'] as const)('keeps the first top-level H1 on %s at its start', key => {
+    const editor = makeEditor({fixedTitle: true});
+    const {key: titleKey} = seedBlock(editor, 'h1');
+    const event = keyEvent(key);
+    const handled = key === 'Enter'
+      ? dispatch(editor, KEY_ENTER_COMMAND, event)
+      : dispatch(editor, KEY_BACKSPACE_COMMAND, event);
+    expect(handled).toBe(true);
+    expect(event.preventDefault).toHaveBeenCalledOnce();
+    expect(readBlocks(editor)).toEqual([['heading', content]]);
+    editor.read('latest', () => {
+      const title = $getNodeByKey(titleKey);
+      expect($isHeadingNode(title) && title.getTag()).toBe('h1');
+      expect(title?.getParent()?.getType()).toBe('root');
+    });
+  });
+
+  it('also blocks beforeinput deletion from flattening the fixed title', () => {
+    const editor = makeEditor({fixedTitle: true});
+    seedBlock(editor, 'h1');
+    expect(dispatch(editor, INSERT_PARAGRAPH_COMMAND, undefined)).toBe(true);
+    expect(dispatch(editor, DELETE_CHARACTER_COMMAND, true)).toBe(true);
+    expect(readBlocks(editor)).toEqual([['heading', content]]);
   });
 });
 

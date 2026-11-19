@@ -40,6 +40,12 @@ const CODE = 16;
 
 /** Inline images arrive base64-encoded and count against the 6 MiB document cap. */
 const MAX_INLINE_IMAGE_BYTES = 512 * 1024;
+/**
+ * Width a Markdown image gets before the user resizes it. Screenshots used as
+ * documentation need the full text column, so this stays wider than a thumbnail
+ * but still inside the editor's readable width.
+ */
+const DEFAULT_IMAGE_WIDTH = 720;
 const EMPTY_CAPTION_STATE =
   '{"root":{"children":[{"children":[],"direction":null,"format":"","indent":0,"type":"paragraph","version":1}],"direction":null,"format":"","indent":0,"type":"root","version":1}}';
 
@@ -356,7 +362,7 @@ function imageNode(token: JsonRecord, context: Context): JsonRecord | null {
   return {
     altText: alt,
     caption: { editorState: EMPTY_CAPTION_STATE },
-    maxWidth: 500,
+    maxWidth: DEFAULT_IMAGE_WIDTH,
     showCaption: false,
     src: href,
     type: 'image',

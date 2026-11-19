@@ -167,6 +167,18 @@ kbd { font: 12px/1.5 monospace; border: 1px solid var(--workspace-line); border-
 .editor-modal .KatexEquationAlterer_defaultRow { color: var(--color-text-2); font-size: 12px; margin-bottom: 10px; }
 .editor-modal .KatexEquationAlterer_centerRow { margin-bottom: 20px; }
 .editor-modal .dialog-dropdown.arco-btn { width: 100%; border: 1px solid var(--workspace-line); border-radius: 4px; display: flex; align-items: center; justify-content: space-between; margin-bottom: 24px; color: var(--color-text-2); }
+.html-insert-dialog { min-width: min(620px, 72vw); color: var(--color-text-2); }
+.html-insert-tabs { display: flex; gap: 6px; margin-bottom: 18px; }
+.html-insert-tab { border: 1px solid var(--workspace-line); border-radius: 4px; padding: 5px 10px; color: var(--color-text-2); background: var(--color-fill-1); cursor: pointer; }
+.html-insert-tab:hover, .html-insert-tab.is-active { border-color: rgb(var(--primary-4)); color: var(--workspace-accent); background: rgb(var(--primary-1)); }
+.html-insert-runtime { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
+.html-insert-runtime label { flex: none; font-size: 12px; color: var(--color-text-3); }
+.html-insert-runtime .arco-select { flex: 1; min-width: 0; }
+.html-insert-source { display: flex; flex-direction: column; gap: 8px; margin-top: 18px; font-size: 12px; color: var(--color-text-2); }
+.html-insert-source textarea { box-sizing: border-box; width: 100%; min-height: 220px; resize: vertical; padding: 10px; border: 1px solid var(--workspace-line); border-radius: 5px; color: var(--color-text-1); background: var(--color-fill-1); font: 12px/1.6 'SFMono-Regular', Consolas, monospace; }
+.html-insert-source textarea:focus { border-color: var(--workspace-accent); outline: none; }
+.html-insert-hint { margin: 10px 0 0; color: var(--color-text-3); font-size: 11px; line-height: 1.6; }
+.html-insert-error { margin: 10px 0 0; color: rgb(var(--danger-6)); font-size: 12px; }
 .help-intro { padding: 4px 0 24px; border-bottom: 1px solid var(--workspace-line); }
 .help-intro h2 { font-size: 23px; letter-spacing: -.5px; margin: 18px 0 10px; color: var(--color-text-1); }
 .help-intro p, .help-group p { font-size: 13px; color: var(--color-text-3); line-height: 1.9; margin: 0; }

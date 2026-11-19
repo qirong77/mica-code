@@ -84,6 +84,27 @@ function nodePath(node, byId) {
   return path.reverse();
 }
 
+function editorNodeText(value) {
+  if (Array.isArray(value)) return value.map(editorNodeText).join('');
+  if (!value || typeof value !== 'object') return '';
+  const record = value;
+  if (typeof record.text === 'string') return record.text;
+  return editorNodeText(record.children);
+}
+
+/** The first top-level H1 is the file title; the runtime keeps it fixed. */
+function notebookDocumentTitle(document) {
+  if (!document?.editorState) return '';
+  try {
+    const state = JSON.parse(document.editorState);
+    const first = state?.root?.children?.[0];
+    if (first?.type !== 'heading' || first?.tag !== 'h1') return '';
+    return editorNodeText(first.children).replace(/\s+/g, ' ').trim().slice(0, 100);
+  } catch {
+    return '';
+  }
+}
+
 /** The index controller may replay this operation after a CAS conflict or uncertain write. */
 export function createDefaultNote({ id, now, parentId }) {
   return (latest) =>
@@ -229,7 +250,8 @@ export default function NotebookPage({ api }) {
     overlay: window.innerWidth <= 1100,
   }));
   const [focused, setFocused] = useState(false);
-  const [outlineOpen, setOutlineOpen] = useState(false);
+  const [outlineOpen, setOutlineOpen] = useState(() => !window.matchMedia('(max-width: 1100px)').matches);
+  const [outlineCollapsed, setOutlineCollapsed] = useState(new Set());
   const [outline, setOutline] = useState(emptyOutline);
   const [externalUpdate, setExternalUpdate] = useState(null);
   const [dialog, setDialog] = useState(null);
@@ -242,6 +264,7 @@ export default function NotebookPage({ api }) {
   const pageRoot = useRef(null);
   const rail = useRef(null);
   const outlinePanel = useRef(null);
+  const outlineItemRefs = useRef(new Map());
   const barLead = useRef(null);
   const barActions = useRef(null);
   const syncLayout = useRef(() => {});
@@ -253,6 +276,8 @@ export default function NotebookPage({ api }) {
   const current = useRef(null);
   const drafts = useRef(new Map());
   const saveTimer = useRef(null);
+  const titleTimer = useRef(null);
+  const pendingTitle = useRef(null);
   const mounted = useRef(true);
   const loadedNote = useRef(null);
   const tree = useRef(null);
@@ -337,6 +362,52 @@ export default function NotebookPage({ api }) {
   const outlineVisible = outlineOpen && !focused && !!active;
   const outlineOverlay = layout.overlay && outlineVisible;
 
+  const commitTitle = useCallback(
+    async ({ id, title, baseTitle }) => {
+      try {
+        const result = await controller.mutateIndex((latest) => {
+          const node = latest.nodes.find((entry) => entry.id === id);
+          if (!node || node.trashedAt || node.title === title) return latest;
+          // Do not let a delayed keystroke overwrite a rename made by another
+          // window or by the directory UI while this title was being debounced.
+          if (baseTitle && node.title !== baseTitle) return latest;
+          return renameNode(latest, id, title, new Date().toISOString());
+        });
+        const committed = result?.nodes.find((entry) => entry.id === id);
+        if (current.current?.id === id && committed) bridge.current?.title(id, committed.title);
+        return result;
+      } catch (cause) {
+        if (mounted.current && current.current?.id === id) setError(message(cause));
+        return null;
+      }
+    },
+    [controller],
+  );
+  const flushTitle = useCallback(async () => {
+    if (titleTimer.current) {
+      clearTimeout(titleTimer.current);
+      titleTimer.current = null;
+    }
+    const next = pendingTitle.current;
+    pendingTitle.current = null;
+    if (next) await commitTitle(next);
+  }, [commitTitle]);
+  const scheduleTitle = useCallback(
+    (draft, document) => {
+      const title = notebookDocumentTitle(document);
+      const node = byId.get(draft.id);
+      if (!title || !node || node.title === title) return;
+      pendingTitle.current = { id: draft.id, title, baseTitle: node.title };
+      if (titleTimer.current) clearTimeout(titleTimer.current);
+      titleTimer.current = setTimeout(() => {
+        titleTimer.current = null;
+        const next = pendingTitle.current;
+        pendingTitle.current = null;
+        if (next) void commitTitle(next);
+      }, 500);
+    },
+    [byId, commitTitle],
+  );
   const save = useCallback(
     async (target = current.current) => {
       if (saveTimer.current) {
@@ -344,6 +415,7 @@ export default function NotebookPage({ api }) {
         saveTimer.current = null;
       }
       try {
+        await flushTitle();
         await writer.save(target);
         return true;
       } catch (cause) {
@@ -351,7 +423,7 @@ export default function NotebookPage({ api }) {
         return false;
       }
     },
-    [writer],
+    [flushTitle, writer],
   );
 
   const acceptChange = useCallback(
@@ -360,13 +432,14 @@ export default function NotebookPage({ api }) {
       if (!draft || current.current !== draft) return;
       uncollected.current = false;
       updateNotebookDraft(draft, document);
+      scheduleTitle(draft, document);
       if (!draft.dirty) return;
       if (saveTimer.current) clearTimeout(saveTimer.current);
       saveTimer.current = setTimeout(() => {
         void save(draft);
       }, 650);
     },
-    [save],
+    [save, scheduleTitle],
   );
 
   const flush = useCallback(
@@ -397,7 +470,7 @@ export default function NotebookPage({ api }) {
       setFrameState('loading');
       instance.freeze(true);
       try {
-        await instance.load(draft.id, draft.document);
+        await instance.load(draft.id, draft.document, byId.get(draft.id)?.title || '未命名笔记');
         if (bridge.current !== instance || current.current !== draft) return;
         loadedNote.current = draft.id;
         uncollected.current = false;
@@ -409,7 +482,7 @@ export default function NotebookPage({ api }) {
         if (bridge.current === instance) lifecycle.resume();
       }
     },
-    [lifecycle],
+    [byId, lifecycle],
   );
 
   const openNote = useCallback(
@@ -455,7 +528,15 @@ export default function NotebookPage({ api }) {
 
   useEffect(() => {
     setExternalUpdate(null);
+    setOutlineCollapsed(new Set());
   }, [activeId]);
+
+  // Index renames can arrive from MCP or another Notebook window. Keep the
+  // fixed H1 in the mounted editor aligned without reloading the document.
+  useEffect(() => {
+    if (!active || !ready.current || loadedNote.current !== active.id || frameState !== 'ready') return;
+    bridge.current?.title(active.id, active.title);
+  }, [active?.id, active?.title, frameState]);
 
   // The Notebook can be changed through MCP or another Mica host. This check is independent of
   // the removed embedded chat so deleting that UI cannot also disable CAS/conflict feedback.
@@ -522,6 +603,8 @@ export default function NotebookPage({ api }) {
       alive = false;
       mounted.current = false;
       if (saveTimer.current) clearTimeout(saveTimer.current);
+      if (titleTimer.current) clearTimeout(titleTimer.current);
+      pendingTitle.current = null;
       void actions.current.save();
     };
   }, [controller]);
@@ -882,8 +965,18 @@ export default function NotebookPage({ api }) {
       if (!result) return;
       revealNode(value.node.id, nodesById(result));
     } else if (value.type === 'rename') {
+      if (pendingTitle.current?.id === value.node.id) {
+        pendingTitle.current = null;
+        if (titleTimer.current) {
+          clearTimeout(titleTimer.current);
+          titleTimer.current = null;
+        }
+      }
       const now = new Date().toISOString();
-      if (!(await mutate((latest) => renameNode(latest, value.node.id, value.name, now)))) return;
+      const result = await mutate((latest) => renameNode(latest, value.node.id, value.name, now));
+      if (!result) return;
+      const renamed = result.nodes.find((node) => node.id === value.node.id);
+      if (current.current?.id === value.node.id && renamed) bridge.current?.title(value.node.id, renamed.title);
     } else {
       if (!(await flush())) return;
       const { id, now } = value;
@@ -1013,6 +1106,46 @@ export default function NotebookPage({ api }) {
     if (repeatedPaths.has(option.label)) option.label += `（${option.value}）`;
   }
 
+  const outlineTree = useMemo(() => {
+    const roots = [];
+    const stack = [];
+    for (const item of outline.items) {
+      const entry = { ...item, children: [] };
+      while (stack.length && stack.at(-1).level >= item.level) stack.pop();
+      if (stack.length) stack.at(-1).children.push(entry);
+      else roots.push(entry);
+      stack.push(entry);
+    }
+    return roots;
+  }, [outline.items]);
+
+  const outlineAncestors = useMemo(() => {
+    const parents = new Map();
+    const stack = [];
+    for (const item of outline.items) {
+      while (stack.length && stack.at(-1).level >= item.level) stack.pop();
+      parents.set(item.key, stack.map((entry) => entry.key));
+      stack.push(item);
+    }
+    return parents;
+  }, [outline.items]);
+
+  useEffect(() => {
+    if (!outline.activeKey) return;
+    const ancestors = outlineAncestors.get(outline.activeKey) || [];
+    setOutlineCollapsed((previous) => {
+      const next = new Set(previous);
+      let changed = false;
+      for (const key of ancestors) {
+        if (next.delete(key)) changed = true;
+      }
+      return changed ? next : previous;
+    });
+    if (!outlineOpen || !outlineVisible) return;
+    const frame = requestAnimationFrame(() => outlineItemRefs.current.get(outline.activeKey)?.scrollIntoView({block: 'nearest'}));
+    return () => cancelAnimationFrame(frame);
+  }, [outline.activeKey, outlineAncestors, outlineOpen, outlineVisible]);
+
   const outlineLinks =
     active && !focused && (outlineVisible || !layout.overlay)
       ? outline.items.map((item) => {
@@ -1041,6 +1174,53 @@ export default function NotebookPage({ api }) {
           );
         })
       : null;
+
+  const outlineEntries = (entries) => entries.flatMap((item) => {
+    const currentHeading = item.key === outline.activeKey;
+    const collapsed = outlineCollapsed.has(item.key);
+    const button = (
+      <div
+        key={item.key}
+        className="notebook-outline-tree-entry"
+        ref={(element) => {
+          if (element) outlineItemRefs.current.set(item.key, element);
+          else outlineItemRefs.current.delete(item.key);
+        }}
+      >
+        <Button
+          variant="ghost"
+          fullWidth
+          className={`mica-arco-row notebook-outline-entry ${currentHeading ? 'is-active' : ''}`}
+          style={{ '--heading-level': item.level }}
+          aria-current={currentHeading ? 'location' : undefined}
+          aria-level={item.level}
+          aria-expanded={item.children.length ? !collapsed : undefined}
+          title={item.text || '未命名标题'}
+          disabled={busy}
+          onClick={() => jump({heading: item.key})}
+        >
+          {item.children.length ? (
+            <span
+              className="notebook-outline-toggle"
+              onClick={(event) => {
+                event.stopPropagation();
+                setOutlineCollapsed((previous) => {
+                  const next = new Set(previous);
+                  if (next.has(item.key)) next.delete(item.key);
+                  else next.add(item.key);
+                  return next;
+                });
+              }}
+            >
+              {collapsed ? <ChevronRight size={13} /> : <ChevronDown size={13} />}
+            </span>
+          ) : <span className="notebook-outline-toggle notebook-outline-toggle-empty" />}
+          <span>{item.text || '未命名标题'}</span>
+        </Button>
+      </div>
+    );
+    return collapsed ? [button] : [button, ...outlineEntries(item.children)];
+  });
 
   const localForm =
     dialog?.type === 'rename' ? (
@@ -1627,7 +1807,7 @@ export default function NotebookPage({ api }) {
                   </header>
                   <nav className="notebook-outline-list" aria-label="当前笔记的标题">
                     {outline.items.length ? (
-                      outlineLinks
+                      outlineEntries(outlineTree)
                     ) : (
                       <p className="notebook-outline-empty">
                         {frameState === 'ready' ? '这篇笔记还没有标题' : '正在读取标题…'}

@@ -69,6 +69,7 @@ import {ExcalidrawExtension} from './plugins/ExcalidrawExtension';
 import {FigmaExtension} from './plugins/FigmaExtension';
 import {ReactFindReplaceExtension} from './plugins/FindReplaceExtension';
 import {ImagesExtension} from './plugins/ImagesExtension';
+import {HtmlExtension} from './plugins/HtmlExtension';
 import {LayoutExtension} from './plugins/LayoutExtension/LayoutExtension';
 import {PlaygroundMarkdownShortcutsExtension} from './plugins/MarkdownShortcutsExtension';
 import {MaxLengthExtension} from './plugins/MaxLengthPlugin';
@@ -111,6 +112,7 @@ const PlaygroundRichTextExtension = defineExtension({
       hasStickyScrollbar: true,
     }),
     ImagesExtension,
+    HtmlExtension,
     HorizontalRuleExtension,
     PageBreakExtension,
     TwitterExtension,

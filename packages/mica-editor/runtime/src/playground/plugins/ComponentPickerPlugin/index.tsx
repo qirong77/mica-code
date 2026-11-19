@@ -36,6 +36,7 @@ import useModal from '../../hooks/useModal';
 import {INSERT_COLLAPSIBLE_COMMAND} from '../CollapsibleExtension';
 import {INSERT_DATETIME_COMMAND} from '../DateTimeExtension';
 import {InsertEquationDialog} from '../EquationsExtension';
+import {InsertHtmlDialog, INSERT_HTML_COMMAND} from '../HtmlExtension';
 import {INSERT_EXCALIDRAW_COMMAND} from '../ExcalidrawExtension';
 import {InsertImageDialog} from '../ImagesExtension';
 import InsertLayoutDialog from '../LayoutExtension/InsertLayoutDialog';
@@ -320,6 +321,18 @@ export function getBaseOptions(editor: LexicalEditor, showModal: ShowModal) {
       onSelect: () =>
         showModal('插入图片', onClose => (
           <InsertImageDialog activeEditor={editor} onClose={onClose} />
+        )),
+    }),
+    new ComponentPickerOption('HTML 页面 HTML', {
+      icon: <i className="icon code" />,
+      keywords: ['html', 'react', 'arco', 'embed', '网页', '页面', '组件'],
+      onSelect: () =>
+        showModal('插入 HTML 块', onClose => (
+          <InsertHtmlDialog
+            activeEditor={editor}
+            onClose={onClose}
+            onInsert={payload => editor.dispatchCommand(INSERT_HTML_COMMAND, payload)}
+          />
         )),
     }),
     new ComponentPickerOption('折叠块 Collapsible', {

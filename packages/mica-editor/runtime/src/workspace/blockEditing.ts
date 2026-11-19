@@ -3,6 +3,7 @@ import {$isAtStartOfNode} from '@lexical/utils';
 import {
   $createParagraphNode,
   $findMatchingParent,
+  $getRoot,
   $getSelection,
   $isElementNode,
   $isRangeSelection,
@@ -23,7 +24,16 @@ function isPlainKey(event: KeyboardEvent | null): boolean {
   );
 }
 
-function $clearBlockStyleAtStart(editor: LexicalEditor, commandEditor: LexicalEditor): boolean {
+function $isFixedNotebookTitle(block: ElementNode | null): boolean {
+  const root = $getRoot();
+  return $isHeadingNode(block) && block.getTag() === 'h1' && block.getParent() === root && root.getFirstChild() === block;
+}
+
+function $clearBlockStyleAtStart(
+  editor: LexicalEditor,
+  commandEditor: LexicalEditor,
+  isFixedTitle: (block: ElementNode | null) => boolean,
+): boolean {
   // Commands from a caption/nested editor can bubble to this editor. Its
   // selection must never cause a mutation in the notebook's document.
   if (commandEditor !== editor || !editor.isEditable() || editor.isComposing()) return false;
@@ -40,6 +50,11 @@ function $clearBlockStyleAtStart(editor: LexicalEditor, commandEditor: LexicalEd
     !$isAtStartOfNode(selection.anchor, block)
   ) return false;
 
+  // The first top-level H1 is the notebook title. Enter/Backspace at its
+  // start must not turn it into a paragraph (or remove it); the title plugin
+  // keeps it non-empty and at the head of the document.
+  if (isFixedTitle(block)) return true;
+
   const paragraph = $createParagraphNode()
     .setDirection(block.getDirection())
     .setFormat(block.getFormatType())
@@ -54,25 +69,28 @@ function $clearBlockStyleAtStart(editor: LexicalEditor, commandEditor: LexicalEd
 }
 
 /** Mount only in the notebook composer, never in the Markdown editor. */
-export function registerNotebookBlockEditing(editor: LexicalEditor): () => void {
+export function registerNotebookBlockEditing(
+  editor: LexicalEditor,
+  {isFixedTitle = $isFixedNotebookTitle}: {isFixedTitle?: (block: ElementNode | null) => boolean} = {},
+): () => void {
   return mergeRegister(
     editor.registerCommand(KEY_ENTER_COMMAND, (event, commandEditor) => {
-      if (!isPlainKey(event) || !$clearBlockStyleAtStart(editor, commandEditor)) return false;
+      if (!isPlainKey(event) || !$clearBlockStyleAtStart(editor, commandEditor, isFixedTitle)) return false;
       event?.preventDefault();
       return true;
     }, COMMAND_PRIORITY_LOW),
     // beforeinput (including mobile/Safari) can insert a paragraph without a
     // KEY_ENTER_COMMAND. Shift+Enter uses INSERT_LINE_BREAK_COMMAND instead.
     editor.registerCommand(INSERT_PARAGRAPH_COMMAND, (_payload, commandEditor) => (
-      $clearBlockStyleAtStart(editor, commandEditor)
+      $clearBlockStyleAtStart(editor, commandEditor, isFixedTitle)
     ), COMMAND_PRIORITY_LOW),
     editor.registerCommand(KEY_BACKSPACE_COMMAND, (event, commandEditor) => {
-      if (!isPlainKey(event) || !$clearBlockStyleAtStart(editor, commandEditor)) return false;
+      if (!isPlainKey(event) || !$clearBlockStyleAtStart(editor, commandEditor, isFixedTitle)) return false;
       event.preventDefault();
       return true;
     }, COMMAND_PRIORITY_LOW),
     editor.registerCommand(DELETE_CHARACTER_COMMAND, (backward, commandEditor) => (
-      backward && $clearBlockStyleAtStart(editor, commandEditor)
+      backward && $clearBlockStyleAtStart(editor, commandEditor, isFixedTitle)
     ), COMMAND_PRIORITY_LOW),
   );
 }

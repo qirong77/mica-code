@@ -16,6 +16,8 @@ export interface NotebookOutlineItem {
   key: NodeKey;
   text: string;
   level: number;
+  /** Nearest preceding heading with a lower level; null means root of outline. */
+  parentKey?: NodeKey | null;
 }
 export interface NotebookOutlineSnapshot {
   items: NotebookOutlineItem[];
@@ -33,7 +35,11 @@ export function $readNotebookOutline(): NotebookOutlineDocument {
   const items: NotebookOutlineItem[] = [];
   const blocks = {table: false, code: false, mermaid: false, image: false};
   const blockKeys: NotebookOutlineDocument['blockKeys'] = {table: null, code: null, mermaid: null, image: null};
-  const pending: {node: LexicalNode; inTable: boolean}[] = $getRoot().getChildren().reverse()
+  const root = $getRoot();
+  const fixedTitle = root.getFirstChild();
+  const fixedTitleKey = fixedTitle && $isHeadingNode(fixedTitle) && fixedTitle.getTag() === 'h1' ? fixedTitle.getKey() : null;
+  const headingStack: {key: NodeKey; level: number}[] = [];
+  const pending: {node: LexicalNode; inTable: boolean}[] = root.getChildren().reverse()
     .map((node) => ({node, inTable: false}));
   while (pending.length) {
     const {node, inTable} = pending.pop()!;
@@ -47,7 +53,17 @@ export function $readNotebookOutline(): NotebookOutlineDocument {
       blockKeys[block] ??= node.getKey();
     }
     if (!inTable && $isHeadingNode(node)) {
-      items.push({key: node.getKey(), text: node.getTextContent().trim(), level: Number(node.getTag().slice(1))});
+      const level = Number(node.getTag().slice(1));
+      while (headingStack.length && headingStack[headingStack.length - 1]!.level >= level) headingStack.pop();
+      if (node.getKey() !== fixedTitleKey) {
+        items.push({
+          key: node.getKey(),
+          text: node.getTextContent().trim(),
+          level,
+          parentKey: headingStack[headingStack.length - 1]?.key ?? null,
+        });
+        headingStack.push({key: node.getKey(), level});
+      }
     }
     if ($isElementNode(node)) {
       for (const child of node.getChildren().reverse()) pending.push({node: child, inTable: inTable || isTable});
