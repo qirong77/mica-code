@@ -74,6 +74,7 @@ export async function getCapabilityDefaultsDetails(): Promise<ConfigWebCapabilit
       .filter((tool) => tool.source !== 'mcp')
       .map((tool) => ({
         name: tool.name,
+        ...(tool.name === 'agent' ? { displayName: 'Subagent（委派）' } : {}),
         description: tool.description,
         readOnly: tool.readOnly,
         parameters: tool.parameters,

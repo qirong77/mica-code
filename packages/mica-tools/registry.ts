@@ -195,17 +195,19 @@ function getAllToolsForPrompt(): MicaTool[] {
   return getAllTools().sort((a, b) => a.name.localeCompare(b.name));
 }
 
-function findTool(name: string): MicaTool | undefined {
-  const exact = getAllTools().find((t) => t.name === name);
+function findRegisteredTool(name: string, tools: MicaTool[]): MicaTool | undefined {
+  const exact = tools.find((t) => t.name === name);
   if (exact) return exact;
-  return getAllTools().find((t) => t.name.endsWith(`__${name}`));
+  return tools.find((t) => t.name.endsWith(`__${name}`));
 }
 
-/** Exact registered source lookup for request accounting; never reads the fallback catalog. */
+function findTool(name: string): MicaTool | undefined {
+  return findRegisteredTool(name, getAllTools());
+}
+
+/** Registered source lookup for request accounting; never reads the fallback catalog. */
 export function getRegisteredToolSource(name: string): { source: ToolSource; mcpServer?: string } | undefined {
-  const tool = builtinTools.find((item) => item.name === name)
-    ?? runtimeTools.findLast((item) => item.name === name)
-    ?? mcpTools.find((item) => item.name === name);
+  const tool = findRegisteredTool(name, getAllTools());
   return tool ? { source: tool.source, ...(tool.mcpServer ? { mcpServer: tool.mcpServer } : {}) } : undefined;
 }
 

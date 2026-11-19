@@ -29,20 +29,6 @@ export type RuntimeToolDescriptor = {
 
 export const RUNTIME_TOOL_DESCRIPTORS: readonly RuntimeToolDescriptor[] = [
   {
-    name: 'harness_review',
-    pluginId: 'harness-review',
-    description:
-      '按用户要求查看当前工作区的 agent 运行复盘。list 返回运行指标与有证据的问题候选；report 导出 Markdown 报告；assess 记录用户的 review 或外部评估结论（需要 id、status、note）。accepted 仅代表认可建议；validated/regressed 需要在 note 写明实际验证证据。记录和聚合自动完成，无需任务结束后调用。不会修改 system prompt、工具、记忆或执行任何评测。',
-    readOnly: false,
-    parameters: [
-      { name: 'action', type: 'string', required: false, description: '默认 list' },
-      { name: 'id', type: 'string', required: false, description: 'assess：问题条目 id' },
-      { name: 'status', type: 'string', required: false, description: '' },
-      { name: 'note', type: 'string', required: false, description: 'assess：用户判断依据，或实际评估方法与结果' },
-      { name: 'days', type: 'number', required: false, description: 'prune：保留最近多少天的运行记录，默认 30' },
-    ],
-  },
-  {
     name: 'agent',
     pluginId: 'subagent',
     description:

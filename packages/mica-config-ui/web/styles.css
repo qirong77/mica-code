@@ -6226,6 +6226,14 @@ html[data-theme='tokyo-night-light'] .mica-config-ui {
   cursor: pointer;
 }
 
+.capability-technical-name {
+  margin-left: 6px;
+  color: var(--text-faint);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 400;
+}
+
 .capability-description {
   min-width: 0;
   padding: 4px 6px;

@@ -13,7 +13,7 @@ argument-hint: [中转机的 SSH 目标，如 root@1.2.3.4]
 手机 ──HTTPS/SSE──> 中转机 ──短轮询──> 这台机器 ──回环──> Mica 运行时（127.0.0.1:8787）
 ```
 
-**插件本身只负责本机那座桥**（进程监管、设置、状态、`mobile_relay` 工具）。中转机的部署
+**插件本身只负责本机那座桥**（进程监管、设置、状态和配置页动作）。中转机的部署
 不预置在插件里：脚本在仓库里，由这个 skill 现场取用，缺什么就装什么、要构建就构建。
 不要试图从已安装的 App 里抠构建产物——打包后它在 `app.asar` 内，只有 Electron 读得到。
 
@@ -75,10 +75,10 @@ node plugins/mobile-relay/setup.mjs --host root@<同一台中转机> --ssh-port 
 
 ### 只更新手机端页面（Mica 升级之后）
 
-不要为此重新部署。跑一次工具就行：
+不要为此重新部署。在设置 → 插件 → Mobile Relay 的「手机访问」面板里点「更新中转机页面」：
 
 ```
-mobile_relay action=sync_page
+设置 → 插件 → Mobile Relay → 手机访问 → 更新中转机页面
 ```
 
 它算出版本号、和 `/api/health` 的 `pageVersion` 比，不一致才打包上传，中转机原子替换 `public/`；
@@ -118,11 +118,12 @@ sleep 20 && curl -s https://<域名>/api/health
 #    打开 https://<域名>/?t=<口令>，应看到会话列表与移动端布局
 ```
 
-`agentOnline: false` 说明桥没跑或没连上：让模型调用 `mobile_relay action=doctor` 逐项排查。
+`agentOnline: false` 说明桥没跑或没连上：打开 Mobile Relay 面板查看状态；需要逐项排查时，
+按本节的 curl / SSH 检查执行，不依赖插件专属模型工具。
 
 ## 日常
 
-- **看状态 / 拿链接**：设置 → 插件 → Mobile Relay 的「手机访问」按钮打开面板（会话设置 → 插件里也有「打开面板」）；或 `mobile_relay action=link`。
+- **看状态 / 拿链接**：设置 → 插件 → Mobile Relay 的「手机访问」按钮打开面板（会话设置 → 插件里也有「打开面板」）。
 - **临时关掉**：配置页 → 插件 → Mobile Relay 的「启用桥」，或停用插件。
   桥进程由 `ctx.background` 监管，关掉就真的杀了，不会留着后台还在外联。
 - **换中转机**：重跑一次 `setup.mjs`，旧口令作废。
@@ -132,7 +133,7 @@ sleep 20 && curl -s https://<域名>/api/health
 | 现象 | 原因 |
 | --- | --- |
 | 手机白屏 | 证书不可信（自签）或域名解析不对 → 用 `sslip.io` 或真域名重跑 |
-| `agentOnline: false` | 桥没跑（`mobile_relay doctor`）、本机桌面端没开、或地址不是 `https://` |
+| `agentOnline: false` | 桥没跑、本机桌面端没开、或地址不是 `https://`；打开 Mobile Relay 面板逐项检查 |
 | 手机能开但没会话 | 运行时没在跑；或口令对不上（中转机 401） |
 | `setup.mjs` 说找不到 renderer | 没构建：`cd apps/desktop && npm install && npx electron-vite build` |
 | certbot 失败 | 80 端口没通 / 域名没解析到这台机器；`--no-cert` 先验证链路 |

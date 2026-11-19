@@ -625,6 +625,11 @@ function readDesktopLauncher(
       return { ok: false, error: `desktop.launcher.${key} 必须是有限数字` };
     }
   }
+  if (input.webContent !== undefined &&
+      (!isRecord(input.webContent) || !Number.isInteger(input.webContent.top) ||
+       (input.webContent.top as number) < 0 || (input.webContent.top as number) > 512)) {
+    return { ok: false, error: 'desktop.launcher.webContent.top 必须是 0–512 的整数' };
+  }
   return {
     ok: true,
     value: {
@@ -632,6 +637,7 @@ function readDesktopLauncher(
       shortcut: typeof input.shortcut === 'string' ? input.shortcut.trim() : 'Alt+Space',
       width: typeof input.width === 'number' ? Math.min(1000, Math.max(400, input.width)) : 720,
       height: typeof input.height === 'number' ? Math.min(800, Math.max(160, input.height)) : 480,
+      ...(isRecord(input.webContent) ? { webContent: { top: input.webContent.top as number } } : {}),
     },
   };
 }

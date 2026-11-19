@@ -124,7 +124,7 @@ node plugins/mobile-relay/setup.mjs --host root@1.2.3.4 --ssh-port 2222
 状态，每次都把它重新点亮等于一个关不掉的通知。真换了构建或中转机换了另一份，对比变了，
 才会重新提示一次；要手动再传时的入口一直在面板的「页面版本」那一节。
 
-这个按钮**不直接上传**：它开一个新会话、把一段提示词（跑 `mobile_relay` 工具的 `sync_page`，
+这个按钮直接执行一次页面版本比较与同步，不会为插件业务注入模型工具：
 产物缺失时先构建）放进输入框，你按回车之后由那个会话里的 agent 去发布。这么绕是因为这一步
 要现场判断的事不少（本机有没有可发布的产物、构建是不是旧的、失败是证书还是口令），写死在
 按钮里只能覆盖最常见的那条路。**上传仍然只有手动这一下**：后台只做只读的版本比较。
@@ -143,7 +143,7 @@ node plugins/mobile-relay/setup.mjs --host root@1.2.3.4 --ssh-port 2222
 打包版指向 `app.asar.unpacked/out/renderer`）→ 仓库的 `apps/desktop/out/renderer`。
 刻意不去抠 `app.asar`：那只有 Electron 读得到，硬解出来会随版本漂移。
 
-排查问题：`mobile_relay action=doctor`（在会话里让模型跑），逐项检查设置、桥进程、
+排查问题：打开 Mobile Relay 面板查看状态，或按本 README 的 curl / SSH 检查逐项排查设置、桥进程、
 TLS、口令、本机运行时。
 
 ### 手机端速度
@@ -301,7 +301,7 @@ HTTPS 握手超时）。查 `dmesg | grep oom-kill` 就能看到真凶。
 
 ## 为什么部署不在插件里
 
-插件只做一件事：**本机这座桥**（进程监管、设置、状态、`mobile_relay` 工具、内置 skill）。
+插件只做一件事：**本机这座桥**（进程监管、设置、状态、配置页动作、内置 skill）。
 
 中转机的部署放在 skill 里、由 agent 现场执行，原因有三条：
 

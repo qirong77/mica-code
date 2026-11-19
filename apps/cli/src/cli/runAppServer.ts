@@ -1872,6 +1872,7 @@ async function handleCodexRequest(
       const prompt = ctx.agent.inspectPrompt();
       const tools = micaTools.getCatalog().map((tool) => ({
         name: tool.name,
+        ...(tool.name === 'agent' ? { displayName: 'Subagent（委派）' } : {}),
         description: tool.description,
         readOnly: tool.readOnly,
         parameters: tool.parameters,

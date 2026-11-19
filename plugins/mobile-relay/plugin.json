@@ -9,7 +9,7 @@
   "assets": ["README.md", "skill/SKILL.md"],
   "priority": 40,
   "mica": { "apiVersion": 1 },
-  "requires": ["settings", "tools", "background", "skills", "actions"],
+  "requires": ["settings", "background", "skills", "actions"],
   "desktop": {
     "panel": {
       "label": "手机访问",

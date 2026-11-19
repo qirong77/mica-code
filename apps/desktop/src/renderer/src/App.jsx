@@ -3374,7 +3374,6 @@ export default function App() {
                 section={configPage.section}
                 pluginId={configPage.pluginId}
                 actionCwd={activeChatCwd || undefined}
-                capabilityTarget={activeNode ? { id: activeNode.id, sessionId: activeSessionId } : undefined}
                 onClose={closeConfigPage}
                 onNewSession={launchPluginFromConfig}
                 onOpenPluginPage={openPluginPageById}

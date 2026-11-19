@@ -257,6 +257,8 @@ export type ConfigWebCapabilityToolParameter = {
 
 export type ConfigWebCapabilityTool = {
   name: string;
+  /** 面向人的名称；调用和禁用仍使用 `name`。 */
+  displayName?: string;
   description: string;
   readOnly: boolean;
   parameters: ConfigWebCapabilityToolParameter[];

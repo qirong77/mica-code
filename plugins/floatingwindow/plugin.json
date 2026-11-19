@@ -1,0 +1,21 @@
+{
+  "id": "floatingwindow",
+  "name": "Floating Window",
+  "version": "1.0.0",
+  "description": "通过全局快捷键打开单一浏览器浮窗，在窗口内输入地址并浏览网页。",
+  "icon": "globe",
+  "author": "Mica Code",
+  "main": "index.ts",
+  "assets": ["README.md"],
+  "mica": { "apiVersion": 1 },
+  "requires": [],
+  "desktop": {
+    "launcher": {
+      "title": "Floating Window",
+      "shortcut": "Command+`",
+      "width": 960,
+      "height": 720,
+      "webContent": { "top": 64 }
+    }
+  }
+}

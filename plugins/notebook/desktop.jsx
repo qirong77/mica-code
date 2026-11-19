@@ -44,6 +44,7 @@ import {
 import { Modal } from '../../packages/mica-config-ui/web/components/Modal';
 import { pluginMcpPath, pluginMcpServerName } from '../../packages/mica-plugin/PluginMcp';
 import { createNotebookController, NotebookConflictError } from './controller';
+import { createNotebookExternalUpdateCheck } from './external-updates';
 import {
   createNode,
   createNodeId,
@@ -165,7 +166,7 @@ function CreateMenu({ open, onOpen, onClose, onCreate, label, title = label, dis
           <Button
             variant="ghost"
             className={toolbar ? 'notebook-rail-add' : undefined}
-            icon={<Plus size={toolbar ? 18 : 15} />}
+            icon={<Plus size={toolbar ? 16 : 15} strokeWidth={1.7} />}
             aria-label={label}
             title={title}
             aria-haspopup="menu"
@@ -173,7 +174,9 @@ function CreateMenu({ open, onOpen, onClose, onCreate, label, title = label, dis
             pressed={open}
             disabled={disabled}
             tabIndex={tabIndex}
-          />
+          >
+            {toolbar ? '新建' : null}
+          </Button>
         </span>
       }
     >
@@ -230,6 +233,7 @@ export default function NotebookPage({ api }) {
   const [focused, setFocused] = useState(false);
   const [outlineOpen, setOutlineOpen] = useState(false);
   const [outline, setOutline] = useState(emptyOutline);
+  const [externalUpdate, setExternalUpdate] = useState(null);
   const [dialog, setDialog] = useState(null);
   const [busy, setBusy] = useState(false);
   const [frameState, setFrameState] = useState('loading');
@@ -289,6 +293,7 @@ export default function NotebookPage({ api }) {
     }
   }, []);
   const directory = useMemo(() => flattenVisibleTree(index), [index]);
+  const noteCount = useMemo(() => directory.filter(({ node }) => node.kind === 'note').length, [directory]);
   const listing = useMemo(
     () => (trash ? flattenVisibleTree(index, { showTrash: true }) : directory),
     [directory, index, trash],
@@ -449,6 +454,40 @@ export default function NotebookPage({ api }) {
   );
 
   actions.current = { flush, openNote, save, loadEditor };
+
+  useEffect(() => {
+    setExternalUpdate(null);
+  }, [activeId]);
+
+  // The Notebook can be changed through MCP or another Mica host. This check is independent of
+  // the removed embedded chat so deleting that UI cannot also disable CAS/conflict feedback.
+  useEffect(() => {
+    if (!loaded) return undefined;
+    const observer = createNotebookExternalUpdateCheck({
+      available: () => !lifecycle.closing && !lifecycle.switching,
+      waitForWrites: () => writer.idle(),
+      refreshIndex: () => (controller.getPendingIndexCount() ? Promise.resolve() : controller.loadIndex()),
+      current: () => current.current,
+      readVersion: async (id) => (await controller.readDocument(id)).version,
+      changed: setExternalUpdate,
+      error: (cause) => setError(`检查笔记更新失败：${message(cause)}`),
+    });
+    const check = () => {
+      if (document.visibilityState === 'visible') void observer.check();
+    };
+    const unsubscribe = api.sessions?.onExit?.(() => void observer.check());
+    window.addEventListener('mica:transport-resync', check);
+    document.addEventListener('visibilitychange', check);
+    const timer = window.setInterval(check, 30_000);
+    void observer.check();
+    return () => {
+      observer.dispose();
+      unsubscribe?.();
+      window.removeEventListener('mica:transport-resync', check);
+      document.removeEventListener('visibilitychange', check);
+      window.clearInterval(timer);
+    };
+  }, [api.sessions, controller, lifecycle, loaded, writer]);
 
   useEffect(() => {
     let alive = true;
@@ -748,6 +787,7 @@ export default function NotebookPage({ api }) {
           current.current = latest;
           await loadEditor(latest);
           setError('');
+          setExternalUpdate(null);
           setDialog(null);
         },
       );
@@ -835,6 +875,7 @@ export default function NotebookPage({ api }) {
         setActiveId(null);
         loadedNote.current = null;
         setOutline(emptyOutline());
+        setExternalUpdate(null);
         api.page?.setSearch?.({});
       }
     } else if (value.type === 'move') {
@@ -1054,10 +1095,13 @@ export default function NotebookPage({ api }) {
       <div className="notebook-layout">
         <aside ref={rail} className="notebook-rail" aria-label="笔记目录" inert={outlineOverlay}>
           <div className="notebook-rail-title">
-            <span className="notebook-book-icon">
+            <span className="notebook-book-icon" aria-hidden="true">
               <BookMarked size={22} strokeWidth={1.6} />
             </span>
-            <strong>我的笔记</strong>
+            <div className="notebook-book-info">
+              <strong>我的笔记</strong>
+              <span>{loaded ? `${noteCount} 篇笔记` : '\u00a0'}</span>
+            </div>
             <Button
               variant="ghost"
               icon={<PanelLeftClose size={15} />}
@@ -1186,7 +1230,10 @@ export default function NotebookPage({ api }) {
                     '--depth': searchTerm ? 0 : depth,
                     '--drop-depth': dropMarker?.targetId === node.id ? (dropMarker.depth ?? depth) : depth,
                   }}
-                  onDragOver={(event) => hoverDrop(event, rowDrop(event, node))}
+                  onDragOver={(event) => {
+                    event.stopPropagation();
+                    hoverDrop(event, rowDrop(event, node));
+                  }}
                   onDrop={(event) => void finishDrop(event, rowDrop(event, node))}
                 >
                   <button
@@ -1340,6 +1387,19 @@ export default function NotebookPage({ api }) {
           />
         )}
         <main className="notebook-main" inert={railOverlay}>
+          {externalUpdate === current.current?.id && (
+            <div className="notebook-error" role="status">
+              <span>这篇笔记已在其他窗口或 MCP 客户端修改。当前草稿未被替换；加载前会备份当前内容。</span>
+              <Button
+                size="compact"
+                variant="ghost"
+                disabled={busy}
+                onClick={() => setDialog({ type: 'reload', title: '备份草稿并加载最新版' })}
+              >
+                查看更新
+              </Button>
+            </div>
+          )}
           {error && (
             <div className="notebook-error">
               <Alert message={error} />
@@ -1501,13 +1561,14 @@ export default function NotebookPage({ api }) {
               {!active ? (
                 <div className="notebook-welcome">
                   <span className="notebook-welcome-icon">
-                    <BookOpen size={31} strokeWidth={1.5} />
+                    <BookOpen size={32} strokeWidth={1.4} />
                   </span>
                   <h1>
                     {index.nodes.some((node) => node.kind === 'note' && !node.trashedAt)
                       ? '选择一篇笔记'
                       : '还没有笔记'}
                   </h1>
+                  <p>把想法写下来，慢慢整理成自己的知识。</p>
                   <Button
                     variant="accent"
                     icon={<Plus size={16} />}

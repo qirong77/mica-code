@@ -190,6 +190,16 @@ describe('parsePluginManifest desktop launcher', () => {
     expect(result.manifest.desktopEntry).toBeNull();
   });
 
+  it('validates the optional embedded web top inset', () => {
+    const result = parse({ title: 'Browser', webContent: { top: 64 } });
+    expect(result.ok && result.manifest.desktopLauncher?.webContent).toEqual({ top: 64 });
+    for (const webContent of [null, {}, { top: -1 }, { top: 513 }, { top: 1.5 }, { top: '64' }]) {
+      expect(parse({ title: 'Browser', webContent })).toEqual({
+        ok: false, error: 'desktop.launcher.webContent.top 必须是 0–512 的整数',
+      });
+    }
+  });
+
   it('preserves custom options alongside other desktop capabilities', () => {
     const result = parsePluginManifest(
       base({

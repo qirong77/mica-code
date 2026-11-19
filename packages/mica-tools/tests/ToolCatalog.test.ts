@@ -1,8 +1,17 @@
 import { describe, expect, it } from 'vitest';
-import { getRegisteredToolSource, getToolCatalog, getToolDefinitions, registerRuntimeTool, unregisterRuntimeTool } from '../registry.js';
+import { MicaTool } from '../MicaTool.js';
+import {
+  getRegisteredToolSource,
+  getToolCatalog,
+  getToolDefinitions,
+  registerMcpTools,
+  registerRuntimeTool,
+  unregisterMcpTools,
+  unregisterRuntimeTool,
+} from '../registry.js';
 
 describe('tool catalog', () => {
-  it('looks up only exact registered tool sources without catalog fallbacks', () => {
+  it('looks up registered tool sources without catalog fallbacks', () => {
     expect(getRegisteredToolSource('read_file')).toEqual({ source: 'builtin' });
     expect(getRegisteredToolSource('file')).toBeUndefined();
     expect(getRegisteredToolSource('not_registered')).toBeUndefined();
@@ -15,6 +24,29 @@ describe('tool catalog', () => {
       unregisterRuntimeTool(tool);
     }
     expect(getRegisteredToolSource('source_lookup_test')).toBeUndefined();
+  });
+
+  it('keeps the MCP source when the provider uses the short tool name', () => {
+    class TestMcpTool extends MicaTool {
+      constructor() {
+        super('mcp__trusted__search', 'search', { type: 'object' }, { source: 'mcp', mcpServer: 'trusted' });
+      }
+
+      execute() {
+        return Promise.resolve('ok');
+      }
+
+      onToolUseDisplayText() {
+        return 'search';
+      }
+    }
+
+    registerMcpTools([new TestMcpTool()]);
+    try {
+      expect(getRegisteredToolSource('search')).toEqual({ source: 'mcp', mcpServer: 'trusted' });
+    } finally {
+      unregisterMcpTools();
+    }
   });
 
   it('does not register the removed PTY tools', () => {

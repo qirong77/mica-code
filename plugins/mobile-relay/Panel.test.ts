@@ -296,12 +296,10 @@ describe('mobile-relay panel', () => {
     expect(section?.actions?.find((item) => item.id === 'sync-page')?.tone).toBe('primary');
   });
 
-  it('hands the page update to a new session instead of uploading from the panel', async () => {
+  it('runs the page update from the panel without a plugin-specific model tool', async () => {
     const handler = createPanelHandler(fakeContext(), dir);
     const result = await handler.action({ action: 'sync-page', values: {} });
-    // 面板只准备提示词：真正上传由会话里的 agent 调 mobile_relay 工具完成。
-    const staged = result && 'newSession' in result ? result.newSession : undefined;
-    expect(staged?.send).toBe(false);
-    expect(staged?.prompt).toContain('sync_page');
+    expect(result && 'newSession' in result).toBe(false);
+    expect(result && 'message' in result).toBe(true);
   });
 });

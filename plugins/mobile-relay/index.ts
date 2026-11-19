@@ -6,9 +6,8 @@ import { micaSkills } from '@packages/mica-skills/index.js';
 import SKILL_MD from './skill/SKILL.md' with { type: 'text' };
 import { registerBridgeSupervisor } from './BridgeSupervisor.js';
 import { createPanelHandler } from './Panel.js';
-import { guidePageSync, rendererDirFor, skillPathFor } from './PageSyncAction.js';
+import { runPageSync } from './PageSyncAction.js';
 import { acknowledgePageNotice } from './PageNotice.js';
-import { MobileRelayTool } from './MobileRelayTool.js';
 import { registerMachine } from './registerMachine.js';
 import manifest from './plugin.json' with { type: 'json' };
 
@@ -76,15 +75,6 @@ export default function setup(ctx: PluginContext): void {
   registerBridgeSupervisor(ctx, dataDir);
   registerPanel(ctx, dataDir);
   registerActions(ctx, dataDir);
-
-  const tools = ctx.tools;
-  if (!tools) {
-    // 一次性动作宿主（配置页按钮）只有 actions，没有 tools。缺能力是宿主的事实，
-    // 由 requires 与 plugin-status 表达，不该写成插件的健康告警。
-    ctx.logger.info('mobile-relay:no-tools', {});
-    return;
-  }
-  tools.register(new MobileRelayTool(ctx));
 }
 
 /**
@@ -93,8 +83,7 @@ export default function setup(ctx: PluginContext): void {
  * 执行它的是一个一次性插件进程，因此这里不能假设有会话、有桥在跑——只读设置、
  * 发一次注册请求、把口令写回设置。
  *
- * 例外是页面更新：它只会把一段提示词交给宿主去开新会话（`guidePageSync`），真正动手
- * 的是那一轮里的 agent。
+ * 页面更新直接由配置页动作执行，避免为了一个插件自己的维护操作给模型增加工具。
  */
 function registerActions(ctx: PluginContext, dataDir: string | null): void {
   const actions = ctx.actions;
@@ -119,14 +108,11 @@ function registerActions(ctx: PluginContext, dataDir: string | null): void {
     trackAction('settings:register', () => registerMachine(ctx, values, dataDir)),
   );
   actions.register('sync-page', async () =>
-    trackAction('settings:sync-page', () => {
+    trackAction('settings:sync-page', async () => {
       // 用户点了这一下就算看过那条提示：同一对「本机版 vs 中转机版」不再让侧栏挂红点。
       // 落后本身仍写在「运行状态 → 页面」里，需要时面板里还能再点一次更新。
       acknowledgePageNotice(dataDir);
-      return guidePageSync({
-        skillPath: skillPathFor(dataDir),
-        rendererDir: rendererDirFor(ctx),
-      });
+      return runPageSync(ctx, dataDir);
     }),
   );
 }

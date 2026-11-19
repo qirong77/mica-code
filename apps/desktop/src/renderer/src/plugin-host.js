@@ -138,8 +138,8 @@ export function createPluginHostApi(pluginId, session = null, { createSession, b
       ? { key, expectedVersion: options.expectedVersion }
       : { key }
   }
-  const launcherControl = (action, path) => {
-    if (isElectronShell(navigator.userAgent)) return host.launcherControl(pluginId, action, path)
+  const launcherControl = (action, path, url) => {
+    if (isElectronShell(navigator.userAgent)) return host.launcherControl(pluginId, action, path, url)
     if (action === 'status') return Promise.resolve({ native: false, registered: false })
     const intent =
       action === 'openPath'
@@ -215,7 +215,22 @@ export function createPluginHostApi(pluginId, session = null, { createSession, b
       show: () => launcherControl('show'),
       close: () => launcherControl('close'),
       configure: () => launcherControl('configure'),
-      openPath: (path) => launcherControl('openPath', path)
+      openPath: (path) => launcherControl('openPath', path),
+      web: isElectronShell(navigator.userAgent) ? {
+        state: () => launcherControl('web.state'),
+        navigate: (url) => launcherControl('web.navigate', undefined, url),
+        home: () => launcherControl('web.home'),
+        back: () => launcherControl('web.back'),
+        forward: () => launcherControl('web.forward'),
+        reload: () => launcherControl('web.reload'),
+        subscribe: (callback) => {
+          if (typeof callback !== 'function') throw new Error('网页状态订阅需要回调函数')
+          if (!isElectronShell(navigator.userAgent)) throw new Error('网页浮窗需要 Mica 桌面应用')
+          const listener = (event) => { if (event.detail?.pluginId === pluginId) callback(event.detail.state) }
+          window.addEventListener('mica:launcher-web-state', listener)
+          return () => window.removeEventListener('mica:launcher-web-state', listener)
+        }
+      } : null
     },
     currentHost: () => currentRuntimeAddress(),
     /** 完整页面入口保留中转机的机器身份；currentHost 仍只回答 origin。 */

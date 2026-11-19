@@ -390,10 +390,12 @@ export class PluginManager {
         ? {
             tools: {
               register: (tool, options = {}) =>
-                shared.tools!.register(observePluginTool(tool, observation), {
-                  ...options,
-                  group: { key: `plugin:${plugin.id}`, label: plugin.manifest?.name ?? plugin.id },
-                }),
+                trackRegistration(
+                  shared.tools!.register(observePluginTool(tool, observation), {
+                    ...options,
+                    group: { key: `plugin:${plugin.id}`, label: plugin.manifest?.name ?? plugin.id },
+                  }),
+                ),
             },
           }
         : {}),

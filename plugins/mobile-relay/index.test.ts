@@ -118,7 +118,7 @@ describe('mobile-relay plugin setup', () => {
 
     setup(ctx as unknown as PluginContext);
 
-    expect(captured.health).toEqual([]);
+    expect(captured.health.filter((entry) => entry.level === 'warn' || entry.level === 'error')).toEqual([]);
     expect(captured.skill).not.toBeNull();
   });
 

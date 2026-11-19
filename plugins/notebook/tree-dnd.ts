@@ -6,33 +6,59 @@ export type NotebookDropTarget =
 
 export type NotebookDropPosition = 'before' | 'after' | 'inside';
 
-function findNode(index: NotebookIndex, id: string): NotebookNode | undefined {
-  return index.nodes.find((node) => node.id === id);
+type DropLookup = {
+  nodes: readonly NotebookNode[];
+  byId: Map<string, NotebookNode>;
+  children: Map<string | null, NotebookNode[]>;
+  siblingIndex: Map<string, number>;
+};
+
+const dropLookups = new WeakMap<object, DropLookup>();
+
+function lookupFor(index: NotebookIndex): DropLookup {
+  const cached = dropLookups.get(index);
+  if (cached?.nodes === index.nodes) return cached;
+
+  const byId = new Map(index.nodes.map((node) => [node.id, node]));
+  const children = new Map<string | null, NotebookNode[]>();
+  for (const node of index.nodes) {
+    if (node.trashedAt) continue;
+    const siblings = children.get(node.parentId) ?? [];
+    siblings.push(node);
+    children.set(node.parentId, siblings);
+  }
+  const siblingIndex = new Map<string, number>();
+  for (const siblings of children.values()) {
+    siblings.forEach((node, position) => siblingIndex.set(node.id, position));
+  }
+
+  const lookup = { nodes: index.nodes, byId, children, siblingIndex };
+  dropLookups.set(index, lookup);
+  return lookup;
 }
 
-function isDescendant(index: NotebookIndex, id: string, ancestorId: string): boolean {
-  let current = findNode(index, id);
+function isDescendant(lookup: DropLookup, id: string, ancestorId: string): boolean {
+  let current = lookup.byId.get(id);
   const seen = new Set<string>();
   while (current?.parentId !== null && current?.parentId !== undefined) {
     if (seen.has(current.parentId)) return true;
     seen.add(current.parentId);
     if (current.parentId === ancestorId) return true;
-    current = findNode(index, current.parentId);
+    current = lookup.byId.get(current.parentId);
   }
   return false;
 }
 
 function sameSiblingSlot(
-  index: NotebookIndex,
+  lookup: DropLookup,
   source: NotebookNode,
   target: NotebookNode,
   position: 'before' | 'after',
 ): boolean {
   if (source.parentId !== target.parentId) return false;
-  const siblings = index.nodes.filter((node) => !node.trashedAt && node.parentId === source.parentId);
-  const sourceIndex = siblings.findIndex((node) => node.id === source.id);
-  const targetIndex = siblings.findIndex((node) => node.id === target.id);
-  if (sourceIndex < 0 || targetIndex < 0) return false;
+  const sourceIndex = lookup.siblingIndex.get(source.id);
+  const targetIndex = lookup.siblingIndex.get(target.id);
+  if (sourceIndex === undefined || targetIndex === undefined) return false;
   return position === 'before' ? sourceIndex + 1 === targetIndex : targetIndex + 1 === sourceIndex;
 }
 
@@ -50,26 +76,25 @@ export function resolveNotebookDrop(
   if (target.targetId === null && target.position !== 'inside') return null;
   if (target.targetId !== null && typeof target.targetId !== 'string') return null;
 
-  const source = findNode(index, sourceId);
+  const lookup = lookupFor(index);
+  const source = lookup.byId.get(sourceId);
   if (!source || source.trashedAt) return null;
-  const destination = target.targetId === null ? undefined : findNode(index, target.targetId);
+  const destination = target.targetId === null ? undefined : lookup.byId.get(target.targetId);
   if (target.targetId !== null && (!destination || destination.trashedAt)) return null;
   if (destination && destination.id === source.id) return null;
-  if (destination && isDescendant(index, destination.id, source.id)) return null;
+  if (destination && isDescendant(lookup, destination.id, source.id)) return null;
 
   if (target.position === 'inside') {
     if (destination && destination.kind !== 'folder') return null;
     if (destination) {
-      const children = index.nodes.filter((node) => !node.trashedAt && node.parentId === destination.id);
-      if (children.at(-1)?.id === source.id) return null;
+      if (lookup.children.get(destination.id)?.at(-1)?.id === source.id) return null;
     } else {
-      const roots = index.nodes.filter((node) => !node.trashedAt && node.parentId === null);
-      if (roots.at(-1)?.id === source.id) return null;
+      if (lookup.children.get(null)?.at(-1)?.id === source.id) return null;
     }
     return target;
   }
 
-  if (!destination || sameSiblingSlot(index, source, destination, target.position)) return null;
+  if (!destination || sameSiblingSlot(lookup, source, destination, target.position)) return null;
   return target;
 }
 

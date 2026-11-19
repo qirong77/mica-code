@@ -7,6 +7,7 @@ import computerUseManifest from '../../plugins/computer-use/plugin.json';
 import connectionsManifest from '../../plugins/connections/plugin.json';
 import deepseekHarnessManifest from '../../plugins/deepseek-harness/plugin.json';
 import evolutionManifest from '../../plugins/evolution/plugin.json';
+import floatingWindowManifest from '../../plugins/floatingwindow/plugin.json';
 import globalSearchManifest from '../../plugins/global-search/plugin.json';
 import harnessReviewManifest from '../../plugins/harness-review/plugin.json';
 import memoryManifest from '../../plugins/memory/plugin.json';
@@ -57,6 +58,7 @@ export const officialPluginManifests: PluginManifest[] = [
   readManifest(connectionsManifest),
   readManifest(deepseekHarnessManifest),
   readManifest(evolutionManifest),
+  readManifest(floatingWindowManifest),
   readManifest(globalSearchManifest),
   readManifest(mobileRelayManifest),
   readManifest(notebookManifest),

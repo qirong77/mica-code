@@ -147,6 +147,8 @@ export type PluginDesktopLauncher = {
   width: number;
   /** 窗口高度，默认 480，范围 160–800。 */
   height: number;
+  /** 嵌入隔离网页，top 为工具栏占用的逻辑像素（0–512）。 */
+  webContent?: { top: number };
 };
 
 /**

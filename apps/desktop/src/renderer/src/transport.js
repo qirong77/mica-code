@@ -482,7 +482,7 @@ function createWebApi(env) {
     pluginHost: {
       experience: (pluginId, event, fields) => invoke('plugin-host:experience', { pluginId, event, fields }),
       launcherRequest: (pluginId, action, input) => invoke('plugin-host:launcher-request', { pluginId, action, input }),
-      launcherControl: (pluginId, action, path) => invoke('plugin-host:launcher-control', { pluginId, action, path }),
+      launcherControl: (pluginId, action, path, url) => invoke('plugin-host:launcher-control', { pluginId, action, path, url }),
       probe: (address) => invoke('plugin-host:probe', { address }),
       readData: (pluginId, options) => invoke('plugin-host:read-data', { pluginId, ...options }),
       writeData: (pluginId, value, options) =>

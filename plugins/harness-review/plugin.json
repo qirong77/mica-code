@@ -11,7 +11,7 @@
   "mica": { "apiVersion": 1 },
   "web": true,
   "desktop": { "page": { "title": "运行控制台", "route": "console" } },
-  "requires": ["hooks", "session", "commands", "tools", "settings", "ui", "actions", "events"],
+  "requires": ["hooks", "session", "commands", "settings", "ui", "actions", "events"],
   "actions": [
     {
       "key": "open-review",

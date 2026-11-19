@@ -1,4 +1,5 @@
 import { watchFile, unwatchFile } from 'node:fs'
+import { hostname, networkInterfaces } from 'node:os'
 import { resolveEditorTarget } from './editor-window.js'
 
 /** Native lifecycle for manifest-declared launchers. No session process is needed. */
@@ -7,9 +8,11 @@ export function createPluginLaunchers({
   readDisabled,
   statePath,
   BrowserWindow,
+  WebContentsView,
   globalShortcut,
   screen,
   pageUrl,
+  runtimeUrl = pageUrl,
   backgroundColor,
   deliver,
   openEditorWindow,
@@ -24,14 +27,14 @@ export function createPluginLaunchers({
     record.error = ''
     try {
       record.registered = globalShortcut.register(record.spec.shortcut, () => {
-        if (record.win?.isVisible() && record.win.isFocused()) {
+        if (record.win?.isVisible() && (record.spec.webContent || record.win.isFocused())) {
           record.win.hide()
           return
         }
         void show(id).catch((error) => onError(error.message))
       })
       if (!record.registered)
-        record.error = `快捷键 ${record.spec.shortcut} 已被其他应用占用，请释放后重新打开搜索`
+        record.error = `快捷键 ${record.spec.shortcut} 已被其他应用占用，请释放后重试`
     } catch (error) {
       record.error = `无法注册快捷键 ${record.spec.shortcut}：${error.message}`
     }
@@ -49,7 +52,17 @@ export function createPluginLaunchers({
       }
       if (records.has(id)) continue
       const spec = manifest.desktopLauncher
-      const record = { spec, win: null, loading: null, registered: false, error: '' }
+      const record = {
+        spec,
+        win: null,
+        view: null,
+        webAttached: false,
+        webHome: !!spec.webContent,
+        loading: null,
+        registered: false,
+        error: '',
+        webError: ''
+      }
       records.set(id, record)
       register(id, record)
     }
@@ -62,6 +75,108 @@ export function createPluginLaunchers({
     return record
   }
 
+  // Keep requests from the embedded partition away from the local runtime and
+  // its dev-server proxy, without blocking unrelated hosts on the same port.
+  const protectedPorts = new Set([pageUrl, runtimeUrl].map((value) => {
+    const url = new URL(value)
+    return url.port || (url.protocol === 'https:' ? '443' : '80')
+  }))
+  const localHosts = new Set(['localhost', '127.0.0.1', '[::1]', '0.0.0.0', hostname().toLowerCase()])
+  for (const addresses of Object.values(networkInterfaces())) {
+    for (const entry of addresses || []) localHosts.add(entry.address.toLowerCase())
+  }
+  for (const value of [pageUrl, runtimeUrl]) localHosts.add(new URL(value).hostname.toLowerCase())
+  function isRuntimeRequest(url) {
+    const port = url.port || (['https:', 'wss:'].includes(url.protocol) ? '443' : '80')
+    const host = url.hostname.toLowerCase().replace(/^\[|\]$/g, '')
+    return protectedPorts.has(port) && (localHosts.has(host) || localHosts.has(`[${host}]`) || /^127\./.test(host))
+  }
+  function allowedWebUrl(value) {
+    if (typeof value !== 'string' || /[\s\x00-\x1f\x7f]/.test(value) || value.length > 8192) return false
+    if (value === 'about:blank') return true
+    if (!/^https?:\/\//i.test(value)) return false
+    try {
+      const url = new URL(value)
+      return ['http:', 'https:'].includes(url.protocol) && !!url.hostname && !url.username && !url.password && !isRuntimeRequest(url)
+    } catch { return false }
+  }
+
+  function webState(record) {
+    const wc = record.view.webContents
+    const url = wc.getURL()
+    return {
+      url: record.webHome || url === 'about:blank' ? '' : url,
+      home: record.webHome,
+      canGoBack: wc.navigationHistory.canGoBack(),
+      canGoForward: wc.navigationHistory.canGoForward(),
+      loading: wc.isLoading(),
+      ...(record.webError ? { error: record.webError } : {})
+    }
+  }
+
+  function pushWebState(id, record) {
+    const win = record.win
+    if (!win || win.isDestroyed() || !record.view || record.view.webContents.isDestroyed()) return
+    if (win.webContents.getURL() !== launcherUrl(id)) return
+    const detail = JSON.stringify({ pluginId: id, state: webState(record) })
+    void win.webContents.executeJavaScript(`window.dispatchEvent(new CustomEvent('mica:launcher-web-state', { detail: ${detail} }))`).catch(() => {})
+  }
+
+  function showWebContent(record) {
+    if (!record.view || record.webAttached) return
+    record.win.contentView.addChildView(record.view)
+    record.webAttached = true
+  }
+
+  function hideWebContent(record) {
+    if (!record.view || !record.webAttached) return
+    record.win.contentView.removeChildView(record.view)
+    record.webAttached = false
+  }
+
+  function attachWebContent(id, record, win) {
+    const view = new WebContentsView({ webPreferences: {
+      partition: `persist:mica-launcher-${id}`,
+      sandbox: true, contextIsolation: true, nodeIntegration: false
+    } })
+    record.view = view
+    const wc = view.webContents
+    wc.session.setPermissionRequestHandler((_wc, _permission, callback) => callback(false))
+    wc.session.setPermissionCheckHandler(() => false)
+    wc.session.webRequest.onBeforeRequest((details, callback) => {
+      try {
+        const target = new URL(details.url)
+        callback({ cancel: ['http:', 'https:', 'ws:', 'wss:'].includes(target.protocol) && isRuntimeRequest(target) })
+      } catch { callback({ cancel: true }) }
+    })
+    const resize = () => {
+      if (win.isDestroyed() || wc.isDestroyed()) return
+      const [width, height] = win.getContentSize()
+      const top = Math.min(record.spec.webContent.top, height)
+      view.setBounds({ x: 0, y: top, width, height: Math.max(0, height - top) })
+    }
+    resize()
+    win.on('resize', resize)
+    const guard = (event, url) => { if (!allowedWebUrl(event.url ?? url)) event.preventDefault() }
+    wc.on('will-navigate', guard)
+    wc.on('will-redirect', guard)
+    wc.on('will-frame-navigate', guard)
+    wc.setWindowOpenHandler(({ url }) => {
+      if (allowedWebUrl(url)) void wc.loadURL(url).catch(() => {})
+      return { action: 'deny' }
+    })
+    for (const event of ['did-navigate', 'did-navigate-in-page', 'did-start-loading', 'did-stop-loading']) {
+      wc.on(event, () => {
+        if (event === 'did-start-loading') record.webError = ''
+        pushWebState(id, record)
+      })
+    }
+    wc.on('did-fail-load', (_event, code, description, _url, mainFrame) => {
+      if (mainFrame && code !== -3) { record.webError = description; pushWebState(id, record) }
+    })
+    win.webContents.on('did-finish-load', () => pushWebState(id, record))
+  }
+
   async function show(id) {
     const record = requireRecord(id)
     register(id, record)
@@ -72,7 +187,7 @@ export function createPluginLaunchers({
         height: spec.height,
         show: false,
         frame: false,
-        resizable: false,
+        resizable: !!spec.webContent,
         minimizable: false,
         maximizable: false,
         fullscreenable: false,
@@ -84,11 +199,18 @@ export function createPluginLaunchers({
         webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true }
       })
       record.win = win
+      win.on('closed', () => {
+        if (record.win !== win) return
+        if (record.view && !record.view.webContents.isDestroyed()) record.view.webContents.close()
+        record.view = null
+        record.webAttached = false
+        record.win = null
+      })
       // macOS panels accept keyboard focus without activating the app and already
       // join all Spaces, including fullscreen. setVisibleOnAllWorkspaces would
       // additionally transform the app's process type and disturb other windows.
       if (platform !== 'darwin') win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
-      win.on('blur', () => {
+      if (!spec.webContent) win.on('blur', () => {
         if (!win.isDestroyed()) win.hide()
       })
       win.on('close', (event) => {
@@ -107,11 +229,15 @@ export function createPluginLaunchers({
           win.hide()
         }
       })
+      if (spec.webContent) attachWebContent(id, record, win)
       try {
         record.loading = win.loadURL(launcherUrl(id))
         await record.loading
       } catch (error) {
         record.win = null
+        if (record.view && !record.view.webContents.isDestroyed()) record.view.webContents.close()
+        record.view = null
+        record.webAttached = false
         if (!win.isDestroyed()) win.destroy()
         throw error
       } finally {
@@ -142,11 +268,48 @@ export function createPluginLaunchers({
     if (!record) return
     records.delete(id)
     if (record.registered) globalShortcut.unregister(record.spec.shortcut)
+    if (record.view && !record.view.webContents.isDestroyed()) record.view.webContents.close()
+    record.view = null
+    record.webAttached = false
     if (record.win && !record.win.isDestroyed()) record.win.destroy()
   }
 
-  async function control({ pluginId, action, path } = {}) {
+  async function control({ pluginId, action, path, url } = {}) {
     const record = requireRecord(pluginId)
+    if (typeof action === 'string' && action.startsWith('web.')) {
+      if (!record.spec.webContent) throw new Error('此启动器未声明网页内容')
+      if (!record.view || record.view.webContents.isDestroyed()) throw new Error('网页浮窗尚未打开')
+      const wc = record.view.webContents
+      if (action === 'web.state') return webState(record)
+      if (action === 'web.navigate') {
+        if (!allowedWebUrl(url)) throw new Error('只允许有效的 HTTP(S) 地址或 about:blank，不能访问 Mica 运行时')
+        showWebContent(record)
+        record.webHome = false
+        record.webError = ''
+        void wc.loadURL(url).catch(() => {})
+      } else if (action === 'web.home') {
+        record.webHome = true
+        record.webError = ''
+        hideWebContent(record)
+        pushWebState(pluginId, record)
+      } else if (action === 'web.back') {
+        if (wc.navigationHistory.canGoBack()) {
+          showWebContent(record)
+          record.webHome = false
+          wc.navigationHistory.goBack()
+        }
+      } else if (action === 'web.forward') {
+        if (wc.navigationHistory.canGoForward()) {
+          showWebContent(record)
+          record.webHome = false
+          wc.navigationHistory.goForward()
+        }
+      } else if (action === 'web.reload') {
+        if (!record.webHome) wc.reload()
+      }
+      else throw new Error('不支持的网页动作')
+      return {}
+    }
     if (action === 'status')
       return { shortcut: record.spec.shortcut, registered: record.registered, error: record.error }
     if (action === 'show') {

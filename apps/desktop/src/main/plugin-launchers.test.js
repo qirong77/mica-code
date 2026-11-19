@@ -10,12 +10,13 @@ afterEach(() => {
   for (const close of cleanups.splice(0)) close()
 })
 
-function fixture({ occupied = false, load, platform = 'darwin' } = {}) {
+function fixture({ occupied = false, load, platform = 'darwin', webContent, pageUrl = 'http://127.0.0.1:8787/?existing=1', runtimeUrl } = {}) {
   let shortcutOccupied = occupied
   const home = mkdtempSync(join(tmpdir(), 'mica-launcher-test-'))
   const disabled = new Set()
   const bindings = new Map()
   const windows = []
+  const views = []
   const delivered = []
   const opened = []
   class Window extends EventEmitter {
@@ -25,6 +26,12 @@ function fixture({ occupied = false, load, platform = 'darwin' } = {}) {
       this.calls = []
       this.webContents = new EventEmitter()
       this.webContents.setWindowOpenHandler = () => {}
+      this.webContents.getURL = () => this.url
+      this.webContents.executeJavaScript = async (script) => { this.script = script }
+      this.contentView = {
+        addChildView: (view) => { this.view = view },
+        removeChildView: (view) => { if (this.view === view) this.view = null }
+      }
       windows.push(this)
     }
     setVisibleOnAllWorkspaces(...args) {
@@ -60,20 +67,46 @@ function fixture({ occupied = false, load, platform = 'darwin' } = {}) {
     getSize() {
       return [720, 480]
     }
+    getContentSize() { return this.contentSize || [720, 480] }
     setPosition(x, y) {
       this.position = [x, y]
     }
+  }
+  class View {
+    constructor(options) {
+      this.options = options
+      const wc = this.webContents = new EventEmitter()
+      wc.session = {
+        setPermissionRequestHandler: (fn) => { this.permissionRequest = fn },
+        setPermissionCheckHandler: (fn) => { this.permissionCheck = fn },
+        webRequest: { onBeforeRequest: (fn) => { this.request = fn } }
+      }
+      wc.navigationHistory = {
+        canGoBack: () => !!this.backAvailable, canGoForward: () => !!this.forwardAvailable,
+        goBack: () => { this.wentBack = true }, goForward: () => { this.wentForward = true }
+      }
+      wc.isDestroyed = () => !!this.destroyed
+      wc.close = () => { this.destroyed = true }
+      wc.isLoading = () => !!this.loading
+      wc.getURL = () => this.url || ''
+      wc.loadURL = async (url) => { this.url = url; wc.emit('did-navigate') }
+      wc.reload = () => { this.reloaded = true }
+      wc.setWindowOpenHandler = (fn) => { this.open = fn }
+      views.push(this)
+    }
+    setBounds(bounds) { this.bounds = bounds }
   }
   const controller = createPluginLaunchers({
     manifests: [
       {
         id: 'sample',
-        desktopLauncher: { title: 'Sample', shortcut: 'Alt+Space', width: 720, height: 480 }
+        desktopLauncher: { title: 'Sample', shortcut: 'Alt+Space', width: 720, height: 480, ...(webContent ? { webContent } : {}) }
       }
     ],
     statePath: join(home, 'state.json'),
     readDisabled: () => disabled,
     BrowserWindow: Window,
+    WebContentsView: View,
     globalShortcut: {
       register(key, callback) {
         if (shortcutOccupied) return false
@@ -88,7 +121,8 @@ function fixture({ occupied = false, load, platform = 'darwin' } = {}) {
       getCursorScreenPoint: () => ({ x: -500, y: 500 }),
       getDisplayNearestPoint: () => ({ workArea: { x: -1920, y: 100, width: 1920, height: 1080 } })
     },
-    pageUrl: 'http://127.0.0.1:8787/?existing=1',
+    pageUrl,
+    runtimeUrl,
     backgroundColor: () => '#ffffff',
     platform,
     deliver: async (intent) => {
@@ -110,6 +144,7 @@ function fixture({ occupied = false, load, platform = 'darwin' } = {}) {
     control,
     bindings,
     windows,
+    views,
     disabled,
     delivered,
     opened,
@@ -121,6 +156,93 @@ function fixture({ occupied = false, load, platform = 'darwin' } = {}) {
 }
 
 describe('manifest desktop launchers', () => {
+  test('protects both the development page and runtime without blocking other hosts', async () => {
+    const f = fixture({ webContent: { top: 64 }, pageUrl: 'http://localhost:5173/', runtimeUrl: 'http://127.0.0.1:8787/' })
+    await f.control('show')
+    let result
+    for (const url of ['http://localhost:5173/', 'http://127.0.0.1:8787/api/invoke']) {
+      f.views[0].request({ url }, (value) => { result = value })
+      expect(result.cancel).toBe(true)
+    }
+    f.views[0].request({ url: 'http://example.com:8787/' }, (value) => { result = value })
+    expect(result.cancel).toBe(false)
+  })
+
+  test('embeds a sandboxed isolated view, handles navigation and destroys it on disable', async () => {
+    const f = fixture({ webContent: { top: 64 } })
+    await expect(f.control('web.state')).rejects.toThrow('尚未打开')
+    await f.control('show')
+    const win = f.windows[0]
+    const view = f.views[0]
+    expect(win.options.resizable).toBe(true)
+    expect(view.options.webPreferences).toEqual({ partition: 'persist:mica-launcher-sample', sandbox: true, contextIsolation: true, nodeIntegration: false })
+    expect(view.bounds).toEqual({ x: 0, y: 64, width: 720, height: 416 })
+    expect(win.view).toBeUndefined()
+    expect(await f.control('web.state')).toMatchObject({ url: '', home: true })
+    expect(view.permissionCheck()).toBe(false)
+    let permission
+    view.permissionRequest(null, 'media', (value) => { permission = value })
+    expect(permission).toBe(false)
+    win.contentSize = [850, 700]
+    win.emit('resize')
+    expect(view.bounds).toEqual({ x: 0, y: 64, width: 850, height: 636 })
+    win.emit('blur')
+    expect(win.visible).toBe(true)
+    await f.control('web.navigate', { url: 'https://example.com/' })
+    expect(await f.control('web.state')).toEqual({ url: 'https://example.com/', home: false, canGoBack: false, canGoForward: false, loading: false })
+    expect(win.view).toBe(view)
+    expect(win.script).toContain('mica:launcher-web-state')
+    for (const url of ['javascript:alert(1)', 'file:///tmp/a', 'http://127.0.0.1:8787/', ' http://example.com', 'http://x:bad', 'http://u:p@example.com']) {
+      await expect(f.control('web.navigate', { url })).rejects.toThrow()
+    }
+    let result
+    view.request({ url: 'http://localhost:8787/api/invoke' }, (value) => { result = value })
+    expect(result.cancel).toBe(true)
+    view.request({ url: 'https://example.com/' }, (value) => { result = value })
+    expect(result.cancel).toBe(false)
+    view.request({ url: 'https://example.com:8787/' }, (value) => { result = value })
+    expect(result.cancel).toBe(false)
+    view.request({ url: 'ws://127.0.0.1:8787/' }, (value) => { result = value })
+    expect(result.cancel).toBe(true)
+    let prevented = false
+    view.webContents.emit('will-redirect', { preventDefault: () => { prevented = true } }, 'file:///etc/passwd')
+    expect(prevented).toBe(true)
+    prevented = false
+    view.webContents.emit('will-frame-navigate', { url: 'https://example.com/', preventDefault: () => { prevented = true } })
+    expect(prevented).toBe(false)
+    view.webContents.emit('will-frame-navigate', { url: 'file:///etc/passwd', preventDefault: () => { prevented = true } })
+    expect(prevented).toBe(true)
+    expect(view.open({ url: 'https://example.org/' })).toEqual({ action: 'deny' })
+    expect(view.url).toBe('https://example.org/')
+    view.loading = true
+    view.webContents.emit('did-start-loading')
+    expect((await f.control('web.state')).loading).toBe(true)
+    view.webContents.emit('did-fail-load', {}, -105, 'NAME_NOT_RESOLVED', 'https://example.org/', true)
+    expect((await f.control('web.state')).error).toBe('NAME_NOT_RESOLVED')
+    view.loading = false
+    view.webContents.emit('did-stop-loading')
+    view.backAvailable = view.forwardAvailable = true
+    await f.control('web.back'); await f.control('web.forward'); await f.control('web.reload')
+    expect([view.wentBack, view.wentForward, view.reloaded]).toEqual([true, true, true])
+    await f.control('web.home')
+    expect(win.view).toBeNull()
+    expect(await f.control('web.state')).toMatchObject({ url: '', home: true })
+    f.bindings.get('Alt+Space')()
+    expect(win.visible).toBe(false)
+    await f.control('show')
+    expect(f.views).toHaveLength(1)
+    expect(view.url).toBe('https://example.org/')
+    f.disabled.add('sample')
+    await expect(f.control('web.state')).rejects.toThrow('停用')
+    expect(view.destroyed).toBe(true)
+  })
+
+  test('rejects web actions on ordinary launchers', async () => {
+    const f = fixture()
+    await f.control('show')
+    await expect(f.control('web.state')).rejects.toThrow('未声明')
+  })
+
   test('registers globally, reuses a sandboxed window and positions on the cursor display', async () => {
     const f = fixture()
     expect(f.bindings.has('Alt+Space')).toBe(true)

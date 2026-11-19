@@ -4,7 +4,6 @@ import { acquireProcessLock } from '@packages/mica-common/processLock.js';
 import { writeTextFileAtomic } from '@packages/mica-config/atomicWrite.js';
 import { resolveMicaHome } from '@packages/mica-config/brand.js';
 import type { AgentObservationEvent, PluginContext, PluginObservationEvent } from '@packages/mica-plugin/index.js';
-import { MicaTool, type ToolInput } from '@packages/mica-tools/index.js';
 import { CLASSIFIER_VERSION, HarnessRecorder, type CaptureOptions, type ReviewReport } from './engine.js';
 import { summarizeProgress } from './progress.js';
 import { summarizeList } from './list.js';
@@ -34,20 +33,10 @@ export default function setup(ctx: PluginContext): void {
       // A closed session is not a reason to open a review in the host's cwd.
     }
     if (!cwd) return { message: '无法确定复盘工作区，请从工作区会话中打开复盘。' };
-    return {
-      newSession: {
-        prompt:
-          '看一下 harness-review 的运行复盘：先用 harness_review 工具 action=list 读当前工作区的运行指标与问题候选，' +
-          '按 progress 区分最近24小时重复、历史待评估、已接受待验证、已验证待观察和待复核，先检查 coverage 与统计时间；' +
-          '优先查看近期重复和评估后新证据，逐项说明证据（哪次运行、哪次调用）、影响和你的判断；' +
-          '需要完整证据时用 action=report 导出报告。结论给我，先不要改任何代码，也不要代我登记 assess 决定。',
-        cwd,
-        send: false,
-      },
-    };
+    return buildReviewHandoff(ctx, cwd);
   });
   if (action) ctx.onDispose(() => action.dispose());
-  if (!ctx.tools || !ctx.session) return;
+  if (!ctx.session) return;
 
   const configHome = ctx.paths?.config ?? resolveMicaHome();
   const root = join(configHome, 'plugin-data', ctx.pluginId);
@@ -227,7 +216,7 @@ export default function setup(ctx: PluginContext): void {
   );
   ctx.onDispose(() => turnHook.dispose());
 
-  const execute = async (input: ToolInput): Promise<unknown> => {
+  const execute = async (input: Record<string, unknown>): Promise<unknown> => {
     const action = input.action ?? 'list';
     const cwd = currentCwd();
     if (!cwd) throw new Error('无法确定复盘工作区，请从工作区会话中打开复盘。');
@@ -283,8 +272,6 @@ export default function setup(ctx: PluginContext): void {
     throw new Error('action 必须是 list / report / prune / rebuild / assess');
   };
 
-  const tool = ctx.tools.register(new HarnessReviewTool(execute));
-  ctx.onDispose(() => tool.dispose());
   const command = ctx.commands.register({
     name: 'harness-review',
     description: '查看运行复盘、导出报告，或记录人工评估结论',
@@ -319,39 +306,37 @@ export default function setup(ctx: PluginContext): void {
   ctx.logger.info('harness-review:ready', { root });
 }
 
-export class HarnessReviewTool extends MicaTool {
-  constructor(private readonly run: (input: ToolInput) => Promise<unknown>) {
-    super(
-      'harness_review',
-      '按用户要求查看当前工作区的 agent 运行复盘。list 返回运行指标与有证据的问题候选；report 导出 Markdown 报告；assess 记录用户的 review 或外部评估结论（需要 id、status、note）。accepted 仅代表认可建议；validated/regressed 需要在 note 写明实际验证证据。记录和聚合自动完成，无需任务结束后调用。不会修改 system prompt、工具、记忆或执行任何评测。' +
-        '同时附整机系统/插件操作与体验日志旁证；机器级日志不冒充本工作区根因。list 为有界摘要，截断/未知覆盖单独说明，完整证据见 reportPath。',
-      {
-        type: 'object',
-        properties: {
-          action: {
-            type: 'string',
-            enum: ['list', 'report', 'prune', 'rebuild', 'assess'],
-            description: '默认 list',
-          },
-          id: { type: 'string', description: 'assess：问题条目 id' },
-          status: { type: 'string', enum: [...STATUSES] },
-          note: { type: 'string', description: 'assess：用户判断依据，或实际评估方法与结果' },
-          days: { type: 'number', description: 'prune：保留最近多少天的运行记录，默认 30' },
-        },
+/** 配置页动作先导出一份快照，再把报告路径交给新会话用通用 read_file 阅读。 */
+async function buildReviewHandoff(ctx: PluginContext, cwd: string): Promise<{
+  newSession: { prompt: string; cwd: string; send: false };
+}> {
+  if (!ctx.session) {
+    return {
+      newSession: {
+        prompt:
+          '请打开 Harness Review 控制台查看当前工作区的运行复盘。使用通用 read_file 读取控制台导出的 Markdown；先检查覆盖范围与统计时间，再总结证据。不要修改代码，也不要代我登记评估结论。',
+        cwd,
+        send: false,
       },
-    );
+    };
   }
-
-  async execute(input: ToolInput): Promise<string> {
-    try {
-      return JSON.stringify(await this.run(input), null, 2);
-    } catch (error) {
-      return JSON.stringify({ ok: false, error: error instanceof Error ? error.message : '复盘操作失败' });
-    }
-  }
-
-  onToolUseDisplayText(input: ToolInput): string {
-    return `Harness review: ${String(input.action ?? 'list')}`;
+  const configHome = ctx.paths?.config ?? resolveMicaHome();
+  const root = join(configHome, 'plugin-data', 'harness-review');
+  const recorder = new HarnessRecorder(root);
+  try {
+    const report = await recorder.review(cwd);
+    const reportPath = await recorder.exportReport(cwd, report);
+    return {
+      newSession: {
+        prompt:
+          `复盘报告已经由 Harness Review 导出到：${reportPath}\n` +
+          '请用通用的 read_file 工具读取这份 Markdown，先检查覆盖范围与统计时间，再总结近期重复候选、证据、影响和判断。不要修改代码，也不要代我登记评估结论。',
+        cwd,
+        send: false,
+      },
+    };
+  } finally {
+    await recorder.dispose();
   }
 }
 

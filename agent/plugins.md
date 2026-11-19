@@ -128,7 +128,7 @@ Capabilities 可按插件查看实际工具、技能和提示词贡献。工具�
 
 ### desktop（入口、整页、面板、会话菜单）
 
-**系统启动器**由随包清单 `desktop.launcher`（`title` / `shortcut` / `width` / `height`）声明。
+**系统启动器**由随包清单 `desktop.launcher`（`title` / `shortcut` / `width` / `height`，可选 `webContent`）声明。
 Electron 外壳 `main/plugin-launchers.js` 管理系统快捷键与独立浮窗；页面 `PluginLauncher.jsx`
 只挂载插件 `desktop.jsx` 的 `Launcher`，不挂聊天。后端通过 `host/plugin-launcher-runtime.js`
 按目录加载插件 `launcher.js` 的 default `createLauncher(context)`，不依赖会话 app-server。
@@ -137,6 +137,8 @@ Electron 外壳 `main/plugin-launchers.js` 管理系统快捷键与独立浮窗�
 前端 `api.launcher` 提供 `request` / `status` / `retry` / `show` / `close` / `configure` / `openPath`；
 原生动作走已有私有系统 socket 的 `/plugin-launcher`，路径交给主窗口唯一的编辑器入口。
 插件设置页可打开启动器；浏览器宿主用整页显示同一组件，系统快捷键与浮窗仅桌面应用可用。
+声明 `webContent: { top }` 时，外壳在同一个窗口内为不可信网页提供隔离视图；窗口可调整大小、失焦不隐藏，
+插件通过 `api.launcher.web` 控制导航和订阅状态。未经声明的启动器不能操作网页视图。
 macOS 浮窗只取键盘焦点、不连带唤起主应用；原生窗口策略见 `desktop.md` 的「三层边界与装配」。
 这类模块同 `desktop.jsx` 一样只支持随包插件，无用户插件运行期代码加载。
 
@@ -237,7 +239,7 @@ macOS 浮窗只取键盘焦点、不连带唤起主应用；原生窗口策略�
 - `readOnly` 分类受 `MicaTool.test.ts` 约束：纯查询为 true；写文件、patch、shell、kill、wait 为 false。
 - 执行类工具按「启动 / 等待 / 查看」拆开：`run_shell` 只跑前台命令（≤120s）；`background_tasks_start` 启动并立即返回 id；`wait_for` 只观察条件。
 - `overlappable: true`（`wait_for`）或 `canOverlap(input)`（`agent` 仅 await/join）表示可与同消息其余调用重叠；加入前确认无写副作用。
-- 只在会话里注册的工具（`agent`、`todo_write`、`session_peers`、`session_notes`、`harness_review`）在配置页/设置页由 `RUNTIME_TOOL_DESCRIPTORS` 兜底列出，改描述要同步 `runtimeToolDescriptors.test.ts`。每条描述带 `pluginId`：注册它的插件停用时 `getToolCatalog()` 跳过这一行。真正装配插件的宿主（TUI、`mica app-server`）在 setup 之前还会调 `micaTools.setRuntimeToolFallback(false)` 整块关掉兜底——那里注册表就是唯一事实来源，否则停用一个插件之后它的工具仍会被静态描述补回目录（用户在能力面板里看到「关掉了却还在」）。配置页 / 桌面设置页这些不加载插件的宿主保持开启。
+- 只在会话里注册的通用工具（`agent`、`todo_write`、`session_peers`、`session_notes`）在配置页/设置页由 `RUNTIME_TOOL_DESCRIPTORS` 兜底列出，改描述要同步 `runtimeToolDescriptors.test.ts`。插件业务操作（例如复盘、手机页面同步）不应新增一个模型工具名：复用配置页动作、插件面板、命令或通用 `read_file` / `skill` 能力。每条描述带 `pluginId`：注册它的插件停用时 `getToolCatalog()` 跳过这一行。真正装配插件的宿主（TUI、`mica app-server`）在 setup 之前还会调 `micaTools.setRuntimeToolFallback(false)` 整块关掉兜底——那里注册表就是唯一事实来源，否则停用一个插件之后它的工具仍会被静态描述补回目录（用户在能力面板里看到「关掉了却还在」）。配置页 / 桌面设置页这些不加载插件的宿主保持开启。
 - 程序化 PTY 会话由 `PtyManager` 懒启动的 Node helper（`mica-pty/src/server.mjs`）承载；改 `server.mjs` 后跑 `bun run scripts/generate-pty-server-source.mjs` 同步 `ptyServerSource.ts`。
 
 ### Todo

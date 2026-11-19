@@ -15,6 +15,7 @@ export type CapabilityParameter = {
 
 export type CapabilityItem = {
   name: string;
+  displayName?: string;
   description: string;
   /** 所属分组；没有分组的项（技能、MCP 服务器）单独成行。 */
   group?: CapabilityGroupRef | null;
@@ -92,7 +93,8 @@ export function CapabilityList({
         ) : null}
       </span>
       <span className="capability-name" title={item.name}>
-        {item.name}
+        {item.displayName ?? item.name}
+        {item.displayName ? <code className="capability-technical-name">{item.name}</code> : null}
         {item.sourceLabel ? <small className="capability-source">{item.sourceLabel}</small> : null}
       </span>
       <span

@@ -1,6 +1,6 @@
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { PluginContext, PluginNewSession } from '@packages/mica-plugin/index.js';
+import type { PluginContext } from '@packages/mica-plugin/index.js';
 import { pageVersionOf, resolveRendererDir, syncPage } from './PageSync.js';
 
 /**
@@ -9,10 +9,7 @@ import { pageVersionOf, resolveRendererDir, syncPage } from './PageSync.js';
  * 页面产物跟着 Mica 的版本走，而中转机托管的是上一次部署时的那一份。所以配置页给一个
  * 按钮：算出版本号、和 `/api/health` 比一次，不一致才打包上传。
  *
- * 点按钮的人拿到的不是「传完了」，而是一段**给 agent 的提示词**（`guidePageSync`）：开一个
- * 新会话、把提示词摆进输入框，发不发送由用户决定。这一步看似绕，但版本比对、产物缺失时要不要
- * 重新构建、上传失败是证书还是口令，都得现场判断——交给会话里的 agent 比在按钮里写死几条
- * if 更靠得住；真正的上传仍然只有 `runPageSync` 一份实现，agent 经 `mobile_relay` 工具调用它。
+ * 页面更新由配置页动作和面板直接执行；不为一个插件自己的维护操作增加模型工具。
  *
  * 上传永远是手动的一步：一次 3MB 级的出网流量，什么时候传该由人决定。后台只做**版本的
  * 只读比较**（`/api/health` 那一个请求），落后时把「有一件事等人点一下」上报成
@@ -119,72 +116,3 @@ export async function runPageSync(
     ...(phoneUrl ? { link: phoneUrl } : {}),
   };
 }
-
-/**
- * 按钮/提示点要开的那一轮：把这件活交给会话里的 agent。
- *
- * 提示词要能独立成立——接手的是一个新会话，它看不到这里的状态，也看不到用户刚才点了什么。
- */
-
-/** 页面产物在仓库里的固定位置；新会话的工作目录就取它上面那层，agent 才找得到仓库。 */
-const RENDERER_TAIL = '/apps/desktop/out/renderer';
-
-export function repoRootFor(rendererDir: string | null | undefined): string | null {
-  const dir = rendererDir ? rendererDir.replace(/\/+$/, '') : '';
-  if (!dir || !dir.endsWith(RENDERER_TAIL)) return null;
-  return dir.slice(0, -RENDERER_TAIL.length) || null;
-}
-
-function pageSyncPrompt(options: { skillPath?: string | null; rendererDir?: string | null }): string {
-  const repoRoot = repoRootFor(options.rendererDir);
-  const lines = [
-    '手机端页面落后了：把中转机上托管的那份换成这台机器当前的版本。',
-    '',
-    '1. 调 `mobile_relay` 工具，action = sync_page。它算本机页面版本、和中转机的 /api/health 比一次，',
-    '   一致就直接回「已经是最新」，不一致才打包上传（3MB 级，一次就够）。',
-  ];
-  if (options.rendererDir) {
-    lines.push(`   本机页面产物：${options.rendererDir}`);
-  }
-  if (repoRoot) {
-    lines.push(
-      '2. 如果它报「本机没有页面产物」，说明这份构建还没出来：在仓库里跑',
-      `   \`cd ${repoRoot}/apps/desktop && npx electron-vite build\` 之后重跑第 1 步。不要为此重新部署中转机`,
-      '   （`setup.mjs --redeploy` 是另一件事，页面更新用不到 SSH）。',
-    );
-  } else {
-    lines.push(
-      '2. 如果它报「本机没有页面产物」，说明这台机器上没有可发布的构建：在 Mica 仓库里跑',
-      '   `cd apps/desktop && npx electron-vite build` 之后重跑第 1 步。不要为此重新部署中转机',
-      '   （`setup.mjs --redeploy` 是另一件事，页面更新用不到 SSH）。',
-    );
-  }
-  lines.push('3. 把版本号变化和手机链接回给我，并说明手机上刷新一下就是新版。', '');
-  if (options.skillPath) {
-    lines.push(`细节在 skill [skill:mobile-relay](${options.skillPath}) 里（先读它）。只做这一件事，别顺手改别的配置。`);
-  } else {
-    lines.push('细节在 skill `mobile-relay` 里。只做这一件事，别顺手改别的配置。');
-  }
-  return lines.join('\n');
-}
-
-/**
- * 动作的产出是「一段提示词 + 一个新会话」。
- *
- * `send: false`：宿主把提示词摆进新会话的输入框就停下，发不发送由用户按回车决定——插件不该
- * 替人按下发送键。
- */
-export function guidePageSync(
-  options: { skillPath?: string | null; rendererDir?: string | null } = {},
-): { newSession: PluginNewSession } {
-  // 工作目录跟着页面产物走：agent 要去构建时就落在那个仓库里，而不是用户当时打开的任意目录。
-  const cwd = repoRootFor(options.rendererDir ?? null);
-  return {
-    newSession: {
-      prompt: pageSyncPrompt(options),
-      send: false,
-      ...(cwd ? { cwd } : {}),
-    },
-  };
-}
-

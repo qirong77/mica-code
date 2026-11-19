@@ -12,7 +12,7 @@ import {
   type PluginStatusFile,
 } from '@packages/mica-plugin/index.js';
 import { micaRuntime } from '@packages/mica-runtime/index.js';
-import { toolResultToText, type MicaTool } from '@packages/mica-tools/index.js';
+import type { MicaTool } from '@packages/mica-tools/index.js';
 import setup from './index.js';
 import { CLASSIFIER_VERSION, HarnessRecorder } from './engine.js';
 import { acquireProcessLock } from '@packages/mica-common/processLock.js';
@@ -91,7 +91,13 @@ function harness(
       },
     } as never);
   const finish = () => emit({ type: 'run:finish', outcome: 'completed', elapsedMs: 20 } as never);
-  const review = async () => JSON.parse(toolResultToText(await tools[0]!.execute({ action: 'list' })));
+  const invoke = async (input: Record<string, unknown> = {}) => {
+    const action = String(input.action ?? 'list');
+    const args = action === 'prune' ? `${action} ${String(input.days ?? 30)}` : [action, input.id, input.status, input.note].filter(Boolean).join(' ');
+    const result = await commands.execute(`/harness-review ${args}`);
+    return JSON.stringify(result.ok ? result.data : { ok: false, error: result.message });
+  };
+  const review = async () => JSON.parse(await invoke({ action: 'list' }));
   cleanup.push(async () => {
     for (const dispose of disposers.reverse()) await dispose();
     if (!options.home) rmSync(home, { recursive: true, force: true });
@@ -112,6 +118,7 @@ function harness(
     readSettings,
     describeSession,
     logger: ctx.logger,
+    invoke,
   };
 }
 
@@ -235,7 +242,7 @@ describe('harness-review plugin', () => {
       } as never);
     }
     await h.finish();
-    const output = toolResultToText(await h.tools[0].execute({}));
+    const output = await h.invoke({});
     expect(output.length).toBeLessThanOrEqual(LIST_MAX_CHARS);
     const report = JSON.parse(output);
     expect(report.totalFindings).toBe(40);
@@ -254,23 +261,21 @@ describe('harness-review plugin', () => {
 
   it('requires an explicit reason and workspace-visible finding for assessments', async () => {
     const h = harness();
-    const tool = h.tools[0]!;
-    expect(JSON.parse(toolResultToText(await tool.execute({ action: 'unknown' })))).toMatchObject({ ok: false });
+    expect(JSON.parse(await h.invoke({ action: 'unknown' }))).toMatchObject({ ok: false });
     expect(
-      JSON.parse(toolResultToText(await tool.execute({ action: 'assess', id: 'x', status: 'accepted' }))).error,
+      JSON.parse(await h.invoke({ action: 'assess', id: 'x', status: 'accepted' })).error,
     ).toContain('note');
     expect(
       JSON.parse(
-        toolResultToText(await tool.execute({ action: 'assess', id: 'x', status: 'accepted', note: 'user reviewed' })),
+        await h.invoke({ action: 'assess', id: 'x', status: 'accepted', note: 'user reviewed' }),
       ).error,
     ).toContain('当前工作区');
     expect((await h.commands.execute('/harness-review unknown')).ok).toBe(false);
   });
 
-  it('registers a capability-changing tool as non-readonly', () => {
+  it('does not register a plugin-specific model tool', () => {
     const h = harness();
-    expect(h.tools[0]!.name).toBe('harness_review');
-    expect(h.tools[0]!.readOnly).toBe(false);
+    expect(h.tools).toHaveLength(0);
   });
 
   it('records which host produced the run', async () => {
@@ -353,7 +358,7 @@ describe('harness-review plugin', () => {
     expect(report.findings[0]).toMatchObject({ occurrences: 2, recentOccurrences: 0 });
     const id = report.findings[0].id;
     const assess = async (status: string) =>
-      h.tools[0].execute({ action: 'assess', id, status, note: 'Regression fixture verified in isolated workspace' });
+      h.invoke({ action: 'assess', id, status, note: 'Regression fixture verified in isolated workspace' });
     await assess('accepted');
     expect(JSON.parse(await readFile(join(root, 'data.json'), 'utf8')).progress).toMatchObject({
       acceptedPending: 1,
@@ -378,14 +383,12 @@ describe('harness-review plugin', () => {
     const id = (await h.review()).findings[0].id;
     const assess = async (status: string) =>
       JSON.parse(
-        toolResultToText(
-          await h.tools[0].execute({
-            action: 'assess',
-            id,
-            status,
-            note: `External review: ${status}`,
-          }),
-        ),
+        await h.invoke({
+          action: 'assess',
+          id,
+          status,
+          note: `External review: ${status}`,
+        }),
       );
     expect((await assess('validated')).recorded).toBe(true);
     await fail();
@@ -409,10 +412,10 @@ describe('harness-review plugin', () => {
     const h = harness();
     const result = await h.actions.get('open-review')!({ values: {} });
     if (!result?.newSession) throw new Error('Expected a new review session');
-    expect(result.newSession.prompt).toContain('harness_review');
+    expect(result.newSession.prompt).toContain('read_file');
     expect(result.newSession.cwd).toBe('/workspace/test');
     expect(result.newSession.send).toBe(false);
-    expect(result.newSession.prompt).toContain('不要代我登记 assess');
+    expect(result.newSession.prompt).toContain('不要代我登记评估结论');
     const selected = await h.actions.get('open-review')!({ values: {}, cwd: '/workspace/selected' });
     expect(selected).toMatchObject({ newSession: { cwd: '/workspace/selected', send: false } });
   });
@@ -422,15 +425,17 @@ describe('harness-review plugin', () => {
     async (missing) => {
       const h = harness(missing);
       expect(h.tools).toHaveLength(0);
-      expect((await h.commands.execute('/harness-review list')).ok).toBe(false);
-      expect(h.readSettings).not.toHaveBeenCalled();
-      expect(h.describeSession).not.toHaveBeenCalled();
+      expect((await h.commands.execute('/harness-review list')).ok).toBe(missing.session !== false);
+      if (missing.tools === false && missing.session !== false) expect(h.readSettings).toHaveBeenCalled();
+      else expect(h.readSettings).not.toHaveBeenCalled();
+      if (missing.tools === false && missing.session !== false) expect(h.describeSession).toHaveBeenCalled();
+      else expect(h.describeSession).not.toHaveBeenCalled();
       const result = await h.actions.get('open-review')!({ values: {}, cwd: '/workspace/action' });
       expect(result).toMatchObject({ newSession: { cwd: '/workspace/action', send: false } });
       await h.start();
       await h.finish();
       await h.hooks.emit('turn:after', { outcome: 'completed' });
-      expect(existsSync(join(h.home, 'plugin-data', 'harness-review'))).toBe(false);
+      expect(existsSync(join(h.home, 'plugin-data', 'harness-review'))).toBe(missing.session !== false);
     },
   );
 

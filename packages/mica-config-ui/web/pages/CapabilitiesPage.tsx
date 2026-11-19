@@ -203,14 +203,9 @@ export function CapabilitiesPage({ runtime }: { runtime?: ConfigWebCapabilitiesR
     promptSave.schedule(next);
   }
 
-  const tools = useMemo(
-    () =>
-      mergeNamed(
-        details?.tools ?? [],
-        (live?.tools ?? []).filter((tool) => tool.group?.key.startsWith('plugin:')),
-      ),
-    [details, live],
-  );
+  // 这里是新会话默认能力页。当前会话的动态工具不能混进来，否则用户改的是默认值，
+  // 看到的却是 activeNode 的插件贡献；会话级能力由 SessionSettingsDialog 单独读取。
+  const tools = details?.tools ?? [];
   const skills = details?.skills ?? [];
   const servers = details?.mcpServers ?? [];
   const plugins = useMemo(() => {
@@ -503,11 +498,6 @@ function toDraft(value: Draft): Draft {
     disabledTools: value.disabledTools,
     disabledMcpServers: value.disabledMcpServers,
   };
-}
-function mergeNamed<T extends { name: string }>(defaults: T[], extra: T[]): T[] {
-  return [...new Map([...defaults, ...extra].map((entry) => [entry.name, entry])).values()].sort((a, b) =>
-    a.name.localeCompare(b.name),
-  );
 }
 function formatError(cause: unknown): string {
   return cause instanceof Error ? cause.message : String(cause);
