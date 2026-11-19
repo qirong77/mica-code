@@ -468,7 +468,9 @@ function readSessionContextAnalysis(id) {
     usageHistory: session.snapshot.usageHistory,
     contextWindowSize: session.snapshot.contextWindowSize,
     lastUsage: session.snapshot.lastUsage,
-    displayUsage: session.snapshot.displayUsage
+    displayUsage: session.snapshot.displayUsage,
+    // 只读快照里记录的最近一次请求，不用当前运行时工具集冒充历史。
+    lastToolSchemas: session.snapshot.lastToolSchemas
   })
 }
 

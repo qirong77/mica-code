@@ -10,6 +10,7 @@
 - `ModelMessage` 是 pi-ai 的消息类型，所有协议使用同一种历史；`PiHistoryNormalizer` 投影成展示用的正文与工具记录。快照写 `messageFormat: 'pi-ai-v1'`。旧 OpenAI 原生历史不再直接加载，由 `evolution` 一次性迁移。
 - `AgentCallbacks.onToolInput` 提供模型生成工具输入的 start/delta/end 事件；`onToolCall` / `onToolResult` 继续表示实际执行。思考显示按 pi 内容块有序提交 checkpoint，签名与加密数据保存在模型历史中。
 - `AgentQueryOptions.onRequestStart` 在实际发起每轮请求前提供消息数量与本轮工具定义；包括首个失败请求，transport 重试另走 `onRetry`，观察回调抛错不影响请求。
+- 宿主可把 `onRequestStart.tools`（provider 实际 payload 的工具定义）压缩为 `AgentToolSchemas`：只保存工具名、`mcp` / `other` 来源、registry 可信的 MCP server 原名与本地近似 token 数，不保存完整 schema；缺失记录不能用当前 registry 冒充历史。
 - 提供子 agent 创建入口：`createSubAgent`。
 - 提供 usage 汇总与 subagent usage 记录类型：`summarizeUsageHistory`、`SubagentUsageRecord`。
 - `AgentUsageRecord` 可携带请求的 `providerId`、含重试的 `durationMs` 和最终尝试的 `firstTokenMs`；`responseWaitMs` 从原请求开始计至最终成功尝试首个非空正文或思考增量，包含 provider 内重试。生成速率用成对的 `generationOutputTokens` / `generationDurationMs`：前者为 API 输出量减去明确的推理用量与首 token，后者只量成功尝试首末非空**正文**增量（不混入思考摘要）。仅在至少 32 个非推理输出 tokens、两个正文增量、500ms 且无工具或其它输出时采样；推理明细缺失不假设为零，多个无法匹配的用量不关联计时。口径参考 [vLLM TPOT](https://github.com/vllm-project/vllm/blob/main/vllm/benchmarks/serve.py) 与 [NVIDIA GenAI-Perf per-user throughput](https://github.com/triton-inference-server/perf_analyzer/blob/main/genai-perf/README.md#metrics)；32 tokens / 500ms 是本项目防止短回答与集中分块放大误差的门槛，不是上游标准。API 非推理输出仍包含不可见格式 tokens，分块也不保证一块一个 token，所以仅为客户端正文流估算，不是服务端解码速度。旧时长没有新分子的形态不再支持，不能拿总输出量回填。`ModelTextRequest.providerId` 可传入实际服务商标识。

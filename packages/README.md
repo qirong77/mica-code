@@ -27,6 +27,7 @@
 本机外壳仅开放显式声明且未停用的随包插件数据，浏览器里该能力为 null。
 
 - `mica-agent`：agent 抽象、pi-ai 模型适配、共享工具循环与 prompt 构建。`PiModelClient` 统一处理 Chat Completions、Responses、Anthropic Messages 和 Google Generative AI；`ModelMessage`、`PiHistoryNormalizer` 提供跨协议历史与展示投影，快照标记 `messageFormat: 'pi-ai-v1'`。请求用量可附服务商 ID、总耗时与首字等待。生成速率使用成对的 `generationOutputTokens` / `generationDurationMs`，只采纳上游明确报告推理用量且足够长的正文流。`IAgent.getSnapshot({ includeConversation: false })` 可省去展示消息投影。
+  其请求观察还可由宿主把 provider payload 的工具定义压缩为 `AgentToolSchemas`（近似 token、来源与可信 MCP server 元数据），仅用于会话 Context 展示，不把完整 schema 写入快照。
 - `mica-tools`：内置工具、支持文本/图片的工具结果、工具 registry、MCP 工具接入；`MicaTool.canOverlap(input)` 与 `micaTools.isOverlappable(name, input)` 为 provider 提供按调用输入判断的重叠调度能力。子代理文件写入由 `assertWritablePath()` 按精确租约检查；`assertShellPathAccess()` 允许从工作区内包含租约的目录运行命令，外部 checkout 以最近 `.git` 为祖先上界，独立外部路径的祖先只到直接父目录，详见该包 README。
 - `mica-mcp`：MCP 配置读取、server 连接管理和工具注册；工具适配保留标准图片块、混合图文顺序及文本资源，二进制不转成截断的 JSON/base64 文本。
 - `mica-ui`：Ink 终端 UI 组件和 UI 状态。
@@ -83,7 +84,7 @@
 - `mica-runtime` 只定义协议和状态原语，不做具体 turn loop 编排。
 - `mica-commands` 只放通用命令机制，产品命令放在 `mica-builtin-commands`。
 - `mica-builtin-commands` 通过 services 注入外部能力，避免直接导入应用层单例。
-- `mica-tools` 统一管理工具定义和执行，MCP 工具也必须通过它注册。
+- `mica-tools` 统一管理工具定义和执行，MCP 工具也必须通过它注册；`micaTools.getRegisteredSource(name)` 只查询内存中实际注册工具的来源，不读取设置页的兜底目录。
 - `mica-session` 只负责持久化，不调用模型、不渲染 UI。
 - `mica-plugin` 只提供插件机制；官方插件实现放在仓库根 `plugins/`，由 `mica-official-plugins` 登记。动作、桌面面板与会话菜单的登记由 manager 随插件自动回收；资源按注册逆序释放，单项清理失败不跳过其余资源。
 

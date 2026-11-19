@@ -231,6 +231,127 @@ function subtree(index: NotebookIndex, id: string): Set<string> {
   return result;
 }
 
+export type NotebookPlaceTarget =
+  | { targetId: string; position: 'before' | 'after' | 'inside' }
+  | { targetId: null; position: 'inside' };
+
+function subtreeFromNodes(nodes: readonly NotebookNode[], id: string): Set<string> {
+  const children = new Map<string, string[]>();
+  for (const node of nodes) {
+    if (node.parentId === null) continue;
+    const siblings = children.get(node.parentId) ?? [];
+    siblings.push(node.id);
+    children.set(node.parentId, siblings);
+  }
+  const result = new Set<string>();
+  const pending = [id];
+  while (pending.length) {
+    const current = pending.pop()!;
+    result.add(current);
+    pending.push(...(children.get(current) ?? []));
+  }
+  return result;
+}
+
+function appendIndex(nodes: readonly NotebookNode[], parentId: string | null): number {
+  const siblings = nodes.filter((node) => node.parentId === parentId);
+  if (!siblings.length) {
+    if (parentId === null) return nodes.length;
+    const parentIndex = nodes.findIndex((node) => node.id === parentId);
+    return parentIndex < 0 ? nodes.length : parentIndex + 1;
+  }
+  const lastSibling = siblings[siblings.length - 1]!;
+  const ids = subtreeFromNodes(nodes, lastSibling.id);
+  let lastIndex = -1;
+  for (let index = 0; index < nodes.length; index++) {
+    if (ids.has(nodes[index]!.id)) lastIndex = index;
+  }
+  return lastIndex + 1;
+}
+
+/**
+ * Place a node before/after a sibling or append it inside a folder/root. The node's complete
+ * subtree is moved as one block; descendants keep both their parent ids and relative order.
+ * The index array is the only ordering state, so this operation deliberately does not add a
+ * position field to the persisted shape.
+ */
+export function placeNode(index: NotebookIndex, id: string, target: NotebookPlaceTarget, now?: string): NotebookIndex {
+  const next = validateNotebookIndex(index);
+  const node = activeNode(next, id);
+  if (!target || typeof target !== 'object') throw new NotebookOperationError('Invalid notebook placement target');
+  if (target.position !== 'before' && target.position !== 'after' && target.position !== 'inside') {
+    throw new NotebookOperationError('Invalid notebook placement position');
+  }
+  if (target.targetId === null && target.position !== 'inside') {
+    throw new NotebookOperationError('Root notebook placement only supports inside');
+  }
+  if (target.targetId !== null && typeof target.targetId !== 'string') {
+    throw new NotebookOperationError('Invalid notebook placement target');
+  }
+
+  const targetNode = target.targetId === null ? undefined : activeNode(next, target.targetId);
+  const movedIds = subtree(next, id);
+  if (targetNode && movedIds.has(targetNode.id)) {
+    throw new NotebookOperationError('Cannot place a notebook node into its own subtree (cycle)');
+  }
+
+  let destinationParent: string | null;
+  if (target.position === 'inside') {
+    if (targetNode && targetNode.kind !== 'folder') {
+      throw new NotebookOperationError('Notebook inside target must be a folder');
+    }
+    destinationParent = target.targetId;
+    parentFolder(next, destinationParent);
+  } else {
+    // targetNode is guaranteed by the targetId/position checks above.
+    destinationParent = targetNode!.parentId;
+    parentFolder(next, destinationParent);
+  }
+
+  // Dropping into the exact existing slot is a no-op. Return before evaluating `now`, just like
+  // renameNode/moveNode, so a stale or malformed timestamp cannot turn a no-op into a failure.
+  const siblings = next.nodes.filter((candidate) => !candidate.trashedAt && candidate.parentId === destinationParent);
+  if (target.position === 'inside') {
+    if (siblings[siblings.length - 1]?.id === node.id) return next;
+  } else {
+    const sourceIndex = siblings.findIndex((candidate) => candidate.id === node.id);
+    const targetIndex = siblings.findIndex((candidate) => candidate.id === targetNode!.id);
+    if (sourceIndex === targetIndex) {
+      throw new NotebookOperationError('Cannot place a notebook node relative to itself');
+    }
+    if (sourceIndex >= 0 && targetIndex >= 0) {
+      if (target.position === 'before' && sourceIndex + 1 === targetIndex) return next;
+      if (target.position === 'after' && targetIndex + 1 === sourceIndex) return next;
+    }
+  }
+
+  const moved = next.nodes.filter((candidate) => movedIds.has(candidate.id));
+  const remaining = next.nodes.filter((candidate) => !movedIds.has(candidate.id));
+  let insertionIndex: number;
+  if (target.position === 'before') {
+    insertionIndex = remaining.findIndex((candidate) => candidate.id === targetNode!.id);
+  } else if (target.position === 'after') {
+    // Existing create/move operations need not keep descendants contiguous with their parent.
+    // Anchor to the next sibling, not the last descendant (which may lie beyond that sibling).
+    const targetIndex = remaining.findIndex((candidate) => candidate.id === targetNode!.id);
+    const followingSibling = remaining.findIndex((candidate, index) => index > targetIndex && candidate.parentId === destinationParent);
+    insertionIndex = followingSibling < 0 ? appendIndex(remaining, destinationParent) : followingSibling;
+  } else {
+    insertionIndex = appendIndex(remaining, destinationParent);
+  }
+  if (insertionIndex < 0) throw new NotebookOperationError('Notebook placement target disappeared');
+
+  const movedRoot = moved.find((candidate) => candidate.id === node.id)!;
+  movedRoot.parentId = destinationParent;
+  movedRoot.updatedAt = timestamp(now ?? new Date().toISOString());
+  next.nodes = [
+    ...remaining.slice(0, insertionIndex),
+    ...moved,
+    ...remaining.slice(insertionIndex),
+  ];
+  return validateNotebookIndex(next);
+}
+
 export function createNode(
   index: NotebookIndex,
   options: { kind: NotebookNode['kind']; parentId: string | null; title: string; id?: string; now?: string },

@@ -35,7 +35,7 @@ beforeEach(() => {
 
 afterEach(() => fs.rmSync(home, { recursive: true, force: true }))
 
-function session(role, systemPrompt) {
+function session(role, systemPrompt, lastToolSchemas) {
   const value = {
     id: '20260801-desktop-role',
     snapshot: {
@@ -44,7 +44,8 @@ function session(role, systemPrompt) {
       model: 'test',
       role,
       messages: [{ role: 'user', content: 'hello' }],
-      ...(systemPrompt === undefined ? {} : { systemPrompt })
+      ...(systemPrompt === undefined ? {} : { systemPrompt }),
+      ...(lastToolSchemas === undefined ? {} : { lastToolSchemas })
     }
   }
   const file = path.join(home, 'sessions', `${value.id}.json`)
@@ -100,6 +101,20 @@ describe('desktop config roles', () => {
     expect(actions.readSessionContextAnalysis({ id }).turns[0].entries[0].tokens).toBe(estimateTextTokens(reference.rolePrompt))
     expect(JSON.parse(actions.readSessionContent({ id }).content).snapshot.systemPrompt).toBeUndefined()
     expect(fs.readFileSync(file, 'utf8')).toBe(before)
+  })
+
+  test('passes recorded tool schemas to Context analysis without reading the current registry', () => {
+    const { id } = session('default', undefined, {
+      tools: [
+        { name: 'read_file', source: 'other', tokens: 20 },
+        { name: 'search', source: 'mcp', server: 'docs', tokens: 80 }
+      ]
+    })
+    const analysis = actions.readSessionContextAnalysis({ id })
+    expect(analysis.toolSchemas).toEqual([
+      { name: 'read_file', source: 'other', tokens: 20 },
+      { name: 'search', source: 'mcp', server: 'docs', tokens: 80 }
+    ])
   })
 
   test.each(['<system>\nSaved prompt.\n</system>\n<role>\nSaved role.\n</role>', ''])(

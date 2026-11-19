@@ -19,7 +19,13 @@ import { PI_MESSAGE_FORMAT, PI_MESSAGE_FORMAT_ERROR } from '@packages/mica-commo
 import { readHeadString, readSessionFileHead } from './sessionFileHead.js';
 import { normalizeTurnTimings, type TurnTimingRecord } from '@packages/mica-common/turnTiming.js';
 import type { CapabilitySelection } from '@packages/mica-common/capabilities.js';
-import type { AgentQueryContent, AgentUsageRecord, SubagentUsageRecord } from '@packages/mica-agent/index.js';
+import {
+  normalizeAgentToolSchemas,
+  type AgentQueryContent,
+  type AgentToolSchemas,
+  type AgentUsageRecord,
+  type SubagentUsageRecord,
+} from '@packages/mica-agent/index.js';
 import {
   isEffortLevelName,
   isProviderProtocol,
@@ -76,6 +82,8 @@ export type PersistedRuntimeSnapshot = {
    * 仍然重新拼装。缺失表示这条会话还没发过请求（或早于本字段出现）。
    */
   systemPrompt?: string;
+  /** Compact metadata for the last actual provider tool payload; tokens are approximate. */
+  lastToolSchemas?: AgentToolSchemas;
   messageFormat?: 'pi-ai-v1';
   messages: Message[];
   conversationMessages: unknown[];
@@ -941,6 +949,7 @@ export function parsePersistedSession(value: unknown): PersistedSession | null {
   if (!isEffortLevelName(session.snapshot.effort)) return null;
   const role = isNonEmptyString(session.snapshot.role) ? session.snapshot.role : 'default';
   const systemPrompt = normalizeSystemPrompt(session.snapshot.systemPrompt);
+  const lastToolSchemas = normalizeAgentToolSchemas(session.snapshot.lastToolSchemas);
   return {
     ...session,
     // 父会话只是展示线索：坏值（不存在的形状、自指）丢掉就行，不为了一个
@@ -956,6 +965,7 @@ export function parsePersistedSession(value: unknown): PersistedSession | null {
       capabilitiesCustomized: session.snapshot.capabilitiesCustomized === true ? true : undefined,
       displayUsage: normalizeDisplayUsage(session.snapshot.displayUsage),
       systemPrompt,
+      lastToolSchemas,
       interruptedThinking: normalizeInterruptedThinking(
         session.snapshot.interruptedThinking,
         session.snapshot.providerId,

@@ -6,7 +6,9 @@ import {
   micaAgent,
   type AgentQueryContent,
   type AgentSnapshot,
+  type AgentToolSchemas,
   type IAgent,
+  normalizeAgentToolSchemas,
   type AgentUsageRecord,
   type ModelClientOptions,
   type SubagentUsageRecord,
@@ -83,6 +85,7 @@ export type AgentRuntimeEvents = {
   toolCall: { name: string; args: string; id?: string };
   toolResult: { name: string; result: string; id?: string };
   usage: AgentUsageRecord;
+  toolSchemas: AgentToolSchemas;
   subagentUsage: SubagentUsageRecord;
   status: AgentRuntimeStatus;
 };
@@ -116,6 +119,8 @@ export type AgentRuntimeSnapshot = {
    * 只随会话快照落盘供界面查看，不会用来重建请求：下一轮仍然重新拼装。
    */
   systemPrompt?: string;
+  /** Compact metadata for the last provider payload's actual tool definitions. */
+  lastToolSchemas?: AgentToolSchemas;
   messageFormat?: 'pi-ai-v1';
   messages: Message[];
   usageHistory: AgentUsageRecord[];
@@ -353,6 +358,8 @@ export class AgentRuntime {
    * 随快照落盘后界面就能回答「这次请求到底带了什么」。
    */
   private lastSystemPrompt: string | undefined;
+  /** Updated from the provider payload, never from the current registry alone. */
+  private lastToolSchemas: AgentToolSchemas | undefined;
   private activePromptControls: { runId: number; controls: PromptControls } | undefined;
   private lastStatusKey: string | null = null;
   private activeRunStartedAt: number | null = null;
@@ -951,6 +958,7 @@ export class AgentRuntime {
     this.activeTurnTimingRunId = null;
     // 记下来的提示词也属于这条会话：新会话的第一轮请求会重新记录。
     this.lastSystemPrompt = undefined;
+    this.lastToolSchemas = undefined;
     this.emitStatus({ type: 'idle' });
   }
 
@@ -985,6 +993,7 @@ export class AgentRuntime {
       pluginSessionSettings: this.pluginSessionSettings,
       contextWindowSize: this.currentConfig.provider.contextWindowSize,
       systemPrompt: this.lastSystemPrompt,
+      ...(this.lastToolSchemas ? { lastToolSchemas: cloneJson(this.lastToolSchemas) } : {}),
       messageFormat: 'pi-ai-v1',
       messages: (snapshot?.messages ?? []) as Message[],
       usageHistory: snapshot?.usageHistory ?? [],
@@ -1102,6 +1111,7 @@ export class AgentRuntime {
     this.pluginSessionSettings = normalizePluginSessionSettingsRecord(snapshot.pluginSessionSettings);
     // 恢复上一次请求的提示词：还没发新请求时，界面看到的是这条会话真正用过的那一份。
     this.lastSystemPrompt = typeof snapshot.systemPrompt === 'string' ? snapshot.systemPrompt : undefined;
+    this.lastToolSchemas = normalizeAgentToolSchemas(snapshot.lastToolSchemas);
     this.recreateClient();
     this.client?.loadSnapshot({
       messageFormat: 'pi-ai-v1',
@@ -1252,6 +1262,13 @@ export class AgentRuntime {
             if (rewrittenInputWillCommit && this.activeTurn?.runId === runId) {
               this.activeTurn.committed = true;
               rewrittenInputWillCommit = false;
+            }
+            if (info.tools !== undefined) {
+              const toolSchemas = captureProviderToolSchemas(info.tools);
+              if (toolSchemas) {
+                this.lastToolSchemas = toolSchemas;
+                this.events.emit('toolSchemas', toolSchemas);
+              }
             }
             this.observeActive({
               type: 'request:start',
@@ -1582,6 +1599,62 @@ export class AgentRuntime {
     this.abortedRunUsageStartIndex = null;
     this.abortedRunCompleteUsageLength = null;
   }
+}
+
+function captureProviderToolSchemas(value: unknown): AgentToolSchemas | undefined {
+  const entries = providerToolEntries(value);
+  if (!entries) return undefined;
+  return {
+    tools: entries.flatMap((entry): AgentToolSchemas['tools'] => {
+      const name = providerToolName(entry);
+      if (!name) return [];
+      const registered = micaTools.getRegisteredSource(name);
+      const json = safeJson(entry);
+      return [
+        {
+          name,
+          // An unmatched name is deliberately treated as non-MCP. The MCP
+          // server name is never guessed from the generated tool name.
+          source: registered?.source === 'mcp' ? 'mcp' : 'other',
+          ...(registered?.source === 'mcp' && registered.mcpServer?.trim()
+            ? { server: registered.mcpServer.trim() }
+            : {}),
+          tokens: Math.max(1, estimateTextTokens(json)),
+        },
+      ];
+    }),
+  };
+}
+
+function providerToolEntries(value: unknown): unknown[] | undefined {
+  if (Array.isArray(value)) {
+    return value.flatMap((entry) => {
+      if (isRecord(entry) && Array.isArray(entry.functionDeclarations)) return entry.functionDeclarations;
+      return [entry];
+    });
+  }
+  if (isRecord(value) && Array.isArray(value.functionDeclarations)) return value.functionDeclarations;
+  return undefined;
+}
+
+function providerToolName(value: unknown): string | undefined {
+  if (!isRecord(value)) return undefined;
+  if (typeof value.name === 'string' && value.name.trim()) return value.name.trim();
+  if (isRecord(value.function) && typeof value.function.name === 'string' && value.function.name.trim())
+    return value.function.name.trim();
+  return undefined;
+}
+
+function safeJson(value: unknown): string {
+  try {
+    return JSON.stringify(value) ?? '';
+  } catch {
+    return '';
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === 'object' && !Array.isArray(value);
 }
 
 function cloneJson<T>(value: T): T {

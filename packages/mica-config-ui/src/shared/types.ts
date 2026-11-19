@@ -772,6 +772,17 @@ export type ConfigWebContextCategory = {
   tokens: number;
 };
 
+/**
+ * 一次模型请求实际携带的工具定义的精简估算。MCP 工具仍是工具定义的一部分，
+ * `server` 只用于在 Context 详情里向下钻取，不应再作为一份独立的总量相加。
+ */
+export type ConfigWebContextToolSchema = {
+  name: string;
+  source: 'mcp' | 'other';
+  server?: string;
+  tokens: number;
+};
+
 export type ConfigWebContextToolCall = {
   id?: string;
   name?: string;
@@ -838,7 +849,7 @@ export type ConfigWebContextAnalysis = {
     totalTokens: number;
   };
   turns: ConfigWebContextTurn[];
-  /** 持久化消息体（含结构字段）的估算：chars/4，与 CLI 的 ctx 同口径。 */
+  /** 持久化消息体（含结构字段）的粗略估算：chars/4。 */
   messageChars: number;
   messageTokens: number;
   clearedResults: number;
@@ -850,6 +861,8 @@ export type ConfigWebContextAnalysis = {
   /** 本会话出现过的最小请求 input：固定开销（system prompt + 工具 schema）的上界。 */
   fixedOverheadTokens: number;
   overheadTokens: number;
+  /** 最近一次请求携带的工具定义估算；缺失表示旧快照 / 尚未记录，不能用当前工具集补齐。 */
+  toolSchemas?: ConfigWebContextToolSchema[];
 };
 
 export type ConfigWebSessionOption = {

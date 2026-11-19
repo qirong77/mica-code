@@ -733,6 +733,46 @@ describe('SessionStore.replaceValidated', () => {
     });
   });
 
+  it('sanitizes the optional last tool-schema checkpoint without inferring MCP servers', async () => {
+    const { parsePersistedSession } = await import('./sessionStore.js');
+    const raw = {
+      version: 1,
+      id: 'tool-schemas',
+      title: 'Tool schemas',
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+      cwd: '/tmp/project',
+      snapshot: {
+        messageFormat: 'pi-ai-v1',
+        providerId: 'test',
+        protocol: 'openai_chat_completions',
+        model: 'test-model',
+        effort: 'none',
+        lastToolSchemas: {
+          tools: [
+            { name: 'mcp__trusted__search_hash', source: 'mcp', server: 'trusted', tokens: 12.4 },
+            { name: 'run_shell', source: 'other', server: 'must-be-dropped', tokens: 8 },
+            { name: 'malformed', source: 'mcp', tokens: -1 },
+            { name: 'unknown-source', source: 'builtin', tokens: 2 },
+          ],
+        },
+        messages: [],
+        conversationMessages: [],
+        usageHistory: [],
+      },
+    };
+
+    expect(parsePersistedSession(raw)?.snapshot.lastToolSchemas).toEqual({
+      tools: [
+        { name: 'mcp__trusted__search_hash', source: 'mcp', server: 'trusted', tokens: 12 },
+        { name: 'run_shell', source: 'other', tokens: 8 },
+      ],
+    });
+    expect(
+      parsePersistedSession({ ...raw, snapshot: { ...raw.snapshot, lastToolSchemas: 42 } })?.snapshot.lastToolSchemas,
+    ).toBeUndefined();
+  });
+
   it('keeps the last request system prompt and drops a malformed one', async () => {
     const { parsePersistedSession } = await import('./sessionStore.js');
     const raw = {

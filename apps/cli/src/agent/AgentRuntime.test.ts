@@ -3,6 +3,7 @@ import { piAssistant, piUser } from './piMessageFixtures.js';
 import type { IMicaConfig } from '@packages/mica-config/index.js';
 import DEFAULT_SYSTEM_PROMPT from '@packages/mica-agent/prompt/system.md' with { type: 'text' };
 import { applyBrandTemplate } from '@packages/mica-agent/prompt/brandTemplate.js';
+import { MicaTool, micaTools } from '@packages/mica-tools/index.js';
 import type {
   AgentQueryContent,
   AgentQueryOptions,
@@ -89,6 +90,56 @@ describe('AgentRuntime tool status', () => {
     await agent.run('hello');
 
     expect(statuses).toEqual(['connecting', 'calling_tool', 'connecting', 'completed']);
+  });
+
+  it('records compact tool metadata from the actual provider payload', async () => {
+    const { AgentRuntime } = await import('./AgentRuntime.js');
+    const mcp = new (class extends MicaTool {
+      constructor() {
+        super(
+          'mcp__trusted__search_1234',
+          'search',
+          { type: 'object', properties: { query: { type: 'string' } } },
+          {
+            source: 'mcp',
+            mcpServer: 'trusted',
+          },
+        );
+      }
+      execute() {
+        return Promise.resolve('ok');
+      }
+      onToolUseDisplayText() {
+        return 'search';
+      }
+    })();
+    micaTools.registerMcp([mcp]);
+    try {
+      const agent = new AgentRuntime();
+      modelClient.queryImpl = async (_question, options) => {
+        options?.onRequestStart?.({
+          messageCount: 1,
+          tools: [
+            { type: 'function', function: { name: 'read_file', parameters: { type: 'object' } } },
+            { type: 'function', function: { name: mcp.name, parameters: { type: 'object' } } },
+            { type: 'function', function: { name: 'mcp__untrusted__not_registered', parameters: {} } },
+          ],
+        });
+        return 'ok';
+      };
+
+      await agent.run('hello');
+
+      const schemas = agent.getSnapshot().lastToolSchemas;
+      expect(schemas?.tools).toHaveLength(3);
+      expect(schemas?.tools[0]).toMatchObject({ name: 'read_file', source: 'other' });
+      expect(schemas?.tools[0]).not.toHaveProperty('server');
+      expect(schemas?.tools[1]).toMatchObject({ name: mcp.name, source: 'mcp', server: 'trusted' });
+      expect(schemas?.tools[2]).toMatchObject({ name: 'mcp__untrusted__not_registered', source: 'other' });
+      expect(schemas?.tools.every((tool) => Number.isInteger(tool.tokens) && tool.tokens > 0)).toBe(true);
+    } finally {
+      micaTools.unregisterMcp();
+    }
   });
 
   it('captures only provider state and keeps a retry checkpoint independent across repeated restores', async () => {

@@ -25,7 +25,7 @@ import type {
   ConfigWebSessionsDetails,
   ConfigWebSkillsDetails,
 } from '../shared/types.js';
-import type { PersistedSession } from '@packages/mica-session/index.js';
+import type { PersistedRuntimeSnapshot, PersistedSession } from '@packages/mica-session/index.js';
 import { buildConfigWebContextAnalysis } from './sessionAnalysis.js';
 export { getCapabilityDefaultsDetails, writeCapabilityDefaults } from './capabilityDefaults.js';
 export { getPluginsDetails, setPluginEnabled, setPluginSettings, testPluginLlm } from './plugins.js';
@@ -243,6 +243,8 @@ export function getSessionContextAnalysis(id: string): ConfigWebContextAnalysis 
       contextWindowSize: session.snapshot.contextWindowSize,
       lastUsage: session.snapshot.lastUsage,
       displayUsage: session.snapshot.displayUsage,
+      // 只读快照里记录的最近一次请求，不用当前运行时工具集冒充历史。
+      lastToolSchemas: (session.snapshot as PersistedRuntimeSnapshot & { lastToolSchemas?: unknown }).lastToolSchemas,
     },
   );
 }

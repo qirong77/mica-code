@@ -164,6 +164,27 @@ describe('buildConfigWebContextAnalysis', () => {
     expect(analysis.turns[0].entries[0].type).toBe('system');
   });
 
+  it('keeps the recorded tool schemas separate from message and input estimates', () => {
+    const analysis = buildConfigWebContextAnalysis(
+      { ...SOURCE, messages: [{ role: 'user', content: 'hello', timestamp: 1 }] },
+      {
+        lastToolSchemas: {
+          tools: [
+            { name: 'read_file', source: 'other', tokens: 12.4 },
+            { name: 'search', source: 'mcp', server: 'docs', tokens: 35 },
+            { name: 'invalid', source: 'unknown', tokens: 500 },
+          ],
+        },
+      },
+    );
+
+    expect(analysis.toolSchemas).toEqual([
+      { name: 'read_file', source: 'other', tokens: 12 },
+      { name: 'search', source: 'mcp', server: 'docs', tokens: 35 },
+    ]);
+    expect(analysis.overheadTokens).toBe(0);
+  });
+
   it('creates a single empty turn for a session with only a system prompt', () => {
     const analysis = buildConfigWebContextAnalysis({
       ...SOURCE,

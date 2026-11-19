@@ -7,6 +7,7 @@ import {
   bodyOverInputNote,
   contextBarSegments,
   contextItemCounts,
+  contextToolSchemaSummary,
   contextItemSubtitle,
   contextItemTitle,
   contextKindClass,
@@ -17,6 +18,7 @@ import {
   overheadNote,
   sortContextItems,
   staleReferenceNote,
+  toolSchemaReferenceNote,
 } from '../contextView.js';
 import { Modal } from './Modal.js';
 import { Button, Tag } from './Ui.js';
@@ -72,6 +74,7 @@ export function ContextPane({ sessionId, refreshToken }: { sessionId: string; re
   return (
     <div className="context-pane">
       <ContextOverview analysis={analysis} total={total} />
+      <ContextToolSchemaSection analysis={analysis} />
       <ContextCategoryTable analysis={analysis} total={total} />
       <ContextEstimateNote analysis={analysis} />
       <ContextItemList items={analysis.items} total={total} />
@@ -128,6 +131,74 @@ function ContextOverview({ analysis, total }: { analysis: ConfigWebContextAnalys
 
       {staleNote ? <p className="context-note context-note-warn">{staleNote}</p> : null}
       {bodyNote ? <p className="context-note">{bodyNote}</p> : null}
+    </section>
+  );
+}
+
+function ContextToolSchemaSection({ analysis }: { analysis: ConfigWebContextAnalysis }) {
+  const summary = contextToolSchemaSummary(analysis);
+  const mcpToolCount = summary?.mcpServers.reduce((count, server) => count + server.tools.length, 0) ?? 0;
+  return (
+    <section className="context-tool-schemas simple-card">
+      <div className="context-section-head">
+        <h3>工具定义（估算）</h3>
+        <span className="muted-text">独立展示，不拆分或加回请求差额</span>
+      </div>
+      {summary ? (
+        <>
+          <div className="context-tool-schema-total">
+            <span>Tool Schema 总数</span>
+            <strong>
+              ~{formatTokens(summary.totalTokens)} tokens · {summary.otherTools.length + mcpToolCount} 个工具
+            </strong>
+          </div>
+          <table className="context-table context-tool-schema-table">
+            <thead>
+              <tr>
+                <th scope="col">分组</th>
+                <th scope="col" className="is-num">工具数</th>
+                <th scope="col" className="is-num">估算 tokens</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>其他工具</td>
+                <td className="is-num muted-text">{summary.otherTools.length}</td>
+                <td className="is-num">{summary.otherTokens.toLocaleString()}</td>
+              </tr>
+              <tr>
+                <td>MCP 工具（含下方 server 明细）</td>
+                <td className="is-num muted-text">{mcpToolCount}</td>
+                <td className="is-num">{summary.mcpTokens.toLocaleString()}</td>
+              </tr>
+            </tbody>
+          </table>
+          {summary.mcpServers.length > 0 ? (
+            <div className="context-tool-schema-servers">
+              <div className="context-tool-schema-subhead">MCP server / 工具明细（已包含在 MCP 工具总数中）</div>
+              {summary.mcpServers.map((server) => (
+                <details key={server.name} className="context-tool-schema-server">
+                  <summary>
+                    <span title={server.name}>{server.name}</span>
+                    <span className="muted-text">{server.tools.length} 个工具 · ~{formatTokens(server.tokens)}</span>
+                  </summary>
+                  <div className="context-tool-schema-tools">
+                    {server.tools.map((tool) => (
+                      <div key={`${server.name}:${tool.name}`} className="context-tool-schema-tool">
+                        <span title={tool.name}>{tool.name}</span>
+                        <span>~{formatTokens(tool.tokens)}</span>
+                      </div>
+                    ))}
+                  </div>
+                </details>
+              ))}
+            </div>
+          ) : null}
+        </>
+      ) : (
+        <p className="context-note">{toolSchemaReferenceNote(analysis)}</p>
+      )}
+      {summary ? <p className="context-note">{toolSchemaReferenceNote(analysis)}</p> : null}
     </section>
   );
 }
@@ -210,10 +281,10 @@ function ContextEstimateNote({ analysis }: { analysis: ConfigWebContextAnalysis 
       </summary>
       <div className="context-estimate-body">
         <p>
-          所有数字都是「持久化消息体」的估算：`chars / 4`，与 CLI 状态栏的 ctx 同口径。 「{OVERHEAD_LABEL}」=
-          最近一次请求的 input 减去持久化消息体估算，包含 system prompt、 AGENT.md、skills 索引、全部工具
-          schema、不落盘的思考内容（Responses 的加密推理链），以及 chars/4 与真实 tokenize 的差（JSON
-          结构、id、中文都会让实际更贵）。
+          消息分类与逐条明细数字是「持久化消息体」的估算：`chars / 4`，不是模型实际 tokenize 的结果。 「{OVERHEAD_LABEL}」=
+          最近一次请求的 input 减去持久化消息体估算，可能包含 system prompt、AGENT.md、skills 索引、工具 schema、
+          不落盘的思考内容（Responses 的加密推理链），以及 chars/4 与真实 tokenize 的差（JSON 结构、id、中文都会让实际更贵）。
+          工具定义若有记录会在上方独立展示，但不会从这份差额中扣除，也不代表差额的精确组成。
         </p>
         <p>
           「消息结构（信封）」是每条消息的 role / type / call_id / name

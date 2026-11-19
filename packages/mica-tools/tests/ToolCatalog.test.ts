@@ -1,7 +1,22 @@
 import { describe, expect, it } from 'vitest';
-import { getToolCatalog, getToolDefinitions, registerRuntimeTool, unregisterRuntimeTool } from '../registry.js';
+import { getRegisteredToolSource, getToolCatalog, getToolDefinitions, registerRuntimeTool, unregisterRuntimeTool } from '../registry.js';
 
 describe('tool catalog', () => {
+  it('looks up only exact registered tool sources without catalog fallbacks', () => {
+    expect(getRegisteredToolSource('read_file')).toEqual({ source: 'builtin' });
+    expect(getRegisteredToolSource('file')).toBeUndefined();
+    expect(getRegisteredToolSource('not_registered')).toBeUndefined();
+    const tool = registerRuntimeTool({
+      name: 'source_lookup_test', description: '', input_schema: { type: 'object' }, execute: async () => '',
+    });
+    try {
+      expect(getRegisteredToolSource('source_lookup_test')).toEqual({ source: 'builtin' });
+    } finally {
+      unregisterRuntimeTool(tool);
+    }
+    expect(getRegisteredToolSource('source_lookup_test')).toBeUndefined();
+  });
+
   it('does not register the removed PTY tools', () => {
     const catalog = getToolCatalog();
     const removedNames = ['pty_spawn', 'pty_send', 'pty_read', 'pty_wait', 'pty_kill'];

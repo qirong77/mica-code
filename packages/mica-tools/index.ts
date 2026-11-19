@@ -9,6 +9,7 @@ import {
   getToolDefinitions,
   getToolCounts,
   getToolCatalog,
+  getRegisteredToolSource,
   executeTool,
   getToolDisplayText,
   isToolReadOnly,
@@ -37,6 +38,8 @@ export const micaTools = {
   getCounts: getToolCounts,
   /** 获取完整工具目录（含来源与所属 MCP server），供能力选择面板使用。 */
   getCatalog: getToolCatalog,
+  /** 按名称查询实际注册工具的来源，不包含静态目录兜底。 */
+  getRegisteredSource: getRegisteredToolSource,
   /** 按工具名执行工具，并返回序列化后的执行结果。 */
   execute: executeTool,
   /** 获取工具调用在 UI 日志中的展示文本。 */

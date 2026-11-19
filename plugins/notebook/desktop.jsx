@@ -47,10 +47,12 @@ import {
   emptyIndex,
   flattenVisibleTree,
   moveNode,
+  placeNode,
   renameNode,
   restoreNode,
   trashNode,
 } from './model';
+import { notebookDropPosition, resolveNotebookDrop } from './tree-dnd';
 import { createEditorBridge } from './bridge';
 import { createNotebookDraft, createNotebookWriter, updateNotebookDraft } from './writer';
 import { createNotebookLifecycle } from './lifecycle';
@@ -91,11 +93,12 @@ function download(value, name) {
 /**
  * 浮层菜单的一行：图标 + 左对齐文字。删除类动作沿用 danger 的红色。
  */
-function MenuRow({ action, label, Icon, variant = 'ghost', onSelect }) {
+function MenuRow({ action, label, Icon, variant = 'ghost', onSelect, disabled = false }) {
   return (
     <MenuItem
       danger={variant === 'danger-ghost'}
       icon={<Icon size={16} strokeWidth={1.7} />}
+      disabled={disabled}
       onClick={() => onSelect(action)}
     >
       <span className="mica-menu-label">{label}</span>
@@ -195,6 +198,10 @@ export default function NotebookPage({ api }) {
   const [trash, setTrash] = useState(false);
   const [menu, setMenu] = useState(null);
   const [newMenu, setNewMenu] = useState(false);
+  const [draggingId, setDraggingId] = useState(null);
+  const [dropTarget, setDropTarget] = useState(null);
+  const dragSource = useRef(null);
+  const folderHover = useRef(null);
   const [railOpen, setRailOpen] = useState(() => !window.matchMedia('(max-width: 760px)').matches);
   const [layout, setLayout] = useState(() => ({
     mobile: window.innerWidth <= 760,
@@ -266,6 +273,30 @@ export default function NotebookPage({ api }) {
     () => flattenVisibleTree(index, { expanded, query, showTrash: trash }),
     [index, expanded, query, trash],
   );
+  const directory = useMemo(() => flattenVisibleTree(index), [index]);
+  const dropMarker = useMemo(() => {
+    if (!dropTarget || dropTarget.position !== 'after') return dropTarget;
+    const start = visible.findIndex(({ node }) => node.id === dropTarget.targetId);
+    if (start < 0) return dropTarget;
+    let end = start;
+    while (end + 1 < visible.length && visible[end + 1].depth > visible[start].depth) end++;
+    return { ...dropTarget, targetId: visible[end].node.id, depth: visible[start].depth };
+  }, [dropTarget, visible]);
+  const canArrange = loaded && !busy && !trash && !query.trim() && !dialog;
+  const clearFolderHover = () => {
+    if (folderHover.current) clearTimeout(folderHover.current.timer);
+    folderHover.current = null;
+  };
+  const clearDrag = () => {
+    clearFolderHover();
+    dragSource.current = null;
+    setDraggingId(null);
+    setDropTarget(null);
+  };
+  useEffect(() => {
+    if (!canArrange) clearDrag();
+  }, [canArrange]);
+  useEffect(() => () => clearFolderHover(), []);
   const railOverlay = layout.mobile && railOpen && !focused;
   const outlineOverlay = layout.overlay && !focused && !chatOpen && !!active;
   const chatOverlay = layout.chatOverlay && chatOpen && !focused;
@@ -694,7 +725,7 @@ export default function NotebookPage({ api }) {
       setBusy(false);
     }
   };
-  const create = async (kind) => {
+  const create = async (kind, parentId = parentForNew) => {
     if (busy || creating.current || lifecycle.closing || lifecycle.switching) return;
     if (kind === 'folder') {
       setDialog({
@@ -704,7 +735,7 @@ export default function NotebookPage({ api }) {
         kind,
         title: '新建文件夹',
         name: '',
-        parentId: parentForNew,
+        parentId,
       });
       return;
     }
@@ -713,7 +744,6 @@ export default function NotebookPage({ api }) {
     try {
       const id = createNodeId();
       const now = new Date().toISOString();
-      const parentId = parentForNew;
       if (!(await flush()) || lifecycle.closing) return;
       const result = await mutate(createDefaultNote({ id, now, parentId }));
       if (!result || lifecycle.closing) return;
@@ -742,6 +772,11 @@ export default function NotebookPage({ api }) {
     if (current.current) download(current.current.document, note.title);
   };
   const runAction = (node, action) => {
+    if (action === 'note' || action === 'folder') {
+      setMenu(null);
+      void create(action, node.id);
+      return;
+    }
     if (action === 'rename') edit(node);
     else if (action === 'move') {
       setMenu(null);
@@ -774,6 +809,7 @@ export default function NotebookPage({ api }) {
     } else if (value.type === 'move') {
       const now = new Date().toISOString();
       if (!(await mutate((latest) => moveNode(latest, value.node.id, value.parentId || null, now)))) return;
+      if (value.parentId) setExpanded((previous) => new Set([...previous, value.parentId]));
     } else if (value.type === 'rename') {
       const now = new Date().toISOString();
       if (!(await mutate((latest) => renameNode(latest, value.node.id, value.name, now)))) return;
@@ -790,10 +826,54 @@ export default function NotebookPage({ api }) {
       setSelectedId(id);
       setExpanded((previous) => new Set([...previous, id]));
       setTrash(false);
+      setQuery('');
     }
     setDialog(null);
     setMenu(null);
   };
+
+  const hoverDrop = (event, target) => {
+    if (!dragSource.current) return;
+    event.stopPropagation();
+    const resolved = canArrange ? resolveNotebookDrop(index, dragSource.current, target) : null;
+    event.dataTransfer.dropEffect = resolved ? 'move' : 'none';
+    if (resolved) event.preventDefault();
+    setDropTarget((previous) =>
+      previous?.targetId === resolved?.targetId && previous?.position === resolved?.position ? previous : resolved,
+    );
+    if (resolved?.position === 'inside' && resolved.targetId && !expanded.has(resolved.targetId)) {
+      if (folderHover.current?.id !== resolved.targetId) {
+        clearFolderHover();
+        const id = resolved.targetId;
+        folderHover.current = {
+          id,
+          timer: setTimeout(() => {
+            setExpanded((previous) => new Set([...previous, id]));
+            folderHover.current = null;
+          }, 600),
+        };
+      }
+    } else clearFolderHover();
+  };
+  const finishDrop = async (event, target) => {
+    const sourceId = dragSource.current;
+    if (!sourceId) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const resolved = canArrange ? resolveNotebookDrop(index, sourceId, target) : null;
+    clearDrag();
+    if (!resolved || creating.current || lifecycle.closing) return;
+    const now = new Date().toISOString();
+    const result = await mutate((latest) => placeNode(latest, sourceId, resolved, now));
+    if (!result || lifecycle.closing) return;
+    setSelectedId(sourceId);
+    const parentId = result.nodes.find((node) => node.id === sourceId)?.parentId;
+    if (parentId) setExpanded((previous) => new Set([...previous, parentId]));
+  };
+  const rowDrop = (event, node) => ({
+    targetId: node.id,
+    position: notebookDropPosition(node.kind, event.clientY, event.currentTarget.getBoundingClientRect()),
+  });
 
   const selectRow = (node) => {
     if (lifecycle.closing || busy || creating.current) return;
@@ -803,8 +883,8 @@ export default function NotebookPage({ api }) {
     else void openNote(node.id);
   };
   const navigateTree = (event) => {
+    if (event.defaultPrevented || !event.target.matches('[role="treeitem"]')) return;
     if (!['ArrowDown', 'ArrowUp', 'Home', 'End', 'ArrowRight', 'ArrowLeft', 'Enter', 'F2'].includes(event.key)) return;
-    if (event.target.closest('input')) return;
     if (busy || creating.current) return;
     const position = visible.findIndex(({ node }) => node.id === selectedId);
     const row =
@@ -848,10 +928,38 @@ export default function NotebookPage({ api }) {
     path.unshift(ancestor.title);
     ancestor = index.nodes.find((node) => node.id === ancestor.parentId);
   }
-  const folders = index.nodes.filter((node) => node.kind === 'folder' && !node.trashedAt);
-  const forbidden = new Set(dialog?.node ? [dialog.node.id] : []);
-  for (let i = 0; i < folders.length; i++)
+  const folders = directory.map(({ node }) => node).filter((node) => node.kind === 'folder');
+  const folderPath = (folder) => {
+    const names = [folder.title];
+    let parent = index.nodes.find((node) => node.id === folder.parentId);
+    while (parent) {
+      names.unshift(parent.title);
+      parent = index.nodes.find((node) => node.id === parent.parentId);
+    }
+    return names.join(' / ');
+  };
+  const forbidden = new Set(dialog?.type === 'move' ? [dialog.node.id] : []);
+  if (dialog?.type === 'move') {
+    // The full directory is in parent-first order; no repeated traversal on dragover renders.
     for (const folder of folders) if (forbidden.has(folder.parentId)) forbidden.add(folder.id);
+  }
+  const folderOptions =
+    dialog?.type === 'move'
+      ? folders
+          .filter((folder) => !forbidden.has(folder.id))
+          .map((folder) => ({
+            value: folder.id,
+            label: folderPath(folder),
+          }))
+      : [];
+  const repeatedPaths = new Set(
+    folderOptions
+      .filter((option, index, all) => all.findIndex((item) => item.label === option.label) !== index)
+      .map((option) => option.label),
+  );
+  for (const option of folderOptions) {
+    if (repeatedPaths.has(option.label)) option.label += `（${option.value}）`;
+  }
 
   const localForm =
     dialog?.type === 'rename' ? (
@@ -928,6 +1036,24 @@ export default function NotebookPage({ api }) {
                 allowClear
               />
             </div>
+            <Button
+              variant="ghost"
+              className="notebook-rail-add"
+              icon={<FolderPlus size={16} />}
+              iconOnly
+              title={
+                parentForNew
+                  ? `新建文件夹：${index.nodes.find((node) => node.id === parentForNew)?.title}`
+                  : '新建文件夹：根目录'
+              }
+              aria-label="新建文件夹"
+              disabled={!loaded || busy || trash}
+              onClick={() => {
+                setNewMenu(false);
+                setMenu(null);
+                void create('folder');
+              }}
+            />
             <PopoverMenu
               open={newMenu}
               onOpen={() => {
@@ -974,11 +1100,34 @@ export default function NotebookPage({ api }) {
               />
             </PopoverMenu>
           </div>
-          {trash && (
+          {trash ? (
             <div className="notebook-tree-heading">
               <span>
                 最近删除<small>{index.nodes.filter((node) => node.trashedAt).length}</small>
               </span>
+            </div>
+          ) : (
+            <div className="notebook-tree-heading">
+              <Button
+                variant="ghost"
+                size="compact"
+                className={`notebook-root-target mica-arco-row ${dropTarget?.targetId === null ? 'is-drop-inside' : ''}`}
+                title="选择根目录；拖到这里移至根目录"
+                pressed={selectedId === null}
+                disabled={!loaded || busy}
+                onClick={() => setSelectedId(null)}
+                onDragOver={(event) => hoverDrop(event, { targetId: null, position: 'inside' })}
+                onDragLeave={(event) => {
+                  if (!event.currentTarget.contains(event.relatedTarget)) {
+                    setDropTarget(null);
+                    clearFolderHover();
+                  }
+                }}
+                onDrop={(event) => void finishDrop(event, { targetId: null, position: 'inside' })}
+              >
+                根目录
+              </Button>
+              {draggingId && <span className="notebook-drag-hint">行间排序 · 拖入文件夹归档</span>}
             </div>
           )}
           <div
@@ -987,6 +1136,14 @@ export default function NotebookPage({ api }) {
             aria-label={trash ? '最近删除' : '笔记目录树'}
             ref={tree}
             onKeyDown={navigateTree}
+            onDragOver={(event) => hoverDrop(event, { targetId: null, position: 'inside' })}
+            onDragLeave={(event) => {
+              if (!event.currentTarget.contains(event.relatedTarget)) {
+                setDropTarget(null);
+                clearFolderHover();
+              }
+            }}
+            onDrop={(event) => void finishDrop(event, { targetId: null, position: 'inside' })}
           >
             {!loaded ? (
               <div className="notebook-tree-skeleton">
@@ -997,9 +1154,14 @@ export default function NotebookPage({ api }) {
             ) : visible.length ? (
               visible.map(({ node, depth }) => (
                 <div
-                  className={`notebook-tree-entry ${node.id === selectedId ? 'is-selected' : ''} ${node.id === activeId ? 'is-active' : ''}`}
+                  className={`notebook-tree-entry ${node.id === selectedId ? 'is-selected' : ''} ${node.id === activeId ? 'is-active' : ''} ${draggingId === node.id ? 'is-dragging' : ''} ${dropMarker?.targetId === node.id ? `is-drop-${dropMarker.position}` : ''}`}
                   key={node.id}
-                  style={{ '--depth': depth }}
+                  style={{
+                    '--depth': depth,
+                    '--drop-depth': dropMarker?.targetId === node.id ? (dropMarker.depth ?? depth) : depth,
+                  }}
+                  onDragOver={(event) => hoverDrop(event, rowDrop(event, node))}
+                  onDrop={(event) => void finishDrop(event, rowDrop(event, node))}
                 >
                   <button
                     type="button"
@@ -1012,6 +1174,21 @@ export default function NotebookPage({ api }) {
                     title={node.title}
                     className="notebook-tree-row"
                     onClick={() => selectRow(node)}
+                    draggable={canArrange}
+                    onDragStart={(event) => {
+                      if (!canArrange || creating.current || lifecycle.closing || lifecycle.switching) {
+                        event.preventDefault();
+                        return;
+                      }
+                      event.dataTransfer.effectAllowed = 'move';
+                      event.dataTransfer.setData('application/x-mica-notebook-node', node.id);
+                      dragSource.current = node.id;
+                      setDraggingId(node.id);
+                      setSelectedId(node.id);
+                      setNewMenu(false);
+                      setMenu(null);
+                    }}
+                    onDragEnd={clearDrag}
                   >
                     <span className="notebook-tree-chevron">
                       {node.kind === 'folder' ? (
@@ -1066,6 +1243,26 @@ export default function NotebookPage({ api }) {
                         }
                       }}
                       onAction={(action) => runAction(node, action)}
+                      extraRows={
+                        node.kind === 'folder' && (
+                          <>
+                            <MenuRow
+                              action="note"
+                              label="新建笔记"
+                              Icon={FilePlus2}
+                              disabled={busy}
+                              onSelect={(action) => runAction(node, action)}
+                            />
+                            <MenuRow
+                              action="folder"
+                              label="新建文件夹"
+                              Icon={FolderPlus}
+                              disabled={busy}
+                              onSelect={(action) => runAction(node, action)}
+                            />
+                          </>
+                        )
+                      }
                       form={menu?.id === node.id && menu.source === 'row' ? localForm : null}
                       trigger={
                         <span className="notebook-row-actions">
@@ -1474,12 +1671,7 @@ export default function NotebookPage({ api }) {
                 <SelectMenu
                   value={dialog.parentId}
                   ariaLabel="目标文件夹"
-                  options={[
-                    { value: '', label: '我的笔记（根目录）' },
-                    ...folders
-                      .filter((folder) => !forbidden.has(folder.id))
-                      .map((folder) => ({ value: folder.id, label: folder.title })),
-                  ]}
+                  options={[{ value: '', label: '我的笔记（根目录）' }, ...folderOptions]}
                   onChange={(parentId) => setDialog({ ...dialog, parentId })}
                 />
               </label>

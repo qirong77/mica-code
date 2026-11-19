@@ -274,7 +274,14 @@ export class PiModelClient extends BaseAgent<ModelClientOptions, Message, AgentU
                     observe(() =>
                       options?.onRequestStart?.({
                         messageCount: Array.isArray(history) ? history.length : messages.length,
-                        tools: payload.tools ?? (payload.config as { tools?: unknown } | undefined)?.tools,
+                        // An omitted tools field is still an explicit empty set when the
+                        // caller disabled tools (or this request had no definitions). This
+                        // lets the session distinguish a recorded no-tool request from an
+                        // old snapshot with no tool-schema checkpoint at all.
+                        tools:
+                          payload.tools ??
+                          (payload.config as { tools?: unknown } | undefined)?.tools ??
+                          (settings.tools === false || requestTools?.length === 0 ? [] : undefined),
                       }),
                     );
                   },

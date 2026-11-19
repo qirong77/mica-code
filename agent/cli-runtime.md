@@ -53,6 +53,7 @@
 - 多模态工具结果统一存为 pi `toolResult` 的 text/image 块，目标协议转换由 pi 负责。UI、日志只取文本投影。
 - 两种运行模式的 `[Image](路径)` 都先经 `parseImageRefs` 转成多模态块；headless 直接导入 `mica-ui/utils/imagePaste.js`，避免引入 React/Ink。
 - 运行中改写只能经 `rewriteIterationMessages` 改共享循环的本地数组；钩子输入是 pi 消息，不含 system prompt。每次发送由 pi 组装 system 与工具声明。
+- `AgentRuntime` 在 provider 的 `onPayload` 回调暴露的实际工具 payload 到达时，按工具名对 registry 元数据做精确匹配，记录 `lastToolSchemas` 的 `{ name, source, server?, tokens }` 精简估算；未匹配名称按 `other`，不从 MCP 工具名猜 server。该记录只随会话 checkpoint 存档，不替代 provider usage，也不保存完整 schema。
 - 无视觉模型由 pi 的发送转换降级图片；持久化历史保留原图。
 - 图片有三道闸：**准备阶段** `prepareImageForApi`（`mica-common/image.ts`）把 PNG 的长边压到 1568 并无损重编码（够小的图原样透传，其它格式不重编码），处理完长边仍超 `IMAGE_MAX_API_LONG_EDGE`（8192）就直接抛错——DeepSeek `/responses` 实测 8192 能过、8193 起 400，报错文案却说「不支持的图片格式」，这种 400 不可重试、整个 turn 会失败，所以要在本机拦住并让模型缩小 / 裁剪 / 分段重读；**发送阶段** `applyImageBudget`（`mica-agent/providers/imageBudget.ts`）按字节而不是 token 算账——一次请求的正文（文本 + 内联图片载荷）上限 20MB、单张 6MB，超了就把最旧的图换成 `[图片已省略]…` 占位文本，最新的图优先保留。三道都要有：token 口径看不出 53MB 的请求体，实测 DeepSeek 网关 32MB 能过、48MB 回 413（openresty 的 HTML 错误页），而压缩只覆盖能解码的 PNG。
 - Responses 带 reasoning 参数时请求 summary 与 encrypted content；签名、原生 item ID 和工具关联保存在 pi assistant 消息中，同模型重放由 pi 处理。思考显示按内容块 checkpoint，和协议重放数据独立。

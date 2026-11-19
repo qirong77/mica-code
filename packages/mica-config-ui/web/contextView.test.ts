@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   contextBarSegments,
   contextItemSubtitle,
+  contextToolSchemaSummary,
   contextItemTitle,
   contextTotalTokens,
   filterContextItems,
@@ -9,6 +10,7 @@ import {
   formatTokens,
   sortContextItems,
   staleReferenceNote,
+  toolSchemaReferenceNote,
 } from './contextView.js';
 import type { ConfigWebContextAnalysis, ConfigWebContextItem } from '../src/shared/types.js';
 
@@ -59,6 +61,34 @@ describe('contextTotalTokens', () => {
 
   it('ignores a stale request input', () => {
     expect(contextTotalTokens(analysis({ lastInputTokens: 0, staleInput: { inputTokens: 76_525, reason: 'compacted' } }))).toBe(100);
+  });
+});
+
+describe('contextToolSchemaSummary', () => {
+  it('groups MCP tools below one MCP total without duplicating the total', () => {
+    const result = contextToolSchemaSummary(
+      analysis({
+        toolSchemas: [
+          { name: 'read_file', source: 'other', tokens: 20 },
+          { name: 'search', source: 'mcp', server: 'docs', tokens: 80 },
+          { name: 'open', source: 'mcp', server: 'docs', tokens: 40 },
+          { name: 'fetch', source: 'mcp', server: 'web', tokens: 30 },
+        ],
+      }),
+    );
+
+    expect(result).toMatchObject({ totalTokens: 170, otherTokens: 20, mcpTokens: 150 });
+    expect(result?.mcpServers.map((server) => server.name)).toEqual(['docs', 'web']);
+    expect(result?.mcpServers[0]?.tools.map((tool) => tool.name)).toEqual(['search', 'open']);
+  });
+
+  it('distinguishes an unrecorded old snapshot from an empty recorded tool list', () => {
+    expect(contextToolSchemaSummary(analysis())).toBeNull();
+    expect(contextToolSchemaSummary(analysis({ toolSchemas: [] }))).toMatchObject({ totalTokens: 0 });
+    expect(toolSchemaReferenceNote(analysis())).toContain('未记录');
+    expect(
+      toolSchemaReferenceNote(analysis({ toolSchemas: [], staleInput: { inputTokens: 100, reason: 'compacted' } })),
+    ).toContain('compact');
   });
 });
 

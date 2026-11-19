@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
 import NotebookPage, { createDefaultNote, NotebookChatButton } from './desktop.jsx';
 import { createNotebookController } from './controller';
-import { createNode, emptyIndex, trashNode } from './model';
+import { createNode, emptyIndex, flattenVisibleTree, placeNode, trashNode } from './model';
 import type { NotebookIndex } from './model';
 import { NotebookChatDock } from './NotebookChatDock';
 
@@ -96,6 +96,8 @@ describe('Notebook AI entry', () => {
       const html = renderToStaticMarkup(<NotebookPage api={{}} />);
       expect(html).toContain('notebook-welcome');
       expect(html).toContain('notebook-bar-actions');
+      expect(html).toContain('aria-label="新建文件夹"');
+      expect(html).toContain('notebook-root-target');
       expect(html).toContain('notebook-ai-button');
       expect(html).toContain('aria-label="打开 AI 对话"');
       expect(html).not.toContain('AI 对话</span>');
@@ -152,5 +154,55 @@ describe('Notebook direct creation', () => {
       ['note', '未命名笔记'],
     ]);
     expect(writeData).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('Notebook directory ordering', () => {
+  it('replays a drop after a CAS conflict without losing another window’s folder and note', async () => {
+    let stored = emptyIndex();
+    for (const id of ['first', 'second', 'third']) {
+      stored = createNode(stored, { id, kind: 'note', parentId: null, title: id, now });
+    }
+    let version = 'initial';
+    let attempts = 0;
+    const controller = createNotebookController({
+      host: {
+        readData: async () => ({ value: stored, version }),
+        writeData: async (candidate, options) => {
+          if (++attempts === 1) {
+            stored = createNode(stored, {
+              id: 'folder',
+              kind: 'folder',
+              parentId: null,
+              title: '另一个窗口的目录',
+              now,
+            });
+            stored = createNode(stored, { id: 'child', kind: 'note', parentId: 'folder', title: '不应丢失', now });
+            version = 'concurrent';
+            return { ok: false, conflict: true };
+          }
+          expect(options.expectedVersion).toBe('concurrent');
+          stored = candidate;
+          version = 'ordered';
+          return { ok: true, version };
+        },
+        documents: {
+          read: vi.fn(async () => ({ value: null, version: null })),
+          write: vi.fn(async () => ({ ok: true, version: 'unused' })),
+        },
+      },
+    });
+    const result = await controller.mutateIndex((latest) =>
+      placeNode(latest, 'third', { targetId: 'first', position: 'before' }, now),
+    );
+    expect(flattenVisibleTree(result).map(({ node }) => node.id)).toEqual([
+      'third',
+      'first',
+      'second',
+      'folder',
+      'child',
+    ]);
+    expect(await controller.loadIndex()).toEqual(result);
+    expect(attempts).toBe(2);
   });
 });

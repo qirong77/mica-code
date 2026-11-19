@@ -36,10 +36,12 @@ export type {
   AgentQueryContent,
   AgentQueryOptions,
   AgentSnapshot,
+  AgentToolSchema,
+  AgentToolSchemas,
   AgentUsageRecord,
   IAgent,
 } from './core/Agent.js';
-export { AgentMaxTurnsError, throwIfAgentMaxTurnsReached } from './core/Agent.js';
+export { AgentMaxTurnsError, normalizeAgentToolSchemas, throwIfAgentMaxTurnsReached } from './core/Agent.js';
 export type { AgentContentPartMapper } from './core/Content.js';
 export type {
   AgentUsageSummary,

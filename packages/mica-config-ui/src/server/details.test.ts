@@ -226,6 +226,23 @@ describe('config web sessions', () => {
     expect(analysis.totals.conversationTokens).toBeGreaterThan(0);
   });
 
+  it('passes the snapshot tool-schema checkpoint to Context analysis', async () => {
+    const { micaSession } = await import('@packages/mica-session/index.js');
+    const session = makeSession();
+    session.snapshot.lastToolSchemas = {
+      tools: [
+        { name: 'read_file', source: 'other', tokens: 20 },
+        { name: 'search', source: 'mcp', server: 'docs', tokens: 80 },
+      ],
+    };
+    micaSession.createStore().save(session);
+
+    expect(detailsApi.getSessionContextAnalysis(session.id).toolSchemas).toEqual([
+      { name: 'read_file', source: 'other', tokens: 20 },
+      { name: 'search', source: 'mcp', server: 'docs', tokens: 80 },
+    ]);
+  });
+
   it('invalidates caches after a session is replaced', async () => {
     const { micaSession } = await import('@packages/mica-session/index.js');
     const session = makeSession();

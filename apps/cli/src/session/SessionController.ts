@@ -645,14 +645,15 @@ export class SessionController {
     const existing = this.store.load(this.currentSessionId);
     if (!existing || existing.turnState !== 'running') return;
     const current = this.agent.getSnapshot();
-    const { activeThinking, activeTurn, messages } = current;
+    const { activeThinking, activeTurn, messages, lastToolSchemas } = current;
     // Thinking changes much more often than the provider history. Compare the
     // small checkpoint fields first so a new part does not serialize all prior
     // messages merely to establish that it needs saving.
     if (
       jsonValuesEqual(activeThinking, existing.snapshot.activeThinking) &&
       jsonValuesEqual(activeTurn, existing.snapshot.activeTurn) &&
-      jsonValuesEqual(messages, existing.snapshot.messages)
+      jsonValuesEqual(messages, existing.snapshot.messages) &&
+      jsonValuesEqual(lastToolSchemas, existing.snapshot.lastToolSchemas)
     )
       return;
     const { activeThinking: _oldThinking, activeTurn: _oldTurn, ...snapshot } = existing.snapshot;
@@ -663,6 +664,7 @@ export class SessionController {
       snapshot: {
         ...snapshot,
         messages,
+        ...(lastToolSchemas ? { lastToolSchemas } : {}),
         ...(activeThinking ? { activeThinking } : {}),
         ...(activeTurn ? { activeTurn } : {}),
       },
@@ -877,6 +879,7 @@ function toPersistedSnapshot(
     // 提示词不进对话历史，但属于会话事实：存最近一次请求真实发出去的那一份，界面据此
     // 展示完整内容（角色 + AGENT.md + skills + 插件段落），不必自己再拼一遍。
     ...(snapshot.systemPrompt ? { systemPrompt: snapshot.systemPrompt } : {}),
+    ...(snapshot.lastToolSchemas ? { lastToolSchemas: snapshot.lastToolSchemas } : {}),
     messageFormat: snapshot.messageFormat,
     messages: snapshot.messages,
     conversationMessages,
@@ -905,6 +908,7 @@ function fromPersistedSnapshot(
     pluginState: snapshot.pluginState,
     pluginSessionSettings: snapshot.pluginSessionSettings,
     systemPrompt: snapshot.systemPrompt,
+    lastToolSchemas: snapshot.lastToolSchemas,
     messageFormat: snapshot.messageFormat,
     messages: snapshot.messages,
     usageHistory: snapshot.usageHistory,

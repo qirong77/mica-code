@@ -168,7 +168,7 @@
 - 会话行右键与对话区右键（`ChatView` 的 `ChatContextMenu`）用的是同一份插件项和同一个执行器 `runSessionMenuPluginAction`：两处各写一遍会让同一个插件在两个入口表现不一样；哪一处出现哪一项由清单 `surface` 决定（`sidebar` 侧栏会话行 / `chat` 对话区，省略＝两处都出，取项时在 `session-menu-plugins.js` 里过滤，会话压缩的两项只标了 `chat`）。插件项默认插在「分享链接」之后、Clear 之前（危险项永远排最后），清单写了 `position: "top"` 的（会话压缩的快速压缩 / 模型压缩）反过来摆在菜单最上面、与其余项之间隔一条分隔线；没有会话时禁用。图标同理来自清单：每一项可以用 `icon` 声明自己的图标名（`session-menu-plugins.js` 传名字，`ChatContextMenu` 用 `resolvePluginIcon` 取组件），省略才回落到插件图标，都省略时用拼图占位。对话区点插件动作立即落「正在…」notice，回包后原位更新；压缩推送历史替换期间保留这条进度。侧栏那处结果进顶部通知。固定项里还有一个「查看详情」，和侧栏会话行的「查看详情」是同一个弹窗（按需加载的 `stats/SessionDetailModal`，含用量页签）；两个入口渲染同一个组件，不要为其中一处另写一份详情。
 - 父子关系（`parentSessionId`）是会话树的唯一事实来源，只改渲染顺序，**不区分来源**：sidecar 子会话、fork 分支与手动拖出来的层级共用这一个字段，侧栏不给它们加标签或图标。父行在前、紧跟它的子树（`session-nesting.js` 的 `nestSessions`），父会话不在当前分区时子会话当顶层，环与自指都退化成顶层。折叠状态是页面内 Set，父行折叠时用 `mergeRowStates` 代显子行状态；子行继承父行的分区与搜索命中，也不参与手动排序——拖到会话行正中＝成为它的子会话（拖进自己的子树会被拒），拖到别处＝先解除父子关系再换分区。写盘走 `stats:set-session-parent`（`host/session-parent.js`）：空闲时独占 turn lease 改文件；这一轮正在跑（lease 被别人持有）时明确拒绝，提示本轮结束后再调整。读前读后比较文件身份不是跨进程 CAS，不能绕过 lease 整文件覆盖，否则会吞掉宿主刚保存的新对话。`parentSessionId` 固定写在 `snapshot` 之前（头部读取靠这个位置判成环），`updatedAt` 不动，否则调整层级会把会话顶到 Recent 最前面。
 - 会话搜索共用 `mica-web-shared/session-search.ts`；正文搜索每会话最多 20k 字符，默认最近 3 日、最多 600 个候选，截断须告知。
-- 上下文统计按整条消息 JSON 估算并排除媒体 payload；compact / rewind 后用 staleInput 说明。
+- 上下文统计按整条消息 JSON 估算并排除媒体 payload；工具定义在实际请求时按工具 / MCP server 记录独立估算（MCP 是 Tool Schema 子项，不重复计总量）；compact / rewind 后用 staleInput 说明来源已不是当前快照。
 
 插件整页各自是一个可复制、可收藏的地址（默认 `/plugins/pages/<插件 id>` 或清单声明的 `/plugins/<id>/<route>`，路由与 `api.page` 见 `plugins.md`），窗口顶部那条拖动条上显示的就是它：桌面应用窗口没有别的地址栏，复制这一枚是把这一页带出去的唯一入口。
 
@@ -177,6 +177,7 @@
 - Notebook 的目录、保存队列与文档栏在 `plugins/notebook/desktop.jsx`；富文本排版、块首键盘行为、文档样式与演示统一在 `packages/mica-editor/runtime/src/workspace/WorkspaceShell.tsx` 装配，仅属于笔记 composer。宿主用经 noteId/loadId 校验的 `action` 消息触发样式/演示，业务不进入桌面内核。正文按约 650ms 防抖自动保存，顶栏不显示保存状态，失败时才在正文上方给出带重试的提示；文档样式使用 Lexical root NodeState，演示只调整视图与临时只读；数据与交互口径见 `packages/mica-editor/README.md`、`plugins/notebook/README.md`。
 
 - Notebook 右侧对话由 `NotebookChatDock.jsx` 管布局，实际会话使用整页宿主提供的 `api.ui.Conversation`，复用同一个 `ChatView`（模型 / 角色 / 推理、工具、Ask、队列和会话设置）。按 note id 保留独立讨论，另有跨笔记对话；关闭 / 专注 / 刷新不自动新建。引用按钮先保存再追加精确 note id 到草稿，不自动发送或隐藏附加正文。对话结束 / 连接恢复后检查目录和正文版本，外部写回只提示查看更新，确认后备份草稿再加载，不直接换掉编辑器。Notebook 的 AI 操作说明由插件角色 `笔记` 注入，默认角色不接入 Notebook MCP，也不在 `/` 快捷列表里列出它；通用会话嵌入、节点归属与恢复边界见 `plugins.md`。
+- Notebook 的目录拖放判定在 `plugins/notebook/tree-dnd.ts`，节点位置变更在 `model.ts` 的 `placeNode`：同级排序沿用 `nodes` 数组顺序，不新增存储字段。目录树提供根目录落点和文件夹悬停展开，排序只用拖动、不添加上移/下移按钮；搜索与最近删除不接拖动排序。所有结构写入复用原有索引 CAS 队列，拖动不触碰正文。
 
 - 会话侧栏顶部保持一行入口的固定顺序：New Session / Stats / Settings / 插件声明的侧栏入口 / Plugins。插件入口由清单 `desktop.entry` 声明、按清单顺序渲染（`Connections` 是浮层卡片）；`placement: "header"` 的入口不占侧栏位置，画在主区顶栏右侧那一簇的最左边（`Schedule` 是整页 + 顶栏图标——顶栏只有 32px 高，所以只画图标，窗口类图标仍贴最右），宿主只画一行与容器，不知道里面是什么；加一个桌面插件只改插件目录，不改侧栏代码。只声明 `desktop.page`、不写 `entry` 的插件不占这一列：它的整页入口是 Plugins 页里那张卡的「打开…」按钮（`plugin-entries.js` 的 `loadPluginPageEntry` 按 id 现取模块，`SettingsView` 经 `onOpenPluginPage` 交回 `App` 打开；标签就这样，不再占侧栏一行）。Plugins 虽然在最末，但它只是一个页面入口——点它进插件整页（目录 → 点一张卡进详情），不做下拉面板、不在侧栏里列插件。
 - 设置与插件页都以覆盖整窗的一层打开（`configPage` 状态 + `fixed inset-0` + 顶部拖拽条），不在对话区右侧再开一栏：配置页自带侧栏导航，套两层侧栏只会把内容挤窄。返回走配置页侧栏顶部的「返回对话」，主区顶栏的返回只管 Files / Stats。

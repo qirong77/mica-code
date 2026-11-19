@@ -2913,6 +2913,7 @@ html[data-theme='tokyo-night-light'] .mica-config-ui {
   }
 
   .context-categories,
+  .context-tool-schemas,
   .context-items,
   .context-estimate {
     display: grid;
@@ -3090,6 +3091,70 @@ html[data-theme='tokyo-night-light'] .mica-config-ui {
     text-overflow: ellipsis;
     vertical-align: 1px;
     white-space: nowrap;
+  }
+
+  .context-tool-schema-total {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+    color: var(--text-soft);
+    font-size: var(--text-label);
+  }
+
+  .context-tool-schema-total strong {
+    color: var(--text);
+    font-family: var(--font-mono);
+    font-size: 14px;
+    font-weight: 650;
+  }
+
+  .context-tool-schema-servers {
+    display: grid;
+    gap: 6px;
+  }
+
+  .context-tool-schema-subhead {
+    color: var(--text-faint);
+    font-size: 11.5px;
+  }
+
+  .context-tool-schema-server {
+    border-top: 1px solid var(--line-soft);
+  }
+
+  .context-tool-schema-server > summary {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 7px 0;
+    color: var(--text-soft);
+    font-size: var(--text-label);
+    cursor: pointer;
+  }
+
+  .context-tool-schema-server > summary > span:first-child,
+  .context-tool-schema-tool > span:first-child {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .context-tool-schema-tools {
+    display: grid;
+    gap: 4px;
+    padding: 0 0 7px 14px;
+  }
+
+  .context-tool-schema-tool {
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+    color: var(--text-faint);
+    font-family: var(--font-mono);
+    font-size: 11px;
   }
 
   .context-table {

@@ -5,6 +5,7 @@
 ## 主要能力
 
 `micaTools.getCatalog()` 返回实际工具的完整 `inputSchema` 与参数摘要、插件分组，供 Capabilities 检查发送给模型的定义；未注册的静态目录占位项可能没有完整 schema。
+`micaTools.getRegisteredSource(name)` 只查询实际注册工具的内存来源元数据，不读取静态目录或磁盘。
 
 - 提供统一工具基类：`MicaTool`。
 - 注册和移除 MCP 工具：`micaTools.registerMcp()`、`micaTools.unregisterMcp()`。

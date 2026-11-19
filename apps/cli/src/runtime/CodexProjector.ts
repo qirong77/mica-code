@@ -45,7 +45,7 @@ function toolDisplayText(name: string, args: string): string {
 type CodexHandlers = {
   [K in Exclude<
     keyof AgentRuntimeEvents,
-    'textAttemptStart' | 'textRollback' | 'thinkingCheckpoint' | 'thinkingRollback' | 'thinkingReset'
+    'textAttemptStart' | 'textRollback' | 'thinkingCheckpoint' | 'thinkingRollback' | 'thinkingReset' | 'toolSchemas'
       | 'thinkingTurnAttemptStart' | 'thinkingTurnAttemptRollback'
   >]: (payload: AgentRuntimeEvents[K]) => void;
 };

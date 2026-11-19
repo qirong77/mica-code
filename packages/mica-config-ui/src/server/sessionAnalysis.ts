@@ -6,6 +6,7 @@ import type {
   ConfigWebContextAnalysis,
   ConfigWebContextEntry,
   ConfigWebContextStaleInput,
+  ConfigWebContextToolSchema,
   ConfigWebContextTurn,
   ConfigWebConversationItem,
 } from '../shared/types.js';
@@ -94,9 +95,10 @@ export function buildConfigWebContextAnalysis(
     lastInputTokens,
     staleInput,
     // 本会话出现过的最小请求 input：固定开销（system prompt + 工具 schema）的上界。
-    // 差额超过它就不可能全是固定开销，界面据此改用「其它差额」的说法。
+    // 差额超过它就不可能全是固定开销，界面据此保留「请求差额（未拆解）」的说法。
     fixedOverheadTokens: minRequestInputTokens(usageHistory),
     overheadTokens: lastInputTokens > breakdown.messageTokens ? lastInputTokens - breakdown.messageTokens : 0,
+    toolSchemas: normalizeToolSchemas(options.lastToolSchemas),
   };
 }
 
@@ -107,6 +109,8 @@ export type ConfigWebContextAnalysisOptions = {
   lastUsage?: { inputTokens?: number; messageCount?: number; occurredAt?: string };
   /** compact 之后的展示用量：用来判定那次请求的 input 还能不能代表当前快照。 */
   displayUsage?: { totalTokens?: number; compactedAt?: string };
+  /** 快照记录的最近一次请求工具定义；不传表示旧会话或尚未记录，不能从当前工具注册表推断。 */
+  lastToolSchemas?: unknown;
 };
 
 /**
@@ -115,7 +119,7 @@ export type ConfigWebContextAnalysisOptions = {
  * - `truncated`：那次请求看到的消息比快照现在多（prune / rewind 裁掉了轮次）。
  *
  * 两种情况里 `lastUsage.inputTokens` 描述的都是**另一份**上下文：拿它当分母/被减数会把
- * 「已经被清理掉的内容」显示成「系统提示词 / 工具 schema」。
+ * 「已经被清理掉的内容」显示成「系统提示词 / 工具 schema」或其它单一来源。
  */
 export function resolveStaleRequestInput({
   lastUsage,
@@ -154,6 +158,28 @@ export function resolveStaleRequestInput({
     };
   }
   return null;
+}
+
+/**
+ * 只接受快照约定的精简工具定义，避免把当前运行时工具注册表或完整 schema 带进历史分析。
+ * `undefined` 与空数组有意区分：前者是「未记录」，后者表示最近请求明确没有工具。
+ */
+export function normalizeToolSchemas(value: unknown): ConfigWebContextToolSchema[] | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const entries = (value as Record<string, unknown>).tools;
+  if (!Array.isArray(entries)) return undefined;
+  const result: ConfigWebContextToolSchema[] = [];
+  for (const entry of entries) {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) continue;
+    const raw = entry as Record<string, unknown>;
+    const name = typeof raw.name === 'string' ? raw.name.trim() : '';
+    const source = raw.source === 'mcp' || raw.source === 'other' ? raw.source : null;
+    const tokens = Number(raw.tokens);
+    if (!name || !source || !Number.isFinite(tokens) || tokens < 0) continue;
+    const server = typeof raw.server === 'string' && raw.server.trim() ? raw.server.trim() : undefined;
+    result.push({ name, source, ...(source === 'mcp' && server ? { server } : {}), tokens: Math.round(tokens) });
+  }
+  return result;
 }
 
 /** 本会话出现过的最小请求 input：固定开销的上界。 */

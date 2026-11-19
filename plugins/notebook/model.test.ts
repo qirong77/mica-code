@@ -11,6 +11,7 @@ import {
   moveNode,
   parseNotebookDocument,
   parseNotebookIndex,
+  placeNode,
   renameNode,
   restoreNode,
   trashNode,
@@ -128,6 +129,77 @@ describe('Notebook tree operations', () => {
     expect(() => moveNode(original, 'root', 'nested')).toThrow('cycle');
     expect(() => moveNode(original, 'nested', 'note')).toThrow('folder');
     expect(() => moveNode(original, 'note', 'missing')).toThrow('not found');
+  });
+
+  it('persists first/last sibling ordering in the existing nodes array', () => {
+    const original = tree();
+    const movedToEnd = placeNode(original, 'nested', { targetId: 'other', position: 'after' }, LATER);
+    expect(movedToEnd.nodes.map((item) => item.id)).toEqual(['root', 'other', 'nested', 'note']);
+    expect(movedToEnd.nodes.find((item) => item.id === 'nested')).toMatchObject({ parentId: null, updatedAt: LATER });
+    expect(movedToEnd.nodes.find((item) => item.id === 'note')).toMatchObject({ parentId: 'nested', updatedAt: NOW });
+
+    const movedToStart = placeNode(movedToEnd, 'nested', { targetId: 'root', position: 'before' }, NOW);
+    expect(movedToStart.nodes.map((item) => item.id)).toEqual(['nested', 'note', 'root', 'other']);
+    expect(movedToStart.nodes.find((item) => item.id === 'note')).toMatchObject({ parentId: 'nested', updatedAt: NOW });
+  });
+
+  it('moves across folders and appends at the root without losing a folder subtree', () => {
+    const original = tree();
+    const intoRoot = placeNode(original, 'nested', { targetId: null, position: 'inside' }, LATER);
+    expect(intoRoot.nodes.map((item) => item.id)).toEqual(['root', 'other', 'nested', 'note']);
+    expect(intoRoot.nodes.find((item) => item.id === 'nested')).toMatchObject({ parentId: null, updatedAt: LATER });
+    expect(intoRoot.nodes.find((item) => item.id === 'note')).toMatchObject({ parentId: 'nested', updatedAt: NOW });
+
+    const intoFolder = placeNode(original, 'other', { targetId: 'nested', position: 'inside' }, LATER);
+    expect(intoFolder.nodes.map((item) => item.id)).toEqual(['root', 'nested', 'note', 'other']);
+    expect(intoFolder.nodes.find((item) => item.id === 'other')).toMatchObject({ parentId: 'nested', updatedAt: LATER });
+  });
+
+  it('sorts after a folder whose descendants were appended after other siblings', () => {
+    const index: NotebookIndex = { version: 1, nodes: [node('a'), node('b'), node('child-a', { kind: 'note', parentId: 'a' }), node('c', { kind: 'note' })] };
+    const result = placeNode(index, 'c', { targetId: 'a', position: 'after' }, LATER);
+    expect(flattenVisibleTree(result).map(({ node }) => node.id)).toEqual(['a', 'child-a', 'c', 'b']);
+    expect(placeNode(result, 'c', { targetId: 'a', position: 'after' }, NOW)).toEqual(result);
+  });
+
+  it('ignores trash entries when deciding an unchanged visible slot', () => {
+    const index: NotebookIndex = { version: 1, nodes: [node('a'), node('deleted', { trashedAt: NOW }), node('b')] };
+    expect(placeNode(index, 'a', { targetId: 'b', position: 'before' }, 'not-a-date')).toEqual(index);
+  });
+
+  it('rejects cycles, trashed/non-folder targets, and leaves exact drops as timestamp-free no-ops', () => {
+    const original = tree();
+    expect(() => placeNode(original, 'root', { targetId: 'root', position: 'inside' })).toThrow('cycle');
+    expect(() => placeNode(original, 'root', { targetId: 'nested', position: 'inside' })).toThrow('cycle');
+    expect(() => placeNode(original, 'other', { targetId: 'note', position: 'inside' })).toThrow('folder');
+
+    const trashed = trashNode(original, 'nested', LATER);
+    expect(() => placeNode(trashed, 'nested', { targetId: null, position: 'inside' })).toThrow('Restore');
+    expect(() => placeNode(original, 'note', { targetId: 'nested', position: 'before' })).not.toThrow();
+    expect(() => placeNode(trashed, 'other', { targetId: 'nested', position: 'before' })).toThrow('Restore');
+
+    const noop = placeNode(original, 'root', { targetId: 'other', position: 'before' }, 'not-a-date');
+    expect(noop).toEqual(original);
+    expect(noop.nodes.find((item) => item.id === 'root')?.updatedAt).toBe(NOW);
+  });
+
+  it('is stable when a CAS retry replays the same placement and re-evaluates a moved target', () => {
+    const original = tree();
+    const operation = (latest: NotebookIndex) => placeNode(latest, 'note', { targetId: 'other', position: 'before' }, LATER);
+    const once = operation(original);
+    expect(operation(once)).toEqual(once);
+
+    // A concurrent writer moved the target into the source folder. Replay uses the latest
+    // parent/order rather than a stale array offset, and the placement is now already adjacent.
+    const concurrent = placeNode(original, 'other', { targetId: 'nested', position: 'inside' }, LATER);
+    const replayed = operation(concurrent);
+    expect(replayed.nodes.map((item) => item.id)).toEqual(['root', 'nested', 'note', 'other']);
+    expect(replayed.nodes.find((item) => item.id === 'other')).toMatchObject({ parentId: 'nested' });
+
+    const movedSource = placeNode(original, 'note', { targetId: 'root', position: 'inside' }, LATER);
+    const replayedSource = operation(movedSource);
+    expect(replayedSource.nodes.map((item) => item.id)).toEqual(['root', 'nested', 'note', 'other']);
+    expect(replayedSource.nodes.find((item) => item.id === 'note')).toMatchObject({ parentId: null });
   });
 
   it('soft-deletes and restores complete subtrees without losing ids, parents or note entries', () => {

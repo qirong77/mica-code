@@ -201,6 +201,14 @@ function findTool(name: string): MicaTool | undefined {
   return getAllTools().find((t) => t.name.endsWith(`__${name}`));
 }
 
+/** Exact registered source lookup for request accounting; never reads the fallback catalog. */
+export function getRegisteredToolSource(name: string): { source: ToolSource; mcpServer?: string } | undefined {
+  const tool = builtinTools.find((item) => item.name === name)
+    ?? runtimeTools.findLast((item) => item.name === name)
+    ?? mcpTools.find((item) => item.name === name);
+  return tool ? { source: tool.source, ...(tool.mcpServer ? { mcpServer: tool.mcpServer } : {}) } : undefined;
+}
+
 function toolAllowed(tool: MicaTool, requestedName: string, filter?: ToolFilter): boolean {
   return !filter || filter(tool.name) || filter(requestedName);
 }

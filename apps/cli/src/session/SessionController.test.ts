@@ -85,6 +85,47 @@ async function sessionController(store: Pick<SessionStoreLike, 'load' | 'save'> 
 }
 
 describe('SessionController', () => {
+  it('persists last tool schemas with the next normal checkpoint', async () => {
+    const { SessionController } = await import('./SessionController.js');
+    let snapshot: AgentRuntimeSnapshot = {
+      ...baseSnapshot,
+      lastToolSchemas: { tools: [{ name: 'mcp__trusted__search_1234', source: 'mcp', server: 'trusted', tokens: 17 }] },
+    };
+    let disk = persistedSession('tool-checkpoint', { turnState: 'completed' });
+    const agent: SessionAgentAdapter = {
+      getSnapshot: () => snapshot,
+      loadSnapshot: (value) => {
+        snapshot = value;
+      },
+      reloadConfig: vi.fn(),
+      toConversationMessages: () => [{ role: 'user', content: 'work' }],
+    };
+    const controller = new SessionController({
+      agent,
+      store: {
+        list: () => [],
+        listRecent: () => [],
+        delete: () => false,
+        load: () => disk,
+        save: (value) => {
+          disk = value;
+        },
+      },
+      config: { apply: () => undefined },
+      ui: { restore: vi.fn() },
+    });
+
+    expect(controller.saveCurrent({ allowEmpty: true, turnState: 'running' })).toBe(true);
+    snapshot = {
+      ...snapshot,
+      lastToolSchemas: { tools: [{ name: 'run_shell', source: 'other', tokens: 9 }] },
+    };
+    expect(controller.saveCurrent({ allowEmpty: true, turnState: 'running' })).toBe(true);
+
+    expect(disk.turnState).toBe('running');
+    expect(disk.snapshot.lastToolSchemas).toEqual(snapshot.lastToolSchemas);
+  });
+
   it('preserves an unpublished plugin role through resume, refresh and save', async () => {
     const { SessionController } = await import('./SessionController.js');
     const { micaAgent } = await import('@packages/mica-agent/index.js');

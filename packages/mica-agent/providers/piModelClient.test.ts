@@ -142,10 +142,12 @@ describe('pi tool iterations', () => {
       () => text('done'),
     );
     const client = new PiModelClient({ ...options(), tools: false });
-    await expect(client.query('generate a title')).rejects.toThrow('tools are disabled');
+    const start = vi.fn();
+    await expect(client.query('generate a title', { onRequestStart: start })).rejects.toThrow('tools are disabled');
     expect(execute).not.toHaveBeenCalled();
     expect(requests).toHaveLength(1);
     expect(requests[0]!.context.tools).toBeUndefined();
+    expect(start).toHaveBeenCalledWith(expect.objectContaining({ tools: [] }));
     expect(client.messages).toEqual([]);
     expect(client.lastUsage).toMatchObject({ inputTokens: 5, outputTokens: 3, totalTokens: 8 });
   });

@@ -28,6 +28,50 @@ export type AgentUsageRecord = {
   generationOutputTokens?: number;
 };
 
+/**
+ * The compact, display-only record of the tool definitions in the last
+ * provider payload. `tokens` is a local approximation, not provider usage.
+ * MCP server names are only populated when the tool registry supplied trusted
+ * metadata for that exact tool name.
+ */
+export type AgentToolSchema = {
+  name: string;
+  source: 'mcp' | 'other';
+  server?: string;
+  tokens: number;
+};
+
+export type AgentToolSchemas = {
+  tools: AgentToolSchema[];
+};
+
+/** Sanitize the optional persisted tool-schema checkpoint without rejecting a session. */
+export function normalizeAgentToolSchemas(value: unknown): AgentToolSchemas | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const tools = (value as { tools?: unknown }).tools;
+  if (!Array.isArray(tools)) return undefined;
+  return {
+    tools: tools.flatMap((entry): AgentToolSchema[] => {
+      if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return [];
+      const record = entry as Record<string, unknown>;
+      if (typeof record.name !== 'string' || !record.name.trim()) return [];
+      if (record.source !== 'mcp' && record.source !== 'other') return [];
+      if (typeof record.tokens !== 'number' || !Number.isFinite(record.tokens) || record.tokens < 0) return [];
+      const name = record.name.trim();
+      const tokens = Math.round(record.tokens);
+      const server = typeof record.server === 'string' ? record.server.trim() : '';
+      return [
+        {
+          name,
+          source: record.source,
+          tokens,
+          ...(record.source === 'mcp' && server ? { server } : {}),
+        },
+      ];
+    }),
+  };
+}
+
 export type AgentCallbacks = {
   onText?: (text: string) => void;
   /** Checkpoint and restore visible text around a retried request. */

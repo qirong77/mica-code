@@ -2,6 +2,7 @@ import type {
   ConfigWebContextAnalysis,
   ConfigWebContextItem,
   ConfigWebContextKind,
+  ConfigWebContextToolSchema,
 } from '../src/shared/types.js';
 
 /**
@@ -33,7 +34,7 @@ export const CONTEXT_KIND_LABELS: Record<ConfigWebContextKind, string> = {
 };
 
 /** 差额那一行：最近一次请求的 input 减掉持久化消息体之后剩下的部分。 */
-export const OVERHEAD_LABEL = '系统提示词 / 工具 schema / 其它差额';
+export const OVERHEAD_LABEL = '请求差额（未拆解）';
 
 export function formatTokens(value: number): string {
   const n = Number(value) || 0;
@@ -76,6 +77,80 @@ export type ContextSegment = {
   tokens: number;
   kind: ConfigWebContextKind | 'overhead';
 };
+
+export type ContextToolSchemaServer = {
+  name: string;
+  tokens: number;
+  tools: ConfigWebContextToolSchema[];
+};
+
+export type ContextToolSchemaSummary = {
+  totalTokens: number;
+  otherTokens: number;
+  mcpTokens: number;
+  otherTools: ConfigWebContextToolSchema[];
+  mcpServers: ContextToolSchemaServer[];
+};
+
+/**
+ * 工具定义的独立投影：MCP server / tool 只是 MCP 总量的下钻，不会在总数之外再累加。
+ * 返回 null 表示快照没有这份记录，不能用当前工具注册表补齐。
+ */
+export function contextToolSchemaSummary(
+  analysis: ConfigWebContextAnalysis | null | undefined,
+): ContextToolSchemaSummary | null {
+  if (!analysis || !Array.isArray(analysis.toolSchemas)) return null;
+  const otherTools: ConfigWebContextToolSchema[] = [];
+  const serverMap = new Map<string, ConfigWebContextToolSchema[]>();
+  let otherTokens = 0;
+  let mcpTokens = 0;
+  for (const tool of analysis.toolSchemas) {
+    const tokens = Number(tool.tokens);
+    if (!Number.isFinite(tokens) || tokens < 0) continue;
+    if (tool.source === 'mcp') {
+      mcpTokens += tokens;
+      const server = tool.server?.trim() || '未记录 server';
+      const tools = serverMap.get(server);
+      if (tools) tools.push(tool);
+      else serverMap.set(server, [tool]);
+    } else {
+      otherTokens += tokens;
+      otherTools.push(tool);
+    }
+  }
+  const sortTools = (left: ConfigWebContextToolSchema, right: ConfigWebContextToolSchema) =>
+    right.tokens - left.tokens || left.name.localeCompare(right.name);
+  otherTools.sort(sortTools);
+  const mcpServers = [...serverMap.entries()]
+    .map(([name, tools]) => ({
+      name,
+      tokens: tools.reduce((sum, tool) => sum + tool.tokens, 0),
+      tools: tools.sort(sortTools),
+    }))
+    .sort((left, right) => right.tokens - left.tokens || left.name.localeCompare(right.name));
+  return {
+    totalTokens: otherTokens + mcpTokens,
+    otherTokens,
+    mcpTokens,
+    otherTools,
+    mcpServers,
+  };
+}
+
+/** 工具定义没有时间戳字段，文案明确它是「最近一次请求」的记录，而不是当前工具集。 */
+export function toolSchemaReferenceNote(analysis: ConfigWebContextAnalysis | null | undefined): string {
+  if (!analysis || !Array.isArray(analysis.toolSchemas)) {
+    return '未记录最近一次请求携带的工具定义（旧快照或请求发生在记录功能启用前）；不从当前工具集推断。';
+  }
+  const stale = analysis.staleInput;
+  if (stale?.reason === 'compacted') {
+    return '来自快照中记录的最近一次请求；之后发生过 compact，与当前快照不完全对应，不代表当前工具集，也不把 MCP 明细重复计入总量。';
+  }
+  if (stale?.reason === 'truncated') {
+    return '来自快照中记录的最近一次请求；之后发生过裁剪 / rewind，与当前快照不完全对应，不代表当前工具集，也不把 MCP 明细重复计入总量。';
+  }
+  return '来自快照中记录的最近一次请求（估算），不代表当前工具集；运行中随下次会话检查点更新。MCP server / 工具明细已包含在 MCP 工具总数内。';
+}
 
 /** 堆叠条的分段：先按固定顺序放持久化消息的类别，最后是不可见的 overhead。 */
 export function contextBarSegments(analysis: ConfigWebContextAnalysis | null | undefined): ContextSegment[] {
@@ -135,7 +210,7 @@ export function overheadNote(analysis: ConfigWebContextAnalysis | null | undefin
   const messageTokens = Number(analysis?.messageTokens) || 0;
   if (overheadTokens <= 0 || fixedOverheadTokens <= 0) return '';
   if (overheadTokens <= messageTokens + fixedOverheadTokens) return '';
-  return `差额 ~${formatTokens(overheadTokens)} 超过「消息体估算 + 本会话最小请求 input（${fixedOverheadTokens.toLocaleString()}，固定开销的上界）」能解释的量：里面含图片的 vision token、chars/4 估不出的真实 tokenize，或已被压缩 / 裁剪掉的历史，不能都算作 system prompt / 工具 schema。`;
+  return `差额 ~${formatTokens(overheadTokens)} 超过「消息体估算 + 本会话最小请求 input（${fixedOverheadTokens.toLocaleString()}，固定开销的上界）」能解释的量：里面含图片的 vision token、chars/4 估不出的真实 tokenize，或已被压缩 / 裁剪掉的历史，不能进一步细分成 system prompt、工具 schema 或其它单一来源。`;
 }
 
 export function filterContextItems(
