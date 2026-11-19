@@ -13,7 +13,11 @@ const paths: Record<string, ReactNode> = {
   code: <path d="m5 4-4 4 4 4m6-8 4 4-4 4M9.5 2.5l-3 11" />,
   clear: <path d="m9.5 2.5 4 4a1 1 0 0 1 0 1.4L7.4 14H4.5l-2-2a1 1 0 0 1 0-1.4l7-8.1ZM6 6.5l5 5M7 14h7" />,
   link: (
-    <path d="m6 10 4-4M5.5 11.5l-1 1a2.8 2.8 0 0 1-4-4l3-3a2.8 2.8 0 0 1 4 0m1-1 1-1a2.8 2.8 0 0 1 4 4l-3 3a2.8 2.8 0 0 1-4 0" />
+    <g transform="rotate(-45 8 8)">
+      <rect x="1" y="5.5" width="6" height="5" rx="2.5" />
+      <rect x="9" y="5.5" width="6" height="5" rx="2.5" />
+      <path d="M5.5 8h5" />
+    </g>
   ),
   quote: <path d="M2.5 3.5h4v5h-4v-5Zm0 5c0 2 1 3 3 3m4-8h4v5h-4v-5Zm0 5c0 2 1 3 3 3" />,
   'horizontal-rule': <path d="M2 8h12" />,

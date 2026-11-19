@@ -1,204 +1,181 @@
-/* Notebook · 分区工作台。颜色与控件来自 Mica，布局不依赖设计预览。 */
 .notebook-page {
-  --notebook-rail-width: 232px;
-  box-sizing: border-box;
+  --notebook-rail-width: 260px;
+  --notebook-bar-height: 44px;
   display: flex;
   width: 100%;
   height: 100%;
   min-width: 0;
   min-height: 0;
   color: var(--color-fg);
-  background: var(--color-panel);
-  font:
-    13px/1.5 -apple-system,
-    BlinkMacSystemFont,
-    'PingFang SC',
-    sans-serif;
+  background: var(--color-canvas);
+  font-size: 14px;
+  line-height: 1.5;
   position: relative;
   overflow: hidden;
-  container-type: inline-size;
-  container-name: notebook;
+  container: notebook / inline-size;
 }
 .notebook-layout {
   display: flex;
   flex: 1;
-  gap: 10px;
-  padding: 10px;
   min-width: 0;
   min-height: 0;
-  box-sizing: border-box;
   position: relative;
 }
 .notebook-page :is(button, input) {
   font-family: inherit;
+}
+.notebook-page button:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: -2px;
 }
 .notebook-page .ui-button-icon-only {
   width: 28px;
   min-width: 28px;
   height: 28px;
   padding: 0;
+  border-radius: 5px;
   flex: none;
 }
-.notebook-page .ui-button[aria-pressed='true'] {
-  color: var(--color-accent);
-  background: var(--color-accent-subtle);
+.notebook-page .ui-button[aria-pressed='true']:not(:disabled) {
+  color: var(--color-fg-strong);
+  background: var(--color-active);
 }
 .notebook-rail {
   box-sizing: border-box;
   width: var(--notebook-rail-width);
-  min-width: var(--notebook-rail-width);
+  flex: none;
   display: none;
   flex-direction: column;
   min-height: 0;
   background: var(--color-canvas);
-  border: 1px solid var(--color-line-soft);
-  border-radius: 10px;
+  border-inline-end: 1px solid var(--color-line);
   overflow: hidden;
 }
-.notebook-page.is-rail-open .notebook-rail {
+.notebook-page.is-rail-open:not(.is-focused) .notebook-rail {
   display: flex;
 }
 .notebook-rail-title {
-  min-height: 50px;
-  padding: 9px 10px 9px 15px;
+  min-height: 56px;
+  padding: 10px 14px 10px 18px;
   display: flex;
   align-items: center;
-  gap: 9px;
+  gap: 10px;
   flex: none;
-  box-sizing: border-box;
 }
 .notebook-book-icon {
   display: grid;
   place-items: center;
   flex: none;
-  width: 20px;
-  height: 24px;
-  color: var(--color-fg-soft);
+  color: var(--color-fg-strong);
+}
+.notebook-book-icon svg {
+  width: 22px;
+  height: 22px;
 }
 .notebook-rail-title strong {
   flex: 1;
   min-width: 0;
-  font-size: 13px;
+  font-size: 16px;
   font-weight: 600;
   color: var(--color-fg-strong);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-/* 搜索与新建是一个复合控件，共用边界、等高、统一聚焦反馈。 */
 .notebook-rail-tools {
   display: flex;
   align-items: center;
-  gap: 2px;
+  gap: 8px;
   flex: none;
-  min-height: 34px;
-  margin: 0 10px 10px;
-  padding: 2px;
-  box-sizing: border-box;
-  background: var(--color-panel);
-  border: 1px solid var(--color-line-soft);
-  border-radius: 8px;
-  transition:
-    border-color 90ms ease,
-    box-shadow 90ms ease;
-}
-.notebook-rail-tools:hover {
-  border-color: var(--color-line-strong);
-}
-.notebook-rail-tools:has(input:focus-visible) {
-  border-color: color-mix(in srgb, var(--color-accent) 55%, var(--color-line));
-  box-shadow: 0 0 0 2px var(--color-accent-subtle);
+  margin: 0 14px 16px;
 }
 .notebook-search {
-  margin: 0;
-  display: flex;
-  align-items: center;
   flex: 1;
   min-width: 0;
 }
 .notebook-search .arco-input-inner-wrapper {
   box-sizing: border-box;
   width: 100%;
-  height: 28px;
-  padding: 0 7px;
-  border: 0;
-  border-radius: 5px;
-  background: transparent;
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: var(--color-panel-hi);
   box-shadow: none;
+}
+.notebook-search .arco-input-inner-wrapper:hover {
+  border-color: var(--color-line);
+}
+.notebook-search .arco-input-inner-wrapper:focus-within {
+  background: var(--color-canvas);
+  border-color: var(--color-accent);
 }
 .notebook-search .arco-input-group-prefix {
   display: inline-flex;
   align-items: center;
-  margin-right: 7px;
+  margin-inline-end: 7px;
   color: var(--color-fg-muted);
 }
 .notebook-search input.arco-input {
   padding: 0;
-  height: 28px;
-  font-size: 12px;
-  line-height: 28px;
+  height: 30px;
+  font-size: 13px;
+  line-height: 20px;
   background: transparent;
 }
-.notebook-search input.arco-input:focus-visible {
-  outline: none;
-  box-shadow: none;
-}
-.notebook-rail-add-anchor {
+.notebook-rail-add-anchor,
+.notebook-menu-anchor {
   display: inline-flex;
   flex: none;
-  position: relative;
-  padding-left: 3px;
-}
-.notebook-rail-add-anchor::before {
-  content: '';
-  position: absolute;
-  left: 0;
-  top: 6px;
-  bottom: 6px;
-  width: 1px;
-  background: var(--color-line-soft);
 }
 .notebook-page .notebook-rail-add {
-  width: 28px;
-  min-width: 28px;
-  height: 28px;
-  padding: 0;
-  color: var(--color-fg-soft);
-  border: 0;
-  border-radius: 5px;
-  background: transparent;
+  width: 32px;
+  min-width: 32px;
+  height: 32px;
+  border: 1px solid var(--color-line);
+  border-radius: 6px;
+  background: var(--color-canvas);
 }
 .notebook-page .notebook-rail-add:hover:not(:disabled) {
-  background: var(--color-active);
-}
-.notebook-page
-  :is(.notebook-rail-add, .notebook-menu-anchor .ui-button, .notebook-row-actions .ui-button)[aria-pressed='true'] {
-  color: var(--color-fg-strong);
+  border-color: var(--color-line-strong);
   background: var(--color-active);
 }
 .notebook-tree-heading {
   position: relative;
-  padding: 0 12px 6px 18px;
+  flex: none;
+  min-height: 36px;
+  padding: 0 10px 4px 12px;
   display: flex;
   justify-content: space-between;
   align-items: center;
-  color: var(--color-fg-muted);
-  font-size: 11px;
+  gap: 6px;
+  color: var(--color-fg-soft);
+  font-size: 13px;
 }
-.notebook-tree-heading > span {
+.notebook-tree-heading > span,
+.notebook-tree-tools {
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: 6px;
+}
+.notebook-tree-tools {
+  flex: none;
+  margin-inline-start: auto;
+  gap: 2px;
 }
 .notebook-tree-heading small {
-  font-size: 10px;
+  font-size: 12px;
+  color: var(--color-fg-muted);
 }
 .notebook-page .notebook-root-target {
-  color: var(--color-fg-muted);
-  font-size: 11px;
+  min-height: 28px;
   padding: 0 6px;
+  border-radius: 5px;
+  color: var(--color-fg-soft);
+  font-size: 13px;
+  font-weight: 600;
 }
-.notebook-page .notebook-root-target.is-drop-inside,
+.notebook-page .notebook-root-target.is-drop-inside:not(:disabled),
 .notebook-tree .notebook-tree-entry.is-drop-inside {
   background: var(--color-accent-subtle);
   color: var(--color-accent);
@@ -206,40 +183,42 @@
 .notebook-drag-hint {
   position: absolute;
   top: 100%;
-  left: 8px;
-  right: 8px;
+  inset-inline: 8px;
   z-index: 2;
   justify-content: center;
   padding: 5px 7px;
   border-radius: 6px;
   color: var(--color-fg-soft);
   background: var(--color-panel);
-  box-shadow: 0 2px 8px var(--color-line-soft);
+  border: 1px solid var(--color-line);
+  font-size: 12px;
   pointer-events: none;
 }
 .notebook-tree {
+  --tree-indent: 16px;
   flex: 1;
   min-height: 0;
   overflow: auto;
   overscroll-behavior: contain;
-  padding: 0 8px 12px;
+  padding: 0 8px 16px;
 }
 .notebook-tree-entry {
+  --row-action-space: 34px;
   display: flex;
   align-items: center;
-  border: 1px solid transparent;
-  border-radius: 7px;
-  margin: 0;
-  padding: 2px 0;
+  border-radius: 5px;
+  color: var(--color-nav-fg);
   min-width: 0;
   position: relative;
 }
-.notebook-tree-entry:hover,
-.notebook-tree-entry.is-selected {
-  background: var(--color-active);
+.notebook-tree-entry:is(:hover, :focus-within, .is-selected) {
+  background: var(--color-overlay);
+}
+.notebook-tree-entry[data-kind='folder']:has(.notebook-menu-anchor) {
+  --row-action-space: 58px;
 }
 .notebook-tree-entry.is-active {
-  background: var(--color-accent-subtle);
+  background: var(--color-active);
   color: var(--color-fg-strong);
   font-weight: 600;
 }
@@ -249,8 +228,8 @@
 .notebook-tree-entry:is(.is-drop-before, .is-drop-after)::after {
   content: '';
   position: absolute;
-  left: calc(8px + var(--drop-depth, var(--depth)) * 14px);
-  right: 5px;
+  inset-inline-start: min(45%, calc(4px + var(--drop-depth, 0) * var(--tree-indent)));
+  inset-inline-end: 4px;
   height: 2px;
   border-radius: 2px;
   background: var(--color-accent);
@@ -265,59 +244,57 @@
 }
 .notebook-tree-row[draggable='true'] {
   user-select: none;
-  cursor: grab;
 }
 .notebook-tree-row[draggable='true']:active {
   cursor: grabbing;
 }
 .notebook-tree-row {
-  color: inherit;
   display: flex;
   align-items: center;
-  gap: 7px;
-  padding: 6px 28px 6px calc(4px + var(--depth) * 14px);
+  gap: 4px;
+  min-height: 36px;
+  padding-block: 6px;
+  padding-inline: min(45%, calc(4px + var(--depth, 0) * var(--tree-indent))) var(--row-action-space);
   width: 100%;
-  border: none;
-  background: none;
   min-width: 0;
-  text-align: left;
-  cursor: pointer;
+  border: 0;
   border-radius: inherit;
-  font-size: 12px;
-  line-height: 18px;
+  background: transparent;
+  color: inherit;
+  text-align: start;
+  font-size: 14px;
+  font-weight: inherit;
+  line-height: 22px;
+  cursor: pointer;
 }
-.notebook-tree-row > svg {
-  flex: none;
+.notebook-tree-chevron {
+  display: grid;
+  place-items: center;
+  flex: 0 0 16px;
   color: var(--color-fg-muted);
 }
-.notebook-tree-entry.is-active .notebook-tree-row > svg {
-  color: var(--color-accent);
-}
-.notebook-tree-row[aria-expanded] {
-  font-weight: 500;
-}
-.notebook-tree-row > span:last-child {
+.notebook-tree-title,
+.notebook-tree-title > :is(span, small) {
+  display: block;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  min-width: 0;
 }
-.notebook-tree-row:focus-visible {
-  outline: 2px solid var(--color-accent);
-  outline-offset: -2px;
-}
-.notebook-tree-chevron {
-  display: flex;
-  width: 12px;
-  flex: none;
-  color: var(--color-fg-faint);
+.notebook-tree-title small {
+  color: var(--color-fg-muted);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 18px;
 }
 .notebook-page .notebook-row-actions {
   position: absolute;
-  right: 3px;
+  inset-inline-end: 4px;
   display: flex;
   opacity: 0;
+  pointer-events: none;
 }
+.notebook-page .notebook-row-actions.ui-button,
 .notebook-page .notebook-row-actions .ui-button {
   height: 24px;
   width: 24px;
@@ -325,17 +302,15 @@
   padding: 0;
   color: var(--color-fg-muted);
 }
-.notebook-menu-anchor {
-  display: inline-flex;
-}
 .notebook-tree-entry:hover .notebook-row-actions,
 .notebook-tree-entry:focus-within .notebook-row-actions,
-.notebook-row-actions:has([aria-pressed='true']) {
+.notebook-page .notebook-row-actions:has([aria-pressed='true']) {
   opacity: 1;
+  pointer-events: auto;
 }
 .notebook-tree-empty {
   color: var(--color-fg-muted);
-  font-size: 12px;
+  font-size: 13px;
   padding: 42px 8px;
   display: flex;
   gap: 12px;
@@ -347,28 +322,29 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 4px 8px;
   flex: none;
   min-height: 44px;
-  padding: 7px 10px 7px 14px;
-  border-top: 1px solid var(--color-line-soft);
-  font-size: 11px;
+  padding: 7px 10px 7px 16px;
+  border-top: 1px solid var(--color-line);
+  font-size: 12px;
   color: var(--color-fg-muted);
 }
 .notebook-rail-footer > span {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  /* 一行里现在有三个入口：存储说明不折行，动作靠右 */
   white-space: nowrap;
 }
 .notebook-rail-footer .ui-button {
-  font-size: 11px;
-  gap: 5px;
+  font-size: 12px;
+  padding-inline: 6px;
 }
-/* 三个入口（MCP / 最近删除 / 存储说明）挤在同一行：说明留在左边，动作靠右排。 */
 .notebook-rail-footer-actions {
   display: flex;
   align-items: center;
+  margin-inline-start: auto;
   gap: 2px;
 }
 .notebook-main {
@@ -378,8 +354,7 @@
   display: flex;
   flex-direction: column;
 }
-/* 文档栏与编辑器工具栏是同一行：两段浮在编辑器顶上，中间留给工具栏，
-   工具栏左右两端各按这两段的实测宽度让位（见 desktop.jsx 的 layout 消息）。 */
+/* iframe 按两端实测宽度给工具栏留位，中间的控件直接接收指针。 */
 .notebook-bar {
   position: absolute;
   inset: 0 0 auto;
@@ -387,63 +362,60 @@
   display: flex;
   align-items: stretch;
   justify-content: space-between;
-  gap: 8px;
-  height: 44px;
+  height: var(--notebook-bar-height);
   pointer-events: none;
 }
 .notebook-bar-lead,
 .notebook-bar-actions {
   display: flex;
   align-items: center;
-  gap: 2px;
+  gap: 4px;
   min-width: 0;
-  padding: 0 8px 0 6px;
-  box-sizing: border-box;
   background: var(--color-canvas);
   border-bottom: 1px solid var(--color-line-soft);
   pointer-events: auto;
 }
 .notebook-bar-lead {
-  max-width: 40%;
+  max-width: min(28%, 244px);
+  padding-inline: 12px 6px;
 }
 .notebook-bar-actions {
-  margin-left: auto;
-  padding: 0 6px 0 8px;
-  gap: 3px;
-}
-.notebook-ai-button {
-  width: 30px;
-  min-width: 30px;
-  height: 30px;
-  padding: 0;
   flex: none;
-  border: 1px solid var(--color-line);
-  border-radius: 8px;
-  color: var(--color-fg-soft);
+  margin-inline-start: auto;
+  padding-inline: 6px 10px;
+  gap: 2px;
 }
-.notebook-ai-button:hover:not(:disabled) {
-  color: var(--color-accent);
-  border-color: color-mix(in srgb, var(--color-accent) 48%, var(--color-line));
-  background: var(--color-accent-subtle);
-}
-.notebook-ai-button[aria-pressed='true'] {
-  color: var(--color-accent);
-  border-color: color-mix(in srgb, var(--color-accent) 62%, var(--color-line));
-  background: var(--color-accent-subtle);
+.notebook-bar-lead:empty,
+.notebook-bar-actions:empty {
+  display: none;
 }
 .notebook-breadcrumb {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
   min-width: 0;
-  padding-left: 2px;
+  overflow: hidden;
+  white-space: nowrap;
   color: var(--color-fg-muted);
-  font-size: 12px;
+  font-size: 13px;
+  line-height: 20px;
+}
+.notebook-breadcrumb > :is(span, strong) {
+  min-width: 0;
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
 }
+.notebook-breadcrumb > span {
+  max-width: 45%;
+}
+.notebook-breadcrumb > strong {
+  color: var(--color-fg-strong);
+  font-weight: 600;
+}
 .notebook-document-body {
   display: flex;
   flex: 1;
-  gap: 10px;
   min-height: 0;
   min-width: 0;
   position: relative;
@@ -454,8 +426,6 @@
   min-height: 0;
   position: relative;
   overflow: hidden;
-  border: 1px solid var(--color-line-soft);
-  border-radius: 10px;
   background: var(--color-canvas);
 }
 .notebook-editor-frame {
@@ -468,14 +438,54 @@
 .notebook-editor-area.has-note .notebook-editor-frame {
   visibility: visible;
 }
+.notebook-outline-marks {
+  display: flex;
+  flex-direction: column;
+  flex: 0 0 36px;
+  align-self: flex-start;
+  margin-block-start: calc(var(--notebook-bar-height) - 1px);
+  max-height: calc(100% - var(--notebook-bar-height) - 40px);
+  padding: 24px 4px 0 0;
+  border-block-start: 1px solid var(--color-line-soft);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+}
+.notebook-page .notebook-outline-mark {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  flex: none;
+  width: 100%;
+  height: 24px;
+  padding: 0 5px;
+  border: 0;
+  border-radius: 4px;
+  color: var(--color-fg-muted);
+  background: transparent;
+}
+.notebook-outline-mark::after {
+  content: '';
+  width: clamp(9px, calc(22px - (var(--heading-level, 1) - 1) * 3px), 22px);
+  height: 2px;
+  border-radius: 2px;
+  background: currentColor;
+}
+.notebook-page .notebook-outline-mark:is(:hover, :focus-visible) {
+  color: var(--color-fg-strong);
+  background: var(--color-overlay);
+}
+.notebook-page .notebook-outline-mark[aria-current]:not([aria-current='false']) {
+  color: var(--color-accent);
+}
 .notebook-outline {
   display: flex;
   flex-direction: column;
-  width: 200px;
-  min-width: 200px;
+  flex: none;
+  width: clamp(208px, 17cqw, 248px);
   min-height: 0;
-  padding: 5px 2px 14px;
-  box-sizing: border-box;
+  border-inline-start: 1px solid var(--color-line);
+  background: var(--color-canvas);
   color: var(--color-fg-muted);
 }
 .notebook-outline > header {
@@ -483,12 +493,13 @@
   align-items: center;
   justify-content: space-between;
   flex: none;
-  height: 38px;
-  padding: 0 2px 0 12px;
-  color: var(--color-fg-soft);
+  height: var(--notebook-bar-height);
+  padding: 0 10px 0 16px;
+  border-bottom: 1px solid var(--color-line-soft);
+  color: var(--color-fg-strong);
 }
 .notebook-outline > header strong {
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 600;
 }
 .notebook-outline-list {
@@ -496,95 +507,72 @@
   min-height: 0;
   overflow: auto;
   overscroll-behavior: contain;
-  margin-top: 3px;
-  padding: 0 2px 0 7px;
-  border-left: 1px solid var(--color-line-soft);
+  padding: 10px 8px 16px;
 }
 .notebook-page .notebook-outline-entry {
-  display: flex;
-  align-items: baseline;
-  min-height: 28px;
-  height: auto;
-  border-radius: 6px;
-  padding: 6px 8px 6px calc(8px + min(36px, (var(--heading-level) - 1) * 12px));
-  color: var(--color-fg-muted);
-  font-size: 12px;
-  line-height: 1.6;
-  text-align: left;
+  height: 32px;
+  border-radius: 5px;
+  padding-inline: calc(8px + clamp(0px, (var(--heading-level, 1) - 1) * 10px, 40px)) 8px;
+  color: var(--color-fg-soft);
+  font-size: 13px;
+  line-height: 20px;
+  text-align: start;
 }
 .notebook-page .notebook-outline-entry:hover:not(:disabled) {
-  color: var(--color-fg-soft);
-  background: var(--color-active);
+  color: var(--color-fg-strong);
+  background: var(--color-overlay);
 }
 .notebook-outline-entry > span:last-child {
-  white-space: normal;
-  overflow-wrap: anywhere;
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-.notebook-page .notebook-outline-entry.is-active {
-  background: var(--color-accent-subtle);
-  color: var(--color-accent);
-  font-weight: 500;
+.notebook-page .notebook-outline-entry.is-active:not(:disabled) {
+  background: var(--color-active);
+  color: var(--color-fg-strong);
+  font-weight: 600;
 }
 .notebook-outline-empty {
-  margin: 5px 8px;
-  font-size: 12px;
-  line-height: 1.9;
+  margin: 8px;
+  font-size: 13px;
+  line-height: 1.6;
 }
 .notebook-welcome {
   position: absolute;
-  inset: 0;
+  inset: var(--notebook-bar-height) 0 0;
   background: var(--color-canvas);
   display: flex;
   flex-direction: column;
   justify-content: center;
   align-items: center;
-  padding: 32px 20px 64px;
+  gap: 10px;
+  padding: 20px 20px 52px;
   text-align: center;
 }
 .notebook-welcome-icon {
-  color: var(--color-accent);
-  background: var(--color-accent-subtle);
-  width: 60px;
-  height: 60px;
-  border-radius: 16px;
-  display: grid;
-  place-items: center;
-  margin-bottom: 24px;
+  color: var(--color-fg-muted);
 }
 .notebook-welcome h1 {
   color: var(--color-fg-strong);
-  font-size: 25px;
-  line-height: 1.5;
+  font-size: 18px;
+  line-height: 1.4;
   font-weight: 600;
-  margin: 0 0 12px;
-  letter-spacing: -0.6px;
+  margin: 0;
 }
 .notebook-welcome p {
   color: var(--color-fg-muted);
-  line-height: 1.9;
   font-size: 13px;
-  margin: 0 0 28px;
+  margin: 0;
 }
 .notebook-welcome > .ui-button {
-  height: 34px;
-  padding: 0 16px;
-}
-.notebook-feature-hints {
-  display: flex;
-  justify-content: center;
-  flex-wrap: wrap;
-  gap: 19px;
-  font-size: 11px;
-  color: var(--color-fg-muted);
-  margin-top: 38px;
-}
-.notebook-feature-hints span:not(:first-child)::before {
-  content: '·';
-  margin-right: 19px;
+  margin-top: 6px;
 }
 .notebook-error {
   flex: none;
-  margin: 0 0 10px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--color-line-soft);
   display: flex;
   gap: 6px;
   align-items: center;
@@ -623,7 +611,7 @@
   position: absolute;
   inset: 0;
   background: var(--color-canvas);
-  padding: 40px 36px;
+  padding: calc(var(--notebook-bar-height) + 36px) max(36px, calc((100% - 900px) / 2 + 36px)) 36px;
 }
 .notebook-editor-skeleton i:first-child {
   height: 32px;
@@ -646,6 +634,7 @@
   justify-content: center;
   align-items: center;
   background: var(--color-canvas);
+  padding-top: var(--notebook-bar-height);
   gap: 14px;
 }
 .notebook-load-error .ui-empty {
@@ -743,59 +732,45 @@
   padding-top: 2px;
 }
 
-.notebook-page.is-focused .notebook-layout {
-  padding: 12px 20px;
-}
-.notebook-page.is-focused :is(.notebook-rail, .notebook-mobile-mask) {
+.notebook-mobile-mask,
+.notebook-outline-mask {
   display: none;
-}
-.notebook-mobile-mask {
-  display: none;
+  position: absolute;
+  inset: 0;
+  padding: 0;
+  border: 0;
+  background: color-mix(in srgb, var(--color-mask-bg) 50%, transparent);
 }
 @container notebook (max-width: 1100px) {
-  .notebook-rail {
-    --notebook-rail-width: 216px;
+  .notebook-outline-marks {
+    display: none;
+  }
+  /* 抽屉与遮罩共用整页的定位容器，打开时目录也在遮罩下面。 */
+  .notebook-document-body {
+    position: static;
+  }
+  .notebook-outline-mask {
+    display: block;
+    z-index: 15;
   }
   .notebook-outline {
     position: absolute;
     inset: 0 0 0 auto;
     z-index: 16;
-    width: 224px;
-    min-width: 0;
-    max-width: calc(100% - 24px);
-    padding: 6px 8px 14px;
-    border: 1px solid var(--color-line);
-    border-radius: 10px;
-    background: var(--color-canvas);
-    box-shadow: -6px 0 24px var(--color-overlay-strong);
+    width: min(260px, calc(100% - 40px));
   }
 }
 @container notebook (max-width: 760px) {
-  .notebook-layout,
-  .notebook-page.is-focused .notebook-layout {
-    padding: 0;
-    gap: 0;
-  }
   .notebook-rail {
     position: absolute;
     inset: 0 auto 0 0;
-    width: min(286px, 82cqw);
-    min-width: 0;
+    width: min(var(--notebook-rail-width), calc(100% - 40px));
     z-index: 21;
-    border: 0;
-    border-right: 1px solid var(--color-line-soft);
-    border-radius: 0;
-    box-shadow: 10px 0 32px var(--color-overlay-strong);
   }
-  .notebook-mobile-mask {
+  .notebook-page.is-rail-open:not(.is-focused) .notebook-mobile-mask {
     display: block;
-    position: absolute;
-    inset: 0;
     z-index: 20;
-    background: var(--color-mask-bg);
-    border: 0;
   }
-  /* 窄屏放不下两段浮层：文档栏退回编辑器上方的一行，工具栏占满编辑器宽度。 */
   .notebook-editor-area {
     display: flex;
     flex-direction: column;
@@ -803,37 +778,27 @@
   .notebook-bar {
     position: relative;
     inset: auto;
-    height: 48px;
-    gap: 2px;
     flex: none;
+    align-items: center;
+    padding: 0 6px;
+    border-bottom: 1px solid var(--color-line-soft);
   }
   .notebook-bar-lead,
   .notebook-bar-actions {
-    border-bottom: 0;
-    padding: 0 4px;
+    border: 0;
+    padding: 0;
   }
   .notebook-bar-lead {
-    max-width: 45%;
+    max-width: none;
+    flex: 1;
   }
   .notebook-editor-frame {
     flex: 1;
     height: auto;
     min-height: 0;
   }
-  .notebook-breadcrumb {
-    font-size: 11px;
-    padding-left: 0;
-  }
-  .notebook-document-body {
-    gap: 0;
-  }
-  .notebook-editor-area {
-    border-width: 1px 0 0;
-    border-radius: 0;
-  }
   .notebook-error {
     padding: 8px;
-    margin: 0;
     flex-direction: column;
     align-items: stretch;
   }
@@ -841,176 +806,39 @@
     justify-content: flex-end;
     flex-wrap: wrap;
   }
-  .notebook-tree-row {
-    padding-block: 10px;
+  .notebook-search input.arco-input {
+    font-size: 16px;
   }
-  .notebook-search input.arco-input,
+  .notebook-editor-skeleton {
+    padding: calc(var(--notebook-bar-height) + 30px) 20px 30px;
+  }
+}
+@media (max-width: 760px) {
   .notebook-dialog .arco-input {
     font-size: 16px;
   }
-  .notebook-page .notebook-row-actions {
-    opacity: 0.75;
-  }
-  .notebook-welcome h1 {
-    font-size: 22px;
-  }
-  .notebook-editor-skeleton {
-    padding: 30px 20px;
-  }
-  .notebook-feature-hints {
-    gap: 8px 14px;
-    margin-top: 28px;
-  }
-  .notebook-feature-hints span:not(:first-child)::before {
-    margin-right: 14px;
-  }
 }
-
-/* Touch users cannot reveal hover-only directory and outline controls. */
-@media (hover: none) {
+@media (hover: none), (any-pointer: coarse) {
+  .notebook-page :is(.notebook-tree-tools, .notebook-bar, .notebook-outline header) .ui-button-icon-only {
+    width: 34px;
+    height: 34px;
+  }
+  .notebook-tree-row {
+    min-height: 44px;
+  }
+  .notebook-tree-entry {
+    --row-action-space: 40px;
+  }
+  .notebook-tree-entry[data-kind='folder']:has(.notebook-menu-anchor) {
+    --row-action-space: 72px;
+  }
+  .notebook-page .notebook-row-actions.ui-button,
+  .notebook-page .notebook-row-actions .ui-button {
+    width: 32px;
+    height: 32px;
+  }
   .notebook-page .notebook-row-actions {
     opacity: 1;
-  }
-}
-
-/* 右侧对话面板：与编辑器并排，窗口窄时变成浮层。 */
-.notebook-chat {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  width: var(--notebook-chat-width, clamp(360px, 38cqw, 560px));
-  min-width: 360px;
-  max-width: 56%;
-  min-height: 0;
-  border: 1px solid var(--color-line-soft);
-  border-radius: 10px;
-  background: var(--color-canvas);
-  box-shadow: 0 2px 14px color-mix(in srgb, var(--color-mask-bg) 35%, transparent);
-  container-type: inline-size;
-}
-.notebook-chat-mask {
-  display: none;
-}
-.notebook-chat-resize {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  left: -4px;
-  z-index: 7;
-  width: 8px;
-  cursor: ew-resize;
-  touch-action: none;
-}
-.notebook-chat-resize:focus-visible {
-  outline: 1px solid var(--color-accent);
-  outline-offset: -1px;
-}
-.notebook-chat-head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-height: 42px;
-  padding: 7px 7px 7px 10px;
-  border-bottom: 1px solid var(--color-line-soft);
-}
-.notebook-chat-heading {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-  flex: 1;
-}
-.notebook-chat-heading-icon {
-  display: grid;
-  place-items: center;
-  width: 28px;
-  height: 28px;
-  flex: none;
-  border-radius: 8px;
-  color: var(--color-accent);
-  background: var(--color-accent-subtle);
-}
-.notebook-chat-heading-copy {
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-  gap: 1px;
-}
-.notebook-chat-heading-copy strong {
-  color: var(--color-fg-strong);
-  font-size: 12px;
-  line-height: 16px;
-  font-weight: 600;
-}
-.notebook-chat-heading-copy small {
-  color: var(--color-fg-faint);
-  font-size: 10px;
-  line-height: 14px;
-}
-/* Mica owns messages, model controls, tool logs, Ask and composer styling. */
-.notebook-chat-scope {
-  display: flex;
-  flex: none;
-  gap: 4px;
-  padding: 6px 8px 0;
-}
-.notebook-chat-hint {
-  flex: none;
-  margin: 0;
-  padding: 6px 10px;
-  color: var(--color-fg-muted);
-  font-size: 11px;
-  line-height: 1.55;
-}
-.notebook-chat-heading-copy small {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  max-width: 250px;
-}
-.notebook-chat-content {
-  display: flex;
-  flex: 1;
-  min-height: 0;
-  min-width: 0;
-  overflow: hidden;
-}
-.notebook-chat-empty {
-  margin: auto 16px;
-  color: var(--color-fg-muted);
-  font-size: 12px;
-  line-height: 1.6;
-  text-align: center;
-}
-
-@container notebook (max-width: 1000px) {
-  .notebook-chat-mask {
-    position: absolute;
-    inset: 0;
-    z-index: 4;
-    display: block;
-    border: 0;
-    background: var(--color-mask-bg);
-    opacity: 0.35;
-  }
-  .notebook-chat-resize {
-    display: none;
-  }
-  .notebook-chat {
-    position: absolute;
-    inset: 0 0 0 auto;
-    z-index: 5;
-    width: min(var(--notebook-chat-width, 420px), 92cqw);
-    max-width: none;
-    box-shadow: -14px 0 30px var(--color-mask-bg);
-  }
-}
-@container notebook (max-width: 560px) {
-  .notebook-chat {
-    width: 100%;
-    min-width: 0;
-    border-radius: 0;
-    border-right: 0;
-    border-left: 0;
+    pointer-events: auto;
   }
 }

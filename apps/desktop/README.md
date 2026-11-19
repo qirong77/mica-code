@@ -95,7 +95,7 @@ npm run start:web -- --host 127.0.0.1 --port 8787 --no-share
 
 整页可用 `desktop.page.route` 注册 `/plugins/<id>/<route>`，只读数据模块用 `web: true` 与随包 `web.ts` 注册 `GET /plugins/<id>/api/<query>`；两者均复用主端口和访问守卫，不启动聊天会话或额外服务。Harness Review 的 [Arco 运行控制台](../../plugins/harness-review/README.md#web-运行控制台) 位于 `/plugins/harness-review/console`，从 Plugins 详情也能打开。分享 cookie 不开放该私有命名空间，Mobile Relay 不会自动转发新增接口。
 
-Notebook 的树与正文存储归插件，共享编辑器运行在 sandbox iframe 中；第三方编辑器依赖首次从 CDN 加载。AI 接口使用同端口 `/plugin/notebook/mcp`（标准 Streamable HTTP），桌面/Web 会话宿主启动时自动接入，外部客户端可配置同一 URL，不再分发 Notebook skill。接口不依赖打开页面或聊天会话，继承应用访问守卫，分享 cookie 不开放独立 MCP。文件视图的 Markdown、配置页 Role/Skill 与 Notebook 共享编辑能力，说明见 [mica-editor](../../packages/mica-editor/README.md) 和 [Notebook](../../plugins/notebook/README.md)。
+Notebook 的目录与正文存储归插件。目录可按标题查找和定位笔记，正文顶栏显示当前笔记名称，右侧大纲可按标题跳转。共享编辑器运行在 sandbox iframe 中，第三方依赖首次从 CDN 加载。独立 MCP 使用同端口的 `/plugin/notebook/mcp`（标准 Streamable HTTP）。桌面与 Web 会话选择 `笔记` 角色后自动接入，外部客户端可配置同一 URL。接口可在笔记页面关闭时访问，沿用应用的访问守卫，分享 cookie 不开放独立 MCP。文件视图的 Markdown、配置页 Role/Skill 与 Notebook 共享编辑能力，说明见 [mica-editor](../../packages/mica-editor/README.md) 和 [Notebook](../../plugins/notebook/README.md)。
 
 会话压缩由 [Session Compact](../../plugins/session-compact/README.md) 提供。快速压缩聚合较早工具过程并移除思考/媒体载荷，保留用户和助手正文；模型压缩保存摘要加最近几轮，界面同步显示当前持久化记录。切换服务商/模型后，插件在下一次发送前快速压缩；没有按占用阈值或空闲时间自动生成摘要的设置。
 

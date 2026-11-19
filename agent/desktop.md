@@ -170,13 +170,13 @@
 - 会话搜索共用 `mica-web-shared/session-search.ts`；正文搜索每会话最多 20k 字符，默认最近 3 日、最多 600 个候选，截断须告知。
 - 上下文统计按整条消息 JSON 估算并排除媒体 payload；工具定义在实际请求时按工具 / MCP server 记录独立估算（MCP 是 Tool Schema 子项，不重复计总量）；compact / rewind 后用 staleInput 说明来源已不是当前快照。
 
-插件整页各自是一个可复制、可收藏的地址（默认 `/plugins/pages/<插件 id>` 或清单声明的 `/plugins/<id>/<route>`，路由与 `api.page` 见 `plugins.md`），窗口顶部那条拖动条上显示的就是它：桌面应用窗口没有别的地址栏，复制这一枚是把这一页带出去的唯一入口。
+插件整页各自是一个可复制、可收藏的地址（默认 `/plugins/pages/<插件 id>` 或清单声明的 `/plugins/<id>/<route>`，路由与 `api.page` 见 `plugins.md`），桌面端把地址和复制按钮放在返回按钮、页面标题所在的同一行。顶栏空白处可拖动窗口，macOS 客户端在左侧为系统窗口按钮留位。
 
 ## 侧栏入口与整页设置
 
 - Notebook 的目录、保存队列与文档栏在 `plugins/notebook/desktop.jsx`；富文本排版、块首键盘行为、文档样式与演示统一在 `packages/mica-editor/runtime/src/workspace/WorkspaceShell.tsx` 装配，仅属于笔记 composer。宿主用经 noteId/loadId 校验的 `action` 消息触发样式/演示，业务不进入桌面内核。正文按约 650ms 防抖自动保存，顶栏不显示保存状态，失败时才在正文上方给出带重试的提示；文档样式使用 Lexical root NodeState，演示只调整视图与临时只读；数据与交互口径见 `packages/mica-editor/README.md`、`plugins/notebook/README.md`。
 
-- Notebook 右侧对话由 `NotebookChatDock.jsx` 管布局，实际会话使用整页宿主提供的 `api.ui.Conversation`，复用同一个 `ChatView`（模型 / 角色 / 推理、工具、Ask、队列和会话设置）。按 note id 保留独立讨论，另有跨笔记对话；关闭 / 专注 / 刷新不自动新建。引用按钮先保存再追加精确 note id 到草稿，不自动发送或隐藏附加正文。对话结束 / 连接恢复后检查目录和正文版本，外部写回只提示查看更新，确认后备份草稿再加载，不直接换掉编辑器。Notebook 的 AI 操作说明由插件角色 `笔记` 注入，默认角色不接入 Notebook MCP，也不在 `/` 快捷列表里列出它；通用会话嵌入、节点归属与恢复边界见 `plugins.md`。
+- Notebook 的桌面目录宽 260px，普通目录行高 36px，当前笔记以整行中性底色标记。标题搜索结果显示所属文件夹路径，选中后展开祖先文件夹并返回目录树。目录标题旁提供当前笔记定位和整树折叠、展开。正文顶栏常驻当前篇名和大纲开关。宽屏默认显示标题刻度，窄屏按需打开带遮罩的目录或大纲抽屉。
 - Notebook 的目录拖放判定在 `plugins/notebook/tree-dnd.ts`，节点位置变更在 `model.ts` 的 `placeNode`：同级排序沿用 `nodes` 数组顺序，不新增存储字段。目录树提供根目录落点和文件夹悬停展开，排序只用拖动、不添加上移/下移按钮；搜索与最近删除不接拖动排序。所有结构写入复用原有索引 CAS 队列，拖动不触碰正文。
 
 - 会话侧栏顶部保持一行入口的固定顺序：New Session / Stats / Settings / 插件声明的侧栏入口 / Plugins。插件入口由清单 `desktop.entry` 声明、按清单顺序渲染（`Connections` 是浮层卡片）；`placement: "header"` 的入口不占侧栏位置，画在主区顶栏右侧那一簇的最左边（`Schedule` 是整页 + 顶栏图标——顶栏只有 32px 高，所以只画图标，窗口类图标仍贴最右），宿主只画一行与容器，不知道里面是什么；加一个桌面插件只改插件目录，不改侧栏代码。只声明 `desktop.page`、不写 `entry` 的插件不占这一列：它的整页入口是 Plugins 页里那张卡的「打开…」按钮（`plugin-entries.js` 的 `loadPluginPageEntry` 按 id 现取模块，`SettingsView` 经 `onOpenPluginPage` 交回 `App` 打开；标签就这样，不再占侧栏一行）。Plugins 虽然在最末，但它只是一个页面入口——点它进插件整页（目录 → 点一张卡进详情），不做下拉面板、不在侧栏里列插件。

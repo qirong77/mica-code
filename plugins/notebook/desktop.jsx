@@ -1,20 +1,23 @@
-import React, { cloneElement, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { cloneElement, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import {
   BookOpen,
+  BookMarked,
   ChevronDown,
   ChevronRight,
+  ChevronsDownUp,
+  ChevronsUpDown,
   Download,
   FilePlus2,
-  FileText,
   Focus,
-  Folder,
   FolderInput,
-  FolderOpen,
   FolderPlus,
-  Menu,
-  Sparkles,
+  ListTree,
+  LocateFixed,
   MoreHorizontal,
   PanelLeftClose,
+  PanelLeftOpen,
+  PanelRightClose,
+  PanelRightOpen,
   Pencil,
   Plug,
   Plus,
@@ -56,9 +59,6 @@ import { notebookDropPosition, resolveNotebookDrop } from './tree-dnd';
 import { createEditorBridge } from './bridge';
 import { createNotebookDraft, createNotebookWriter, updateNotebookDraft } from './writer';
 import { createNotebookLifecycle } from './lifecycle';
-import { NotebookChatDock } from './NotebookChatDock';
-import { prepareNotebookReference } from './ai-context';
-import { createNotebookUpdateCheck } from './ai-updates';
 import './notebook.css';
 
 const message = (error) =>
@@ -72,6 +72,16 @@ const emptyOutline = () => ({
   items: [],
   activeKey: null,
 });
+
+function nodesById(index) {
+  return new Map(index.nodes.map((node) => [node.id, node]));
+}
+
+function nodePath(node, byId) {
+  const path = [];
+  for (let entry = node; entry; entry = byId.get(entry.parentId)) path.push(entry);
+  return path.reverse();
+}
 
 /** The index controller may replay this operation after a CAS conflict or uncertain write. */
 export function createDefaultNote({ id, now, parentId }) {
@@ -112,7 +122,7 @@ function MenuRow({ action, label, Icon, variant = 'ghost', onSelect, disabled = 
  * ArcoPopover 负责定位与点外关闭；菜单行、键盘导航与 Esc 交给共享菜单。
  */
 function PopoverMenu({ open, onOpen, onClose, label, position = 'br', trigger, children, form }) {
-  const anchor = useRef(null);
+  const anchorId = useId();
   return (
     <ArcoPopover
       trigger="click"
@@ -129,7 +139,7 @@ function PopoverMenu({ open, onOpen, onClose, label, position = 'br', trigger, c
             autoFocus
             onClose={() => {
               onClose();
-              anchor.current?.querySelector('button')?.focus({ preventScroll: true });
+              document.getElementById(anchorId)?.querySelector('button')?.focus({ preventScroll: true });
             }}
           >
             {children}
@@ -137,8 +147,39 @@ function PopoverMenu({ open, onOpen, onClose, label, position = 'br', trigger, c
         )
       }
     >
-      {cloneElement(trigger, { ref: anchor })}
+      {cloneElement(trigger, { id: anchorId })}
     </ArcoPopover>
+  );
+}
+
+function CreateMenu({ open, onOpen, onClose, onCreate, label, title = label, disabled, tabIndex, toolbar = false }) {
+  return (
+    <PopoverMenu
+      open={open}
+      onOpen={onOpen}
+      onClose={onClose}
+      label={label}
+      position="bl"
+      trigger={
+        <span className={toolbar ? 'notebook-rail-add-anchor' : 'notebook-menu-anchor'}>
+          <Button
+            variant="ghost"
+            className={toolbar ? 'notebook-rail-add' : undefined}
+            icon={<Plus size={toolbar ? 18 : 15} />}
+            aria-label={label}
+            title={title}
+            aria-haspopup="menu"
+            aria-expanded={open}
+            pressed={open}
+            disabled={disabled}
+            tabIndex={tabIndex}
+          />
+        </span>
+      }
+    >
+      <MenuRow action="note" label="新建笔记" Icon={FilePlus2} onSelect={onCreate} />
+      <MenuRow action="folder" label="新建文件夹" Icon={FolderPlus} onSelect={onCreate} />
+    </PopoverMenu>
   );
 }
 
@@ -167,26 +208,6 @@ function NoteMenu({ node, open, onOpen, onClose, onAction, extraRows, trigger, p
   );
 }
 
-/** 会话能力不依赖某篇笔记；入口始终可见，也能从专注模式重新打开面板。 */
-export function NotebookChatButton({ open, focused, onOpenChange, onFocusedChange }) {
-  const visible = open && !focused;
-  return (
-    <Button
-      variant={visible ? 'primary' : 'ghost'}
-      icon={<Sparkles size={16} strokeWidth={1.7} />}
-      className="notebook-ai-button"
-      title={visible ? '收起 AI 对话' : '打开 AI 对话'}
-      aria-label={visible ? '收起 AI 对话' : '打开 AI 对话'}
-      aria-expanded={visible}
-      pressed={visible}
-      onClick={() => {
-        if (!visible) onFocusedChange(false);
-        onOpenChange(!visible);
-      }}
-    />
-  );
-}
-
 export default function NotebookPage({ api }) {
   const [index, setIndex] = useState(emptyIndex);
   const [loaded, setLoaded] = useState(false);
@@ -197,7 +218,6 @@ export default function NotebookPage({ api }) {
   const [query, setQuery] = useState('');
   const [trash, setTrash] = useState(false);
   const [menu, setMenu] = useState(null);
-  const [newMenu, setNewMenu] = useState(false);
   const [draggingId, setDraggingId] = useState(null);
   const [dropTarget, setDropTarget] = useState(null);
   const dragSource = useRef(null);
@@ -206,17 +226,15 @@ export default function NotebookPage({ api }) {
   const [layout, setLayout] = useState(() => ({
     mobile: window.innerWidth <= 760,
     overlay: window.innerWidth <= 1100,
-    chatOverlay: window.innerWidth <= 1000,
   }));
   const [focused, setFocused] = useState(false);
+  const [outlineOpen, setOutlineOpen] = useState(false);
   const [outline, setOutline] = useState(emptyOutline);
   const [dialog, setDialog] = useState(null);
   const [busy, setBusy] = useState(false);
   const [frameState, setFrameState] = useState('loading');
   const [frameKey, setFrameKey] = useState(0);
   const [mcpOpen, setMcpOpen] = useState(false);
-  const [chatOpen, setChatOpen] = useState(false);
-  const [externalUpdate, setExternalUpdate] = useState(null);
   const [copied, setCopied] = useState('');
   const iframe = useRef(null);
   const pageRoot = useRef(null);
@@ -237,7 +255,6 @@ export default function NotebookPage({ api }) {
   const loadedNote = useRef(null);
   const tree = useRef(null);
   const actions = useRef({});
-  const checkUpdates = useRef(async () => {});
   const creating = useRef(false);
   // 深链（`/plugins/pages/notebook?note=<id>`）：首屏要打开的是这一篇，而不是第一篇。
   // 只在挂载时取一次——之后地址由页面自己按当前笔记改写。
@@ -254,8 +271,10 @@ export default function NotebookPage({ api }) {
       }),
     [],
   );
-  const active = index.nodes.find((node) => node.id === activeId && !node.trashedAt);
-  const selected = index.nodes.find((node) => node.id === selectedId);
+  const byId = useMemo(() => nodesById(index), [index]);
+  const activeNode = byId.get(activeId);
+  const active = activeNode?.trashedAt ? null : activeNode;
+  const selected = byId.get(selectedId);
   // MCP：笔记本跑在 Mica 运行时里，AI 客户端要的就是这台机器上的同一个端口。
   const mcpServer = pluginMcpServerName('notebook');
   const mcpUrl = `${api.currentHost?.() ?? ''}${pluginMcpPath('notebook')}`;
@@ -269,11 +288,25 @@ export default function NotebookPage({ api }) {
       setError(message(cause));
     }
   }, []);
-  const visible = useMemo(
-    () => flattenVisibleTree(index, { expanded, query, showTrash: trash }),
-    [index, expanded, query, trash],
-  );
   const directory = useMemo(() => flattenVisibleTree(index), [index]);
+  const listing = useMemo(
+    () => (trash ? flattenVisibleTree(index, { showTrash: true }) : directory),
+    [directory, index, trash],
+  );
+  const searchTerm = query.trim().toLowerCase();
+  const visible = useMemo(() => {
+    if (searchTerm) return listing.filter(({ node }) => node.title.toLowerCase().includes(searchTerm));
+    if (trash) return listing;
+    let foldedDepth = Infinity;
+    return listing.filter(({ node, depth }) => {
+      if (depth > foldedDepth) return false;
+      foldedDepth = node.kind === 'folder' && !expanded.has(node.id) ? depth : Infinity;
+      return true;
+    });
+  }, [listing, expanded, searchTerm, trash]);
+  const folders = useMemo(() => directory.filter(({ node }) => node.kind === 'folder'), [directory]);
+  const hasExpandedFolder = visible.some(({ node, hasChildren }) => hasChildren && expanded.has(node.id));
+  const tabStop = visible.some(({ node }) => node.id === selectedId) ? selectedId : visible[0]?.node.id;
   const dropMarker = useMemo(() => {
     if (!dropTarget || dropTarget.position !== 'after') return dropTarget;
     const start = visible.findIndex(({ node }) => node.id === dropTarget.targetId);
@@ -298,8 +331,8 @@ export default function NotebookPage({ api }) {
   }, [canArrange]);
   useEffect(() => () => clearFolderHover(), []);
   const railOverlay = layout.mobile && railOpen && !focused;
-  const outlineOverlay = layout.overlay && !focused && !chatOpen && !!active;
-  const chatOverlay = layout.chatOverlay && chatOpen && !focused;
+  const outlineVisible = outlineOpen && !focused && !!active;
+  const outlineOverlay = layout.overlay && outlineVisible;
 
   const save = useCallback(
     async (target = current.current) => {
@@ -402,7 +435,7 @@ export default function NotebookPage({ api }) {
             loadedNote.current = null;
             await loadEditor(draft);
             // 地址跟着当前笔记走：复制出去、刷新页面都还落在这一篇上。
-            api.page?.setSearch?.({ ...api.page.search?.(), note: id });
+            api.page?.setSearch?.({ note: id });
             if (layoutRef.current.mobile) setRailOpen(false);
           },
         );
@@ -418,50 +451,12 @@ export default function NotebookPage({ api }) {
   actions.current = { flush, openNote, save, loadEditor };
 
   useEffect(() => {
-    setExternalUpdate(null);
-  }, [activeId]);
-
-  // AI writes go through MCP/CAS, not through this editor's undo history. Refresh the
-  // directory, but never silently replace a live document or its unsaved input.
-  useEffect(() => {
-    if (!chatOpen || !api.sessions?.onExit) return undefined;
-    const observer = createNotebookUpdateCheck({
-      available: () => !lifecycle.closing && !lifecycle.switching,
-      waitForWrites: () => writer.idle(),
-      refreshIndex: () => (controller.getPendingIndexCount() ? Promise.resolve() : controller.loadIndex()),
-      current: () => current.current,
-      readVersion: async (id) => (await controller.readDocument(id)).version,
-      changed: setExternalUpdate,
-      error: (cause) => setError(`检查笔记更新失败：${message(cause)}`),
-    });
-    const check = () => observer.check();
-    checkUpdates.current = check;
-    const unsubscribe = api.sessions.onExit(() => {
-      void check();
-    });
-    const restore = () => {
-      if (document.visibilityState === 'visible') void check();
-    };
-    window.addEventListener('mica:transport-resync', restore);
-    document.addEventListener('visibilitychange', restore);
-    void check();
-    return () => {
-      observer.dispose();
-      if (checkUpdates.current === check) checkUpdates.current = async () => {};
-      unsubscribe?.();
-      window.removeEventListener('mica:transport-resync', restore);
-      document.removeEventListener('visibilitychange', restore);
-    };
-  }, [api.sessions, chatOpen, controller, writer, lifecycle, activeId, frameState]);
-
-  useEffect(() => {
     let alive = true;
     mounted.current = true;
     void controller
       .loadIndex()
       .then(async (result) => {
         if (!alive) return;
-        setExpanded(new Set(result.nodes.filter((node) => node.kind === 'folder').map((node) => node.id)));
         setLoaded(true);
         // 地址里点名的那一篇优先（深链 / 刷新 / 收藏）；它被删了或者不存在就退回第一篇。
         const requested = deepLink.current?.note;
@@ -469,7 +464,16 @@ export default function NotebookPage({ api }) {
           (requested &&
             result.nodes.find((node) => node.id === requested && node.kind === 'note' && !node.trashedAt)) ||
           result.nodes.find((node) => node.kind === 'note' && !node.trashedAt);
-        if (target) await actions.current.openNote(target.id);
+        if (target) {
+          setExpanded(
+            new Set(
+              nodePath(target, nodesById(result))
+                .slice(0, -1)
+                .map((node) => node.id),
+            ),
+          );
+          await actions.current.openNote(target.id);
+        }
       })
       .catch((cause) => {
         if (alive) {
@@ -585,18 +589,12 @@ export default function NotebookPage({ api }) {
       const next = {
         mobile: entry.contentRect.width <= 760,
         overlay: entry.contentRect.width <= 1100,
-        chatOverlay: entry.contentRect.width <= 1000,
       };
       const previous = layoutRef.current;
-      if (
-        previous.mobile === next.mobile &&
-        previous.overlay === next.overlay &&
-        previous.chatOverlay === next.chatOverlay
-      )
-        return;
+      if (previous.mobile === next.mobile && previous.overlay === next.overlay) return;
       layoutRef.current = next;
       setLayout(next);
-      if (next.mobile && !previous.mobile) setRailOpen(false);
+      if (next.mobile !== previous.mobile) setRailOpen(!next.mobile);
     });
     if (pageRoot.current) observer.observe(pageRoot.current);
     return () => observer.disconnect();
@@ -626,25 +624,25 @@ export default function NotebookPage({ api }) {
 
   useEffect(() => {
     const escape = (event) => {
-      if (event.key !== 'Escape' || event.defaultPrevented || dialog || menu || newMenu) return;
-      if (focused) setFocused(false);
+      if (event.key !== 'Escape' || event.defaultPrevented || dialog || menu || mcpOpen) return;
+      if (outlineVisible) setOutlineOpen(false);
+      else if (focused) setFocused(false);
       else if (layout.mobile && railOpen) setRailOpen(false);
     };
     window.addEventListener('keydown', escape);
     return () => window.removeEventListener('keydown', escape);
-  }, [focused, dialog, menu, newMenu, railOpen, layout]);
+  }, [focused, dialog, menu, mcpOpen, outlineVisible, railOpen, layout]);
 
   // iframe 内的点击不冒泡到宿主；焦点进入编辑器时也要收起宿主的菜单。
   useEffect(() => {
-    if (!menu && !newMenu) return;
+    if (!menu) return;
     const closeMenus = () => {
       setMenu(null);
-      setNewMenu(false);
       setDialog((value) => (value?.type === 'rename' ? null : value));
     };
     window.addEventListener('blur', closeMenus);
     return () => window.removeEventListener('blur', closeMenus);
-  }, [menu, newMenu]);
+  }, [menu]);
 
   useEffect(() => {
     const panel = railOverlay ? rail.current : outlineOverlay ? outlinePanel.current : null;
@@ -671,6 +669,41 @@ export default function NotebookPage({ api }) {
       else next.add(id);
       return next;
     });
+  const focusRow = (id) => {
+    requestAnimationFrame(() => {
+      const row = tree.current?.querySelector(`[data-node-id="${id}"]`);
+      if (!row?.getClientRects().length) return;
+      row.focus({ preventScroll: true });
+      row.scrollIntoView({ block: 'nearest' });
+    });
+  };
+  const revealNode = (id, lookup = byId) => {
+    const branch = nodePath(lookup.get(id), lookup).filter((entry) => entry.kind === 'folder');
+    setExpanded((previous) => new Set([...previous, ...branch.map((entry) => entry.id)]));
+    setQuery('');
+    setTrash(false);
+    setSelectedId(id);
+    focusRow(id);
+  };
+  const toggleAll = () => {
+    if (hasExpandedFolder) {
+      setExpanded(new Set());
+      if (selected?.parentId) setSelectedId(nodePath(selected, byId)[0].id);
+    } else {
+      setExpanded(new Set(folders.map(({ node }) => node.id)));
+    }
+  };
+  const showMenu = (source, node) => {
+    if (busy || creating.current) return;
+    setDialog(null);
+    if (node && source !== 'header') setSelectedId(node.id);
+    setMenu({ source, id: node?.id });
+  };
+  const closeMenu = () => {
+    if (busy) return;
+    setMenu(null);
+    setDialog((value) => (value?.type === 'rename' ? null : value));
+  };
   const parentForNew =
     selected && !selected.trashedAt ? (selected.kind === 'folder' ? selected.id : selected.parentId) : null;
   const mutate = async (operation) => {
@@ -715,7 +748,6 @@ export default function NotebookPage({ api }) {
           current.current = latest;
           await loadEditor(latest);
           setError('');
-          setExternalUpdate(null);
           setDialog(null);
         },
       );
@@ -747,9 +779,7 @@ export default function NotebookPage({ api }) {
       if (!(await flush()) || lifecycle.closing) return;
       const result = await mutate(createDefaultNote({ id, now, parentId }));
       if (!result || lifecycle.closing) return;
-      if (parentId) setExpanded((previous) => new Set([...previous, parentId]));
-      setTrash(false);
-      setQuery('');
+      revealNode(id, nodesById(result));
       await openNote(id);
     } finally {
       creating.current = false;
@@ -805,11 +835,13 @@ export default function NotebookPage({ api }) {
         setActiveId(null);
         loadedNote.current = null;
         setOutline(emptyOutline());
+        api.page?.setSearch?.({});
       }
     } else if (value.type === 'move') {
       const now = new Date().toISOString();
-      if (!(await mutate((latest) => moveNode(latest, value.node.id, value.parentId || null, now)))) return;
-      if (value.parentId) setExpanded((previous) => new Set([...previous, value.parentId]));
+      const result = await mutate((latest) => moveNode(latest, value.node.id, value.parentId || null, now));
+      if (!result) return;
+      revealNode(value.node.id, nodesById(result));
     } else if (value.type === 'rename') {
       const now = new Date().toISOString();
       if (!(await mutate((latest) => renameNode(latest, value.node.id, value.name, now)))) return;
@@ -822,11 +854,7 @@ export default function NotebookPage({ api }) {
           : createNode(latest, { id, now, kind: value.kind, title: value.name, parentId: value.parentId }),
       );
       if (!result || lifecycle.closing) return;
-      if (value.parentId) setExpanded((previous) => new Set([...previous, value.parentId]));
-      setSelectedId(id);
-      setExpanded((previous) => new Set([...previous, id]));
-      setTrash(false);
-      setQuery('');
+      revealNode(id, nodesById(result));
     }
     setDialog(null);
     setMenu(null);
@@ -879,21 +907,19 @@ export default function NotebookPage({ api }) {
     if (lifecycle.closing || busy || creating.current) return;
     setSelectedId(node.id);
     if (trash) return;
-    if (node.kind === 'folder') toggleFolder(node.id);
-    else void openNote(node.id);
+    if (searchTerm) revealNode(node.id);
+    if (node.kind === 'note') void openNote(node.id);
+    else if (!searchTerm) toggleFolder(node.id);
   };
   const navigateTree = (event) => {
     if (event.defaultPrevented || !event.target.matches('[role="treeitem"]')) return;
     if (!['ArrowDown', 'ArrowUp', 'Home', 'End', 'ArrowRight', 'ArrowLeft', 'Enter', 'F2'].includes(event.key)) return;
     if (busy || creating.current) return;
-    const position = visible.findIndex(({ node }) => node.id === selectedId);
-    const row =
-      visible[position] ??
-      visible.find(({ node }) => node.id === event.target.closest('[data-node-id]')?.dataset.nodeId);
+    const position = visible.findIndex(({ node }) => node.id === event.target.dataset.nodeId);
+    const row = visible[position];
     if (event.key === 'F2' && row && !trash) {
       event.preventDefault();
-      setNewMenu(false);
-      setMenu({ id: row.node.id, source: 'row' });
+      showMenu('row', row.node);
       edit(row.node);
       return;
     }
@@ -907,49 +933,36 @@ export default function NotebookPage({ api }) {
     if (event.key === 'ArrowUp') target = visible[Math.max(0, position - 1)];
     if (event.key === 'Home') target = visible[0];
     if (event.key === 'End') target = visible.at(-1);
-    if (event.key === 'ArrowRight' && row?.node.kind === 'folder') {
+    if (event.key === 'ArrowRight' && row?.hasChildren && !searchTerm && !trash) {
       if (!expanded.has(row.node.id)) toggleFolder(row.node.id);
       else target = visible[position + 1];
     }
-    if (event.key === 'ArrowLeft' && row) {
+    if (event.key === 'ArrowLeft' && row && !searchTerm && !trash) {
       if (expanded.has(row.node.id)) toggleFolder(row.node.id);
       else target = visible.find(({ node }) => node.id === row.node.parentId);
     }
     if (target) {
       setSelectedId(target.node.id);
-      requestAnimationFrame(() => tree.current?.querySelector(`[data-node-id="${target.node.id}"]`)?.focus());
+      focusRow(target.node.id);
     }
     event.preventDefault();
   };
 
-  const path = [];
-  let ancestor = active;
-  while (ancestor) {
-    path.unshift(ancestor.title);
-    ancestor = index.nodes.find((node) => node.id === ancestor.parentId);
-  }
-  const folders = directory.map(({ node }) => node).filter((node) => node.kind === 'folder');
-  const folderPath = (folder) => {
-    const names = [folder.title];
-    let parent = index.nodes.find((node) => node.id === folder.parentId);
-    while (parent) {
-      names.unshift(parent.title);
-      parent = index.nodes.find((node) => node.id === parent.parentId);
-    }
-    return names.join(' / ');
-  };
+  const path = useMemo(() => nodePath(active, byId).map((node) => node.title), [active, byId]);
   const forbidden = new Set(dialog?.type === 'move' ? [dialog.node.id] : []);
   if (dialog?.type === 'move') {
     // The full directory is in parent-first order; no repeated traversal on dragover renders.
-    for (const folder of folders) if (forbidden.has(folder.parentId)) forbidden.add(folder.id);
+    for (const { node } of folders) if (forbidden.has(node.parentId)) forbidden.add(node.id);
   }
   const folderOptions =
     dialog?.type === 'move'
       ? folders
-          .filter((folder) => !forbidden.has(folder.id))
-          .map((folder) => ({
-            value: folder.id,
-            label: folderPath(folder),
+          .filter(({ node }) => !forbidden.has(node.id))
+          .map(({ node }) => ({
+            value: node.id,
+            label: nodePath(node, byId)
+              .map((entry) => entry.title)
+              .join(' / '),
           }))
       : [];
   const repeatedPaths = new Set(
@@ -960,6 +973,35 @@ export default function NotebookPage({ api }) {
   for (const option of folderOptions) {
     if (repeatedPaths.has(option.label)) option.label += `（${option.value}）`;
   }
+
+  const outlineLinks =
+    active && !focused && (outlineVisible || !layout.overlay)
+      ? outline.items.map((item) => {
+          const currentHeading = item.key === outline.activeKey;
+          return (
+            <Button
+              key={item.key}
+              variant="ghost"
+              fullWidth={outlineVisible}
+              className={
+                outlineVisible
+                  ? `mica-arco-row notebook-outline-entry ${currentHeading ? 'is-active' : ''}`
+                  : 'notebook-outline-mark'
+              }
+              style={{ '--heading-level': item.level }}
+              aria-current={currentHeading ? 'location' : undefined}
+              title={item.text || '未命名标题'}
+              disabled={busy}
+              onClick={() => {
+                jump({ heading: item.key });
+                if (outlineOverlay) setOutlineOpen(false);
+              }}
+            >
+              {outlineVisible && <span>{item.text || '未命名标题'}</span>}
+            </Button>
+          );
+        })
+      : null;
 
   const localForm =
     dialog?.type === 'rename' ? (
@@ -1010,10 +1052,10 @@ export default function NotebookPage({ api }) {
   return (
     <div ref={pageRoot} className={`notebook-page ${railOpen ? 'is-rail-open' : ''} ${focused ? 'is-focused' : ''}`}>
       <div className="notebook-layout">
-        <aside ref={rail} className="notebook-rail" aria-label="笔记目录" inert={outlineOverlay || chatOverlay}>
+        <aside ref={rail} className="notebook-rail" aria-label="笔记目录" inert={outlineOverlay}>
           <div className="notebook-rail-title">
             <span className="notebook-book-icon">
-              <BookOpen size={15} strokeWidth={1.6} />
+              <BookMarked size={22} strokeWidth={1.6} />
             </span>
             <strong>我的笔记</strong>
             <Button
@@ -1024,7 +1066,6 @@ export default function NotebookPage({ api }) {
               onClick={() => setRailOpen(false)}
             />
           </div>
-          {/* 搜索与新建共用一栏：左边找笔记，右边就地新建，不再各占一行。 */}
           <div className="notebook-rail-tools">
             <div className="notebook-search">
               <Input
@@ -1032,78 +1073,42 @@ export default function NotebookPage({ api }) {
                 onChange={setQuery}
                 placeholder="搜索笔记"
                 aria-label="搜索笔记"
-                prefix={<Search size={14} strokeWidth={1.7} />}
+                onKeyDown={(event) => {
+                  if (event.nativeEvent.isComposing) return;
+                  if (event.key === 'Escape' && query) {
+                    event.preventDefault();
+                    setQuery('');
+                  } else if (event.key === 'ArrowDown' && visible.length) {
+                    event.preventDefault();
+                    setSelectedId(visible[0].node.id);
+                    focusRow(visible[0].node.id);
+                  } else if (event.key === 'Enter' && searchTerm && visible.length) {
+                    event.preventDefault();
+                    selectRow(visible[0].node);
+                  }
+                }}
+                prefix={<Search size={15} strokeWidth={1.7} />}
                 allowClear
               />
             </div>
-            <Button
-              variant="ghost"
-              className="notebook-rail-add"
-              icon={<FolderPlus size={16} />}
-              iconOnly
-              title={
-                parentForNew
-                  ? `新建文件夹：${index.nodes.find((node) => node.id === parentForNew)?.title}`
-                  : '新建文件夹：根目录'
-              }
-              aria-label="新建文件夹"
+            <CreateMenu
+              toolbar
+              label="新建"
+              title={`在「${byId.get(parentForNew)?.title || '根目录'}」中新建`}
+              open={menu?.source === 'new'}
+              onOpen={() => showMenu('new')}
+              onClose={closeMenu}
               disabled={!loaded || busy || trash}
-              onClick={() => {
-                setNewMenu(false);
+              onCreate={(kind) => {
                 setMenu(null);
-                void create('folder');
+                void create(kind);
               }}
             />
-            <PopoverMenu
-              open={newMenu}
-              onOpen={() => {
-                if (busy || creating.current) return;
-                setMenu(null);
-                setDialog(null);
-                setNewMenu(true);
-              }}
-              onClose={() => setNewMenu(false)}
-              label="新建"
-              position="bl"
-              trigger={
-                <span className="notebook-rail-add-anchor">
-                  <Button
-                    variant="ghost"
-                    className="notebook-rail-add"
-                    icon={<Plus size={16} />}
-                    title="新建笔记或文件夹"
-                    aria-label="新建"
-                    pressed={newMenu}
-                    disabled={!loaded || busy || trash}
-                    onClick={() => {}}
-                  />
-                </span>
-              }
-            >
-              <MenuRow
-                action="note"
-                label="新建笔记"
-                Icon={FilePlus2}
-                onSelect={(kind) => {
-                  setNewMenu(false);
-                  create(kind);
-                }}
-              />
-              <MenuRow
-                action="folder"
-                label="新建文件夹"
-                Icon={FolderPlus}
-                onSelect={(kind) => {
-                  setNewMenu(false);
-                  create(kind);
-                }}
-              />
-            </PopoverMenu>
           </div>
           {trash ? (
             <div className="notebook-tree-heading">
               <span>
-                最近删除<small>{index.nodes.filter((node) => node.trashedAt).length}</small>
+                <Trash2 size={15} /> 最近删除 <small>{visible.length}</small>
               </span>
             </div>
           ) : (
@@ -1112,10 +1117,14 @@ export default function NotebookPage({ api }) {
                 variant="ghost"
                 size="compact"
                 className={`notebook-root-target mica-arco-row ${dropTarget?.targetId === null ? 'is-drop-inside' : ''}`}
-                title="选择根目录；拖到这里移至根目录"
-                pressed={selectedId === null}
+                icon={<ListTree size={16} />}
+                title="选择根目录，拖到这里可移至顶层"
+                pressed={selectedId === null && !searchTerm}
                 disabled={!loaded || busy}
-                onClick={() => setSelectedId(null)}
+                onClick={() => {
+                  setQuery('');
+                  setSelectedId(null);
+                }}
                 onDragOver={(event) => hoverDrop(event, { targetId: null, position: 'inside' })}
                 onDragLeave={(event) => {
                   if (!event.currentTarget.contains(event.relatedTarget)) {
@@ -1125,8 +1134,24 @@ export default function NotebookPage({ api }) {
                 }}
                 onDrop={(event) => void finishDrop(event, { targetId: null, position: 'inside' })}
               >
-                根目录
+                {searchTerm ? `搜索结果（${visible.length}）` : '目录'}
               </Button>
+              <div className="notebook-tree-tools">
+                <Button
+                  variant="ghost"
+                  icon={<LocateFixed size={16} />}
+                  title="定位当前笔记"
+                  disabled={!active || busy}
+                  onClick={() => revealNode(active.id)}
+                />
+                <Button
+                  variant="ghost"
+                  icon={hasExpandedFolder ? <ChevronsDownUp size={16} /> : <ChevronsUpDown size={16} />}
+                  title={hasExpandedFolder ? '折叠全部文件夹' : '展开全部文件夹'}
+                  disabled={busy || !!searchTerm || !folders.some(({ hasChildren }) => hasChildren)}
+                  onClick={toggleAll}
+                />
+              </div>
               {draggingId && <span className="notebook-drag-hint">行间排序 · 拖入文件夹归档</span>}
             </div>
           )}
@@ -1152,12 +1177,13 @@ export default function NotebookPage({ api }) {
                 <i />
               </div>
             ) : visible.length ? (
-              visible.map(({ node, depth }) => (
+              visible.map(({ node, depth, hasChildren }) => (
                 <div
                   className={`notebook-tree-entry ${node.id === selectedId ? 'is-selected' : ''} ${node.id === activeId ? 'is-active' : ''} ${draggingId === node.id ? 'is-dragging' : ''} ${dropMarker?.targetId === node.id ? `is-drop-${dropMarker.position}` : ''}`}
                   key={node.id}
+                  data-kind={node.kind}
                   style={{
-                    '--depth': depth,
+                    '--depth': searchTerm ? 0 : depth,
                     '--drop-depth': dropMarker?.targetId === node.id ? (dropMarker.depth ?? depth) : depth,
                   }}
                   onDragOver={(event) => hoverDrop(event, rowDrop(event, node))}
@@ -1167,13 +1193,19 @@ export default function NotebookPage({ api }) {
                     type="button"
                     role="treeitem"
                     aria-selected={node.id === selectedId}
-                    aria-expanded={node.kind === 'folder' ? expanded.has(node.id) : undefined}
-                    aria-level={depth + 1}
+                    aria-current={node.id === activeId ? 'page' : undefined}
+                    aria-expanded={hasChildren && !searchTerm ? trash || expanded.has(node.id) : undefined}
+                    aria-level={searchTerm ? 1 : depth + 1}
                     data-node-id={node.id}
-                    tabIndex={node.id === selectedId || (!selectedId && visible[0]?.node.id === node.id) ? 0 : -1}
+                    tabIndex={node.id === tabStop ? 0 : -1}
                     title={node.title}
                     className="notebook-tree-row"
                     onClick={() => selectRow(node)}
+                    onContextMenu={(event) => {
+                      if (trash) return;
+                      event.preventDefault();
+                      showMenu('row', node);
+                    }}
                     draggable={canArrange}
                     onDragStart={(event) => {
                       if (!canArrange || creating.current || lifecycle.closing || lifecycle.switching) {
@@ -1185,30 +1217,28 @@ export default function NotebookPage({ api }) {
                       dragSource.current = node.id;
                       setDraggingId(node.id);
                       setSelectedId(node.id);
-                      setNewMenu(false);
                       setMenu(null);
                     }}
                     onDragEnd={clearDrag}
                   >
-                    <span className="notebook-tree-chevron">
-                      {node.kind === 'folder' ? (
-                        expanded.has(node.id) ? (
-                          <ChevronDown size={12} />
+                    <span className="notebook-tree-chevron" aria-hidden="true">
+                      {node.kind === 'folder' &&
+                        (trash || (!searchTerm && expanded.has(node.id)) ? (
+                          <ChevronDown size={14} />
                         ) : (
-                          <ChevronRight size={12} />
-                        )
-                      ) : null}
+                          <ChevronRight size={14} />
+                        ))}
                     </span>
-                    {node.kind === 'folder' ? (
-                      expanded.has(node.id) ? (
-                        <FolderOpen size={15} />
-                      ) : (
-                        <Folder size={15} />
-                      )
-                    ) : (
-                      <FileText size={15} />
-                    )}
-                    <span>{node.title}</span>
+                    <span className="notebook-tree-title">
+                      <span>{node.title}</span>
+                      {searchTerm && (
+                        <small>
+                          {nodePath(byId.get(node.parentId), byId)
+                            .map((entry) => entry.title)
+                            .join(' / ') || '我的笔记'}
+                        </small>
+                      )}
+                    </span>
                   </button>
                   {trash ? (
                     <Button
@@ -1217,77 +1247,56 @@ export default function NotebookPage({ api }) {
                       title="恢复"
                       aria-label={`恢复：${node.title}`}
                       className="notebook-row-actions"
+                      tabIndex={node.id === tabStop ? 0 : -1}
                       onClick={() => {
                         let root = node;
-                        while (index.nodes.find((item) => item.id === root.parentId)?.trashedAt)
-                          root = index.nodes.find((item) => item.id === root.parentId);
+                        while (byId.get(root.parentId)?.trashedAt) root = byId.get(root.parentId);
                         const now = new Date().toISOString();
                         void mutate((latest) => restoreNode(latest, root.id, now));
                       }}
                     />
                   ) : (
-                    <NoteMenu
-                      node={node}
-                      open={menu?.id === node.id && menu.source === 'row'}
-                      onOpen={() => {
-                        if (busy || creating.current) return;
-                        setNewMenu(false);
-                        setDialog(null);
-                        setSelectedId(node.id);
-                        setMenu({ id: node.id, source: 'row' });
-                      }}
-                      onClose={() => {
-                        if (!busy) {
-                          setMenu(null);
-                          setDialog(null);
+                    <span className="notebook-row-actions">
+                      {node.kind === 'folder' && (
+                        <CreateMenu
+                          label={`在「${node.title}」中新建`}
+                          tabIndex={node.id === tabStop ? 0 : -1}
+                          open={menu?.id === node.id && menu.source === 'create'}
+                          onOpen={() => showMenu('create', node)}
+                          onClose={closeMenu}
+                          disabled={busy}
+                          onCreate={(kind) => runAction(node, kind)}
+                        />
+                      )}
+                      <NoteMenu
+                        node={node}
+                        open={menu?.id === node.id && menu.source === 'row'}
+                        onOpen={() => showMenu('row', node)}
+                        onClose={closeMenu}
+                        onAction={(action) => runAction(node, action)}
+                        form={menu?.id === node.id && menu.source === 'row' ? localForm : null}
+                        trigger={
+                          <span className="notebook-menu-anchor">
+                            <Button
+                              variant="ghost"
+                              icon={<MoreHorizontal size={15} />}
+                              title={`更多操作：${node.title}`}
+                              tabIndex={node.id === tabStop ? 0 : -1}
+                              aria-haspopup="menu"
+                              aria-expanded={menu?.id === node.id && menu.source === 'row'}
+                              pressed={menu?.id === node.id && menu.source === 'row'}
+                              disabled={busy}
+                            />
+                          </span>
                         }
-                      }}
-                      onAction={(action) => runAction(node, action)}
-                      extraRows={
-                        node.kind === 'folder' && (
-                          <>
-                            <MenuRow
-                              action="note"
-                              label="新建笔记"
-                              Icon={FilePlus2}
-                              disabled={busy}
-                              onSelect={(action) => runAction(node, action)}
-                            />
-                            <MenuRow
-                              action="folder"
-                              label="新建文件夹"
-                              Icon={FolderPlus}
-                              disabled={busy}
-                              onSelect={(action) => runAction(node, action)}
-                            />
-                          </>
-                        )
-                      }
-                      form={menu?.id === node.id && menu.source === 'row' ? localForm : null}
-                      trigger={
-                        <span className="notebook-row-actions">
-                          <Button
-                            variant="ghost"
-                            icon={<MoreHorizontal size={14} />}
-                            title="更多操作"
-                            aria-label={`更多操作：${node.title}`}
-                            pressed={menu?.id === node.id && menu.source === 'row'}
-                            onClick={() => setSelectedId(node.id)}
-                          />
-                        </span>
-                      }
-                    />
+                      />
+                    </span>
                   )}
                 </div>
               ))
             ) : (
               <div className="notebook-tree-empty">
-                {query ? '没有匹配的笔记' : trash ? '还没有删除的内容' : '还没有笔记'}
-                {!query && !trash && (
-                  <Button variant="ghost" onClick={() => create('note')}>
-                    创建第一篇笔记
-                  </Button>
-                )}
+                {searchTerm ? '没有匹配的笔记' : trash ? '还没有删除的内容' : '还没有笔记'}
               </div>
             )}
           </div>
@@ -1331,19 +1340,6 @@ export default function NotebookPage({ api }) {
           />
         )}
         <main className="notebook-main" inert={railOverlay}>
-          {externalUpdate === current.current?.id && (
-            <div className="notebook-error" role="status">
-              <span>AI 或其他窗口已更新这篇笔记。编辑器内容未被替换；载入前会备份当前草稿。</span>
-              <Button
-                size="compact"
-                variant="ghost"
-                disabled={busy}
-                onClick={() => setDialog({ type: 'reload', title: '备份草稿并加载最新版' })}
-              >
-                查看更新
-              </Button>
-            </div>
-          )}
           {error && (
             <div className="notebook-error">
               <Alert message={error} />
@@ -1386,30 +1382,29 @@ export default function NotebookPage({ api }) {
               </div>
             </div>
           )}
-          <div className={`notebook-document-body ${chatOpen && !focused ? 'has-chat' : ''}`}>
-            <div className={`notebook-editor-area ${active ? 'has-note' : ''}`} inert={outlineOverlay || chatOverlay}>
-              {/* 顶栏与编辑器工具栏是同一条操作栏：只有目录收起时才在左边出现目录开关与位置，
-                  右边常驻保存状态与文档操作；工具栏按这两段的实测宽度让位。 */}
+          <div className="notebook-document-body">
+            <div className={`notebook-editor-area ${active ? 'has-note' : ''}`} inert={outlineOverlay}>
               <div className="notebook-bar">
-                {(focused || !railOpen) && (
-                  <div className="notebook-bar-lead" ref={barLead}>
+                <div className="notebook-bar-lead" ref={barLead}>
+                  {(focused || !railOpen) && (
                     <Button
                       variant="ghost"
-                      icon={<Menu size={16} />}
+                      icon={<PanelLeftOpen size={16} />}
                       title={focused ? '显示目录并退出专注' : '展开目录'}
-                      aria-label={focused ? '显示目录并退出专注' : '展开目录'}
                       onClick={() => {
                         setFocused(false);
+                        setOutlineOpen(false);
                         setRailOpen(true);
                       }}
                     />
-                    {active && (
-                      <span className="notebook-breadcrumb" title={path.join(' / ')}>
-                        {path.slice(0, -1).join(' / ') || '我的笔记'}
-                      </span>
-                    )}
-                  </div>
-                )}
+                  )}
+                  {active && (
+                    <span className="notebook-breadcrumb" title={path.join(' / ')}>
+                      {(!railOpen || focused) && path.length > 1 && <span>{path.at(-2)} /</span>}
+                      <strong>{active.title}</strong>
+                    </span>
+                  )}
+                </div>
                 <div className="notebook-bar-actions" ref={barActions}>
                   {active && (
                     <>
@@ -1439,21 +1434,21 @@ export default function NotebookPage({ api }) {
                         pressed={focused}
                         onClick={() => setFocused(!focused)}
                       />
+                      {!focused && (
+                        <Button
+                          variant="ghost"
+                          icon={<PanelRightOpen size={16} />}
+                          title={outlineOpen ? '收起大纲' : '展开大纲'}
+                          aria-expanded={outlineOpen}
+                          pressed={outlineOpen}
+                          onClick={() => setOutlineOpen(!outlineOpen)}
+                        />
+                      )}
                       <NoteMenu
                         node={active}
                         open={menu?.id === active.id && menu.source === 'header'}
-                        onOpen={() => {
-                          if (busy || creating.current) return;
-                          setNewMenu(false);
-                          setDialog(null);
-                          setMenu({ id: active.id, source: 'header' });
-                        }}
-                        onClose={() => {
-                          if (!busy) {
-                            setMenu(null);
-                            setDialog(null);
-                          }
-                        }}
+                        onOpen={() => showMenu('header', active)}
+                        onClose={closeMenu}
                         onAction={(action) => runAction(active, action)}
                         form={menu?.id === active.id && menu.source === 'header' ? localForm : null}
                         position="bl"
@@ -1492,12 +1487,6 @@ export default function NotebookPage({ api }) {
                       />
                     </>
                   )}
-                  <NotebookChatButton
-                    open={chatOpen}
-                    focused={focused}
-                    onOpenChange={setChatOpen}
-                    onFocusedChange={setFocused}
-                  />
                 </div>
               </div>
               <iframe
@@ -1508,19 +1497,17 @@ export default function NotebookPage({ api }) {
                 src={`/editor/index.html#${token}`}
                 sandbox="allow-scripts allow-downloads allow-popups"
                 allow="clipboard-read; clipboard-write; fullscreen"
-                allowFullScreen
               />
               {!active ? (
                 <div className="notebook-welcome">
                   <span className="notebook-welcome-icon">
                     <BookOpen size={31} strokeWidth={1.5} />
                   </span>
-                  <h1>留住每一个想法</h1>
-                  <p>
-                    一处安静的空间，记录文字、表格和灵感。
-                    <br />
-                    所有笔记自动保存到本机。
-                  </p>
+                  <h1>
+                    {index.nodes.some((node) => node.kind === 'note' && !node.trashedAt)
+                      ? '选择一篇笔记'
+                      : '还没有笔记'}
+                  </h1>
                   <Button
                     variant="accent"
                     icon={<Plus size={16} />}
@@ -1529,11 +1516,6 @@ export default function NotebookPage({ api }) {
                   >
                     新建笔记
                   </Button>
-                  <div className="notebook-feature-hints">
-                    <span>丰富排版</span>
-                    <span>灵活表格</span>
-                    <span>图片与公式</span>
-                  </div>
                 </div>
               ) : frameState === 'loading' ? (
                 <div className="notebook-editor-skeleton">
@@ -1563,62 +1545,44 @@ export default function NotebookPage({ api }) {
                 </div>
               ) : null}
             </div>
-            <NotebookChatDock
-              api={api}
-              open={chatOpen && !focused}
-              note={active || null}
-              reference={
-                active
-                  ? {
-                      label: '引用当前笔记',
-                      getText: () =>
-                        prepareNotebookReference({
-                          note: active,
-                          currentId: () =>
-                            !lifecycle.closing &&
-                            !lifecycle.switching &&
-                            ready.current &&
-                            loadedNote.current === current.current?.id
-                              ? current.current?.id
-                              : null,
-                          save: () => flush(),
-                        }),
-                    }
-                  : null
-              }
-              onCheckUpdates={() => void checkUpdates.current()}
-              onClose={() => setChatOpen(false)}
-            />
-            {active && !focused && !chatOpen && (
+            {outlineVisible ? (
               <>
+                {outlineOverlay && (
+                  <button
+                    type="button"
+                    className="notebook-outline-mask"
+                    aria-label="关闭大纲"
+                    tabIndex={-1}
+                    onClick={() => setOutlineOpen(false)}
+                  />
+                )}
                 <aside ref={outlinePanel} className="notebook-outline" aria-label="文档大纲">
                   <header>
-                    <strong>大纲</strong>
+                    <strong>文档大纲</strong>
+                    <Button
+                      variant="ghost"
+                      icon={<PanelRightClose size={16} />}
+                      title="关闭文档大纲"
+                      onClick={() => setOutlineOpen(false)}
+                    />
                   </header>
                   <nav className="notebook-outline-list" aria-label="当前笔记的标题">
-                    {!outline.items.length && (
+                    {outline.items.length ? (
+                      outlineLinks
+                    ) : (
                       <p className="notebook-outline-empty">
-                        {frameState !== 'ready' ? '正在读取文档结构…' : '添加标题后，文档结构会显示在这里。'}
+                        {frameState === 'ready' ? '这篇笔记还没有标题' : '正在读取标题…'}
                       </p>
                     )}
-                    {outline.items.map((item) => (
-                      <Button
-                        key={item.key}
-                        variant="ghost"
-                        fullWidth
-                        className={`mica-arco-row notebook-outline-entry ${item.key === outline.activeKey ? 'is-active' : ''}`}
-                        style={{ '--heading-level': item.level }}
-                        aria-current={item.key === outline.activeKey ? 'location' : undefined}
-                        title={item.text || '未命名标题'}
-                        disabled={busy}
-                        onClick={() => jump({ heading: item.key })}
-                      >
-                        <span>{item.text.replace(/^\d+\s*[·.、]\s*/, '') || '未命名标题'}</span>
-                      </Button>
-                    ))}
                   </nav>
                 </aside>
               </>
+            ) : (
+              outlineLinks?.length > 0 && (
+                <nav className="notebook-outline-marks" aria-label="文档大纲刻度">
+                  {outlineLinks}
+                </nav>
+              )
             )}
           </div>
         </main>
@@ -1626,10 +1590,7 @@ export default function NotebookPage({ api }) {
       {mcpOpen && (
         <Modal title="Notebook MCP" onClose={() => setMcpOpen(false)} portal>
           <div className="notebook-mcp">
-            <p>
-              AI 客户端可以按这个地址读写这台机器上的笔记本：先读目录，再按 node_id 读正文， 写回时带上版本号。它只在
-              Mica 运行时里可用，应用关掉就连不上。
-            </p>
+            <p>复制接口地址或配置，即可从 MCP 客户端访问本机笔记。连接时请保持 Mica 应用运行。</p>
             <div className="notebook-mcp-field">
               <span>接口地址</span>
               <div className="notebook-mcp-value">
@@ -1649,8 +1610,7 @@ export default function NotebookPage({ api }) {
               </div>
             </div>
             <p className="notebook-mcp-hint">
-              桌面端与 Web 应用会自动注入这份配置，不用手填；TUI 与 <code>mica exec</code> 里没有自动注入，需要把它加进
-              MCP 配置。
+              桌面端与 Web 应用的「笔记」角色已配置此接口。TUI 和 <code>mica exec</code> 可使用上面的客户端配置。
             </p>
           </div>
         </Modal>

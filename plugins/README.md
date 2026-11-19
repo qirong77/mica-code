@@ -25,9 +25,9 @@
 
 随包 `notebook` 在顶栏右侧（与 Schedule 同一排）提供 Notebook 整页：目录树、本地富文本与表格编辑，和会话笔记相互独立；通过应用同端口的 `/plugin/notebook/mcp` 暴露 `notebook_read` / `notebook_write`，让 Mica 或其它 MCP 客户端按 id 查找、读取、创建、整理、软删除、恢复和编辑正文。桌面/Web 宿主只在选中插件角色 `笔记` 的会话里连接它，不再提供 Notebook skill 或直连工具入口。正文写入沿用页面的版本比较，不直接改插件 JSON。
 编辑器是共享包 `packages/mica-editor`（笔记用其富文本模式，配置页 Role / Skill 用同一份运行时的 Markdown 模式），第三方依赖固定版本从 CDN 运行时加载；数据在 `plugin-data/notebook/data.json` 与 `documents/<id>.json`。首次打开需要 CDN 网络。
-目录支持多级文件夹、同级拖动排序和跨目录归档，不增加上移/下移按钮；排序沿用索引数组顺序与 CAS 写入，不改变既有数据格式。具体能力、限制与开发方式见 [Notebook](./notebook/README.md)。
+目录按标题搜索并列出所属文件夹路径，选中结果会展开沿途文件夹。目录标题旁可定位当前笔记、折叠或展开所有文件夹。同级拖动排序和跨目录移动沿用索引数组顺序与 CAS 写入。具体能力、限制与开发方式见 [Notebook](./notebook/README.md)。
 
-Notebook 的右侧对话复用通用 `api.ui.Conversation` 与宿主完整 `ChatView`，支持模型/角色/推理切换、工具过程、交互确认和历史恢复；每篇笔记保留自己的讨论，另有跨笔记对话。关闭或刷新不再新建会话；只有显式引用才先保存并将精确笔记 id 追加到草稿，不自动发送正文。AI 写回后提示查看更新，保留编辑器草稿，确认后备份并加载最新版。Notebook 的功能说明与 MCP 使用约束由插件角色 `笔记` 注入；默认角色不会连接 Notebook MCP，也不会在 `/` 快捷列表里占一个 MCP 条目，选 `笔记` 后当前会话才接入。Notebook MCP 的 `set_markdown` / `append_markdown` / `prepend_markdown` 把 Markdown 确定性转换为原生富文本，保留原有 CAS 与复杂文档保护边界，返回大纲、结构统计与降级警告。
+插件角色 `笔记` 提供独立 MCP 的使用说明。`set_markdown`、`append_markdown` 和 `prepend_markdown` 将 Markdown 转为原生富文本，按正文版本校验写入，并返回大纲、结构统计与降级警告。
 
 ## 目录结构
 
@@ -682,8 +682,8 @@ export function summary(api) { return api.currentHost() } // 可选：入口行�
 
 **整页同时是一个真地址**：默认 `/plugins/pages/<插件 id>`（`mica-web-shared` 的 `pluginPagePath`）
 由运行时提供同一份产物，渲染层按 pathname 直接画这一页——所以应用里点开、浏览器里打开、
-手机上（口令对了之后）打开都是同一个页面、同一份插件数据。宿主在窗口顶部那条拖动条上显示
-这个地址并支持复制；页面内换内容（例如笔记换了一篇）用 `api.page.setSearch({ note })` 同步，
+手机上（口令对了之后）打开都是同一个页面、同一份插件数据。桌面端在返回按钮和页面标题所在的顶栏显示
+这个地址，旁边提供复制按钮。页面内切换内容（例如笔记换了一篇）用 `api.page.setSearch({ note })` 同步，
 刷新、收藏、发给别人都会回到同一处。
 
 可选的 `desktop.page.route` 注册本插件命名空间内的单段名字，例如

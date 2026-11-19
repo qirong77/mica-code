@@ -43,6 +43,7 @@ export function PluginPage({
   standalone = false
 }) {
   const isMobile = useIsMobile()
+  const hasMacWindowControls = window.micaClient && navigator.platform.startsWith('Mac')
   const beforeClose = useMemo(() => new Set(), [entry.id])
   const closing = useRef(false)
   // 当前地址的查询参数：初值来自浏览器地址（深链），之后由插件通过 `api.page.setSearch` 改写。
@@ -157,29 +158,16 @@ export function PluginPage({
   const Page = entry.module.Page ?? entry.module.default
 
   return (
-    <div className="fixed inset-0 z-[9500] flex flex-col bg-canvas">
-      {/* 桌面端留一条拖动条：整页盖住窗口后没有别处可以拖（macOS 的交通灯由系统画在
-          页面之上，不受这层影响）。地址也放在这条上——应用窗口里没有别的地址栏。 */}
-      {!isMobile && (
-        <div className="drag-region flex h-8 shrink-0 items-center justify-center border-b border-line bg-panel px-2">
-          <div className="no-drag flex h-5 max-w-[min(560px,72vw)] items-center gap-1 rounded-full border border-line bg-canvas px-2">
-            <span
-              className="min-w-0 select-text truncate font-mono text-[11px] leading-none text-fg-muted"
-              title={address}
-            >
-              {address}
-            </span>
-            <CopyAddress address={address} />
-          </div>
-        </div>
-      )}
-      <div className="no-drag flex min-h-0 flex-1 flex-col">
-        <header className="flex h-10 shrink-0 items-center gap-2 border-b border-line bg-panel px-2">
+    <div className="no-drag fixed inset-0 z-[9500] flex flex-col bg-canvas">
+      <header className="drag-region grid h-10 shrink-0 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-x-2 border-b border-line bg-panel px-2">
+        <div
+          className={`flex min-w-0 items-center gap-2 ${isMobile ? 'col-span-3' : ''} ${hasMacWindowControls ? 'pl-20' : ''}`}
+        >
           <ArcoAction
             type="button"
             title={standalone ? '打开 Mica' : '返回对话'}
             aria-label={standalone ? '打开 Mica' : '返回对话'}
-            className="flex h-6 shrink-0 items-center gap-1 px-1.5 transition-colors "
+            className="no-drag flex h-6 shrink-0 items-center gap-1 px-1.5 transition-colors"
             onClick={close}
           >
             <IconArrowLeft size={13} />
@@ -188,21 +176,30 @@ export function PluginPage({
           <span className="min-w-0 truncate text-xs font-medium text-fg-strong">
             {entry.page.title || entry.label}
           </span>
-        </header>
-        {/* 插件页面与设置页共用同一套控件（`@mica-config-ui/web`），那些样式限定在
-            `.mica-config-ui` 作用域内，所以整页内容外面必须套这一层。`is-fill` 让它
-            占满剩下的高度，时间轴这类要整块空间的界面才铺得开。 */}
-        <div className="mica-config-ui is-embed is-fill min-h-0 flex-1 overflow-hidden">
-          <Suspense
-            fallback={
-              <div className="grid h-full place-items-center text-xs text-fg-muted">正在加载…</div>
-            }
-          >
-            <PluginSurface api={api} surface="page" className="h-full min-h-0">
-              <Page api={api} onClose={close} />
-            </PluginSurface>
-          </Suspense>
         </div>
+        {!isMobile && (
+          <div className="no-drag flex h-5 min-w-0 max-w-[min(560px,45vw)] items-center gap-1 rounded-full border border-line bg-canvas px-2">
+            <span
+              className="min-w-0 select-text truncate font-mono text-[11px] leading-none text-fg-muted"
+              title={address}
+            >
+              {address}
+            </span>
+            <CopyAddress address={address} />
+          </div>
+        )}
+      </header>
+      {/* is-fill 让插件内容占满标题栏以下的空间。 */}
+      <div className="mica-config-ui is-embed is-fill min-h-0 flex-1 overflow-hidden">
+        <Suspense
+          fallback={
+            <div className="grid h-full place-items-center text-xs text-fg-muted">正在加载…</div>
+          }
+        >
+          <PluginSurface api={api} surface="page" className="h-full min-h-0">
+            <Page api={api} onClose={close} />
+          </PluginSurface>
+        </Suspense>
       </div>
     </div>
   )
