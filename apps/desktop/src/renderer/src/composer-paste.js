@@ -52,26 +52,36 @@ async function insertClipboardImage(event, data, imageItems, insertText) {
 
 /**
  * 处理一次 paste 事件；返回是否已经接管（false 表示交给浏览器默认粘贴）。
- * `insertText` 决定插到哪儿（主输入条与抽屉各自的光标逻辑），`notify` 报失败原因。
+ * `insertText` 决定插到哪儿（主输入条与抽屉各自的光标逻辑），`notify` 报失败原因；
+ * 图片处理的开始/结束回调只覆盖图片分支，供输入条显示等待反馈。
  */
-export async function pasteIntoComposer(event, { insertText, notify } = {}) {
+export async function pasteIntoComposer(
+  event,
+  { insertText, notify, onImagePasteStart, onImagePasteEnd } = {}
+) {
   const { data, files, imageItems } = pastedFiles(event)
   if (!files.length && !imageItems.length) return false
   event.preventDefault()
 
-  if (isFileCopyPaste(files)) {
-    const paths = await clipboardPaths(files)
-    if (paths.length) {
-      insertText?.(paths.join(' '))
-      return true
+  const isImagePaste = imageItems.length > 0
+  if (isImagePaste) onImagePasteStart?.()
+  try {
+    if (isFileCopyPaste(files)) {
+      const paths = await clipboardPaths(files)
+      if (paths.length) {
+        insertText?.(paths.join(' '))
+        return true
+      }
+      // 文件路径拿不到时，图片文件还能按图片处理；其余（文件夹、Excel…）只能提示
+      if (!imageItems.length) {
+        notify?.('无法读取剪贴板里的文件路径，请手动输入路径', 'error')
+        return true
+      }
     }
-    // 文件路径拿不到时，图片文件还能按图片处理；其余（文件夹、Excel…）只能提示
-    if (!imageItems.length) {
-      notify?.('无法读取剪贴板里的文件路径，请手动输入路径', 'error')
-      return true
-    }
-  }
 
-  if (imageItems.length) await insertClipboardImage(event, data, imageItems, insertText)
-  return true
+    if (imageItems.length) await insertClipboardImage(event, data, imageItems, insertText)
+    return true
+  } finally {
+    if (isImagePaste) onImagePasteEnd?.()
+  }
 }

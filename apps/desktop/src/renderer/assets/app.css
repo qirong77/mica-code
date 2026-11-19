@@ -3175,6 +3175,23 @@ html[data-appearance='light'] .chat-markdown code:not(pre code) {
   object-fit: contain;
 }
 
+.chat-composer-image-pending {
+  display: inline-flex;
+  flex: 0 0 auto;
+  width: 104px;
+  height: 40px;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  border: 1px dashed color-mix(in srgb, var(--color-info) 58%, transparent);
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--color-info) 7%, transparent);
+  color: var(--color-info-soft);
+  font-family: var(--chat-font);
+  font-size: 10px;
+  white-space: nowrap;
+}
+
 /* 输入框上方的引用条：草稿里有几个引用块就列几条（与图片缩略图同源，都是从草稿反推）。 */
 .chat-composer-quotes {
   display: flex;
@@ -7635,6 +7652,18 @@ html body #root {
   to {
     opacity: 1;
   }
+}
+
+/* 粘贴图片可能要等剪贴板读取和磁盘写入；旋转图标在等待期间给出即时反馈。 */
+@keyframes chat-composer-image-paste-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.chat-composer-image-pending-icon {
+  flex: none;
+  animation: chat-composer-image-paste-spin var(--motion-breathe) linear infinite;
 }
 
 /* 切页：对话 / 统计 / 文件三块常驻实例靠 display 切换（见 App.jsx 的 `visible`），

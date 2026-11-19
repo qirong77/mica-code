@@ -155,6 +155,7 @@ export function BtwDrawer({
   const bodyRef = useRef(null)
   const inputRef = useRef(null)
   const imageInputRef = useRef(null)
+  const imagePasteCountRef = useRef(0)
   const asideRef = useRef(null)
   const draftRef = useLatest(draft)
   const entries = Array.isArray(thread?.entries) ? thread.entries : []
@@ -171,6 +172,7 @@ export function BtwDrawer({
   const runningEntry = btwRunningEntry(entries)
   const running = Boolean(runningEntry)
   const [threadId, setThreadId] = useState(thread?.id || '')
+  const [imagePastePending, setImagePastePending] = useState(false)
   const [now, setNow] = useState(() => Date.now())
   /**
    * 抽屉自己的提示条：上传失败、复制失败、线程上限这类「做了但没成」的话必须说在原地。
@@ -402,13 +404,29 @@ export function BtwDrawer({
     [draftRef, onDraftChange]
   )
 
+  // 剪贴板图片可能需要先解析路径或写入磁盘；处理期间显示占位动画，避免用户
+  // 误以为粘贴没有生效。计数器保证连续粘贴时最后一个任务结束前仍保持提示。
+  const beginImagePaste = useCallback(() => {
+    imagePasteCountRef.current += 1
+    setImagePastePending(true)
+  }, [])
+  const endImagePaste = useCallback(() => {
+    imagePasteCountRef.current = Math.max(0, imagePasteCountRef.current - 1)
+    if (imagePasteCountRef.current === 0) setImagePastePending(false)
+  }, [])
+
   // 粘贴与主输入条**同一份实现**：图片转 `[Image](路径)`，文件（文件夹 / Excel…）转成
   // 绝对路径。抽屉是另一条对话，粘贴的行为不该长出第二种。
   const handlePaste = useCallback(
     (event) => {
-      void pasteIntoComposer(event, { insertText, notify })
+      void pasteIntoComposer(event, {
+        insertText,
+        notify,
+        onImagePasteStart: beginImagePaste,
+        onImagePasteEnd: endImagePaste
+      })
     },
-    [insertText, notify]
+    [beginImagePaste, endImagePaste, insertText, notify]
   )
 
   // 相册/拍照：手机上粘贴不可用，只能靠文件选择器（与主输入条同一个 accept）
@@ -758,7 +776,7 @@ export function BtwDrawer({
         ) : null}
       </div>
       <div className="chat-btw-foot">
-        <ComposerImageStrip text={draft} onPreview={onPreviewImage} />
+        <ComposerImageStrip text={draft} pending={imagePastePending} onPreview={onPreviewImage} />
         {/* 排队中的那一问：单槽位（与主对话的 message-queue 同款），答完自动接上；
             这里的 ✕ 就是撤回，撤回后问题回到输入框，不丢字。 */}
         {thread?.pendingQuestion ? (

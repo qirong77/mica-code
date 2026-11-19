@@ -3577,6 +3577,8 @@ export function ChatView({
   const pendingMenuNoticesRef = useRef(new Set())
   const [input, setInput] = useState('')
   const inputRef = useLatest(input)
+  const imagePasteCountRef = useRef(0)
+  const [imagePastePending, setImagePastePending] = useState(false)
   const [running, setRunning] = useState(false)
   const runningRef = useLatest(running)
   // 这个会话正被**另一个进程**跑着（终端里的 TUI / mica exec / 另一个运行时实例持着它的
@@ -4448,6 +4450,18 @@ export function ChatView({
     },
     [inputRef, nodeId]
   )
+
+  // 图片粘贴会先经过剪贴板路径解析或写入磁盘；这段时间保留一个稳定的占位项，
+  // 让用户知道粘贴已经接住，而不是误以为输入框卡住。用计数器避免连续粘贴时
+  // 前一个异步保存先结束，把后一个仍在处理的动画提前收掉。
+  const beginImagePaste = useCallback(() => {
+    imagePasteCountRef.current += 1
+    setImagePastePending(true)
+  }, [])
+  const endImagePaste = useCallback(() => {
+    imagePasteCountRef.current = Math.max(0, imagePasteCountRef.current - 1)
+    if (imagePasteCountRef.current === 0) setImagePastePending(false)
+  }, [])
 
   // Async plugin input appends to the latest draft, preserving typing and selections.
   const appendComposerText = useCallback(
@@ -7783,6 +7797,7 @@ export function ChatView({
           />
           <ComposerImageStrip
             text={input}
+            pending={imagePastePending}
             onPreview={(source, alt) => setImagePreview({ source, alt })}
           />
           <ComposerQuoteStrip text={input} onRemove={removeQuoteFromComposer} />
@@ -7972,7 +7987,9 @@ export function ChatView({
                 // 图片转 `[Image](路径)`，文件（文件夹 / Excel…）转成它的绝对路径
                 void pasteIntoComposer(event, {
                   insertText: insertComposerText,
-                  notify: appendNotice
+                  notify: appendNotice,
+                  onImagePasteStart: beginImagePaste,
+                  onImagePasteEnd: endImagePaste
                 })
               }}
               onDragOver={(event) => {

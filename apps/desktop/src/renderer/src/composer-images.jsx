@@ -1,4 +1,5 @@
 import { findImageReferences } from './chat-paths'
+import { IconLoader2 } from '@tabler/icons-react'
 
 /**
  * 输入框里的图片素材：`[Image](路径)` 引用 → 可点缩略图。**主对话输入条与 By The Way
@@ -26,11 +27,21 @@ export function resolveImageSource(source) {
   return expanded
 }
 
-export function ComposerImageStrip({ text, onPreview }) {
+export function ComposerImageStrip({ text, onPreview, pending = false }) {
   const images = findImageReferences(text)
-  if (!images.length) return null
+  if (!images.length && !pending) return null
   return (
-    <div className="chat-composer-images" aria-label="输入中的图片">
+    <div
+      className="chat-composer-images"
+      aria-label="输入中的图片"
+      aria-busy={pending || undefined}
+    >
+      {pending ? (
+        <div className="chat-composer-image-pending" role="status" aria-label="正在处理图片">
+          <IconLoader2 className="chat-composer-image-pending-icon" size={15} aria-hidden="true" />
+          <span>正在处理图片…</span>
+        </div>
+      ) : null}
       {images.map((image) => (
         <button
           key={image.source}
