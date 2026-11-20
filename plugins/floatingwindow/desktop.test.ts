@@ -14,7 +14,7 @@ it('declares the real backtick shortcut and a compact 40px web inset', () => {
 });
 
 it('renders a clear empty state without native web support', () => {
-  const html = renderToStaticMarkup(React.createElement(ArcoProvider, { children: React.createElement(Launcher, { api: { launcher: {} }, onClose: undefined }) }));
+  const html = renderToStaticMarkup(React.createElement(ArcoProvider, { children: React.createElement(Launcher, { api: { launcher: {} } }) }));
   expect(html).toContain('当前环境不支持原生网页浮窗');
   expect(html).toContain('aria-label="网址"');
   expect(html).toContain('disabled');
@@ -23,7 +23,7 @@ it('renders a clear empty state without native web support', () => {
 it('starts with a welcome page and a home control when native web is available', () => {
   const method = () => {};
   const web = { state: method, navigate: method, home: method, back: method, forward: method, reload: method, subscribe: method };
-  const html = renderToStaticMarkup(React.createElement(ArcoProvider, { children: React.createElement(Launcher, { api: { launcher: { web } }, onClose: undefined }) }));
+  const html = renderToStaticMarkup(React.createElement(ArcoProvider, { children: React.createElement(Launcher, { api: { launcher: { web } } }) }));
   expect(html).toContain('欢迎使用 Floating Window');
   expect(html).toContain('还没有最近访问的站点');
   expect(html).toContain('aria-label="欢迎页"');
@@ -49,6 +49,11 @@ it('renders recent sites and opens the clicked origin', () => {
 it('renders a starred toolbar action for the current site', () => {
   const method = () => {};
   const web = { state: method, navigate: method, home: method, back: method, forward: method, reload: method, subscribe: method };
-  const html = renderToStaticMarkup(React.createElement(ArcoProvider, { children: React.createElement(Launcher, { api: { launcher: { web } }, onClose: undefined }) }));
+  const html = renderToStaticMarkup(React.createElement(ArcoProvider, { children: React.createElement(Launcher, { api: { launcher: { web } } }) }));
   expect(html).toContain('aria-label="收藏"');
+  expect(html).toContain('floatingwindow-address-wrap');
+  expect(html).toContain('floatingwindow-address-favorite');
+  expect(html).toContain('aria-label="拖动窗口"');
+  expect(html).not.toContain('aria-label="刷新"');
+  expect(html).not.toContain('aria-label="关闭"');
 });

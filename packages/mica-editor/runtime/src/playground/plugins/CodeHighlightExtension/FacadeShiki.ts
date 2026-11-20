@@ -153,13 +153,6 @@ export function loadCodeTheme(theme: string, editor?: LexicalEditor, codeNodeKey
     });
 }
 
-export function getCodeLanguageOptions(): [string, string][] {
-  return bundledLanguagesInfo.map((i) => [i.id, i.name]);
-}
-export function getCodeThemeOptions(): [string, string][] {
-  return bundledThemesInfo.map((i) => [i.id, i.displayName]);
-}
-
 export function normalizeCodeLanguage(language: string): string {
   const langId = language;
   const languageInfo = bundledLanguagesInfo.find(

@@ -343,6 +343,12 @@ function scan() {
 const SEARCH_MAX_CANDIDATES = 600
 const SEARCH_MAX_RESULTS = 100
 
+function normalizedTurnState(value) {
+  return value === 'running' || value === 'completed' || value === 'aborted' || value === 'error'
+    ? value
+    : 'completed'
+}
+
 /**
  * 会话内容搜索：在 title/cwd 之外的对话正文里找词（见 stats-core 的 parseSessionText）。
  *
@@ -412,7 +418,7 @@ export function registerStatsIpc() {
       cwd: raw.cwd || null,
       createdAt: raw.createdAt || null,
       updatedAt: raw.updatedAt || null,
-      turnState: raw.turnState || 'completed',
+      turnState: normalizedTurnState(raw.turnState),
       providerId: snap.providerId || null,
       model: snap.model || null,
       effort: snap.effort || null,

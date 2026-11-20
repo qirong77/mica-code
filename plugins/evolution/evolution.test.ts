@@ -7,6 +7,7 @@ import {
   dropRawUsage,
   generationTimingV2,
   quickButtonsAccentColor,
+  sessionTurnState,
   usageOccurredAt,
   usageSourceOwner,
 } from './migrations.js';
@@ -87,6 +88,28 @@ describe('usage-occurred-at 迁移', () => {
   it('形状不对的文档不算改动', () => {
     expect(usageOccurredAt.apply({ createdAt: '2026-01-02T03:04:05.000Z' })).toBe(0);
     expect(usageOccurredAt.apply({ snapshot: { usageHistory: 'nope' } })).toBe(0);
+  });
+});
+
+describe('session-turn-state 迁移', () => {
+  it('给缺失或非法状态补为 completed，合法状态不动', () => {
+    const missing = {} as Record<string, any>;
+    const invalid = { turnState: 'idle' } as Record<string, any>;
+    expect(sessionTurnState.apply(missing)).toBe(1);
+    expect(sessionTurnState.apply(invalid)).toBe(1);
+    expect(missing.turnState).toBe('completed');
+    expect(invalid.turnState).toBe('completed');
+    for (const turnState of ['running', 'completed', 'aborted', 'error']) {
+      const document = { turnState } as Record<string, any>;
+      expect(sessionTurnState.apply(document)).toBe(0);
+      expect(document.turnState).toBe(turnState);
+    }
+  });
+
+  it('重复执行没有改动', () => {
+    const document = {} as Record<string, any>;
+    sessionTurnState.apply(document);
+    expect(sessionTurnState.apply(document)).toBe(0);
   });
 });
 
@@ -316,7 +339,7 @@ describe('runEvolution', () => {
     const path = writeSession(home, 'quick-buttons', document);
     const first = await runEvolution({ home, lockSession: () => ({ release() {} }) });
     expect(first.migratedFiles).toBe(1);
-    expect(first.migratedRecords).toBe(1);
+    expect(first.migratedRecords).toBe(2);
     expect(readSession(path).snapshot.pluginState['quick-buttons'].buttons).toEqual([
       { ...button, style: { ...button.style, color: 'accent' } },
     ]);
@@ -333,9 +356,10 @@ describe('runEvolution', () => {
     const first = await runEvolution({ home, lockSession: noLock });
     expect(first.outcome).toBe('ok');
     expect(first.migratedFiles).toBe(1);
-    expect(first.migratedRecords).toBe(2);
+    expect(first.migratedRecords).toBe(3);
     expect(first.pending).toBe(0);
     expect(readSession(path).snapshot.usageHistory[0].occurredAt).toBe('2026-01-02T03:04:05.000Z');
+    expect(readSession(path).turnState).toBe('completed');
 
     const second = await runEvolution({ home, lockSession: noLock });
     expect(second.evaluated).toBe(0);

@@ -72,7 +72,7 @@ function checkpoint(version, inputTokens) {
     snapshot: {
       ...fixture('one').snapshot,
       conversationMessages: [{ role: 'user', content: `body ${version}` }],
-      usageHistory: [{ usageId: `usage-${version}`, inputTokens, outputTokens: 1 }]
+      usageHistory: [{ usageId: `usage-${version}`, occurredAt: '2025-01-01T00:00:01.000Z', inputTokens, outputTokens: 1 }]
     }
   })
 }
@@ -275,7 +275,8 @@ describe('incremental session scanner', () => {
         cwd: '  /older  ',
         createdAt: 'invalid',
         updatedAt: '2025-01-02T00:00:00.000Z',
-        turnState: ''
+        turnState: 'idle',
+        awaitingInput: 'Choose one'
       })
     )
     harness.files.write('newer', fixture('newer', { updatedAt: '2025-01-03T00:00:00.000Z' }))
@@ -332,7 +333,7 @@ describe('incremental session scanner', () => {
       fixture('two', {
         snapshot: {
           ...fixture('two').snapshot,
-          usageHistory: [{ usageId: 'u-2', inputTokens: 7, outputTokens: 1 }]
+          usageHistory: [{ usageId: 'u-2', occurredAt: '2025-01-02T00:00:01.000Z', inputTokens: 7, outputTokens: 1 }]
         }
       })
     )
@@ -463,7 +464,7 @@ describe('incremental session scanner', () => {
   })
 
   test('attributes a usage record copied by an old fork to the oldest session', async () => {
-    const shared = { usageId: 'shared', inputTokens: 100, outputTokens: 10 }
+    const shared = { usageId: 'shared', occurredAt: '2025-01-01T00:00:01.000Z', inputTokens: 100, outputTokens: 10 }
     const harness = createHarness()
     harness.files.write(
       'source',
@@ -478,7 +479,7 @@ describe('incremental session scanner', () => {
         createdAt: '2025-02-01T00:00:00.000Z',
         snapshot: {
           ...fixture('fork').snapshot,
-          usageHistory: [shared, { usageId: 'own', inputTokens: 20, outputTokens: 2 }]
+          usageHistory: [shared, { usageId: 'own', occurredAt: '2025-02-01T00:00:01.000Z', inputTokens: 20, outputTokens: 2 }]
         }
       })
     )
@@ -494,7 +495,7 @@ describe('incremental session scanner', () => {
   })
 
   test('gives a copied record back when the session that owned it is deleted', async () => {
-    const shared = { usageId: 'shared', inputTokens: 100, outputTokens: 10 }
+    const shared = { usageId: 'shared', occurredAt: '2025-01-01T00:00:01.000Z', inputTokens: 100, outputTokens: 10 }
     const harness = createHarness()
     harness.files.write(
       'source',
@@ -528,7 +529,7 @@ describe('incremental session scanner', () => {
         }
       }
     })
-    const shared = { inputTokens: 20, outputTokens: 2, extra: { legacyIdentity: true } }
+    const shared = { occurredAt: '2025-01-01T00:00:01.000Z', inputTokens: 20, outputTokens: 2, extra: { legacyIdentity: true } }
     const snapshot = {
       ...fixture('source').snapshot,
       conversationMessages: [{ role: 'user', content: 'searchable body' }],

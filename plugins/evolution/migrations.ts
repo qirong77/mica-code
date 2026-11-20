@@ -332,6 +332,38 @@ export const notebookMcp: Migration = {
   },
 };
 
+/** Notebook 已改为独立 HTTP API，清理上一步迁移留下的失效 MCP 停用项。 */
+export const notebookHttpApi: Migration = {
+  id: 'notebook-http-api',
+  description: '移除已改为 HTTP API 的 Notebook MCP 停用项',
+  apply(document) {
+    const snapshot = isRecord(document.snapshot) ? document.snapshot : undefined;
+    const selections = [snapshot?.capabilitySelection, document.capabilityDefaults];
+    let changed = 0;
+    for (const selection of selections) {
+      if (!isRecord(selection) || !Array.isArray(selection.disabledMcpServers)) continue;
+      const servers = selection.disabledMcpServers;
+      const filtered = servers.filter((name) => name !== 'mica-plugin-notebook');
+      if (filtered.length === servers.length) continue;
+      selection.disabledMcpServers = filtered;
+      changed += 1;
+    }
+    return changed;
+  },
+};
+
+/** 会话顶层 turnState 是必填字段；缺失或非法的旧数据按已完成收敛。 */
+export const sessionTurnState: Migration = {
+  id: 'session-turn-state',
+  description: '给缺失或非法顶层 turnState 的会话补为 completed',
+  apply(document) {
+    if (document.turnState === 'running' || document.turnState === 'completed' ||
+      document.turnState === 'aborted' || document.turnState === 'error') return 0;
+    document.turnState = 'completed';
+    return 1;
+  },
+};
+
 export const MIGRATIONS: Migration[] = [
   usageOccurredAt,
   sessionCompactRename,
@@ -341,4 +373,6 @@ export const MIGRATIONS: Migration[] = [
   quickButtonsAccentColor,
   piMessagesV1,
   notebookMcp,
+  notebookHttpApi,
+  sessionTurnState,
 ];

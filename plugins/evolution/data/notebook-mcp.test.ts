@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, 
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { afterEach, describe, expect, it } from 'vitest';
-import { notebookMcp } from '../migrations.js';
+import { MIGRATIONS, notebookMcp, notebookHttpApi } from '../migrations.js';
 import { notebookMcpData } from './notebook-mcp.js';
 
 const homes: string[] = [];
@@ -28,6 +28,29 @@ describe('Notebook MCP 迁移', () => {
     const document = { capabilityDefaults: { disabledSkills: ['notebook'], disabledTools: [], disabledMcpServers: [] } };
     expect(notebookMcp.apply(document)).toBe(1);
     expect(document.capabilityDefaults.disabledMcpServers).toEqual([]);
+  });
+
+  it('经过完整会话迁移后不留下已废弃的 Notebook MCP，且保留其它停用项', () => {
+    const document = {
+      snapshot: {
+        capabilitySelection: {
+          disabledTools: ['notebook_write'],
+          disabledMcpServers: ['other'],
+        },
+      },
+      capabilityDefaults: {
+        disabledTools: ['notebook_read'],
+        disabledMcpServers: ['other', 'mica-plugin-notebook'],
+      },
+    };
+    for (const migration of MIGRATIONS) migration.apply(document);
+
+    expect(document.snapshot.capabilitySelection.disabledMcpServers).toEqual(['other']);
+    expect(document.capabilityDefaults.disabledMcpServers).toEqual(['other']);
+    expect(document.snapshot.capabilitySelection.disabledTools).toEqual([]);
+    expect(document.capabilityDefaults.disabledTools).toEqual([]);
+    expect(MIGRATIONS.indexOf(notebookHttpApi)).toBe(MIGRATIONS.indexOf(notebookMcp) + 1);
+    expect(notebookHttpApi.apply(document)).toBe(0);
   });
 
   it('归档原 skill 索引并迁移配置，不删除正文或手工 skill', () => {

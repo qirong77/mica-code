@@ -70,6 +70,12 @@ function validTime(value) {
   return Number.isFinite(time) ? time : null
 }
 
+function normalizedTurnState(value) {
+  return value === 'running' || value === 'completed' || value === 'aborted' || value === 'error'
+    ? value
+    : 'completed'
+}
+
 /**
  * 一条用量记录的跨会话身份。原始持久化记录与由它投影出的事件必须算出同一个值，
  * 会话列表和会话详情才能对「这条请求属于哪个会话」给出一致的答案。
@@ -220,15 +226,17 @@ export function parseSessionEvents(raw) {
       : {}),
     createdAtMs,
     updatedAtMs,
-    turnState: raw.turnState || 'completed',
+    turnState: normalizedTurnState(raw.turnState),
     model: snap.model || null,
     providerId: snap.providerId || null,
     turns: messages.filter((message) => message?.role === 'assistant').length,
     durationMs: Math.max(0, updatedAtMs - createdAtMs)
   }
-  const mainEvents = usageHistory.map((usage) =>
-    withSource(normalizeUsageEvent(usage, createdAtMs, snap.model), MAIN_USAGE_SOURCE)
-  )
+  // `occurredAt` is required for persisted usage. Migration fills the old shape once;
+  // do not put an un-migrated record on a made-up session or task date here.
+  const mainEvents = usageHistory
+    .filter((usage) => validTime(usage.occurredAt) != null)
+    .map((usage) => withSource(normalizeUsageEvent(usage, 0, snap.model), MAIN_USAGE_SOURCE))
   // Subagent requests are persisted per task under snapshot.subagentUsageHistory;
   // flatten them into the same usage-event stream, tagged with task lineage and
   // the source they belong to (delegation / plugin / built-in helper).
@@ -239,16 +247,15 @@ export function parseSessionEvents(raw) {
   const subagentEvents = []
   for (const record of subagentRecords) {
     const recordModel = record.model || snap.model
-    // 子代理请求缺 occurredAt（旧数据未清洗）时退回任务开始时间：它比会话创建时间
-    // 更接近真实请求时间。
-    const recordStartMs = validTime(record.startedAt) ?? createdAtMs
     const source = usageSourceOf(record)
     const requests = Array.isArray(record.requests)
-      ? record.requests.filter((usage) => usage && typeof usage === 'object')
+      ? record.requests.filter(
+          (usage) => usage && typeof usage === 'object' && validTime(usage.occurredAt) != null
+        )
       : []
     for (const usage of requests) {
       subagentEvents.push(
-        withSource(normalizeUsageEvent(usage, recordStartMs, recordModel), source, {
+        withSource(normalizeUsageEvent(usage, 0, recordModel), source, {
           taskId: record.taskId || null,
           purpose:
             typeof record.description === 'string' && record.description.trim()

@@ -41,7 +41,7 @@ mica 选后者，这个插件就是「洗」的地方。
 
 | id                       | 内容                                                                                                                                                   |
 | ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `usage-occurred-at`      | 给没有请求时间的用量记录补上 `occurredAt`：主对话取会话创建时间，子代理 / 插件请求取任务开始时间。                                                     |
+| `usage-occurred-at`      | 给没有请求时间的用量记录补上 `occurredAt`：主对话取会话创建时间，子代理 / 插件请求取任务开始时间；统计读取不再按会话或任务日期回退。                                                     |
 | `session-compact-rename` | 清掉旧压缩插件（`auto-compact`）留下的会话状态，并把摘要子代理的旧写法 `subagentType: 'auto-compact'` 归一为 `compact`。                               |
 | `drop-raw-usage`         | 删掉会话里存着的 provider 原始 usage（`rawUsage`，含 `attribution.items` 逐条 token 归因）：没有消费方，单条可达 247KB、实测占会话文件总量的 22%。     |
 | `usage-source-owner`     | 给没有归属的用量记录补上发起它的插件：委派（内置子代理类型）→ `subagent`，`btw` / `commit` / `memory-curator` → 各自插件；`compact` 是内核命令，不动。 |
@@ -49,6 +49,8 @@ mica 选后者，这个插件就是「洗」的地方。
 | `quick-buttons-accent-color` | 只为会话 `snapshot.pluginState['quick-buttons'].buttons` 中缺失的 `style.color` 补 `accent`；已有颜色、图标、形状、纯图标配置与按钮内容、动作和顺序保持不变，其它插件不受影响。 |
 | `pi-messages-v1` | 将旧 Chat Completions / Responses 原生历史转换为完整 pi `Message[]`，写入 `snapshot.messageFormat: 'pi-ai-v1'`。身份由快照 provider/model/协议决定；保留正文、内联图片、reasoning 原项签名、工具调用与结果，展示对话及用量账本保留。已标记的快照不再改写。 |
 | `notebook-mcp` | 将旧 `notebook_read` / `notebook_write` 工具停用项迁为 `mica-plugin-notebook` MCP 停用项；移除已撤下的 `notebook` skill 选择，其它能力与会话内容不动。 |
+| `notebook-http-api` | Notebook 改为独立 HTTP API 后，移除上一步迁移留下的 `mica-plugin-notebook` MCP 停用项；保留其它 MCP 停用项。 |
+| `session-turn-state` | 给缺失或非法的会话顶层 `turnState` 补为 `completed`；当前桌面读取只把剩余异常当作损坏数据处理，不再把缺失字段当作旧版本能力。 |
 
 `pi-messages-v1` 只读文档本身：内联图片保留数据与 MIME，远程图片 URL / 文件引用保留为 `[Image](引用)` 文本（pi 图片块只支持内联数据）。Responses reasoning 的完整原项保存到 `thinkingSignature`，正文项的 id / phase 保存到 `textSignature`，函数调用与结果共享 pi 的 `call_id|item_id`。缺失的时间取会话创建时间，缺失的用量填零；现有用量记录的 token 数映射到消息内的 pi usage，不改原账本。无法识别的消息会使该文件转换失败，保留原文，不会把半份历史标成 pi。运行时不再支持旧 wire 历史，必须先经此迁移。
 
@@ -69,6 +71,8 @@ mica 选后者，这个插件就是「洗」的地方。
 | `subagent-task-files` | 将 `subagent-tasks/<sessionId>.json` 的旧任务数组拆为 `<sessionId>/<taskId>.json`，已有独立任务更新优先；完整原文件改名归档为 `*.legacy-v1.json`，归档重名时加编号。损坏、未知数据与符号链接不改。运行时不再读取旧数组，需经此迁移。 |
 | `notebook-comments` | 评论功能移除后，笔记文档里的 `comments` 讨论记录先归档到 `plugin-data/evolution/legacy-notebook-comments/<noteId>.json`（重名加编号），再删掉该字段；正文里由评论产生的 MarkNode 锚点拆回普通子节点，文字与格式不变。文档只剩 `version` 与 `editorState`，损坏文档与非 `version: 1` 文档不动；重复执行改动数为 0。 |
 | `notebook-mcp` | 将 Notebook 旧插件 skill 索引移到 `plugin-data/evolution/legacy-notebook-skill/` 原文归档，迁移默认能力中的旧工具停用项；不改笔记正文、用户手写 skill 或其它插件索引。旧 skill / 直连工具入口不再支持。 |
+| `connections-peer-store` | 将 Connections 旧纯地址数组或缺 `version` 的 `{ peers }` 迁为 version 1 清单；原文归档到 `legacy-connections/` 后原子替换，运行时不再回写旧形态。 |
+| `schedule-plans-stages` | 将 Schedule 旧 `plans/stages` 数据严格迁为扁平 `tasks`；原文归档到 `legacy-schedule/` 后原子替换，损坏或无法安全转换时不改原文件，运行时不再读取旧形态。 |
 | `prompt-contributions` | 历史回查控制从 `plugin:builtin.command-memory/guidance` 迁到 `plugin:memory/history`，保留正文、开关与顺序，已有新控制优先；撤下 Todo / 会话自治 / Video / Web Search 的静态段落前将原控制文件归档到 `legacy-prompt-controls/`。归档 Schedule 随包 skill 索引到 `legacy-schedule-skill/`，不改排期数据、用户 skill 或能力停用选择（同名用户 skill 可能仍存在）。旧入口不再支持。 |
 
 | `floatingwindow-favorites`         | 给已有 Floating Window 数据补上 `favoriteUrls` 收藏集合和 `favicons` 图标集合。                                                                                                                 |

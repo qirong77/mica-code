@@ -6,7 +6,6 @@ import {
   emptyData,
   exportDocument,
   formatSchedule,
-  isLegacyPlanShape,
   normalizeData,
   parseImport,
   sampleData,
@@ -75,7 +74,7 @@ describe('normalizeData', () => {
     expect(data.summary).toBe('1 个任务');
   });
 
-  it('migrates the old plans/stages shape into flat tasks', () => {
+  it('does not interpret the old plans/stages shape at runtime', () => {
     const raw = {
       version: 1,
       summary: '2 个计划 · 3 条阶段',
@@ -93,14 +92,8 @@ describe('normalizeData', () => {
       ],
     };
     const data = normalizeData(raw);
-    expect(isLegacyPlanShape(raw)).toBe(true);
-    expect(data.tasks).toEqual([
-      { id: 's1', name: '钱包改版 · 评审', start: '2026-10-28', end: '2026-10-29', color: 'blue', note: '11 月上线' },
-      { id: 's2', name: '钱包改版 · 开发', start: '2026-11-01', end: '2026-11-10', color: 'blue', note: '' },
-      { id: 's3', name: '官网 · 设计', start: '2026-11-02', end: '2026-11-02', color: 'violet', note: '' },
-    ]);
-    expect(data.summary).toBe('3 个任务');
-    expect(isLegacyPlanShape({ tasks: [] })).toBe(false);
+    expect(data.tasks).toEqual([]);
+    expect(data.summary).toBe('2 个计划 · 3 条阶段');
   });
 });
 
@@ -229,7 +222,11 @@ describe('import / export / sample', () => {
 
   it('rejects an import with no valid tasks', () => {
     expect(() => parseImport({ tasks: [] })).toThrow('任务列表为空');
-    expect(() => parseImport({ plans: [{ id: 'p', name: 'A' }] })).toThrow('任务列表为空');
+    expect(() =>
+      parseImport({
+        plans: [{ id: 'p', name: 'A', stages: [{ id: 's', name: '阶段', start: '2026-10-01' }] }],
+      }),
+    ).toThrow('任务列表为空');
   });
 
   it('builds a sample around this week’s Monday', () => {

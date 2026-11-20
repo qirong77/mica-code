@@ -27,7 +27,7 @@
 编辑器是共享包 `packages/mica-editor`（笔记用其富文本模式，配置页 Role / Skill 用同一份运行时的 Markdown 模式），第三方依赖固定版本从 CDN 运行时加载；数据在 `plugin-data/notebook/data.json` 与 `documents/<id>.json`。首次打开需要 CDN 网络。
 目录按标题搜索并列出所属文件夹路径，选中结果会展开沿途文件夹。目录标题旁可定位当前笔记、折叠或展开所有文件夹。同级拖动排序和跨目录移动沿用索引数组顺序与 CAS 写入。具体能力、限制与开发方式见 [Notebook](./notebook/README.md)。
 
-插件角色 `笔记` 提供独立 MCP 的使用说明。`set_markdown`、`append_markdown` 和 `prepend_markdown` 将 Markdown 转为原生富文本，按正文版本校验写入，并返回大纲、结构统计与降级警告。
+Notebook 的 HTTP API 文档与端点说明见 [Notebook](./notebook/README.md)。`set_markdown`、`append_markdown` 和 `prepend_markdown` 将 Markdown 转为原生富文本，按正文版本校验写入，并返回大纲、结构统计与降级警告。
 
 ## 目录结构
 

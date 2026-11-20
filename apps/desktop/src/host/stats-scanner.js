@@ -40,6 +40,12 @@ const HEAD_BYTES = 4096
 /** 「在等你选」那句话的上限，与会话文件的 `normalizeAwaitingInput` 同一个尺度。 */
 const AWAITING_INPUT_MAX = 120
 
+function normalizedTurnState(value) {
+  return value === 'running' || value === 'completed' || value === 'aborted' || value === 'error'
+    ? value
+    : 'completed'
+}
+
 /** Use all identity/content fields available from stat. */
 function fileSignature(fileSystem, file) {
   let stat
@@ -79,10 +85,11 @@ function parseSessionMeta(raw) {
       : null
   // 「在等你选」只是一句提示：轮次没在跑就不算（崩溃残留的 running 由调用方按租约再筛一
   // 道），形状不对按没有处理。
+  const turnState = normalizedTurnState(raw.turnState)
   const awaitingInput =
     typeof raw.awaitingInput === 'string' &&
     raw.awaitingInput.trim() &&
-    raw.turnState !== 'completed'
+    turnState !== 'completed'
       ? raw.awaitingInput.trim().slice(0, AWAITING_INPUT_MAX)
       : null
   return {
@@ -93,7 +100,7 @@ function parseSessionMeta(raw) {
     ...(awaitingInput ? { awaitingInput } : {}),
     updatedAtMs,
     createdAtMs: Number.isFinite(createdAtMs) ? createdAtMs : 0,
-    turnState: raw.turnState || 'completed'
+    turnState
   }
 }
 
@@ -144,7 +151,7 @@ function readHeadMeta(fileSystem, file) {
   const createdAt = field('createdAt')
   const createdAtMs = Date.parse(createdAt)
   const parentSessionId = field('parentSessionId')
-  const turnState = field('turnState')
+  const turnState = normalizedTurnState(field('turnState'))
   const awaitingInput = field('awaitingInput')
   return {
     id,
@@ -156,7 +163,7 @@ function readHeadMeta(fileSystem, file) {
       : {}),
     updatedAtMs,
     createdAtMs: Number.isFinite(createdAtMs) ? createdAtMs : 0,
-    turnState: turnState || 'completed'
+    turnState
   }
 }
 

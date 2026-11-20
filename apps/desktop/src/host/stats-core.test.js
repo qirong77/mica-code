@@ -141,9 +141,18 @@ describe('Stats usage aggregation', () => {
       snapshot: {
         providerId: 'parent',
         model: 'm',
-        usageHistory: [{ provider: 'openai', providerId: 'actual' }, { provider: 'openai' }],
+        usageHistory: [
+          { occurredAt: '2026-08-01T01:00:00.000Z', provider: 'openai', providerId: 'actual' },
+          { occurredAt: '2026-08-01T01:01:00.000Z', provider: 'openai' }
+        ],
         subagentUsageHistory: [
-          { provider: 'other', requests: [{ provider: 'openai' }, { providerId: 'child' }] }
+          {
+            provider: 'other',
+            requests: [
+              { occurredAt: '2026-08-01T01:02:00.000Z', provider: 'openai' },
+              { occurredAt: '2026-08-01T01:03:00.000Z', providerId: 'child' }
+            ]
+          }
         ]
       }
     })
@@ -187,25 +196,26 @@ describe('Stats usage aggregation', () => {
     })
   })
 
-  test('uses per-request time and a stable created-at fallback for old records', () => {
+  test('uses per-request time and skips persisted records without a valid occurredAt', () => {
     const { session, events } = parseSessionEvents({
       id: 'one',
       createdAt: '2026-08-01T01:00:00.000Z',
       updatedAt: '2026-08-03T01:00:00.000Z',
+      turnState: 'idle',
       snapshot: {
         model: 'm',
         messages: [],
         usageHistory: [
           { occurredAt: '2026-08-02T02:00:00.000Z', inputTokens: 10 },
-          { inputTokens: 20 }
+          { occurredAt: 'not-a-time', inputTokens: 20 }
         ]
       }
     })
     expect(events.map((event) => event.occurredAtMs)).toEqual([
-      Date.parse('2026-08-02T02:00:00.000Z'),
-      Date.parse('2026-08-01T01:00:00.000Z')
+      Date.parse('2026-08-02T02:00:00.000Z')
     ])
     expect(session.id).toBe('one')
+    expect(session.turnState).toBe('completed')
   })
 
   test('flattens subagent usage records into the event stream with source lineage', () => {
@@ -216,7 +226,7 @@ describe('Stats usage aggregation', () => {
       snapshot: {
         model: 'main-model',
         messages: [],
-        usageHistory: [{ usageId: 'main-1', inputTokens: 500, outputTokens: 50 }],
+        usageHistory: [{ usageId: 'main-1', occurredAt: '2026-08-01T01:00:00.000Z', inputTokens: 500, outputTokens: 50 }],
         subagentUsageHistory: [
           {
             taskId: 'task-1',
@@ -271,7 +281,7 @@ describe('Stats usage aggregation', () => {
       snapshot: {
         model: 'main-model',
         messages: [],
-        usageHistory: [{ usageId: 'main-1', inputTokens: 500, outputTokens: 50 }],
+        usageHistory: [{ usageId: 'main-1', occurredAt: '2026-08-01T01:00:00.000Z', inputTokens: 500, outputTokens: 50 }],
         subagentUsageHistory: [
           {
             taskId: 'plugin:session-rename:自动起标题',
@@ -282,7 +292,7 @@ describe('Stats usage aggregation', () => {
             status: 'completed',
             startedAt: '2026-08-01T01:10:00.000Z',
             finishedAt: '2026-08-01T01:10:03.000Z',
-            requests: [{ usageId: 'plugin-1', inputTokens: 80, outputTokens: 8 }]
+            requests: [{ usageId: 'plugin-1', occurredAt: '2026-08-01T01:10:01.000Z', inputTokens: 80, outputTokens: 8 }]
           }
         ]
       }
@@ -312,7 +322,7 @@ describe('Stats usage aggregation', () => {
             subagentType: 'compact',
             description: '压缩摘要',
             startedAt: '2026-08-01T01:10:00.000Z',
-            requests: [{ usageId: 'helper-1', inputTokens: 5 }]
+            requests: [{ usageId: 'helper-1', occurredAt: '2026-08-01T01:10:01.000Z', inputTokens: 5 }]
           }
         ]
       }
@@ -383,7 +393,7 @@ describe('Stats usage aggregation', () => {
     })
   })
 
-  test('falls back to the subagent task startedAt when requests lack occurredAt', () => {
+  test('skips subagent requests without occurredAt instead of using task startedAt', () => {
     const { events } = parseSessionEvents({
       id: 'legacy-subagent',
       createdAt: '2026-08-01T01:00:00.000Z',
@@ -412,7 +422,7 @@ describe('Stats usage aggregation', () => {
         ]
       }
     })
-    expect(events[0].occurredAtMs).toBe(Date.parse('2026-08-03T09:30:00.000Z'))
+    expect(events).toEqual([])
   })
 
   test('projects content blocks to text placeholders and truncates long strings', () => {
@@ -514,7 +524,7 @@ describe('Stats usage aggregation', () => {
             initiatedByCallId: 'call-1',
             subagentType: 'Explore',
             startedAt: firstDay.toISOString(),
-            requests: [{ usageId: 'sub-1', inputTokens: 30, outputTokens: 3 }]
+            requests: [{ usageId: 'sub-1', occurredAt: firstDay.toISOString(), inputTokens: 30, outputTokens: 3 }]
           },
           {
             taskId: 'plugin:session-rename:title',
@@ -522,7 +532,7 @@ describe('Stats usage aggregation', () => {
             pluginId: 'session-rename',
             description: '自动起标题',
             startedAt: secondDay.toISOString(),
-            requests: [{ usageId: 'plugin-1', inputTokens: 8, outputTokens: 1 }]
+            requests: [{ usageId: 'plugin-1', occurredAt: secondDay.toISOString(), inputTokens: 8, outputTokens: 1 }]
           }
         ]
       }
@@ -598,7 +608,7 @@ describe('Stats usage aggregation', () => {
     expect(compressed.session.turns).toBe(2)
   })
 
-  test('files records without a request time under the session created day', () => {
+  test('skips records without a request time instead of using the session created day', () => {
     const day = new Date(2026, 7, 5, 12, 0, 0)
     const compressed = compressSessionStats({
       version: 1,
@@ -614,8 +624,8 @@ describe('Stats usage aggregation', () => {
         ]
       }
     })
-    expect(compressed.session.days[0].requests).toBe(2)
-    expect(compressed.session.requests).toBe(2)
+    expect(compressed.session.days[0].requests).toBe(1)
+    expect(compressed.session.requests).toBe(1)
     expect(summarizeStatsDays([])).toEqual([])
   })
 })

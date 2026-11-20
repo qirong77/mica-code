@@ -5,6 +5,10 @@ import { statSync } from 'node:fs'
 // Inline worker source survives both Electron's packaged bundle and the web server
 // bundle without relying on a separately emitted worker file or an asar path.
 function projectSession(raw) {
+  const normalizedTurnState = (value) =>
+    value === 'running' || value === 'completed' || value === 'aborted' || value === 'error'
+      ? value
+      : 'completed'
   const snapshot = raw?.snapshot
   const messages = snapshot?.conversationMessages
   const text = (content) => typeof content === 'string' ? content : Array.isArray(content)
@@ -91,7 +95,7 @@ function projectSession(raw) {
       lastUsage: display > 0 ? { totalTokens: display, inputTokens: display, outputTokens: 0, cachedInputTokens: 0 }
         : snapshot.lastUsage || usages.at(-1) || null,
       cachedRate: input > 0 ? cached / input : 0,
-      turnState: raw.turnState || 'completed', updatedAt: raw.updatedAt || null, todoInput
+      turnState: normalizedTurnState(raw.turnState), updatedAt: raw.updatedAt || null, todoInput
     }
   }
   } catch {

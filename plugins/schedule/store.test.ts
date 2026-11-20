@@ -26,6 +26,19 @@ describe('readScheduleData', () => {
     writeFileSync(file, '{ not json', 'utf8');
     expect(() => readScheduleData(file)).toThrow('原文件未改写');
   });
+
+  it('rejects the old plans/stages shape instead of migrating it at runtime', () => {
+    const file = join(dir, 'data.json');
+    writeFileSync(
+      file,
+      JSON.stringify({
+        version: 1,
+        plans: [{ name: '计划', stages: [{ id: 's1', name: '阶段', start: '2026-11-01' }] }],
+      }),
+      'utf8',
+    );
+    expect(() => readScheduleData(file)).toThrow('原文件未改写');
+  });
 });
 
 describe('writeScheduleData', () => {

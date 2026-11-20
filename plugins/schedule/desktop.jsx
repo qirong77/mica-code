@@ -26,10 +26,9 @@ import {
   applyOperation,
   emptyData,
   exportDocument,
-  isLegacyPlanShape,
   newId,
-  normalizeData,
   normalizeTitle,
+  parseStoredData,
   parseImport,
   sampleData,
   stamp,
@@ -140,16 +139,7 @@ export default function SchedulePage({ api }) {
       try {
         const result = await api.readData();
         if (result?.ok === false) throw new Error(result.error || '读取排期失败');
-        const parsed = result?.value == null ? emptyData() : normalizeData(result.value);
-        if (isLegacyPlanShape(result?.value)) {
-          // 旧的两层数据（计划 + 阶段）读出来已经迁移成扁平任务；顺手落盘成新格式，
-          // 失败就留在内存里，下一次编辑或加载再写。
-          try {
-            await api.writeData(stamp(parsed), { expectedVersion: result?.version ?? null });
-          } catch {
-            // 迁移失败不影响这次展示
-          }
-        }
+        const parsed = result?.value == null ? emptyData() : parseStoredData(result.value);
         dataRef.current = parsed;
         setData(parsed);
         setZoom(parsed.zoom);
@@ -212,7 +202,7 @@ export default function SchedulePage({ api }) {
       if (result?.ok === false) return;
       const version = result?.version ?? null;
       if (version === pollVersionRef.current) return;
-      const parsed = result?.value == null ? emptyData() : normalizeData(result.value);
+      const parsed = result?.value == null ? emptyData() : parseStoredData(result.value);
       pollVersionRef.current = version;
       dataRef.current = parsed;
       setData(parsed);

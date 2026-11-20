@@ -1,6 +1,6 @@
 import { addDays, daysBetween, formatStamp, isValidDate, isValidRange, startOfWeek, todayOf } from './dates.js';
 import { clampZoom } from './gantt.js';
-import { COLOR_KEYS, isScheduleColor, nextColor, normalizeColor, type ScheduleColor } from './palette.js';
+import { COLOR_KEYS, isScheduleColor, normalizeColor, type ScheduleColor } from './palette.js';
 
 /**
  * 排期的数据模型与全部写操作。
@@ -124,30 +124,23 @@ export function normalizeZoom(value: unknown): number {
  * 这份文件可能被别的版本写过、被 `$MICA_HOME` 拷来拷去、也可能被手改坏：认不出的部分
  * 丢掉，能显示的照常显示——一条坏任务不该让整张时间线消失。
  *
- * 旧形态（`plans` / `stages`）在读取时迁移成扁平任务：计划名并进任务名、计划备注放在
- * 第一条、颜色按计划顺序分配，原来「一个计划一行」的分组因此保留下来。
+ * 旧形态（`plans` / `stages`）不再支持：这里只读当前的 `tasks`，旧文件要先由 Evolution
+ * 迁移；否则显示为空且写盘会拒绝它。
  */
 export function normalizeData(value: unknown): ScheduleData {
   const record = asRecord(value);
   if (!record) return emptyData();
-  const legacy = isLegacyPlanShape(record);
-  const tasks = legacy ? migrateLegacyPlans(record) : normalizeTaskEntries(record.tasks);
+  const tasks = normalizeTaskEntries(record.tasks);
   return {
-    version: typeof record.version === 'number' && !legacy ? record.version : SCHEDULE_VERSION,
+    version: typeof record.version === 'number' ? record.version : SCHEDULE_VERSION,
     updatedAtMs: typeof record.updatedAtMs === 'number' ? record.updatedAtMs : 0,
     updatedAt: typeof record.updatedAt === 'string' ? record.updatedAt : '',
-    summary: legacy || typeof record.summary !== 'string' ? summarize(tasks) : record.summary,
+    summary: typeof record.summary === 'string' ? record.summary : summarize(tasks),
     title: normalizeTitle(record.title),
     scale: normalizeScale(record.scale),
     zoom: normalizeZoom(record.zoom),
     tasks,
   };
-}
-
-/** 旧版本把排期存成「计划 + 阶段」两层；现在只有一层任务。 */
-export function isLegacyPlanShape(value: unknown): boolean {
-  const record = asRecord(value);
-  return Boolean(record && !Array.isArray(record.tasks) && Array.isArray(record.plans));
 }
 
 function normalizeTaskEntries(value: unknown): ScheduleTask[] {
@@ -174,41 +167,68 @@ function normalizeTaskEntries(value: unknown): ScheduleTask[] {
   return tasks;
 }
 
-function migrateLegacyPlans(record: Record<string, unknown>): ScheduleTask[] {
-  const tasks: ScheduleTask[] = [];
-  const seen = new Set<string>();
-  asArray(record.plans).forEach((entry, planIndex) => {
-    if (tasks.length >= MAX_TASKS) return;
-    const plan = asRecord(entry);
-    if (!plan) return;
-    const planName = text(plan.name, MAX_NAME_LENGTH);
-    const planNote = text(plan.note, MAX_NOTE_LENGTH);
-    const color = nextColor(planIndex);
-    let firstStage = true;
-    asArray(plan.stages).forEach((stageEntry) => {
-      if (tasks.length >= MAX_TASKS) return;
-      const stage = asRecord(stageEntry);
-      if (!stage) return;
-      const stageName = text(stage.name, MAX_NAME_LENGTH);
-      const start = text(stage.start, 10);
-      const end = text(stage.end, 10) || start;
-      if (!stageName || !isValidRange(start, end)) return;
-      let id = text(stage.id, MAX_NAME_LENGTH);
-      if (!id) id = newId();
-      while (seen.has(id)) id = newId();
-      seen.add(id);
-      tasks.push({
-        id,
-        name: (planName ? `${planName} · ${stageName}` : stageName).slice(0, MAX_NAME_LENGTH),
-        start,
-        end,
-        color,
-        note: planNote && firstStage ? planNote : '',
-      });
-      firstStage = false;
-    });
+/**
+ * Parse the on-disk shape once, before a writer uses it as a mutation base.
+ *
+ * `normalizeData` is deliberately forgiving for the renderer and imports. Persistent writes are
+ * different: silently dropping a malformed task would overwrite user data. Keeping this check in
+ * the node-free model module lets the file store and the page writer share one strict baseline.
+ */
+export function parseStoredData(value: unknown): ScheduleData {
+  const raw = asRecord(value);
+  if (
+    !raw ||
+    raw.version !== SCHEDULE_VERSION ||
+    !optionalStoredText(raw.title, MAX_TITLE_LENGTH) ||
+    !optionalStoredText(raw.updatedAt, Number.MAX_SAFE_INTEGER) ||
+    !optionalStoredText(raw.summary, Number.MAX_SAFE_INTEGER) ||
+    (raw.updatedAtMs !== undefined && (typeof raw.updatedAtMs !== 'number' || !Number.isFinite(raw.updatedAtMs))) ||
+    (raw.scale !== undefined && !(SCALES as readonly unknown[]).includes(raw.scale)) ||
+    (raw.zoom !== undefined && (typeof raw.zoom !== 'number' || !Number.isFinite(raw.zoom))) ||
+    !Array.isArray(raw.tasks) ||
+    raw.tasks.length > MAX_TASKS
+  ) {
+    throw invalidStoredData();
+  }
+
+  const ids = new Set<string>();
+  for (const entry of raw.tasks) {
+    const task = asRecord(entry);
+    if (
+      !task ||
+      typeof task.id !== 'string' ||
+      !task.id.trim() ||
+      task.id.length > MAX_NAME_LENGTH ||
+      typeof task.name !== 'string' ||
+      !task.name.trim() ||
+      task.name.length > MAX_NAME_LENGTH ||
+      typeof task.start !== 'string' ||
+      task.start.length !== 10 ||
+      (task.end !== undefined && (typeof task.end !== 'string' || task.end.length !== 10)) ||
+      !isValidRange(task.start, typeof task.end === 'string' ? task.end : task.start) ||
+      (task.color !== undefined && !isScheduleColor(task.color)) ||
+      !optionalStoredText(task.note, MAX_NOTE_LENGTH)
+    ) {
+      throw invalidStoredData();
+    }
+    const id = task.id.trim();
+    if (ids.has(id)) throw invalidStoredData();
+    ids.add(id);
+  }
+
+  const data = normalizeData(raw);
+  if (data.tasks.length !== raw.tasks.length) throw invalidStoredData();
+  return data;
+}
+
+function optionalStoredText(value: unknown, limit: number): boolean {
+  return value === undefined || (typeof value === 'string' && value.length <= limit);
+}
+
+function invalidStoredData(): Error {
+  return Object.assign(new Error('排期文件损坏或结构不合法；请先修复或恢复文件，原文件未改写'), {
+    code: 'invalid_data',
   });
-  return tasks;
 }
 
 /* ------------------------------------------------------------------ 写操作 */
@@ -350,7 +370,7 @@ export function exportDocument(data: ScheduleData): ScheduleDocument {
 
 /**
  * 导入：解析失败或没有任何合法任务都直接报错，避免用户以为导入成功了。
- * 认不出的字段被丢掉；旧形态（`plans` / `stages`）按迁移规则读成任务；
+ * 认不出的字段被丢掉；旧形态（`plans` / `stages`）不再接受，必须先由 Evolution 迁移；
  * 颜色、日期不合法的任务不会进来。
  */
 export function parseImport(value: unknown): { title: string; scale: ScheduleScale; tasks: ScheduleTask[] } {

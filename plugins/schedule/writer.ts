@@ -1,4 +1,4 @@
-import { applyOperation, emptyData, normalizeData, stamp, type ScheduleOperation } from './schedule.js';
+import { applyOperation, emptyData, parseStoredData, stamp, type ScheduleOperation } from './schedule.js';
 
 /**
  * 页面写盘的那条链。
@@ -56,7 +56,12 @@ export function createScheduleWriter(options: {
         return fail(`读取排期失败：${errorText(error)}`);
       }
       if (result?.ok === false) return fail(result.error || '读取排期失败');
-      const base = result?.value == null ? emptyData() : normalizeData(result.value);
+      let base;
+      try {
+        base = result?.value == null ? emptyData() : parseStoredData(result.value);
+      } catch (error) {
+        return fail(`读取排期失败：${error instanceof Error ? error.message : String(error)}`);
+      }
       let next;
       try {
         next = stamp(applyOperation(base, operation));

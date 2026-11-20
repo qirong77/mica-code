@@ -24,7 +24,6 @@ import {
 } from 'lexical';
 
 import {
-  CODE_LANGUAGE_FRIENDLY_NAME_MAP,
   getPrismLanguageFriendlyName,
   normalizePrismCodeLanguage,
 } from './codeLanguageOptions';
@@ -53,31 +52,6 @@ export function normalizeCodeLanguage(lang: string) {
 
 export function getLanguageFriendlyName(lang: string) {
   return getPrismLanguageFriendlyName(lang);
-}
-
-export const getCodeLanguages = (): string[] =>
-  Object.keys(Prism.languages)
-    .filter(
-      // Prism has several language helpers mixed into languages object
-      // so filtering them out here to get langs list
-      (language) => typeof Prism.languages[language] !== 'function',
-    )
-    .sort();
-
-export function getCodeLanguageOptions(): [string, string][] {
-  const options: [string, string][] = [];
-
-  for (const [lang, friendlyName] of Object.entries(CODE_LANGUAGE_FRIENDLY_NAME_MAP)) {
-    options.push([lang, friendlyName]);
-  }
-
-  return options;
-}
-
-// Prism has no theme support
-export function getCodeThemeOptions(): [string, string][] {
-  const options: [string, string][] = [];
-  return options;
 }
 
 function getDiffedLanguage(language: string) {

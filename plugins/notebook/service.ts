@@ -37,7 +37,7 @@ export interface NotebookDataHost {
 
 export type NotebookNodeView = {
   id: string;
-  /** Stable identifier used by the MCP contract; `id` remains for page/model parity. */
+  /** Stable identifier used by the HTTP API; `id` remains for page/model parity. */
   node_id: string;
   kind: NotebookNode['kind'];
   title: string;
@@ -224,14 +224,6 @@ export class NotebookService {
       text_truncated: text.length > MAX_TEXT_RESULT,
     };
   }
-
-  async readDocumentForUpdate(id: string): Promise<NotebookDocument> {
-    const index = await this.controller.loadIndex();
-    const node = findNode(index, id);
-    if (node.kind !== 'note') throw new Error('只有笔记节点有正文');
-    if (node.trashedAt) throw new Error('请先恢复笔记，再编辑正文');
-    return (await this.controller.readDocument(id)).value;
-  }
 }
 
 function findNode(index: NotebookIndex, id: string): NotebookNode {
@@ -298,7 +290,7 @@ function collectText(value: unknown, parts: string[]): void {
   if (!value || typeof value !== 'object') return;
   const record = value as Record<string, unknown>;
   // Rich Markdown writes use Lexical linebreak nodes for soft breaks and code
-  // lines. Keep the plain-text MCP projection readable instead of joining them
+  // lines. Keep the plain-text HTTP API projection readable instead of joining them
   // into one long word while the editor state itself remains untouched.
   if (record.type === 'linebreak') {
     parts.push('\n');
@@ -317,8 +309,6 @@ function collectText(value: unknown, parts: string[]): void {
     if (record.type !== 'root') parts.push('\n');
     return;
   }
-  // Compatibility with small synthetic documents used by older callers/tests.
-  if (typeof record.text === 'string') parts.push(record.text);
 }
 
 export function appendPlainText(document: NotebookDocument, text: string, prepend = false): NotebookDocument {

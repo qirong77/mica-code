@@ -67,16 +67,18 @@ export function samePeer(a: unknown, b: unknown): boolean {
 }
 
 /**
- * 读出来的清单可能是旧版本或被手改过的：非法项丢掉、同 host 去重、超上限截断。
+ * 当前清单被手改过时：非法项丢掉、同 host 去重、超上限截断。
  *
- * 旧版本存的是纯地址数组（`["http://10.0.0.2:9102"]`），这里一并读成
- * `{ url, note: '' }`；`persistence.load()` 检测到旧形状会立即回写新格式。
+ * 旧版本由 Evolution 一次性迁移；运行时只认 version 1 的当前对象形态，避免每次打开卡片
+ * 都再次承担旧数据的解析责任。
  */
 export function normalizePeerStore(raw: unknown): PeerStore {
+  if (!isRecord(raw) || raw.version !== PEER_STORE_VERSION || !Array.isArray(raw.peers)) {
+    return emptyPeerStore();
+  }
   const peers: PeerEntry[] = [];
-  for (const value of readPeerList(raw)) {
-    const candidate = typeof value === 'string' ? { url: value, note: '' } : value;
-    const entry = asPeerEntry(candidate);
+  for (const value of raw.peers) {
+    const entry = asPeerEntry(value);
     if (!entry) continue;
     if (peers.some((existing) => samePeer(existing.url, entry.url))) continue;
     peers.push(entry);
@@ -158,13 +160,6 @@ export function peerRows(current: unknown, store: PeerStore, localHost?: string)
 /** 卡片上这一行的名字：起过备注就用备注，否则退回地址的显示名（回环叫 `Local`）。 */
 export function peerLabel(peer: PeerEntry): string {
   return peer.note || runtimeLabel(peer.url);
-}
-
-/** 混进来的可能是数组、可能是 `{ peers: [...] }`，也可能是一句无意义的字符串。 */
-function readPeerList(raw: unknown): unknown[] {
-  if (Array.isArray(raw)) return raw;
-  if (isRecord(raw) && Array.isArray(raw.peers)) return raw.peers;
-  return [];
 }
 
 function asPeerEntry(value: unknown): PeerEntry | null {

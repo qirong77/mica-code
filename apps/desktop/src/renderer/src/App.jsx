@@ -819,7 +819,7 @@ export default function App() {
         title: typeof row.title === 'string' && row.title.trim() ? row.title.trim() : '',
         cwd: typeof row.cwd === 'string' && row.cwd.trim() ? row.cwd.trim() : null,
         updatedAtMs: Number(row.updatedAtMs) || 0,
-        turnState: row.turnState || 'completed'
+        turnState: row.turnState
       }
     }
     setSessions((prev) => (prev === list ? prev : list || []))

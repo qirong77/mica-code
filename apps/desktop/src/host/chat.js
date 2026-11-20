@@ -101,6 +101,12 @@ const ABORT_RECALL_TIMEOUT_MS = 1500
 const MAX_STDERR_CHARS = 32 * 1024
 const MAX_QUEUED_RUNS = 50
 
+function normalizedTurnState(value) {
+  return value === 'running' || value === 'completed' || value === 'aborted' || value === 'error'
+    ? value
+    : 'completed'
+}
+
 // Merge the login-shell environment captured at startup (e.g. exports from
 // ~/.zshrc) into a spawned mica process. Falls back to the inherited env
 // while the capture is still pending or unavailable.
@@ -433,7 +439,7 @@ function readSessionMeta(sessionId) {
             }
           : lastUsage,
       cachedRate: inputTokens > 0 ? cachedInputTokens / inputTokens : 0,
-      turnState: raw.turnState || 'completed',
+      turnState: normalizedTurnState(raw.turnState),
       updatedAt: raw.updatedAt || null
     }
   } catch {

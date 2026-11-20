@@ -18,12 +18,28 @@
   -webkit-app-region: drag;
 }
 .floatingwindow-toolbar > * { -webkit-app-region: no-drag; }
-.floatingwindow-toolbar .floatingwindow-address.arco-input {
+.floatingwindow-toolbar .floatingwindow-drag { -webkit-app-region: drag; cursor: grab; }
+.floatingwindow-toolbar .floatingwindow-drag:active { cursor: grabbing; }
+.floatingwindow-address-wrap {
+  position: relative;
   flex: 1 1 auto;
-  width: auto;
   min-width: 0;
 }
+.floatingwindow-toolbar .floatingwindow-address.arco-input {
+  width: 100%;
+  min-width: 0;
+}
+#root .floatingwindow-address-wrap .floatingwindow-address.arco-input { padding-right: 36px; }
 #root .floatingwindow-toolbar .floatingwindow-address.arco-input { font-size: 13px; }
+.floatingwindow-address-favorite {
+  position: absolute;
+  z-index: 1;
+  top: 50%;
+  right: 2px;
+  transform: translateY(-50%);
+  color: var(--color-fg-muted);
+}
+.floatingwindow-address-favorite:hover, .floatingwindow-address-favorite:focus-visible { color: var(--color-accent); }
 .floatingwindow-notice {
   position: absolute;
   z-index: 2;

@@ -47,13 +47,17 @@ describe('normalizePeerStore', () => {
     ).toEqual({ version: PEER_STORE_VERSION, peers: [{ url: 'http://10.0.0.2:9102', note: '办公室' }] });
   });
 
-  it('旧格式（纯地址数组）也能读成 { url, note: "" }', () => {
-    expect(normalizePeerStore(['http://10.0.0.2:9102', '192.168.1.5'])).toEqual({
+  it('不再在运行时读取旧存储形态，但仍清洗当前对象里的非法条目', () => {
+    expect(normalizePeerStore(['http://10.0.0.2:9102', '192.168.1.5'])).toEqual(emptyPeerStore());
+    expect(normalizePeerStore({ peers: [{ url: 'http://10.0.0.2:9102' }] })).toEqual(emptyPeerStore());
+    expect(
+      normalizePeerStore({
+        version: PEER_STORE_VERSION,
+        peers: [{ url: 'http://10.0.0.2:9102' }, { url: 'ftp://invalid' }, null],
+      }),
+    ).toEqual({
       version: PEER_STORE_VERSION,
-      peers: [
-        { url: 'http://10.0.0.2:9102', note: '' },
-        { url: 'http://192.168.1.5:8787', note: '' },
-      ],
+      peers: [{ url: 'http://10.0.0.2:9102', note: '' }],
     });
   });
 
@@ -166,7 +170,7 @@ describe('relay links', () => {
   const link = (session: string) => `https://mica.qirong77.com/?t=${token}&session=${session}`;
 
   it('keeps the token and session instead of turning it into a bare origin', () => {
-    const peers = store([link('s1')]);
+    const peers = store([{ url: link('s1') }]);
     expect(peers.peers[0]?.url).toBe(link('s1'));
   });
 

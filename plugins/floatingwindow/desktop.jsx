@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { ArrowLeft, ArrowRight, Globe, House, RotateCw, Star, X } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Globe, GripVertical, House, Star } from 'lucide-react';
 import { ArcoAction, Input } from '@mica-config-ui/web';
 import { normalizeAddress, persistableAddress } from './address.js';
 import './desktop.css';
@@ -53,7 +53,7 @@ export function Welcome({ favorites = [], recent = [], favicons = {}, onOpen, on
   </main>;
 }
 
-export function Launcher({ api, onClose }) {
+export function Launcher({ api }) {
   const launcher = api?.launcher;
   const web = launcher?.web;
   const [state, setState] = useState({ url: '', home: true, canGoBack: false, canGoForward: false, loading: false });
@@ -64,7 +64,7 @@ export function Launcher({ api, onClose }) {
   const [error, setError] = useState('');
   const [saveNotice, setSaveNotice] = useState('');
   const [status, setStatus] = useState(null);
-  const available = status?.native !== false && !!web && ['state', 'navigate', 'home', 'back', 'forward', 'reload', 'subscribe'].every((key) => typeof web[key] === 'function');
+  const available = status?.native !== false && !!web && ['state', 'navigate', 'home', 'back', 'forward', 'subscribe'].every((key) => typeof web[key] === 'function');
   const dirty = useRef(false);
   const latest = useRef('');
   const editVersion = useRef(0);
@@ -194,10 +194,6 @@ export function Launcher({ api, onClose }) {
     try { check(await launcher.retry()); setStatus(check(await launcher.status())); }
     catch (cause) { setError(`快捷键重试失败：${message(cause)}`); }
   };
-  const close = async () => {
-    try { if (launcher?.close) check(await launcher.close()); else onClose?.(); }
-    catch (cause) { setError(`无法关闭：${message(cause)}`); }
-  };
   const shortcutNotice = status?.native === false ? '当前环境不支持系统快捷键' : status && !status.registered ? `快捷键注册失败${status.error ? `：${status.error}` : '，可能已被其他应用占用'}` : '';
   const notice = !available ? '当前环境不支持原生网页浮窗，请在 Mica 桌面端打开' : [error || state.error, shortcutNotice, saveNotice].filter(Boolean).join(' · ') || (state.loading ? '正在加载…' : '');
   const currentSite = state.home ? '' : persistableAddress(state.url) || '';
@@ -208,17 +204,18 @@ export function Launcher({ api, onClose }) {
         <ArcoAction iconOnly title="后退" aria-label="后退" disabled={!available || state.home || !state.canGoBack} onClick={() => void run('back')}><ArrowLeft size={15} /></ArcoAction>
         <ArcoAction iconOnly title="前进" aria-label="前进" disabled={!available || state.home || !state.canGoForward} onClick={() => void run('forward')}><ArrowRight size={15} /></ArcoAction>
         <ArcoAction iconOnly title="欢迎页" aria-label="欢迎页" disabled={!available || state.home} onClick={() => void run('home')}><House size={15} /></ArcoAction>
-        <ArcoAction iconOnly title="刷新" aria-label="刷新" disabled={!available || state.home} onClick={() => void run('reload')}><RotateCw size={15} /></ArcoAction>
-        <ArcoAction iconOnly title={isFavorite ? '取消收藏' : '收藏'} aria-label={isFavorite ? '取消收藏' : '收藏'} disabled={!available || state.home} onClick={() => void toggleFavorite(state.url, !isFavorite)}><Star size={15} fill={isFavorite ? 'currentColor' : 'none'} /></ArcoAction>
-        <Input className="floatingwindow-address" aria-label="网址" placeholder="输入域名或网址" autoComplete="off" spellCheck={false} disabled={!available} value={address}
-          onKeyDown={(event) => {
-            if (event.key !== 'Enter') return;
-            event.preventDefault();
-            if (!event.nativeEvent.isComposing && event.keyCode !== 229) void open(address);
-          }}
-          onBlur={() => { if (!dirty.current) setAddress(latest.current); }}
-          onChange={(value) => { editVersion.current += 1; dirty.current = true; setAddress(value); }} />
-        <ArcoAction iconOnly title="关闭" aria-label="关闭" onClick={() => void close()}><X size={15} /></ArcoAction>
+        <ArcoAction iconOnly className="floatingwindow-drag" title="拖动窗口" aria-label="拖动窗口"><GripVertical size={15} /></ArcoAction>
+        <div className="floatingwindow-address-wrap">
+          <Input className="floatingwindow-address" aria-label="网址" placeholder="输入域名或网址" autoComplete="off" spellCheck={false} disabled={!available} value={address}
+            onKeyDown={(event) => {
+              if (event.key !== 'Enter') return;
+              event.preventDefault();
+              if (!event.nativeEvent.isComposing && event.keyCode !== 229) void open(address);
+            }}
+            onBlur={() => { if (!dirty.current) setAddress(latest.current); }}
+            onChange={(value) => { editVersion.current += 1; dirty.current = true; setAddress(value); }} />
+          <ArcoAction iconOnly className="floatingwindow-address-favorite" title={isFavorite ? '取消收藏' : '收藏'} aria-label={isFavorite ? '取消收藏' : '收藏'} disabled={!available || state.home} onClick={() => void toggleFavorite(state.url, !isFavorite)}><Star size={15} fill={isFavorite ? 'currentColor' : 'none'} /></ArcoAction>
+        </div>
       </form>
       {notice ? <div className="floatingwindow-notice" role={error || state.error ? 'alert' : 'status'} title={notice}>
         <span>{notice}</span>
