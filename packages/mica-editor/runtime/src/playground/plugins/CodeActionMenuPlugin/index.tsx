@@ -7,17 +7,12 @@
 
 import './index.css';
 
-import {Button, Select} from '@arco-design/web-react';
-import {IconExport} from '@arco-design/web-react/icon';
-import {$isCodeNode} from '@lexical/code';
-import {DEFAULT_CODE_LANGUAGE} from '@lexical/code-core';
-import {
-  getCodeLanguageOptions,
-  getLanguageFriendlyName,
-  normalizeCodeLanguage,
-} from '@lexical/code-prism';
-import {useLexicalComposerContext} from '@lexical/react/LexicalComposerContext';
-import {useLexicalEditable} from '@lexical/react/useLexicalEditable';
+import { Button, Select } from '@arco-design/web-react';
+import { IconExport } from '@arco-design/web-react/icon';
+import { $isCodeNode } from '@lexical/code';
+import { DEFAULT_CODE_LANGUAGE } from '@lexical/code-core';
+import { useLexicalComposerContext } from '@lexical/react/LexicalComposerContext';
+import { useLexicalEditable } from '@lexical/react/useLexicalEditable';
 import {
   $getNearestNodeFromDOMNode,
   getComposedEventTarget,
@@ -26,8 +21,8 @@ import {
   type NodeKey,
   SKIP_DOM_SELECTION_TAG,
 } from 'lexical';
-import {type JSX, type ReactPortal, useCallback, useEffect, useRef, useState} from 'react';
-import {createPortal} from 'react-dom';
+import { type JSX, type ReactPortal, useCallback, useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 
 import {
   $exitCodeBlock,
@@ -36,23 +31,26 @@ import {
   $setCodeBlockLanguage,
   registerCodeWritingCommands,
 } from './codeActions';
-import {CopyButton} from './components/CopyButton';
-import {PrettierButton} from './components/PrettierButton';
-import {canBePrettier} from './formatCodeWithPrettier';
-import {isMermaidLanguage} from '../MermaidPreviewPlugin/mermaid';
+import { CopyButton } from './components/CopyButton';
+import { PrettierButton } from './components/PrettierButton';
+import { canBePrettier } from './formatCodeWithPrettier';
+import { isMermaidLanguage } from '../MermaidPreviewPlugin/mermaid';
+import {
+  CODE_LANGUAGE_OPTIONS_PRISM,
+  getPrismLanguageFriendlyName,
+  normalizePrismCodeLanguage,
+} from '../CodeHighlightExtension/codeLanguageOptions';
 
 const LANGUAGE_OPTIONS = [
-  {value: '', label: '未指定语言'},
-  {value: 'plain', label: '纯文本'},
-  ...getCodeLanguageOptions()
-    .filter(([value]) => value !== 'plain')
-    .map(([value, label]) => ({value, label})),
+  { value: '', label: '未指定语言' },
+  { value: 'plain', label: '纯文本' },
+  ...CODE_LANGUAGE_OPTIONS_PRISM.filter(([value]) => value !== 'plain').map(([value, label]) => ({ value, label })),
 ];
 
-type ActiveCode = {key: NodeKey; language: string};
-type Position = {top: number; left: number; width: number};
+type ActiveCode = { key: NodeKey; language: string };
+type Position = { top: number; left: number; width: number };
 
-function CodeActionMenuContainer({anchorElem}: {anchorElem: HTMLElement}): JSX.Element | null {
+function CodeActionMenuContainer({ anchorElem }: { anchorElem: HTMLElement }): JSX.Element | null {
   const [editor] = useLexicalComposerContext();
   const isEditable = useLexicalEditable();
   const [active, setActive] = useState<ActiveCode | null>(null);
@@ -69,15 +67,16 @@ function CodeActionMenuContainer({anchorElem}: {anchorElem: HTMLElement}): JSX.E
     const doc = anchorElem.ownerDocument;
     const menuHasFocus = menuRef.current?.contains(doc.activeElement);
     const next = editor.read('latest', () => {
-      const locked = (menuHasFocus || popupOpenRef.current) && activeRef.current
-        ? $getCodeBlock(activeRef.current.key)
-        : null;
+      const locked =
+        (menuHasFocus || popupOpenRef.current) && activeRef.current ? $getCodeBlock(activeRef.current.key) : null;
       const hovered = hoveredKeyRef.current ? $getCodeBlock(hoveredKeyRef.current) : null;
       const selected = root?.contains(doc.activeElement) ? $getSelectedCodeBlock() : null;
       const code = locked || hovered || selected;
       // Mermaid has its own source/preview controls; do not cover those with
       // a second language/copy/exit menu when its CodeNode receives focus.
-      return code && !isMermaidLanguage(code.getLanguage()) ? {key: code.getKey(), language: code.getLanguage() || ''} : null;
+      return code && !isMermaidLanguage(code.getLanguage())
+        ? { key: code.getKey(), language: code.getLanguage() || '' }
+        : null;
     });
     const codeDOM = next ? editor.getElementByKey(next.key) : null;
     if (!root || !next || !codeDOM?.isConnected || !root.contains(codeDOM)) {
@@ -88,7 +87,7 @@ function CodeActionMenuContainer({anchorElem}: {anchorElem: HTMLElement}): JSX.E
       return;
     }
     activeRef.current = next;
-    setActive(previous => previous?.key === next.key && previous.language === next.language ? previous : next);
+    setActive((previous) => (previous?.key === next.key && previous.language === next.language ? previous : next));
 
     const codeRect = codeDOM.getBoundingClientRect();
     const anchorRect = anchorElem.getBoundingClientRect();
@@ -106,8 +105,13 @@ function CodeActionMenuContainer({anchorElem}: {anchorElem: HTMLElement}): JSX.E
     // Let a first-line caret/selection use the full width while typing. The
     // tools remain reachable by moving over the block or pressing Alt+F10.
     const selection = doc.getSelection();
-    if (!hoveredKeyRef.current && !menuHasFocus && !popupOpenRef.current &&
-        selection?.rangeCount && codeDOM.contains(selection.anchorNode)) {
+    if (
+      !hoveredKeyRef.current &&
+      !menuHasFocus &&
+      !popupOpenRef.current &&
+      selection?.rangeCount &&
+      codeDOM.contains(selection.anchorNode)
+    ) {
       const rect = selection.getRangeAt(0).getBoundingClientRect();
       if (rect.right >= left && rect.left <= right && rect.top < codeRect.top + 34 && rect.bottom > codeRect.top) {
         setPosition(null);
@@ -119,7 +123,11 @@ function CodeActionMenuContainer({anchorElem}: {anchorElem: HTMLElement}): JSX.E
       top: codeRect.top - anchorRect.top + anchorElem.scrollTop - anchorElem.clientTop + 4,
       width: right - left,
     };
-    setPosition(previous => previous?.left === measured.left && previous.top === measured.top && previous.width === measured.width ? previous : measured);
+    setPosition((previous) =>
+      previous?.left === measured.left && previous.top === measured.top && previous.width === measured.width
+        ? previous
+        : measured,
+    );
   }, [editor, anchorElem]);
 
   const scheduleRefresh = useCallback(() => {
@@ -138,10 +146,13 @@ function CodeActionMenuContainer({anchorElem}: {anchorElem: HTMLElement}): JSX.E
       if (target instanceof win.Node && menuRef.current?.contains(target)) return;
       const root = editor.getRootElement();
       const codeDOM = isHTMLElement(target) ? target.closest<HTMLElement>('code.PlaygroundEditorTheme__code') : null;
-      const key = codeDOM && root?.contains(codeDOM) ? editor.read('latest', () => {
-        const code = $getNearestNodeFromDOMNode(codeDOM);
-        return $isCodeNode(code) && editor.getElementByKey(code.getKey()) === codeDOM ? code.getKey() : null;
-      }) : null;
+      const key =
+        codeDOM && root?.contains(codeDOM)
+          ? editor.read('latest', () => {
+              const code = $getNearestNodeFromDOMNode(codeDOM);
+              return $isCodeNode(code) && editor.getElementByKey(code.getKey()) === codeDOM ? code.getKey() : null;
+            })
+          : null;
       if (key !== hoveredKeyRef.current) {
         hoveredKeyRef.current = key;
         scheduleRefresh();
@@ -172,13 +183,14 @@ function CodeActionMenuContainer({anchorElem}: {anchorElem: HTMLElement}): JSX.E
         root?.classList.add('has-code-action-menu');
         scheduleRefresh();
       }),
-      registerCodeWritingCommands(editor, key => {
+      registerCodeWritingCommands(editor, (key) => {
         const codeDOM = editor.getElementByKey(key);
         if (codeDOM?.hasAttribute('data-mermaid-view')) {
           // The Mermaid source toolbar replaces this menu, including its
           // keyboard entry point. It lives outside the editable root.
-          const toolbar = [...anchorElem.querySelectorAll<HTMLElement>('.mermaid-source-toolbar')]
-            .find(element => element.dataset.mermaidKey === key);
+          const toolbar = [...anchorElem.querySelectorAll<HTMLElement>('.mermaid-source-toolbar')].find(
+            (element) => element.dataset.mermaidKey === key,
+          );
           toolbar?.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus();
           return;
         }
@@ -187,7 +199,9 @@ function CodeActionMenuContainer({anchorElem}: {anchorElem: HTMLElement}): JSX.E
         cancelAnimationFrame(focusFrameRef.current);
         focusFrameRef.current = requestAnimationFrame(() => {
           focusFrameRef.current = requestAnimationFrame(() => {
-            menuRef.current?.querySelector<HTMLElement>('[role="combobox"]:not([aria-disabled="true"]), button:not(:disabled)')?.focus();
+            menuRef.current
+              ?.querySelector<HTMLElement>('[role="combobox"]:not([aria-disabled="true"]), button:not(:disabled)')
+              ?.focus();
           });
         });
       }),
@@ -218,13 +232,13 @@ function CodeActionMenuContainer({anchorElem}: {anchorElem: HTMLElement}): JSX.E
   }, [editor, anchorElem, active?.key, scheduleRefresh]);
 
   if (!active) return null;
-  const language = normalizeCodeLanguage(active.language);
-  const options = LANGUAGE_OPTIONS.some(option => option.value === language)
+  const language = normalizePrismCodeLanguage(active.language);
+  const options = LANGUAGE_OPTIONS.some((option) => option.value === language)
     ? LANGUAGE_OPTIONS
-    : [...LANGUAGE_OPTIONS, {value: language, label: getLanguageFriendlyName(language)}];
+    : [...LANGUAGE_OPTIONS, { value: language, label: getPrismLanguageFriendlyName(language) }];
   // Preserve the previous formatter for unspecified code, without assigning a
   // language in the document. Explicit plain text never offers JS formatting.
-  const formatLanguage = normalizeCodeLanguage(active.language || DEFAULT_CODE_LANGUAGE);
+  const formatLanguage = normalizePrismCodeLanguage(active.language || DEFAULT_CODE_LANGUAGE);
 
   return (
     <div
@@ -233,14 +247,15 @@ function CodeActionMenuContainer({anchorElem}: {anchorElem: HTMLElement}): JSX.E
       className="code-action-menu-container"
       role="group"
       aria-label="代码块工具（Alt+F10 聚焦，Esc 返回正文）"
-      style={position ? position : {visibility: 'hidden', pointerEvents: 'none'}}
-      onKeyDown={event => {
+      style={position ? position : { visibility: 'hidden', pointerEvents: 'none' }}
+      onKeyDown={(event) => {
         if (event.key === 'Escape' && !popupOpenRef.current) {
           event.preventDefault();
           event.stopPropagation();
           editor.focus();
         }
-      }}>
+      }}
+    >
       <div className="code-action-menu-row">
         <Select
           size="mini"
@@ -252,23 +267,30 @@ function CodeActionMenuContainer({anchorElem}: {anchorElem: HTMLElement}): JSX.E
           options={options}
           notFoundContent="没有匹配的语言"
           filterOption={(query, option) => {
-            const props = option.props as {value: string; children: string};
+            const props = option.props as { value: string; children: string };
             return `${props.value} ${props.children}`.toLowerCase().includes(query.toLowerCase());
           }}
           getPopupContainer={() => menuRef.current || anchorElem}
           dropdownMenuClassName="code-language-options"
-          triggerProps={{autoAlignPopupWidth: false, autoFitPosition: true}}
-          onVisibleChange={visible => {
+          triggerProps={{ autoAlignPopupWidth: false, autoFitPosition: true }}
+          onVisibleChange={(visible) => {
             popupOpenRef.current = visible;
             scheduleRefresh();
           }}
           onChange={(value: string) => {
-            editor.update(() => $setCodeBlockLanguage(editor, active.key, value), {tag: SKIP_DOM_SELECTION_TAG});
+            editor.update(() => $setCodeBlockLanguage(editor, active.key, value), { tag: SKIP_DOM_SELECTION_TAG });
           }}
         />
         <CopyButton editor={editor} codeKey={active.key} />
         {canBePrettier(formatLanguage) && (
-          <PrettierButton key={formatLanguage} editor={editor} codeKey={active.key} lang={formatLanguage} disabled={!isEditable} getFeedbackContainer={() => menuRef.current} />
+          <PrettierButton
+            key={formatLanguage}
+            editor={editor}
+            codeKey={active.key}
+            lang={formatLanguage}
+            disabled={!isEditable}
+            getFeedbackContainer={() => menuRef.current}
+          />
         )}
         <Button
           type="text"
@@ -280,11 +302,11 @@ function CodeActionMenuContainer({anchorElem}: {anchorElem: HTMLElement}): JSX.E
           aria-keyshortcuts="Meta+Enter Control+Enter"
           title="退出代码块（⌘/Ctrl + Enter）"
           icon={<IconExport />}
-          onMouseDown={event => event.preventDefault()}
+          onMouseDown={(event) => event.preventDefault()}
           onClick={() => {
             hoveredKeyRef.current = null;
             editor.update(() => {
-              if ($exitCodeBlock(editor, active.key)) editor.getRootElement()?.focus({preventScroll: true});
+              if ($exitCodeBlock(editor, active.key)) editor.getRootElement()?.focus({ preventScroll: true });
             });
           }}
         />
@@ -293,6 +315,10 @@ function CodeActionMenuContainer({anchorElem}: {anchorElem: HTMLElement}): JSX.E
   );
 }
 
-export default function CodeActionMenuPlugin({anchorElem = document.body}: {anchorElem?: HTMLElement}): ReactPortal {
+export default function CodeActionMenuPlugin({
+  anchorElem = document.body,
+}: {
+  anchorElem?: HTMLElement;
+}): ReactPortal {
   return createPortal(<CodeActionMenuContainer anchorElem={anchorElem} />, anchorElem);
 }

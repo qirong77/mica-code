@@ -6,20 +6,10 @@
  *
  */
 
-import {caretFromPoint} from '@lexical/clipboard';
-import {
-  $generateNodesFromDOM,
-  defineImportRule,
-  DOMImportExtension,
-  sel,
-} from '@lexical/html';
-import {
-  $isAutoLinkNode,
-  $isLinkNode,
-  type LinkNode,
-  TOGGLE_LINK_COMMAND,
-} from '@lexical/link';
-import {$wrapNodeInElement} from '@lexical/utils';
+import { caretFromPoint } from '@lexical/clipboard';
+import { $generateNodesFromDOM, defineImportRule, DOMImportExtension, sel } from '@lexical/html';
+import { $isAutoLinkNode, $isLinkNode, type LinkNode, TOGGLE_LINK_COMMAND } from '@lexical/link';
+import { $wrapNodeInElement } from '@lexical/utils';
 import {
   $createParagraphNode,
   $createRangeSelection,
@@ -47,21 +37,14 @@ import {
   registerEventListener,
   SKIP_DOM_SELECTION_TAG,
 } from 'lexical';
-import {type JSX, useEffect, useRef, useState} from 'react';
+import { type JSX, useEffect, useRef, useState } from 'react';
 
-import landscapeImage from '../../images/landscape.jpg';
-import yellowFlowerImage from '../../images/yellow-flower.jpg';
-import {
-  $createImageNode,
-  $isImageNode,
-  ImageNode,
-  type ImagePayload,
-} from '../../nodes/ImageNode';
+import { $createImageNode, $isImageNode, ImageNode, type ImagePayload } from '../../nodes/ImageNode';
 import Button from '../../ui/Button';
-import {DialogActions, DialogButtonsList} from '../../ui/Dialog';
+import { DialogActions, DialogButtonsList } from '../../ui/Dialog';
 import FileInput from '../../ui/FileInput';
 import TextInput from '../../ui/TextInput';
-import {$imageBlock, $selectImage} from '../../nodes/imageEditing';
+import { $imageBlock, $selectImage } from '../../nodes/imageEditing';
 
 /**
  * Google Docs serializes its bullet/check list markers as a leading
@@ -122,12 +105,10 @@ const FigureRule = defineImportRule({
         // import pipeline; route the <figcaption> children through it.
         imgNode.__caption.update(
           () => {
-            $selectAll().insertNodes(
-              $generateNodesFromDOM(imgNode.__caption, figcaption),
-            );
+            $selectAll().insertNodes($generateNodesFromDOM(imgNode.__caption, figcaption));
             $setSelection(null);
           },
-          {tag: SKIP_DOM_SELECTION_TAG},
+          { tag: SKIP_DOM_SELECTION_TAG },
         );
       }
     }
@@ -139,14 +120,9 @@ const FigureRule = defineImportRule({
 
 export type InsertImagePayload = Readonly<ImagePayload>;
 
-export const INSERT_IMAGE_COMMAND: LexicalCommand<InsertImagePayload> =
-  createCommand('INSERT_IMAGE_COMMAND');
+export const INSERT_IMAGE_COMMAND: LexicalCommand<InsertImagePayload> = createCommand('INSERT_IMAGE_COMMAND');
 
-export function InsertImageUriDialogBody({
-  onClick,
-}: {
-  onClick: (payload: InsertImagePayload) => void;
-}) {
+export function InsertImageUriDialogBody({ onClick }: { onClick: (payload: InsertImagePayload) => void }) {
   const [src, setSrc] = useState('');
   const [altText, setAltText] = useState('');
 
@@ -170,10 +146,7 @@ export function InsertImageUriDialogBody({
         data-test-id="image-modal-alt-text-input"
       />
       <DialogActions>
-        <Button
-          data-test-id="image-modal-confirm-btn"
-          disabled={isDisabled}
-          onClick={() => onClick({altText, src})}>
+        <Button data-test-id="image-modal-confirm-btn" disabled={isDisabled} onClick={() => onClick({ altText, src })}>
           插入
         </Button>
       </DialogActions>
@@ -181,11 +154,7 @@ export function InsertImageUriDialogBody({
   );
 }
 
-export function InsertImageUploadedDialogBody({
-  onClick,
-}: {
-  onClick: (payload: InsertImagePayload) => void;
-}) {
+export function InsertImageUploadedDialogBody({ onClick }: { onClick: (payload: InsertImagePayload) => void }) {
   const [src, setSrc] = useState('');
   const [altText, setAltText] = useState('');
 
@@ -206,12 +175,7 @@ export function InsertImageUploadedDialogBody({
 
   return (
     <>
-      <FileInput
-        label="上传图片"
-        onChange={loadImage}
-        accept="image/*"
-        data-test-id="image-modal-file-upload"
-      />
+      <FileInput label="上传图片" onChange={loadImage} accept="image/*" data-test-id="image-modal-file-upload" />
       <TextInput
         label="图片描述"
         placeholder="简要描述图片内容（供无障碍阅读）"
@@ -223,7 +187,8 @@ export function InsertImageUploadedDialogBody({
         <Button
           data-test-id="image-modal-file-upload-btn"
           disabled={isDisabled}
-          onClick={() => onClick({altText, src})}>
+          onClick={() => onClick({ altText, src })}
+        >
           插入
         </Button>
       </DialogActions>
@@ -257,36 +222,31 @@ export function InsertImageDialog({
     onClose();
   };
 
+  const insertSampleImage = async () => {
+    const sample = hasModifier.current
+      ? {
+          altText: 'Daylight fir trees forest glacier green high ice landscape',
+          image: import('../../images/landscape.jpg'),
+        }
+      : {
+          altText: 'Yellow flower in tilt shift lens',
+          image: import('../../images/yellow-flower.jpg'),
+        };
+    const { default: src } = await sample.image;
+    onClick({ altText: sample.altText, src });
+  };
+
   return (
     <>
       {!mode && (
         <DialogButtonsList>
-          <Button
-            data-test-id="image-modal-option-sample"
-            onClick={() =>
-              onClick(
-                hasModifier.current
-                  ? {
-                      altText:
-                        'Daylight fir trees forest glacier green high ice landscape',
-                      src: landscapeImage,
-                    }
-                  : {
-                      altText: 'Yellow flower in tilt shift lens',
-                      src: yellowFlowerImage,
-                    },
-              )
-            }>
+          <Button data-test-id="image-modal-option-sample" onClick={() => void insertSampleImage()}>
             示例图片
           </Button>
-          <Button
-            data-test-id="image-modal-option-url"
-            onClick={() => setMode('url')}>
+          <Button data-test-id="image-modal-option-url" onClick={() => setMode('url')}>
             图片链接
           </Button>
-          <Button
-            data-test-id="image-modal-option-file"
-            onClick={() => setMode('file')}>
+          <Button data-test-id="image-modal-option-file" onClick={() => setMode('file')}>
             本地上传
           </Button>
         </DialogButtonsList>
@@ -305,11 +265,11 @@ export const ImagesExtension = defineExtension({
   ],
   name: '@lexical/playground/Images',
   nodes: [ImageNode],
-  register: editor =>
+  register: (editor) =>
     mergeRegister(
       editor.registerCommand(
         INSERT_IMAGE_COMMAND,
-        payload => {
+        (payload) => {
           const imageNode = $createImageNode(payload);
           $insertNodes([imageNode]);
           if ($isRootOrShadowRoot(imageNode.getParentOrThrow())) {
@@ -320,26 +280,13 @@ export const ImagesExtension = defineExtension({
         },
         COMMAND_PRIORITY_EDITOR,
       ),
-      editor.registerCommand(
-        DRAGSTART_COMMAND,
-        event => $onDragStart(event),
-        COMMAND_PRIORITY_HIGH,
-      ),
-      editor.registerCommand(
-        DRAGOVER_COMMAND,
-        event => $onDragover(event),
-        COMMAND_PRIORITY_LOW,
-      ),
-      editor.registerCommand(
-        DROP_COMMAND,
-        event => $onDrop(event, editor),
-        COMMAND_PRIORITY_HIGH,
-      ),
+      editor.registerCommand(DRAGSTART_COMMAND, (event) => $onDragStart(event), COMMAND_PRIORITY_HIGH),
+      editor.registerCommand(DRAGOVER_COMMAND, (event) => $onDragover(event), COMMAND_PRIORITY_LOW),
+      editor.registerCommand(DROP_COMMAND, (event) => $onDrop(event, editor), COMMAND_PRIORITY_HIGH),
     ),
 });
 
-const TRANSPARENT_IMAGE =
-  'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
+const TRANSPARENT_IMAGE = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
 // Detached element for setDragImage() visual feedback — not inserted into
 // any DOM tree, so it does not need shadow-root-aware $getDocument().
 const img = document.createElement('img');
@@ -397,13 +344,16 @@ function $onDrop(event: DragEvent, editor: LexicalEditor): boolean {
   }
   const existingLink = $findMatchingParent(
     node,
-    (parent): parent is LinkNode =>
-      !$isAutoLinkNode(parent) && $isLinkNode(parent),
+    (parent): parent is LinkNode => !$isAutoLinkNode(parent) && $isLinkNode(parent),
   );
-  const linkAttributes = existingLink ? {
-    url: existingLink.getURL(), target: existingLink.getTarget(),
-    rel: existingLink.getRel(), title: existingLink.getTitle(),
-  } : null;
+  const linkAttributes = existingLink
+    ? {
+        url: existingLink.getURL(),
+        target: existingLink.getTarget(),
+        rel: existingLink.getRel(),
+        title: existingLink.getTitle(),
+      }
+    : null;
   const originalFormat = $imageBlock(node)?.getFormatType();
   event.preventDefault();
   if (canDropImage(event)) {
@@ -442,7 +392,7 @@ function getDragImageData(event: DragEvent): null | InsertImagePayload {
   if (!dragData) {
     return null;
   }
-  const {type, data} = JSON.parse(dragData);
+  const { type, data } = JSON.parse(dragData);
   if (type !== 'image') {
     return null;
   }
@@ -467,10 +417,7 @@ function canDropImage(event: DragEvent): boolean {
   );
 }
 
-function getDragSelection(
-  event: DragEvent,
-  rootElement: HTMLElement | null,
-): Range | null | undefined {
+function getDragSelection(event: DragEvent, rootElement: HTMLElement | null): Range | null | undefined {
   const domSelection = getDOMSelectionFromTarget(event.target);
   // Pass rootElement so caretFromPoint uses caretPositionFromPoint's
   // shadowRoots option rather than the retargeted caretRangeFromPoint.

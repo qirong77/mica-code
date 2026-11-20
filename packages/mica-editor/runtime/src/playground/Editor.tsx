@@ -6,59 +6,32 @@
  *
  */
 
-import {getExtensionDependencyFromEditor, signal} from '@lexical/extension';
-import {CharacterLimitPlugin} from '@lexical/react/LexicalCharacterLimitPlugin';
-import {useLexicalComposerContext} from '@lexical/react/LexicalComposerContext';
-import {useSignalValue} from '@lexical/react/useExtensionSignalValue';
-import {$nodesOfType, CAN_USE_DOM, registerEventListener} from 'lexical';
-import {TableNode} from '@lexical/table';
-import {type JSX, lazy, Suspense, useCallback, useEffect, useMemo, useState} from 'react';
+import { getExtensionDependencyFromEditor, signal } from '@lexical/extension';
+import { CharacterLimitPlugin } from '@lexical/react/LexicalCharacterLimitPlugin';
+import { useLexicalComposerContext } from '@lexical/react/LexicalComposerContext';
+import { useSignalValue } from '@lexical/react/useExtensionSignalValue';
+import { CAN_USE_DOM, registerEventListener } from 'lexical';
+import { type JSX, useCallback, useEffect, useMemo, useState } from 'react';
 
-import {useSettings} from './context/SettingsContext';
-import {useSynchronizeSettings} from './hooks/useSynchronizeSettings';
+import { useSettings } from './context/SettingsContext';
+import { useSynchronizeSettings } from './hooks/useSynchronizeSettings';
 import AutoEmbedPlugin from './plugins/AutoEmbedPlugin';
-import CodeActionMenuPlugin from './plugins/CodeActionMenuPlugin';
-import MermaidPreviewPlugin from './plugins/MermaidPreviewPlugin';
 import ComponentPickerPlugin from './plugins/ComponentPickerPlugin';
 import ContextMenuPlugin from './plugins/ContextMenuPlugin';
 import DraggableBlockPlugin from './plugins/DraggableBlockPlugin';
 import EmojiPickerPlugin from './plugins/EmojiPickerPlugin';
-import {ExcalidrawPlugin} from './plugins/ExcalidrawExtension';
+import { ExcalidrawPlugin } from './plugins/ExcalidrawExtension';
 import FloatingLinkEditorPlugin from './plugins/FloatingLinkEditorPlugin';
 import FloatingTextFormatToolbarPlugin from './plugins/FloatingTextFormatToolbarPlugin';
-import {MentionsPlugin} from './plugins/MentionsExtension';
+import { MentionsPlugin } from './plugins/MentionsExtension';
 import MarkdownPastePlugin from './plugins/MarkdownPastePlugin';
 import FloatingRubyEditorPlugin from './plugins/RubyExtension/FloatingRubyEditor';
-import {ShortcutsExtension} from './plugins/ShortcutsExtension';
-import TableCellResizer from './plugins/TableCellResizer';
+import { ShortcutsExtension } from './plugins/ShortcutsExtension';
+import CodeFeaturesGate from './plugins/CodeFeaturesGate';
 import TableClipboardPlugin from './plugins/TableClipboardPlugin';
-import TableControlsPlugin from './plugins/TableControlsPlugin';
-import TableFitNestedTablePlugin from './plugins/TableFitNestedTablePlugin';
-import TableScrollShadowPlugin from './plugins/TableScrollShadowPlugin';
+import TableFeaturesGate from './plugins/TableFeaturesGate';
 import ToolbarPlugin from './plugins/ToolbarPlugin';
 import ContentEditable from './ui/ContentEditable';
-
-const MarkdownTableLayoutPlugin = lazy(() => import('../markdown/markdownTableLayout'));
-
-function MarkdownTableLayoutGate(): JSX.Element | null {
-  const [editor] = useLexicalComposerContext();
-  const [hasTable, setHasTable] = useState(() =>
-    editor.getEditorState().read(() => $nodesOfType(TableNode).length > 0),
-  );
-
-  useEffect(() => {
-    if (hasTable) return undefined;
-    return editor.registerMutationListener(TableNode, mutations => {
-      if ([...mutations.values()].some(type => type === 'created')) setHasTable(true);
-    });
-  }, [editor, hasTable]);
-
-  return hasTable ? (
-    <Suspense fallback={null}>
-      <MarkdownTableLayoutPlugin fill />
-    </Suspense>
-  ) : null;
-}
 
 export default function Editor(): JSX.Element {
   const {
@@ -81,10 +54,8 @@ export default function Editor(): JSX.Element {
     : isRichText
       ? '写下你的想法，或输入 / 插入内容…'
       : '写下你的文字…';
-  const [floatingAnchorElem, setFloatingAnchorElem] =
-    useState<HTMLDivElement | null>(null);
-  const [isSmallWidthViewport, setIsSmallWidthViewport] =
-    useState<boolean>(false);
+  const [floatingAnchorElem, setFloatingAnchorElem] = useState<HTMLDivElement | null>(null);
+  const [isSmallWidthViewport, setIsSmallWidthViewport] = useState<boolean>(false);
   const [editor] = useLexicalComposerContext();
   const [activeEditor, setActiveEditor] = useState(editor);
   // The link edit mode state lives on the ShortcutsExtension output so the
@@ -92,20 +63,14 @@ export default function Editor(): JSX.Element {
   // (the extension is only present in rich text configurations)
   const isLinkEditModeSignal = useMemo(
     () =>
-      isRichText
-        ? getExtensionDependencyFromEditor(editor, ShortcutsExtension).output
-            .isLinkEditMode
-        : signal(false),
+      isRichText ? getExtensionDependencyFromEditor(editor, ShortcutsExtension).output.isLinkEditMode : signal(false),
     [editor, isRichText],
   );
   const isLinkEditMode = useSignalValue(isLinkEditModeSignal);
   const setIsLinkEditMode = useCallback(
     (nextIsLinkEditMode: boolean) => {
       if (isRichText) {
-        getExtensionDependencyFromEditor(
-          editor,
-          ShortcutsExtension,
-        ).output.isLinkEditMode.value = nextIsLinkEditMode;
+        getExtensionDependencyFromEditor(editor, ShortcutsExtension).output.isLinkEditMode.value = nextIsLinkEditMode;
       }
     },
     [editor, isRichText],
@@ -120,8 +85,7 @@ export default function Editor(): JSX.Element {
 
   useEffect(() => {
     const updateViewPortWidth = () => {
-      const isNextSmallWidthViewport =
-        CAN_USE_DOM && window.matchMedia('(max-width: 1025px)').matches;
+      const isNextSmallWidthViewport = CAN_USE_DOM && window.matchMedia('(max-width: 1025px)').matches;
 
       if (isNextSmallWidthViewport !== isSmallWidthViewport) {
         setIsSmallWidthViewport(isNextSmallWidthViewport);
@@ -153,19 +117,14 @@ export default function Editor(): JSX.Element {
               <div className="editor" ref={onRef}>
                 <ContentEditable placeholder={placeholder} />
               </div>
-            </div>
-            {hasFitNestedTables ? <TableFitNestedTablePlugin /> : null}
-            <TableCellResizer initializeColumnWidths={false} />
-            <TableClipboardPlugin />
+            </div>{' '}
             <MarkdownPastePlugin />
-            <TableControlsPlugin />
-            <TableScrollShadowPlugin />
-            <MarkdownTableLayoutGate />
+            <TableClipboardPlugin />
+            <TableFeaturesGate hasFitNestedTables={hasFitNestedTables} />
             <ExcalidrawPlugin />
             {floatingAnchorElem && (
               <>
-                <CodeActionMenuPlugin anchorElem={floatingAnchorElem} />
-                <MermaidPreviewPlugin anchorElem={floatingAnchorElem} />
+                <CodeFeaturesGate anchorElem={floatingAnchorElem} />
                 <FloatingLinkEditorPlugin
                   anchorElem={floatingAnchorElem}
                   isLinkEditMode={isLinkEditMode}
@@ -193,15 +152,10 @@ export default function Editor(): JSX.Element {
           <ContentEditable placeholder={placeholder} />
         )}
         {(isCharLimit || isCharLimitUtf8) && (
-          <CharacterLimitPlugin
-            charset={isCharLimit ? 'UTF-16' : 'UTF-8'}
-            maxLength={5}
-          />
+          <CharacterLimitPlugin charset={isCharLimit ? 'UTF-16' : 'UTF-8'} maxLength={5} />
         )}
         {shouldUseLexicalContextMenu && (
-          <ContextMenuPlugin
-            shouldPreserveNewLinesInMarkdown={shouldPreserveNewLinesInMarkdown}
-          />
+          <ContextMenuPlugin shouldPreserveNewLinesInMarkdown={shouldPreserveNewLinesInMarkdown} />
         )}
       </div>
     </>

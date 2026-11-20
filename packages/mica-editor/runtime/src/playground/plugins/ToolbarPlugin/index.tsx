@@ -6,30 +6,17 @@
  *
  */
 
-import {useMergeRefs} from '@floating-ui/react';
-import {$isCodeNode} from '@lexical/code';
-import {
-  getCodeLanguageOptions as getCodeLanguageOptionsPrism,
-  normalizeCodeLanguage as normalizeCodeLanguagePrism,
-} from '@lexical/code-prism';
-import {
-  getCodeLanguageOptions as getCodeLanguageOptionsShiki,
-  getCodeThemeOptions as getCodeThemeOptionsShiki,
-  normalizeCodeLanguage as normalizeCodeLanguageShiki,
-} from '@lexical/code-shiki';
-import {INSERT_HORIZONTAL_RULE_COMMAND} from '@lexical/extension';
-import {$isLinkNode, TOGGLE_LINK_COMMAND} from '@lexical/link';
-import {$isListNode, ListNode} from '@lexical/list';
-import {useLexicalFocusManagerRef} from '@lexical/react/useLexicalFocusManagerRef';
-import {useLexicalRovingTabIndexRef} from '@lexical/react/useLexicalRovingTabIndexRef';
-import {$isHeadingNode} from '@lexical/rich-text';
-import {
-  $getSelectionStyleValueForProperty,
-  $isParentElementRTL,
-  $patchStyleText,
-} from '@lexical/selection';
-import {$isTableNode, $isTableSelection} from '@lexical/table';
-import {$getNearestNodeOfType, $isEditorIsNestedEditor} from '@lexical/utils';
+import { useMergeRefs } from '@floating-ui/react';
+import { $isCodeNode } from '@lexical/code';
+import { INSERT_HORIZONTAL_RULE_COMMAND } from '@lexical/extension';
+import { $isLinkNode, TOGGLE_LINK_COMMAND } from '@lexical/link';
+import { $isListNode, ListNode } from '@lexical/list';
+import { useLexicalFocusManagerRef } from '@lexical/react/useLexicalFocusManagerRef';
+import { useLexicalRovingTabIndexRef } from '@lexical/react/useLexicalRovingTabIndexRef';
+import { $isHeadingNode } from '@lexical/rich-text';
+import { $getSelectionStyleValueForProperty, $isParentElementRTL, $patchStyleText } from '@lexical/selection';
+import { $isTableNode, $isTableSelection } from '@lexical/table';
+import { $getNearestNodeOfType, $isEditorIsNestedEditor } from '@lexical/utils';
 import {
   $addUpdateTag,
   $findMatchingParent,
@@ -63,38 +50,47 @@ import {
   type TextFormatType,
   UNDO_COMMAND,
 } from 'lexical';
-import {type Dispatch, Fragment, type JSX, type MouseEvent, type ReactNode, useCallback, useEffect, useState} from 'react';
-
-import {useSettings} from '../../context/SettingsContext';
 import {
-  blockTypeToBlockName,
-  useToolbarState,
-} from '../../context/ToolbarContext';
+  type Dispatch,
+  Fragment,
+  type JSX,
+  type MouseEvent,
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useState,
+} from 'react';
+
+import { useSettings } from '../../context/SettingsContext';
+import { blockTypeToBlockName, useToolbarState } from '../../context/ToolbarContext';
 import useModal from '../../hooks/useModal';
-import {MenuSeparator} from '../../../../../../mica-config-ui/web/components/ActionMenu';
+import { MenuSeparator } from '../../../../../../mica-config-ui/web/components/ActionMenu';
 import ColorPicker from '../../ui/ColorPicker';
-import DropDown, {DropDownItem} from '../../ui/DropDown';
+import DropDown, { DropDownItem } from '../../ui/DropDown';
 import DropdownColorPicker from '../../ui/DropdownColorPicker';
 import EditorIcon from '../../ui/EditorIcon';
-import {isKeyboardInput} from '../../utils/focusUtils';
-import {getSelectedNode} from '../../utils/getSelectedNode';
-import {INSERT_COLLAPSIBLE_COMMAND} from '../CollapsibleExtension';
-import {INSERT_DATETIME_COMMAND} from '../DateTimeExtension';
-import {InsertEquationDialog} from '../EquationsExtension';
-import {InsertHtmlDialog, INSERT_HTML_COMMAND} from '../HtmlExtension';
-import {INSERT_EXCALIDRAW_COMMAND} from '../ExcalidrawExtension';
-import {InsertImageDialog} from '../ImagesExtension';
+import { isKeyboardInput } from '../../utils/focusUtils';
+import { getSelectedNode } from '../../utils/getSelectedNode';
+import { INSERT_COLLAPSIBLE_COMMAND } from '../CollapsibleExtension';
+import { INSERT_DATETIME_COMMAND } from '../DateTimeExtension';
+import { InsertEquationDialog } from '../EquationsExtension';
+import { InsertHtmlDialog, INSERT_HTML_COMMAND } from '../HtmlExtension';
+import { INSERT_EXCALIDRAW_COMMAND } from '../ExcalidrawExtension';
+import { InsertImageDialog } from '../ImagesExtension';
 import InsertLayoutDialog from '../LayoutExtension/InsertLayoutDialog';
-import {$isRubyNode, $toggleRuby} from '../RubyExtension/RubyNode';
-import {shortcut} from '../ShortcutsExtension/shortcuts';
-import {InsertTableDialog} from '../TablePlugin';
-import FontSize, {parseFontSizeForToolbar} from './fontSize';
-import {type ToolbarGroup, useAdaptiveToolbar} from './useAdaptiveToolbar';
+import { $isRubyNode, $toggleRuby } from '../RubyExtension/RubyNode';
+import { shortcut } from '../ShortcutsExtension/shortcuts';
+import { InsertTableDialog } from '../TablePlugin';
 import {
-  $getToolbarFontSize,
-  FONT_SIZE_PRESETS,
-  HEADING_FONT_SIZES,
-} from './typography';
+  CODE_LANGUAGE_OPTIONS_PRISM,
+  CODE_LANGUAGE_OPTIONS_SHIKI,
+  CODE_THEME_OPTIONS_SHIKI,
+  normalizePrismCodeLanguage,
+  normalizeShikiCodeLanguage,
+} from '../CodeHighlightExtension/codeLanguageOptions';
+import FontSize, { parseFontSizeForToolbar } from './fontSize';
+import { type ToolbarGroup, useAdaptiveToolbar } from './useAdaptiveToolbar';
+import { $getToolbarFontSize, FONT_SIZE_PRESETS, HEADING_FONT_SIZES } from './typography';
 import './toolbar.css';
 import {
   clearFormatting,
@@ -129,80 +125,6 @@ const BLOCK_TYPE_LABELS: Record<keyof typeof blockTypeToBlockName, string> = {
   quote: '引用',
 };
 
-const CODE_LANGUAGE_OPTIONS_PRISM: [string, string][] =
-  getCodeLanguageOptionsPrism().filter(option =>
-    [
-      'c',
-      'clike',
-      'cpp',
-      'css',
-      'go',
-      'html',
-      'java',
-      'js',
-      'javascript',
-      'markdown',
-      'objc',
-      'objective-c',
-      'plain',
-      'powershell',
-      'py',
-      'python',
-      'rust',
-      'sql',
-      'swift',
-      'typescript',
-      'xml',
-    ].includes(option[0]),
-  );
-
-const CODE_LANGUAGE_OPTIONS_SHIKI: [string, string][] =
-  getCodeLanguageOptionsShiki().filter(option =>
-    [
-      'c',
-      'clike',
-      'cpp',
-      'css',
-      'go',
-      'html',
-      'java',
-      'js',
-      'javascript',
-      'markdown',
-      'objc',
-      'objective-c',
-      'plain',
-      'powershell',
-      'py',
-      'python',
-      'rust',
-      'sql',
-      'typescript',
-      'xml',
-    ].includes(option[0]),
-  );
-
-const CODE_THEME_OPTIONS_SHIKI: [string, string][] =
-  getCodeThemeOptionsShiki().filter(option =>
-    [
-      'catppuccin-latte',
-      'everforest-light',
-      'github-light',
-      'gruvbox-light-medium',
-      'kanagawa-lotus',
-      'dark-plus',
-      'light-plus',
-      'material-theme-lighter',
-      'min-light',
-      'one-light',
-      'rose-pine-dawn',
-      'slack-ochin',
-      'snazzy-light',
-      'solarized-light',
-      'vitesse-light',
-    ].includes(option[0]),
-  );
-
 const FONT_FAMILY_OPTIONS: [string, string][] = [
   ['', '默认字体'],
   ['Arial', 'Arial'],
@@ -213,10 +135,7 @@ const FONT_FAMILY_OPTIONS: [string, string][] = [
   ['Verdana', 'Verdana'],
 ];
 
-const FONT_SIZE_OPTIONS: [string, string][] = FONT_SIZE_PRESETS.map(size => [
-  `${size}px`,
-  String(size),
-]);
+const FONT_SIZE_OPTIONS: [string, string][] = FONT_SIZE_PRESETS.map((size) => [`${size}px`, String(size)]);
 
 const HEADING_SHORTCUTS: Partial<Record<keyof typeof HEADING_FONT_SIZES, string>> = {
   h1: shortcut('HEADING1'),
@@ -287,18 +206,26 @@ function BlockFormatDropDown({
       disabled={disabled}
       buttonClassName="toolbar-item block-controls"
       buttonLabel={BLOCK_TYPE_LABELS[blockType]}
-      buttonAriaLabel="段落样式">
+      buttonAriaLabel="段落样式"
+    >
       <BlockFormatItems editor={editor} blockType={blockType} />
     </DropDown>
   );
 }
 
-function BlockFormatItems({editor, blockType}: {editor: LexicalEditor; blockType: keyof typeof blockTypeToBlockName}) {
+function BlockFormatItems({
+  editor,
+  blockType,
+}: {
+  editor: LexicalEditor;
+  blockType: keyof typeof blockTypeToBlockName;
+}) {
   return (
     <>
       <DropDownItem
         className={'item wide ' + dropDownActiveClass(blockType === 'paragraph')}
-        onClick={() => formatParagraph(editor)}>
+        onClick={() => formatParagraph(editor)}
+      >
         <div className="icon-text-container">
           <EditorIcon icon="paragraph" />
           <span className="text">正文</span>
@@ -309,10 +236,13 @@ function BlockFormatItems({editor, blockType}: {editor: LexicalEditor; blockType
         <DropDownItem
           key={tag}
           className={'item wide toolbar-heading-item ' + dropDownActiveClass(blockType === tag)}
-          onClick={() => formatHeading(editor, blockType, tag as keyof typeof HEADING_FONT_SIZES)}>
+          onClick={() => formatHeading(editor, blockType, tag as keyof typeof HEADING_FONT_SIZES)}
+        >
           <div className="icon-text-container">
             <EditorIcon icon={tag} />
-            <span className="text toolbar-heading-preview" style={{fontSize: `${size}px`}}>标题 {tag.slice(1)}</span>
+            <span className="text toolbar-heading-preview" style={{ fontSize: `${size}px` }}>
+              标题 {tag.slice(1)}
+            </span>
           </div>
           <span className="toolbar-heading-meta">
             <span className="toolbar-heading-size">{size}</span>
@@ -324,7 +254,8 @@ function BlockFormatItems({editor, blockType}: {editor: LexicalEditor; blockType
       ))}
       <DropDownItem
         className={'item wide ' + dropDownActiveClass(blockType === 'number')}
-        onClick={() => formatNumberedList(editor, blockType)}>
+        onClick={() => formatNumberedList(editor, blockType)}
+      >
         <div className="icon-text-container">
           <EditorIcon icon="numbered-list" />
           <span className="text">有序列表</span>
@@ -333,7 +264,8 @@ function BlockFormatItems({editor, blockType}: {editor: LexicalEditor; blockType
       </DropDownItem>
       <DropDownItem
         className={'item wide ' + dropDownActiveClass(blockType === 'bullet')}
-        onClick={() => formatBulletList(editor, blockType)}>
+        onClick={() => formatBulletList(editor, blockType)}
+      >
         <div className="icon-text-container">
           <EditorIcon icon="bullet-list" />
           <span className="text">无序列表</span>
@@ -342,7 +274,8 @@ function BlockFormatItems({editor, blockType}: {editor: LexicalEditor; blockType
       </DropDownItem>
       <DropDownItem
         className={'item wide ' + dropDownActiveClass(blockType === 'check')}
-        onClick={() => formatCheckList(editor, blockType)}>
+        onClick={() => formatCheckList(editor, blockType)}
+      >
         <div className="icon-text-container">
           <EditorIcon icon="check-list" />
           <span className="text">任务列表</span>
@@ -351,7 +284,8 @@ function BlockFormatItems({editor, blockType}: {editor: LexicalEditor; blockType
       </DropDownItem>
       <DropDownItem
         className={'item wide ' + dropDownActiveClass(blockType === 'quote')}
-        onClick={() => formatQuote(editor, blockType)}>
+        onClick={() => formatQuote(editor, blockType)}
+      >
         <div className="icon-text-container">
           <EditorIcon icon="quote" />
           <span className="text">引用</span>
@@ -360,7 +294,8 @@ function BlockFormatItems({editor, blockType}: {editor: LexicalEditor; blockType
       </DropDownItem>
       <DropDownItem
         className={'item wide ' + dropDownActiveClass(blockType === 'code')}
-        onClick={() => formatCode(editor, blockType)}>
+        onClick={() => formatCode(editor, blockType)}
+      >
         <div className="icon-text-container">
           <EditorIcon icon="code" />
           <span className="text">代码块</span>
@@ -404,17 +339,17 @@ function FontDropDown({
       disabled={disabled}
       buttonClassName={'toolbar-item ' + style}
       buttonLabel={value || (style === 'font-family' ? '默认' : '')}
-      buttonAriaLabel={buttonAriaLabel}>
-      {(style === 'font-family' ? FONT_FAMILY_OPTIONS : FONT_SIZE_OPTIONS).map(
-        ([option, text]) => (
-          <DropDownItem
-            className={`item ${dropDownActiveClass(value === option)} ${style === 'font-size' ? 'fontsize-item' : ''}`}
-            onClick={() => handleClick(option)}
-            key={option}>
-            <span className="text">{text}</span>
-          </DropDownItem>
-        ),
-      )}
+      buttonAriaLabel={buttonAriaLabel}
+    >
+      {(style === 'font-family' ? FONT_FAMILY_OPTIONS : FONT_SIZE_OPTIONS).map(([option, text]) => (
+        <DropDownItem
+          className={`item ${dropDownActiveClass(value === option)} ${style === 'font-size' ? 'fontsize-item' : ''}`}
+          onClick={() => handleClick(option)}
+          key={option}
+        >
+          <span className="text">{text}</span>
+        </DropDownItem>
+      ))}
     </DropDown>
   );
 }
@@ -438,20 +373,22 @@ function ElementFormatDropdown({
       buttonLabel={formatOption.name}
       buttonIcon={<EditorIcon icon={isRTL ? formatOption.iconRTL : formatOption.icon} />}
       buttonClassName="toolbar-item spaced alignment"
-      buttonAriaLabel="对齐与缩进">
+      buttonAriaLabel="对齐与缩进"
+    >
       <ElementFormatItems editor={editor} isRTL={isRTL} />
     </DropDown>
   );
 }
 
-function ElementFormatItems({editor, isRTL}: {editor: LexicalEditor; isRTL: boolean}) {
+function ElementFormatItems({ editor, isRTL }: { editor: LexicalEditor; isRTL: boolean }) {
   return (
     <>
       <DropDownItem
         onClick={() => {
           editor.dispatchCommand(FORMAT_ELEMENT_COMMAND, 'left');
         }}
-        className="item wide">
+        className="item wide"
+      >
         <div className="icon-text-container">
           <EditorIcon icon="left-align" />
           <span className="text">左对齐</span>
@@ -462,7 +399,8 @@ function ElementFormatItems({editor, isRTL}: {editor: LexicalEditor; isRTL: bool
         onClick={() => {
           editor.dispatchCommand(FORMAT_ELEMENT_COMMAND, 'center');
         }}
-        className="item wide">
+        className="item wide"
+      >
         <div className="icon-text-container">
           <EditorIcon icon="center-align" />
           <span className="text">居中对齐</span>
@@ -473,7 +411,8 @@ function ElementFormatItems({editor, isRTL}: {editor: LexicalEditor; isRTL: bool
         onClick={() => {
           editor.dispatchCommand(FORMAT_ELEMENT_COMMAND, 'right');
         }}
-        className="item wide">
+        className="item wide"
+      >
         <div className="icon-text-container">
           <EditorIcon icon="right-align" />
           <span className="text">右对齐</span>
@@ -484,7 +423,8 @@ function ElementFormatItems({editor, isRTL}: {editor: LexicalEditor; isRTL: bool
         onClick={() => {
           editor.dispatchCommand(FORMAT_ELEMENT_COMMAND, 'justify');
         }}
-        className="item wide">
+        className="item wide"
+      >
         <div className="icon-text-container">
           <EditorIcon icon="justify-align" />
           <span className="text">两端对齐</span>
@@ -495,7 +435,8 @@ function ElementFormatItems({editor, isRTL}: {editor: LexicalEditor; isRTL: bool
         onClick={() => {
           editor.dispatchCommand(FORMAT_ELEMENT_COMMAND, 'start');
         }}
-        className="item wide">
+        className="item wide"
+      >
         <EditorIcon icon={isRTL ? ELEMENT_FORMAT_OPTIONS.start.iconRTL : ELEMENT_FORMAT_OPTIONS.start.icon} />
         <span className="text">起始对齐</span>
       </DropDownItem>
@@ -503,7 +444,8 @@ function ElementFormatItems({editor, isRTL}: {editor: LexicalEditor; isRTL: bool
         onClick={() => {
           editor.dispatchCommand(FORMAT_ELEMENT_COMMAND, 'end');
         }}
-        className="item wide">
+        className="item wide"
+      >
         <EditorIcon icon={isRTL ? ELEMENT_FORMAT_OPTIONS.end.iconRTL : ELEMENT_FORMAT_OPTIONS.end.icon} />
         <span className="text">末端对齐</span>
       </DropDownItem>
@@ -512,7 +454,8 @@ function ElementFormatItems({editor, isRTL}: {editor: LexicalEditor; isRTL: bool
         onClick={() => {
           editor.dispatchCommand(OUTDENT_CONTENT_COMMAND);
         }}
-        className="item wide">
+        className="item wide"
+      >
         <div className="icon-text-container">
           <EditorIcon icon={isRTL ? 'indent' : 'outdent'} />
           <span className="text">减少缩进</span>
@@ -523,7 +466,8 @@ function ElementFormatItems({editor, isRTL}: {editor: LexicalEditor; isRTL: bool
         onClick={() => {
           editor.dispatchCommand(INDENT_CONTENT_COMMAND);
         }}
-        className="item wide">
+        className="item wide"
+      >
         <div className="icon-text-container">
           <EditorIcon icon={isRTL ? 'outdent' : 'indent'} />
           <span className="text">增加缩进</span>
@@ -538,7 +482,7 @@ function $findTopLevelElement(node: LexicalNode) {
   let topLevelElement =
     node.getKey() === 'root'
       ? node
-      : $findMatchingParent(node, e => {
+      : $findMatchingParent(node, (e) => {
           const parent = e.getParent();
           return parent !== null && $isRootOrShadowRoot(parent);
         });
@@ -572,68 +516,56 @@ export default function ToolbarPlugin({
   setIsLinkEditMode: Dispatch<boolean>;
   setIsRubyEditMode: Dispatch<boolean>;
 }): JSX.Element {
-  const [selectedElementKey, setSelectedElementKey] = useState<NodeKey | null>(
-    null,
-  );
+  const [selectedElementKey, setSelectedElementKey] = useState<NodeKey | null>(null);
   const [modal, showModal] = useModal();
   const [isEditable, setIsEditable] = useState(() => editor.isEditable());
-  const {toolbarState, updateToolbarState} = useToolbarState();
+  const { toolbarState, updateToolbarState } = useToolbarState();
   const rovingRef = useLexicalRovingTabIndexRef();
   const focusManagerRef = useLexicalFocusManagerRef();
   const [morePage, setMorePage] = useState<string | null>(null);
   const {
-    settings: {isCodeHighlighted, isCodeShiki},
+    settings: { isCodeHighlighted, isCodeShiki },
   } = useSettings();
-  const showCodeOptions =
-    toolbarState.blockType === 'code' && isCodeHighlighted;
+  const showCodeOptions = toolbarState.blockType === 'code' && isCodeHighlighted;
   const groups: ToolbarGroup[] = [
-    ...(!toolbarState.isImageCaption
-      ? [{id: 'insert', section: 'insert'}]
-      : []),
-    {id: 'history', section: 'history', priority: 2},
-    {id: 'clear', section: 'history', priority: 9},
-    ...(toolbarState.blockType in blockTypeToBlockName &&
-    activeEditor === editor
-      ? [{id: 'paragraph', section: 'typography', priority: 1}]
+    ...(!toolbarState.isImageCaption ? [{ id: 'insert', section: 'insert' }] : []),
+    { id: 'history', section: 'history', priority: 2 },
+    { id: 'clear', section: 'history', priority: 9 },
+    ...(toolbarState.blockType in blockTypeToBlockName && activeEditor === editor
+      ? [{ id: 'paragraph', section: 'typography', priority: 1 }]
       : []),
     ...(showCodeOptions
-      ? [{id: 'code-options', section: 'typography'}]
+      ? [{ id: 'code-options', section: 'typography' }]
       : [
-          {id: 'font-family', section: 'typography', priority: 7},
-          {id: 'font-size', section: 'typography', priority: 0},
+          { id: 'font-family', section: 'typography', priority: 7 },
+          { id: 'font-size', section: 'typography', priority: 0 },
         ]),
-    {id: 'emphasis', section: 'format'},
-    {id: 'strikethrough', section: 'format', priority: 6},
-    {id: 'underline', section: 'format'},
-    ...(!toolbarState.isImageCaption
-      ? [{id: 'code', section: 'format', priority: 11}]
-      : []),
-    {id: 'colors', section: 'colors', priority: 3},
-    {id: 'alignment', section: 'structure', priority: 4},
+    { id: 'emphasis', section: 'format' },
+    { id: 'strikethrough', section: 'format', priority: 6 },
+    { id: 'underline', section: 'format' },
+    ...(!toolbarState.isImageCaption ? [{ id: 'code', section: 'format', priority: 11 }] : []),
+    { id: 'colors', section: 'colors', priority: 3 },
+    { id: 'alignment', section: 'structure', priority: 4 },
     ...(activeEditor === editor
       ? [
-          {id: 'lists', section: 'structure', priority: 5},
-          {id: 'indent', section: 'structure', priority: 10},
-          {id: 'links', section: 'insert-shortcuts', priority: 8},
-          {id: 'blocks', section: 'insert-shortcuts', priority: 12},
+          { id: 'lists', section: 'structure', priority: 5 },
+          { id: 'indent', section: 'structure', priority: 10 },
+          { id: 'links', section: 'insert-shortcuts', priority: 8 },
+          { id: 'blocks', section: 'insert-shortcuts', priority: 12 },
         ]
       : []),
-    {id: 'more', section: 'more'},
+    { id: 'more', section: 'more' },
   ];
-  const {toolbarElementRef, overflowed} = useAdaptiveToolbar(
+  const { toolbarElementRef, overflowed } = useAdaptiveToolbar(
     groups,
     `${toolbarState.blockType}:${toolbarState.fontFamily}`,
   );
-  const toolbarRef = useMergeRefs([
-    rovingRef,
-    focusManagerRef,
-    toolbarElementRef,
-  ]);
+  const toolbarRef = useMergeRefs([rovingRef, focusManagerRef, toolbarElementRef]);
   const groupProps = (id: string, label: string, className = '') => {
-    const index = groups.findIndex(group => group.id === id);
+    const index = groups.findIndex((group) => group.id === id);
     const previous = groups
       .slice(0, index)
-      .filter(group => !overflowed.has(group.id))
+      .filter((group) => !overflowed.has(group.id))
       .at(-1);
     return {
       className: `toolbar-group ${className}`.trim(),
@@ -641,8 +573,7 @@ export default function ToolbarPlugin({
       'aria-label': label,
       'data-toolbar-group': id,
       'data-overflowed': overflowed.has(id) || undefined,
-      'data-section-start':
-        (previous && previous.section !== groups[index]?.section) || undefined,
+      'data-section-start': (previous && previous.section !== groups[index]?.section) || undefined,
     };
   };
 
@@ -661,22 +592,15 @@ export default function ToolbarPlugin({
     });
   };
 
-  const dispatchFormatTextCommand = (
-    payload: TextFormatType,
-    skipRefocus: boolean = false,
-  ) => dispatchToolbarCommand(FORMAT_TEXT_COMMAND, payload, skipRefocus);
+  const dispatchFormatTextCommand = (payload: TextFormatType, skipRefocus: boolean = false) =>
+    dispatchToolbarCommand(FORMAT_TEXT_COMMAND, payload, skipRefocus);
 
   const $handleHeadingNode = useCallback(
     (selectedElement: LexicalNode) => {
-      const type = $isHeadingNode(selectedElement)
-        ? selectedElement.getTag()
-        : selectedElement.getType();
+      const type = $isHeadingNode(selectedElement) ? selectedElement.getTag() : selectedElement.getType();
 
       if (type in blockTypeToBlockName) {
-        updateToolbarState(
-          'blockType',
-          type as keyof typeof blockTypeToBlockName,
-        );
+        updateToolbarState('blockType', type as keyof typeof blockTypeToBlockName);
       }
     },
     [updateToolbarState],
@@ -690,9 +614,7 @@ export default function ToolbarPlugin({
           'codeLanguage',
           language
             ? (isCodeHighlighted &&
-                (isCodeShiki
-                  ? normalizeCodeLanguageShiki(language)
-                  : normalizeCodeLanguagePrism(language))) ||
+                (isCodeShiki ? normalizeShikiCodeLanguage(language) : normalizePrismCodeLanguage(language))) ||
                 language
             : '',
         );
@@ -711,9 +633,7 @@ export default function ToolbarPlugin({
         const rootElement = activeEditor.getRootElement();
         updateToolbarState(
           'isImageCaption',
-          !!rootElement?.parentElement?.classList.contains(
-            'image-caption-container',
-          ),
+          !!rootElement?.parentElement?.classList.contains('image-caption-container'),
         );
       } else {
         updateToolbarState('isImageCaption', false);
@@ -743,9 +663,7 @@ export default function ToolbarPlugin({
         setSelectedElementKey(elementKey);
         if ($isListNode(element)) {
           const parentList = $getNearestNodeOfType(anchorNode, ListNode);
-          const type = parentList
-            ? parentList.getListType()
-            : element.getListType();
+          const type = parentList ? parentList.getListType() : element.getListType();
 
           updateToolbarState('blockType', type);
         } else {
@@ -755,28 +673,15 @@ export default function ToolbarPlugin({
       }
 
       // Handle buttons
-      updateToolbarState(
-        'fontColor',
-        $getSelectionStyleValueForProperty(selection, 'color', '#000'),
-      );
-      updateToolbarState(
-        'bgColor',
-        $getSelectionStyleValueForProperty(
-          selection,
-          'background-color',
-          '#fff',
-        ),
-      );
-      updateToolbarState(
-        'fontFamily',
-        $getSelectionStyleValueForProperty(selection, 'font-family', ''),
-      );
+      updateToolbarState('fontColor', $getSelectionStyleValueForProperty(selection, 'color', '#000'));
+      updateToolbarState('bgColor', $getSelectionStyleValueForProperty(selection, 'background-color', '#fff'));
+      updateToolbarState('fontFamily', $getSelectionStyleValueForProperty(selection, 'font-family', ''));
       let matchingParent;
       if ($isLinkNode(parent)) {
         // If node is a link, we need to fetch the parent paragraph node to set format
         matchingParent = $findMatchingParent(
           node,
-          parentNode => $isElementNode(parentNode) && !parentNode.isInline(),
+          (parentNode) => $isElementNode(parentNode) && !parentNode.isInline(),
         );
       }
 
@@ -795,18 +700,12 @@ export default function ToolbarPlugin({
       updateToolbarState('isBold', selection.hasFormat('bold'));
       updateToolbarState('isItalic', selection.hasFormat('italic'));
       updateToolbarState('isUnderline', selection.hasFormat('underline'));
-      updateToolbarState(
-        'isStrikethrough',
-        selection.hasFormat('strikethrough'),
-      );
+      updateToolbarState('isStrikethrough', selection.hasFormat('strikethrough'));
       updateToolbarState('isSubscript', selection.hasFormat('subscript'));
       updateToolbarState('isSuperscript', selection.hasFormat('superscript'));
       updateToolbarState('isHighlight', selection.hasFormat('highlight'));
       updateToolbarState('isCode', selection.hasFormat('code'));
-      updateToolbarState(
-        'fontSize',
-        $getToolbarFontSize(activeEditor, selection),
-      );
+      updateToolbarState('fontSize', $getToolbarFontSize(activeEditor, selection));
       updateToolbarState('isLowercase', selection.hasFormat('lowercase'));
       updateToolbarState('isUppercase', selection.hasFormat('uppercase'));
       updateToolbarState('isCapitalize', selection.hasFormat('capitalize'));
@@ -824,21 +723,12 @@ export default function ToolbarPlugin({
           $handleCodeNode(selectedElement);
           // Update elementFormat for node selection (e.g., images)
           if ($isElementNode(selectedElement)) {
-            updateToolbarState(
-              'elementFormat',
-              selectedElement.getFormatType(),
-            );
+            updateToolbarState('elementFormat', selectedElement.getFormatType());
           }
         }
       }
     }
-  }, [
-    activeEditor,
-    editor,
-    updateToolbarState,
-    $handleHeadingNode,
-    $handleCodeNode,
-  ]);
+  }, [activeEditor, editor, updateToolbarState, $handleHeadingNode, $handleCodeNode]);
 
   useEffect(() => {
     return editor.registerCommand(
@@ -860,20 +750,20 @@ export default function ToolbarPlugin({
 
   useEffect(() => {
     return mergeRegister(
-      editor.registerEditableListener(editable => {
+      editor.registerEditableListener((editable) => {
         setIsEditable(editable);
       }),
-      activeEditor.registerUpdateListener(({editorState}) => {
+      activeEditor.registerUpdateListener(({ editorState }) => {
         editorState.read(
           () => {
             $updateToolbar();
           },
-          {editor: activeEditor},
+          { editor: activeEditor },
         );
       }),
       activeEditor.registerCommand(
         CAN_UNDO_COMMAND,
-        payload => {
+        (payload) => {
           updateToolbarState('canUndo', payload);
           return false;
         },
@@ -881,7 +771,7 @@ export default function ToolbarPlugin({
       ),
       activeEditor.registerCommand(
         CAN_REDO_COMMAND,
-        payload => {
+        (payload) => {
           updateToolbarState('canRedo', payload);
           return false;
         },
@@ -891,11 +781,7 @@ export default function ToolbarPlugin({
   }, [$updateToolbar, activeEditor, editor, updateToolbarState]);
 
   const applyStyleText = useCallback(
-    (
-      styles: Record<string, string | null>,
-      skipHistoryStack?: boolean,
-      skipRefocus: boolean = false,
-    ) => {
+    (styles: Record<string, string | null>, skipHistoryStack?: boolean, skipRefocus: boolean = false) => {
       activeEditor.update(
         () => {
           if (skipRefocus) {
@@ -906,7 +792,7 @@ export default function ToolbarPlugin({
             $patchStyleText(selection, styles);
           }
         },
-        skipHistoryStack ? {tag: HISTORIC_TAG} : {},
+        skipHistoryStack ? { tag: HISTORIC_TAG } : {},
       );
     },
     [activeEditor],
@@ -914,18 +800,14 @@ export default function ToolbarPlugin({
 
   const onFontColorSelect = useCallback(
     (value: string, skipHistoryStack: boolean, skipRefocus: boolean) => {
-      applyStyleText({color: value}, skipHistoryStack, skipRefocus);
+      applyStyleText({ color: value }, skipHistoryStack, skipRefocus);
     },
     [applyStyleText],
   );
 
   const onBgColorSelect = useCallback(
     (value: string, skipHistoryStack: boolean, skipRefocus: boolean) => {
-      applyStyleText(
-        {'background-color': value},
-        skipHistoryStack,
-        skipRefocus,
-      );
+      applyStyleText({ 'background-color': value }, skipHistoryStack, skipRefocus);
     },
     [applyStyleText],
   );
@@ -936,7 +818,7 @@ export default function ToolbarPlugin({
   }, [activeEditor, setIsLinkEditMode]);
 
   const insertRuby = useCallback(() => {
-    const {hasRuby, hasSelection} = activeEditor.read(() => {
+    const { hasRuby, hasSelection } = activeEditor.read(() => {
       const selection = $getSelection();
       if ($isRangeSelection(selection)) {
         return {
@@ -944,7 +826,7 @@ export default function ToolbarPlugin({
           hasSelection: !selection.isCollapsed(),
         };
       }
-      return {hasRuby: false, hasSelection: false};
+      return { hasRuby: false, hasSelection: false };
     });
     if (hasRuby) {
       activeEditor.update(() => {
@@ -994,7 +876,7 @@ export default function ToolbarPlugin({
     icon,
     active,
     keys,
-    onClick: event => dispatchFormatTextCommand(id, isKeyboardInput(event)),
+    onClick: (event) => dispatchFormatTextCommand(id, isKeyboardInput(event)),
   });
   const actions = {
     undo: {
@@ -1020,8 +902,7 @@ export default function ToolbarPlugin({
       label: '清除格式',
       icon: 'clear',
       keys: shortcut('CLEAR_FORMATTING'),
-      onClick: (event: MouseEvent<HTMLButtonElement>) =>
-        clearFormatting(activeEditor, isKeyboardInput(event)),
+      onClick: (event: MouseEvent<HTMLButtonElement>) => clearFormatting(activeEditor, isKeyboardInput(event)),
     },
     title: {
       id: 'title',
@@ -1030,20 +911,8 @@ export default function ToolbarPlugin({
       active: toolbarState.blockType === 'h1',
       onClick: () => formatHeading(activeEditor, toolbarState.blockType, 'h1'),
     },
-    bold: textAction(
-      'bold',
-      '加粗',
-      'bold',
-      toolbarState.isBold,
-      shortcut('BOLD'),
-    ),
-    italic: textAction(
-      'italic',
-      '斜体',
-      'italic',
-      toolbarState.isItalic,
-      shortcut('ITALIC'),
-    ),
+    bold: textAction('bold', '加粗', 'bold', toolbarState.isBold, shortcut('BOLD')),
+    italic: textAction('italic', '斜体', 'italic', toolbarState.isItalic, shortcut('ITALIC')),
     strikethrough: textAction(
       'strikethrough',
       '删除线',
@@ -1051,56 +920,15 @@ export default function ToolbarPlugin({
       toolbarState.isStrikethrough,
       shortcut('STRIKETHROUGH'),
     ),
-    underline: textAction(
-      'underline',
-      '下划线',
-      'underline',
-      toolbarState.isUnderline,
-      shortcut('UNDERLINE'),
-    ),
+    underline: textAction('underline', '下划线', 'underline', toolbarState.isUnderline, shortcut('UNDERLINE')),
     code: textAction('code', '行内代码', 'code', toolbarState.isCode),
-    lowercase: textAction(
-      'lowercase',
-      '转为小写',
-      'lowercase',
-      toolbarState.isLowercase,
-      shortcut('LOWERCASE'),
-    ),
-    uppercase: textAction(
-      'uppercase',
-      '转为大写',
-      'uppercase',
-      toolbarState.isUppercase,
-      shortcut('UPPERCASE'),
-    ),
-    capitalize: textAction(
-      'capitalize',
-      '首字母大写',
-      'capitalize',
-      toolbarState.isCapitalize,
-      shortcut('CAPITALIZE'),
-    ),
-    subscript: textAction(
-      'subscript',
-      '下标',
-      'subscript',
-      toolbarState.isSubscript,
-      shortcut('SUBSCRIPT'),
-    ),
-    superscript: textAction(
-      'superscript',
-      '上标',
-      'superscript',
-      toolbarState.isSuperscript,
-      shortcut('SUPERSCRIPT'),
-    ),
-    highlight: textAction(
-      'highlight',
-      '高亮',
-      'highlight',
-      toolbarState.isHighlight,
-    ),
-    ruby: {id: 'ruby', label: '注音', icon: 'ruby', onClick: insertRuby},
+    lowercase: textAction('lowercase', '转为小写', 'lowercase', toolbarState.isLowercase, shortcut('LOWERCASE')),
+    uppercase: textAction('uppercase', '转为大写', 'uppercase', toolbarState.isUppercase, shortcut('UPPERCASE')),
+    capitalize: textAction('capitalize', '首字母大写', 'capitalize', toolbarState.isCapitalize, shortcut('CAPITALIZE')),
+    subscript: textAction('subscript', '下标', 'subscript', toolbarState.isSubscript, shortcut('SUBSCRIPT')),
+    superscript: textAction('superscript', '上标', 'superscript', toolbarState.isSuperscript, shortcut('SUPERSCRIPT')),
+    highlight: textAction('highlight', '高亮', 'highlight', toolbarState.isHighlight),
+    ruby: { id: 'ruby', label: '注音', icon: 'ruby', onClick: insertRuby },
     bullet: {
       id: 'bullet',
       label: '无序列表',
@@ -1131,11 +959,7 @@ export default function ToolbarPlugin({
       icon: toolbarState.isRTL ? 'indent' : 'outdent',
       keys: shortcut('OUTDENT'),
       onClick: (event: MouseEvent<HTMLButtonElement>) =>
-        dispatchToolbarCommand(
-          OUTDENT_CONTENT_COMMAND,
-          undefined,
-          isKeyboardInput(event),
-        ),
+        dispatchToolbarCommand(OUTDENT_CONTENT_COMMAND, undefined, isKeyboardInput(event)),
     },
     indent: {
       id: 'indent',
@@ -1143,11 +967,7 @@ export default function ToolbarPlugin({
       icon: toolbarState.isRTL ? 'outdent' : 'indent',
       keys: shortcut('INDENT'),
       onClick: (event: MouseEvent<HTMLButtonElement>) =>
-        dispatchToolbarCommand(
-          INDENT_CONTENT_COMMAND,
-          undefined,
-          isKeyboardInput(event),
-        ),
+        dispatchToolbarCommand(INDENT_CONTENT_COMMAND, undefined, isKeyboardInput(event)),
     },
     link: {
       id: 'link',
@@ -1170,11 +990,7 @@ export default function ToolbarPlugin({
       label: '分隔线',
       icon: 'horizontal-rule',
       onClick: (event: MouseEvent<HTMLButtonElement>) =>
-        dispatchToolbarCommand(
-          INSERT_HORIZONTAL_RULE_COMMAND,
-          undefined,
-          isKeyboardInput(event),
-        ),
+        dispatchToolbarCommand(INSERT_HORIZONTAL_RULE_COMMAND, undefined, isKeyboardInput(event)),
     },
   } satisfies Record<string, ToolbarAction>;
   const actionButton = (action: ToolbarAction) => (
@@ -1186,7 +1002,8 @@ export default function ToolbarPlugin({
       aria-label={action.label}
       aria-pressed={action.active}
       title={action.keys ? `${action.label} (${action.keys})` : action.label}
-      onClick={action.onClick}>
+      onClick={action.onClick}
+    >
       <EditorIcon icon={action.icon} />
     </button>
   );
@@ -1195,7 +1012,8 @@ export default function ToolbarPlugin({
       key={action.id}
       className={`item wide ${dropDownActiveClass(!!action.active)}`}
       disabled={!isEditable || action.disabled}
-      onClick={action.onClick}>
+      onClick={action.onClick}
+    >
       <div className="icon-text-container">
         <EditorIcon icon={action.icon} />
         <span className="text">{action.label}</span>
@@ -1207,10 +1025,11 @@ export default function ToolbarPlugin({
     <DropDownItem
       key={page}
       className="item wide"
-      onClick={event => {
+      onClick={(event) => {
         event.preventDefault();
         setMorePage(page);
-      }}>
+      }}
+    >
       <div className="icon-text-container">
         <EditorIcon icon={icon} />
         <span className="text">{label}</span>
@@ -1232,10 +1051,7 @@ export default function ToolbarPlugin({
       <>
         {actionItem(actions.title)}
         <MenuSeparator />
-        <BlockFormatItems
-          editor={activeEditor}
-          blockType={toolbarState.blockType}
-        />
+        <BlockFormatItems editor={activeEditor} blockType={toolbarState.blockType} />
       </>
     ),
     'font-family': pageItem('font-family', '字体', 'font-family'),
@@ -1274,7 +1090,7 @@ export default function ToolbarPlugin({
       </>
     ),
   };
-  const collapsedGroups = groups.filter(group => overflowed.has(group.id));
+  const collapsedGroups = groups.filter((group) => overflowed.has(group.id));
   const morePageLabels: Record<string, string> = {
     paragraph: '段落样式',
     'font-family': '字体',
@@ -1286,51 +1102,34 @@ export default function ToolbarPlugin({
   // Navigation replaces the current menu instead of stacking another popup.
   useEffect(() => {
     document
-      .querySelector<HTMLElement>(
-        '.editor-dropdown [data-toolbar-page] [role^="menuitem"]',
-      )
-      ?.focus({preventScroll: true});
+      .querySelector<HTMLElement>('.editor-dropdown [data-toolbar-page] [role^="menuitem"]')
+      ?.focus({ preventScroll: true });
   }, [morePage]);
   const morePageContent =
     morePage === 'paragraph' ? (
-      <BlockFormatItems
-        editor={activeEditor}
-        blockType={toolbarState.blockType}
-      />
+      <BlockFormatItems editor={activeEditor} blockType={toolbarState.blockType} />
     ) : morePage === 'alignment' ? (
       <ElementFormatItems editor={activeEditor} isRTL={toolbarState.isRTL} />
     ) : morePage === 'font-family' || morePage === 'font-size' ? (
-      (morePage === 'font-family'
-        ? FONT_FAMILY_OPTIONS
-        : FONT_SIZE_OPTIONS
-      ).map(([value, label]) => (
+      (morePage === 'font-family' ? FONT_FAMILY_OPTIONS : FONT_SIZE_OPTIONS).map(([value, label]) => (
         <DropDownItem
           key={value}
           className={`item ${dropDownActiveClass(value === (morePage === 'font-family' ? toolbarState.fontFamily : toolbarState.fontSize))}`}
-          onClick={() => applyStyleText({[morePage]: value || null})}>
+          onClick={() => applyStyleText({ [morePage]: value || null })}
+        >
           <span className="text">{label}</span>
         </DropDownItem>
       ))
     ) : morePage === 'font-color' || morePage === 'bg-color' ? (
       <ColorPicker
         compact
-        color={
-          morePage === 'font-color'
-            ? toolbarState.fontColor
-            : toolbarState.bgColor
-        }
-        onChange={
-          morePage === 'font-color' ? onFontColorSelect : onBgColorSelect
-        }
+        color={morePage === 'font-color' ? toolbarState.fontColor : toolbarState.bgColor}
+        onChange={morePage === 'font-color' ? onFontColorSelect : onBgColorSelect}
       />
     ) : null;
 
   return (
-    <div
-      ref={toolbarRef}
-      className="toolbar"
-      role="toolbar"
-      aria-label="编辑工具栏">
+    <div ref={toolbarRef} className="toolbar" role="toolbar" aria-label="编辑工具栏">
       {!toolbarState.isImageCaption && (
         <div {...groupProps('insert', '插入内容', 'toolbar-insert')}>
           <DropDown
@@ -1338,96 +1137,83 @@ export default function ToolbarPlugin({
             buttonClassName="toolbar-item insert-menu"
             hideChevron
             buttonAriaLabel="插入内容"
-            buttonIcon={<EditorIcon icon="plus" />}>
+            buttonIcon={<EditorIcon icon="plus" />}
+          >
             <DropDownItem
               onClick={() => {
-                showModal('插入表格', onClose => (
-                  <InsertTableDialog
-                    activeEditor={activeEditor}
-                    onClose={onClose}
-                  />
-                ));
+                showModal('插入表格', (onClose) => <InsertTableDialog activeEditor={activeEditor} onClose={onClose} />);
               }}
-              className="item">
+              className="item"
+            >
               <EditorIcon icon="table" />
               <span className="text">表格</span>
             </DropDownItem>
-            <DropDownItem
-              onClick={() =>
-                dispatchToolbarCommand(INSERT_HORIZONTAL_RULE_COMMAND)
-              }
-              className="item">
+            <DropDownItem onClick={() => dispatchToolbarCommand(INSERT_HORIZONTAL_RULE_COMMAND)} className="item">
               <EditorIcon icon="horizontal-rule" />
               <span className="text">分隔线</span>
             </DropDownItem>
 
             <DropDownItem
               onClick={() => {
-                showModal('插入图片', onClose => (
-                  <InsertImageDialog
-                    activeEditor={activeEditor}
-                    onClose={onClose}
-                  />
-                ));
+                showModal('插入图片', (onClose) => <InsertImageDialog activeEditor={activeEditor} onClose={onClose} />);
               }}
-              className="item">
+              className="item"
+            >
               <EditorIcon icon="image" />
               <span className="text">图片</span>
             </DropDownItem>
 
             <DropDownItem
               onClick={() => {
-                showModal('插入 HTML 块', onClose => (
-                  <InsertHtmlDialog
-                    activeEditor={activeEditor}
-                    onClose={onClose}
-                    onInsert={payload => activeEditor.dispatchCommand(INSERT_HTML_COMMAND, payload)}
-                  />
-                ), false, 'html-insert-modal');
+                showModal(
+                  '插入 HTML 块',
+                  (onClose) => (
+                    <InsertHtmlDialog
+                      activeEditor={activeEditor}
+                      onClose={onClose}
+                      onInsert={(payload) => activeEditor.dispatchCommand(INSERT_HTML_COMMAND, payload)}
+                    />
+                  ),
+                  false,
+                  'html-insert-modal',
+                );
               }}
-              className="item">
+              className="item"
+            >
               <EditorIcon icon="code" />
               <span className="text">HTML 页面</span>
             </DropDownItem>
 
-            <DropDownItem
-              onClick={() => dispatchToolbarCommand(INSERT_EXCALIDRAW_COMMAND)}
-              className="item">
+            <DropDownItem onClick={() => dispatchToolbarCommand(INSERT_EXCALIDRAW_COMMAND)} className="item">
               <EditorIcon icon="diagram-2" />
               <span className="text">绘图</span>
             </DropDownItem>
 
             <DropDownItem
               onClick={() => {
-                showModal('插入分栏', onClose => (
-                  <InsertLayoutDialog
-                    activeEditor={activeEditor}
-                    onClose={onClose}
-                  />
+                showModal('插入分栏', (onClose) => (
+                  <InsertLayoutDialog activeEditor={activeEditor} onClose={onClose} />
                 ));
               }}
-              className="item">
+              className="item"
+            >
               <EditorIcon icon="columns" />
               <span className="text">分栏布局</span>
             </DropDownItem>
 
             <DropDownItem
               onClick={() => {
-                showModal('插入公式', onClose => (
-                  <InsertEquationDialog
-                    activeEditor={activeEditor}
-                    onClose={onClose}
-                  />
+                showModal('插入公式', (onClose) => (
+                  <InsertEquationDialog activeEditor={activeEditor} onClose={onClose} />
                 ));
               }}
-              className="item">
+              className="item"
+            >
               <EditorIcon icon="equation" />
               <span className="text">公式</span>
             </DropDownItem>
 
-            <DropDownItem
-              onClick={() => dispatchToolbarCommand(INSERT_COLLAPSIBLE_COMMAND)}
-              className="item">
+            <DropDownItem onClick={() => dispatchToolbarCommand(INSERT_COLLAPSIBLE_COMMAND)} className="item">
               <EditorIcon icon="caret-right" />
               <span className="text">折叠区块</span>
             </DropDownItem>
@@ -1435,9 +1221,10 @@ export default function ToolbarPlugin({
               onClick={() => {
                 const dateTime = new Date();
                 dateTime.setHours(0, 0, 0, 0);
-                dispatchToolbarCommand(INSERT_DATETIME_COMMAND, {dateTime});
+                dispatchToolbarCommand(INSERT_DATETIME_COMMAND, { dateTime });
               }}
-              className="item">
+              className="item"
+            >
               <EditorIcon icon="calendar" />
               <span className="text">日期</span>
             </DropDownItem>
@@ -1448,24 +1235,20 @@ export default function ToolbarPlugin({
         {actionButton(actions.undo)}
         {actionButton(actions.redo)}
       </div>
-      <div {...groupProps('clear', '清除格式')}>
-        {actionButton(actions.clear)}
-      </div>
-      {toolbarState.blockType in blockTypeToBlockName &&
-        activeEditor === editor && (
-          <div {...groupProps('paragraph', '段落格式')}>
-            <BlockFormatDropDown
-              disabled={!isEditable}
-              blockType={toolbarState.blockType}
-              rootType={toolbarState.rootType}
-              editor={activeEditor}
-            />
-            {actionButton(actions.title)}
-          </div>
-        )}
+      <div {...groupProps('clear', '清除格式')}>{actionButton(actions.clear)}</div>
+      {toolbarState.blockType in blockTypeToBlockName && activeEditor === editor && (
+        <div {...groupProps('paragraph', '段落格式')}>
+          <BlockFormatDropDown
+            disabled={!isEditable}
+            blockType={toolbarState.blockType}
+            rootType={toolbarState.rootType}
+            editor={activeEditor}
+          />
+          {actionButton(actions.title)}
+        </div>
+      )}
       {showCodeOptions ? (
-        <div
-          {...groupProps('code-options', '代码选项', 'toolbar-code-options')}>
+        <div {...groupProps('code-options', '代码选项', 'toolbar-code-options')}>
           {!isCodeShiki && (
             <DropDown
               disabled={!isEditable}
@@ -1473,17 +1256,17 @@ export default function ToolbarPlugin({
               buttonLabel={
                 toolbarState.codeLanguage
                   ? (CODE_LANGUAGE_OPTIONS_PRISM.find(
-                      opt =>
-                        opt[0] ===
-                        normalizeCodeLanguagePrism(toolbarState.codeLanguage),
+                      (opt) => opt[0] === normalizePrismCodeLanguage(toolbarState.codeLanguage),
                     ) || ['', ''])[1]
                   : '无语言'
               }
-              buttonAriaLabel="代码语言">
+              buttonAriaLabel="代码语言"
+            >
               <DropDownItem
                 className={`item ${dropDownActiveClass(!toolbarState.codeLanguage)}`}
                 onClick={() => onCodeLanguageSelect(null)}
-                key="__no_language__">
+                key="__no_language__"
+              >
                 <span className="text">无语言</span>
               </DropDownItem>
               {CODE_LANGUAGE_OPTIONS_PRISM.map(([value, name]) => {
@@ -1491,7 +1274,8 @@ export default function ToolbarPlugin({
                   <DropDownItem
                     className={`item ${dropDownActiveClass(value === toolbarState.codeLanguage)}`}
                     onClick={() => onCodeLanguageSelect(value)}
-                    key={value}>
+                    key={value}
+                  >
                     <span className="text">{name}</span>
                   </DropDownItem>
                 );
@@ -1506,17 +1290,17 @@ export default function ToolbarPlugin({
                 buttonLabel={
                   toolbarState.codeLanguage
                     ? (CODE_LANGUAGE_OPTIONS_SHIKI.find(
-                        opt =>
-                          opt[0] ===
-                          normalizeCodeLanguageShiki(toolbarState.codeLanguage),
+                        (opt) => opt[0] === normalizeShikiCodeLanguage(toolbarState.codeLanguage),
                       ) || ['', ''])[1]
                     : '无语言'
                 }
-                buttonAriaLabel="代码语言">
+                buttonAriaLabel="代码语言"
+              >
                 <DropDownItem
                   className={`item ${dropDownActiveClass(!toolbarState.codeLanguage)}`}
                   onClick={() => onCodeLanguageSelect(null)}
-                  key="__no_language__">
+                  key="__no_language__"
+                >
                   <span className="text">无语言</span>
                 </DropDownItem>
                 {CODE_LANGUAGE_OPTIONS_SHIKI.map(([value, name]) => {
@@ -1524,7 +1308,8 @@ export default function ToolbarPlugin({
                     <DropDownItem
                       className={`item ${dropDownActiveClass(value === toolbarState.codeLanguage)}`}
                       onClick={() => onCodeLanguageSelect(value)}
-                      key={value}>
+                      key={value}
+                    >
                       <span className="text">{name}</span>
                     </DropDownItem>
                   );
@@ -1533,18 +1318,16 @@ export default function ToolbarPlugin({
               <DropDown
                 disabled={!isEditable}
                 buttonClassName="toolbar-item code-language"
-                buttonLabel={
-                  (CODE_THEME_OPTIONS_SHIKI.find(
-                    opt => opt[0] === toolbarState.codeTheme,
-                  ) || ['', ''])[1]
-                }
-                buttonAriaLabel="代码主题">
+                buttonLabel={(CODE_THEME_OPTIONS_SHIKI.find((opt) => opt[0] === toolbarState.codeTheme) || ['', ''])[1]}
+                buttonAriaLabel="代码主题"
+              >
                 {CODE_THEME_OPTIONS_SHIKI.map(([value, name]) => {
                   return (
                     <DropDownItem
                       className={`item ${dropDownActiveClass(value === toolbarState.codeTheme)}`}
                       onClick={() => onCodeThemeSelect(value)}
-                      key={value}>
+                      key={value}
+                    >
                       <span className="text">{name}</span>
                     </DropDownItem>
                   );
@@ -1566,9 +1349,7 @@ export default function ToolbarPlugin({
           <div {...groupProps('font-size', '字号')}>
             <div className="toolbar-font-size" role="group" aria-label="字号">
               <FontSize
-                selectionFontSize={parseFontSizeForToolbar(
-                  toolbarState.fontSize,
-                ).slice(0, -2)}
+                selectionFontSize={parseFontSizeForToolbar(toolbarState.fontSize).slice(0, -2)}
                 editor={activeEditor}
                 disabled={!isEditable}
               />
@@ -1580,17 +1361,9 @@ export default function ToolbarPlugin({
         {actionButton(actions.bold)}
         {actionButton(actions.italic)}
       </div>
-      <div {...groupProps('strikethrough', '删除线')}>
-        {actionButton(actions.strikethrough)}
-      </div>
-      <div {...groupProps('underline', '下划线')}>
-        {actionButton(actions.underline)}
-      </div>
-      {!toolbarState.isImageCaption && (
-        <div {...groupProps('code', '行内代码')}>
-          {actionButton(actions.code)}
-        </div>
-      )}
+      <div {...groupProps('strikethrough', '删除线')}>{actionButton(actions.strikethrough)}</div>
+      <div {...groupProps('underline', '下划线')}>{actionButton(actions.underline)}</div>
+      {!toolbarState.isImageCaption && <div {...groupProps('code', '行内代码')}>{actionButton(actions.code)}</div>}
       <div {...groupProps('colors', '文字颜色', 'toolbar-colors')}>
         <DropdownColorPicker
           disabled={!isEditable}
@@ -1647,18 +1420,18 @@ export default function ToolbarPlugin({
           buttonAriaLabel="更多"
           buttonIcon={<EditorIcon icon="toolbar-ellipsis" />}
           onOpen={() => setMorePage(null)}
-          stopCloseOnClickSelf={
-            morePage === 'font-color' || morePage === 'bg-color'
-          }>
+          stopCloseOnClickSelf={morePage === 'font-color' || morePage === 'bg-color'}
+        >
           <div data-toolbar-page={morePage || 'root'}>
             {morePage ? (
               <>
                 <DropDownItem
                   className="item wide toolbar-menu-back"
-                  onClick={event => {
+                  onClick={(event) => {
                     event.preventDefault();
                     setMorePage(null);
-                  }}>
+                  }}
+                >
                   <span className="toolbar-menu-back-icon" aria-hidden="true">
                     ‹
                   </span>
@@ -1671,24 +1444,14 @@ export default function ToolbarPlugin({
               <>
                 {collapsedGroups.map((group, index) => (
                   <Fragment key={group.id}>
-                    {index > 0 &&
-                      collapsedGroups[index - 1].section !== group.section && (
-                        <MenuSeparator />
-                      )}
+                    {index > 0 && collapsedGroups[index - 1].section !== group.section && <MenuSeparator />}
                     {overflowContent[group.id]}
                   </Fragment>
                 ))}
                 {collapsedGroups.length > 0 && <MenuSeparator />}
-                {[
-                  actions.subscript,
-                  actions.superscript,
-                  actions.highlight,
-                  actions.ruby,
-                ].map(actionItem)}
+                {[actions.subscript, actions.superscript, actions.highlight, actions.ruby].map(actionItem)}
                 <MenuSeparator />
-                {[actions.lowercase, actions.uppercase, actions.capitalize].map(
-                  actionItem,
-                )}
+                {[actions.lowercase, actions.uppercase, actions.capitalize].map(actionItem)}
               </>
             )}
           </div>
