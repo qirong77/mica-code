@@ -28,8 +28,8 @@
 - 密钥类输入统一用 `web/components/SecretInput.tsx`：默认密文 + 眼睛按钮切明文，明文状态在组件内，收起或换页自动回到密文。
 - 配置页不提供 effort 开关：由模型规则按模型名决定。
 - 表单转换唯一实现 `web/configDraft.ts`；写入保留未知键，已知键固定顺序，可选字段留空即删键。MCP 页同理（`web/mcpDraft.ts`）。
-- Capabilities 页只有一份「默认配置」，页签顺序是 提示词控制 / Tools / Skills / MCP servers / Plugins，顶部不放作用范围切换也不放搜索：默认值读写仍在 `src/server/capabilityDefaults.ts`，静态目录合并插件清单与已发布技能；有会话宿主时 `ConfigWebApp.capabilitiesRuntime` 接到该会话的 `mica/capabilities/get|set`，展示实际注册工具、技能归属与完整 schema，没有宿主时明确提示读不到动态正文。与会话设置共用的能力列表中，单项组直接平铺，多项组保留组头与整组开关。
-- Capabilities 的 Plugins 贡献页只列官方与用户插件，宿主 `builtin.*` 直接在 Tools / 提示词控制中展示；工具来源显示插件名称或「内置」。当前会话确认某插件没有提示词段落时，不画无效的「提示词注入」开关。
+- Capabilities 页只有一份「默认配置」，页签顺序是 提示词控制 / Tools / Skills / MCP servers，顶部不放作用范围切换也不放搜索：默认值读写仍在 `src/server/capabilityDefaults.ts`，静态目录合并插件清单与已发布技能；有会话宿主时 `ConfigWebApp.capabilitiesRuntime` 接到该会话的 `mica/capabilities/get|set`，展示实际注册工具、技能归属与完整 schema，没有宿主时明确提示读不到动态正文。与会话设置共用的能力列表中，单项组直接平铺，多项组保留组头与整组开关。
+- Capabilities 不单独提供 Plugins 页签；插件来源直接标在 Tools / Skills / 提示词控制的对应条目上。宿主 `builtin.*` 直接在 Tools / 提示词控制中展示；工具来源显示插件名称或「内置」。当前会话确认某插件没有提示词段落时，不画无效的「提示词注入」开关。
 - 提示词控制是单列列表，一行就是提示词里的一段；段名取注册的可读 `label`，插件来源优先取运行时快照的 `pluginName`，宿主内置段只显示段名，不把 `builtin.*` 标识上屏（`web/components/PromptControlsPanel.tsx`）：行首把手拖动排序，行上一枚开关决定是否注入，展开后才出现编辑器与“原文 / 恢复原文”。不显示字符数、复制正文、整份预览这类辅助信息，也没有说明性提示行；空段落展开时压缩编辑器高度并注明「当前为空，不会注入」。把手支持 ↑/↓ 微调（键盘可达）。展开/收起是 160ms 的 `grid-template-rows` 过渡（收起先收高度再卸载编辑器，箭头同步旋转 140ms），`prefers-reduced-motion` 下全部关掉。全局控制存 `prompt-controls.json`（含 `order`），不改插件文件或存档，下一轮开始生效；固定 system 行没有把手，始终留在首位、始终只读。
 - 插件页是「目录 + 整页详情」：目录首个页签是「全部」，其后按已声明的桌面能力 / 可配置能力 / 其他工具 / 用户来源切换卡片网格（停用的卡片压暗），每张卡显示清单 `icon`（`web/pluginIcons.tsx` 的映射表，未登记回落 `puzzle`）与一枚启停开关（卡片是「外壳 + 打开详情的按钮 + 右上角的开关」，开关不能塞进按钮里）；点开进入单插件详情页，返回走详情页自己的返回行。**开关是唯一的启停控件**：卡片脚注与详情页信息表的「加载」行只说装配结论（已加载 / 已跳过 / 加载失败 / 尚未加载，停用时是「已停用」），不要再放一枚「已启用」标签去重复开关的语义（唯一实现在 `pluginRunningStatus()`）。清单 icon 不参与内核逻辑，只在配置页呈现。
 - 详情页右侧信息表只有标识 / 加载 / 目录 / 日志四行、单行省略；「日志」是路径链接（单击选「在 Finder 中打开 / 在 Mica 中打开」，⌘ 点击直接进编辑器，用的是 `PathLink` + 宿主的 `revealPath` / `openPathInEditor`），目录那行不是——官方插件的目录是仓库里的相对路径。插件里的文件清单不进界面（`PluginInspection` 不读目录），用户要的是「装没装上」而不是文件浏览器。

@@ -6,6 +6,7 @@ import {describe, expect, it, vi} from 'vitest';
 
 import {
   DEFAULT_REACT_BLOCK,
+  buildHtmlPreviewDocument,
   insertHtmlBlock,
   normalizeLocalHtml,
 } from '../src/playground/plugins/HtmlExtension';
@@ -52,6 +53,14 @@ describe('Notebook HTML blocks', () => {
     expect(DEFAULT_REACT_BLOCK).toContain('function App({React, Arco, html})');
     expect(DEFAULT_REACT_BLOCK).toContain('<${Card}');
     expect(DEFAULT_REACT_BLOCK).toContain('setCount(count + 1)');
+  });
+
+  it('wraps HTML fragments in a preview document without changing complete documents', () => {
+    expect(buildHtmlPreviewDocument('<strong>预览</strong>')).toContain('<body>');
+    expect(buildHtmlPreviewDocument('<strong>预览</strong>')).toContain('<strong>预览</strong>');
+
+    const document = '<!doctype html><html><body><main>完整文档</main></body></html>';
+    expect(buildHtmlPreviewDocument(document)).toBe(document);
   });
 });
 

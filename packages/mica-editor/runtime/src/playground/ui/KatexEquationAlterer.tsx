@@ -12,11 +12,12 @@ import {useLexicalComposerContext} from '@lexical/react/LexicalComposerContext';
 import {LexicalErrorBoundary} from '@lexical/react/LexicalErrorBoundary';
 import {Input} from '@arco-design/web-react';
 import * as React from 'react';
-import {type JSX, useCallback, useId, useState} from 'react';
+import {type JSX, useCallback, useId, useLayoutEffect, useState} from 'react';
 
 import Button from '../ui/Button';
 import KatexRenderer from './KatexRenderer';
 import Checkbox from './Checkbox';
+import {ensureEditorOptionalStyle} from '../../cdnStyles';
 
 type Props = {
   initialEquation?: string;
@@ -31,6 +32,10 @@ export default function KatexEquationAlterer({
   const [equation, setEquation] = useState<string>(initialEquation);
   const [inline, setInline] = useState<boolean>(true);
   const equationInputId = useId();
+
+  useLayoutEffect(() => {
+    ensureEditorOptionalStyle('katex');
+  }, []);
 
   const onClick = useCallback(() => {
     onConfirm(equation, inline);

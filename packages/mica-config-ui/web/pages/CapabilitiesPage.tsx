@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { PromptControls } from '@packages/mica-common/promptControls.js';
 import { PageFrame } from '../components/PageFrame.js';
-import { Alert, Button, Empty, SaveStatus, SettingsGroup, Switch, Tag } from '../components/Ui.js';
+import { Alert, Button, Empty, SaveStatus } from '../components/Ui.js';
 import { CapabilityList, CapabilityParameters, type CapabilityItem } from '../components/CapabilityList.js';
 import { PromptControlsPanel } from '../components/PromptControlsPanel.js';
 import { JsonEditor } from '../components/JsonEditor.js';
@@ -11,11 +11,8 @@ import { readCapabilityDefaults, writeCapabilityDefaults, readPromptControls, wr
 import {
   CAPABILITY_LABELS as L,
   capabilitySourceLabel,
-  pluginLoadStatusLabel,
-  pluginSourceLabel,
   mcpStatusLabel,
 } from '../labels.js';
-import { setPluginPromptEnabled } from '../promptControlDraft.js';
 import {
   capabilityDraftCache,
   promptDraftCache,
@@ -33,12 +30,11 @@ import type {
 } from '../../src/shared/types.js';
 
 type Group = 'skills' | 'tools' | 'mcpServers';
-type Tab = Group | 'plugins' | 'prompts';
+type Tab = Group | 'prompts';
 type Draft = { disabledSkills: string[]; disabledTools: string[]; disabledMcpServers: string[] };
 type Item = CapabilityItem & { mcpTools?: ConfigWebCapabilityTool[] };
-const TABS: Tab[] = ['prompts', 'tools', 'skills', 'mcpServers', 'plugins'];
+const TABS: Tab[] = ['prompts', 'tools', 'skills', 'mcpServers'];
 const EMPTY: Draft = { disabledSkills: [], disabledTools: [], disabledMcpServers: [] };
-const EMPTY_CONTROLS: PromptControls = { version: 1, disabledPlugins: [], sections: {} };
 
 /** 默认配置与当前会话共用页面，真实目录始终由会话宿主提供。 */
 export function CapabilitiesPage({ runtime }: { runtime?: ConfigWebCapabilitiesRuntime }) {
@@ -272,7 +268,6 @@ export function CapabilitiesPage({ runtime }: { runtime?: ConfigWebCapabilitiesR
     tools: count('tools'),
     skills: count('skills'),
     mcpServers: count('mcpServers'),
-    plugins: String(plugins.length),
     prompts: live?.prompt ? String(live.prompt.sections.length) : '',
   };
   const activeGroup: Group = tab === 'tools' || tab === 'skills' || tab === 'mcpServers' ? tab : 'tools';
@@ -290,9 +285,7 @@ export function CapabilitiesPage({ runtime }: { runtime?: ConfigWebCapabilitiesR
       title="Capabilities"
       description={L.description}
       path={
-        tab === 'prompts' || tab === 'plugins'
-          ? 'prompt-controls.json'
-          : 'config.json · capabilityDefaults'
+        tab === 'prompts' ? 'prompt-controls.json' : 'config.json · capabilityDefaults'
       }
       actions={
         <div className="toolbar">
@@ -335,87 +328,6 @@ export function CapabilitiesPage({ runtime }: { runtime?: ConfigWebCapabilitiesR
           </div>
           {loading && !details && !live ? (
             <div className="page-loading">正在读取能力…</div>
-          ) : tab === 'plugins' ? (
-            <SettingsGroup title="插件贡献" description={L.promptScope}>
-              {plugins.map((plugin) => {
-                  const actual = live?.plugins.find((entry) => entry.id === plugin.id);
-                  const pluginSections =
-                    live?.prompt?.sections.filter((section) => section.pluginId === plugin.id) ?? [];
-                  return (
-                    <div key={plugin.id} className="capability-plugin-row">
-                      <div className="capability-plugin-copy">
-                        <div>
-                          <strong>{plugin.name}</strong>
-                          <Tag>{pluginSourceLabel(plugin.source)}</Tag>
-                          <Tag>
-                            {plugin.state === 'disabled'
-                              ? '已停用'
-                              : actual
-                                ? pluginLoadStatusLabel(actual.status)
-                                : pluginLoadStatusLabel(plugin.loadStatus)}
-                          </Tag>
-                        </div>
-                        <code title={plugin.id}>{plugin.id}</code>
-                        <p title={plugin.description}>{plugin.description || plugin.error || '未提供描述'}</p>
-                        {actual ? (
-                          <div className="capability-plugin-contributions">
-                            <Button
-                              size="compact"
-                              variant="ghost"
-                              disabled={!actual.toolNames.length}
-                              onClick={() => {
-                                setTab('tools');
-                              }}
-                            >
-                              {actual.toolNames.length} 个工具
-                            </Button>
-                            <Button
-                              size="compact"
-                              variant="ghost"
-                              disabled={!actual.skillNames.length}
-                              onClick={() => {
-                                setTab('skills');
-                              }}
-                            >
-                              {actual.skillNames.length} 个技能
-                            </Button>
-                            <span>{pluginSections.length} 段提示词</span>
-                          </div>
-                        ) : (
-                          <span>打开当前会话后查看实际贡献</span>
-                        )}
-                        {actual?.error ? <span>{actual.error}</span> : null}
-                      </div>
-                      {!actual || pluginSections.length > 0 ? (
-                        <div className="capability-plugin-actions">
-                          {pluginSections.length ? (
-                            <Button
-                              size="compact"
-                              variant="ghost"
-                              onClick={() => {
-                                setPromptFocusId(pluginSections[0]!.id);
-                                setTab('prompts');
-                              }}
-                            >
-                              查看提示词
-                            </Button>
-                          ) : null}
-                          <span>{L.injection}</span>
-                          <Switch
-                            label={`${plugin.name} 提示词注入`}
-                            checked={plugin.state !== 'disabled' && !controls?.disabledPlugins.includes(plugin.id)}
-                            disabled={!controls || loading || plugin.state === 'disabled'}
-                            onChange={(enabled) =>
-                              commitControls(setPluginPromptEnabled(controls ?? EMPTY_CONTROLS, plugin.id, enabled))
-                            }
-                          />
-                        </div>
-                      ) : null}
-                    </div>
-                  );
-                })}
-              {!plugins.length ? <Empty description="尚未发现插件" /> : null}
-            </SettingsGroup>
           ) : tab === 'prompts' ? (
             controls ? (
               <PromptControlsPanel

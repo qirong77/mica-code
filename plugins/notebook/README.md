@@ -109,6 +109,7 @@ MCP 工具说明建议先写短摘要，再用 H2 和简短要点组织正文。
 编辑器已抽成共享包 `packages/mica-editor`：笔记用它运行时的富文本模式，配置页 Role / Skill 用同一份运行时的 Markdown 模式（两份文档契约互不相通，见该包 README）。本插件只保留目录模型、保存控制和 iframe 桥。`packages/mica-editor/runtime/cdn.mjs` 固定第三方版本，浏览器通过 esm.sh 加载 ESM、jsDelivr 加载样式与字体；本地产物只包含一方代码、图标和编辑器主题资源，不复制第三方 JS 库。Lexical 导出与 `.js` 别名由 import map 统一，避免编辑器上下文出现两个实例。
 
 编辑器在无 `allow-same-origin` 的 sandbox iframe 中运行，通过 iframe WindowProxy + 随机 nonce 校验的消息桥交换当前笔记正文，不提供 Mica API 或文件系统权限。每次加载另带独立请求身份，超时或被替换的请求不能完成后续加载；编辑器关闭后新请求立即失败。CDN 只负责库文件，不发送笔记正文；网络图片/视频等外部嵌入会请求相应站点。首次打开需要网络；不能承诺完全离线运行，CDN 失败时展示可重试错误且不清空本地笔记。
+没有活动笔记时只渲染本地目录与欢迎态，不创建编辑器 iframe；打开或新建笔记后才启动隔离运行时，避免空笔记本提前下载编辑器资源。
 
 协同服务、分享快照和会重建文档的 Playground 实验模式不用于本地笔记，不提供语音和 Markdown/HTML 源码模式入口。外部嵌入仍受浏览器能力、iframe 权限和网络约束。
 

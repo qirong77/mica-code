@@ -51,7 +51,7 @@ import {
 } from '../../nodes/EquationNode';
 import {$createImageNode, $isImageNode, ImageNode} from '../../nodes/ImageNode';
 import {$createTweetNode, $isTweetNode, TweetNode} from '../../nodes/TweetNode';
-import emojiList from '../../utils/emoji-list';
+import {EMOJI_ALIASES} from '../../utils/emoji-aliases';
 
 export const HR: ElementTransformer = {
   dependencies: [HorizontalRuleNode],
@@ -104,7 +104,7 @@ export const EMOJI: TextMatchTransformer = {
   importRegExp: /:([a-z0-9_]+):/,
   regExp: /:([a-z0-9_]+):$/,
   replace: (textNode, [, name]) => {
-    const emoji = emojiList.find(e => e.aliases.includes(name))?.emoji;
+    const emoji = EMOJI_ALIASES[name];
     if (emoji) {
       textNode.replace($createTextNode(emoji));
     }

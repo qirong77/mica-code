@@ -30,11 +30,12 @@ import {
   SELECTION_CHANGE_COMMAND,
 } from 'lexical';
 import * as React from 'react';
-import {type JSX, useCallback, useEffect, useRef, useState} from 'react';
+import {type JSX, useCallback, useEffect, useLayoutEffect, useRef, useState} from 'react';
 
 import EquationEditor from '../ui/EquationEditor';
 import KatexRenderer from '../ui/KatexRenderer';
 import {$isEquationNode} from './EquationNode';
+import {ensureEditorOptionalStyle} from '../../cdnStyles';
 
 type EquationComponentProps = {
   equation: string;
@@ -54,6 +55,10 @@ export default function EquationComponent({
   const [equationValue, setEquationValue] = useState(equation);
   const [showEquationEditor, setShowEquationEditor] = useState<boolean>(false);
   const inputRef = useRef<HTMLTextAreaElement | HTMLInputElement>(null);
+
+  useLayoutEffect(() => {
+    ensureEditorOptionalStyle('katex');
+  }, []);
 
   // Promote a click on the rendered KaTeX into a NodeSelection on this
   // EquationNode. Without this, an EquationNode that is the only root

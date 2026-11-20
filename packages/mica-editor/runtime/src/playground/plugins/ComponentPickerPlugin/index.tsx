@@ -333,7 +333,7 @@ export function getBaseOptions(editor: LexicalEditor, showModal: ShowModal) {
             onClose={onClose}
             onInsert={payload => editor.dispatchCommand(INSERT_HTML_COMMAND, payload)}
           />
-        )),
+        ), false, 'html-insert-modal'),
     }),
     new ComponentPickerOption('折叠块 Collapsible', {
       icon: <i className="icon caret-right" />,

@@ -6,8 +6,6 @@
  *
  */
 
-import 'katex/dist/katex.css';
-
 import {defineImportRule, DOMImportExtension, sel} from '@lexical/html';
 import {
   $insertNodeIntoLeaf,

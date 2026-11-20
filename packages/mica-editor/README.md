@@ -114,7 +114,9 @@ Mermaid 与 DOMPurify 用固定版本 jsDelivr ESM 按需加载（版本见插�
   一并打进 `generatedStaticAssets.ts`。
 
 第三方库不进产物：`runtime/cdn.mjs` 固定版本，页面用 import map 从 esm.sh 加载 ESM、jsDelivr 加载样式与字体；
-产物只含一方代码、图标与主题资源。首次打开需要联网。
+产物只含一方代码、图标与主题资源。首次打开需要联网。首屏 HTML 只加载两种模式都需要的 Arco 样式，KaTeX、Excalidraw
+和日期选择器的样式在对应节点真正挂载时才注入；Notebook 的表格布局 chunk 只在正文已有表格或首次插入表格后加载，
+完整 emoji 元数据也只在用户开始 `:` 搜索时加载，Markdown 快捷转换使用单独的紧凑别名表。
 
 ## 开发与验证
 

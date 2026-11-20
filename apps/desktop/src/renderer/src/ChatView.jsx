@@ -191,6 +191,12 @@ import {
   writeScrollEntry
 } from './chat-scroll'
 import { turnLogVisible } from './chat-process-layout'
+import {
+  DEFAULT_TURN_LOG_OPEN,
+  TURN_LOG_OPEN_STATE_KEY,
+  toggleTurnLogOpen,
+  turnLogContentCollapsed
+} from './chat-turn-log-state'
 import { mergeRecalledDraft, resolveQueueRecall } from './chat-recall'
 import { uid } from './workspace'
 import { setUiState, setUiStateEntries, subscribeUiState, uiStateKeys, useSharedState, useUiStateValue } from './ui-state'
@@ -2271,9 +2277,9 @@ function TurnLogDock({
   const roundsRef = useRef(null)
   // 这块日志的高度也是界面状态：换个窗口打开时保持同一高度，重启后还在。
   const [storedHeight, setStoredHeight] = useSharedState('turnLogHeight', null)
-  // 收起是使用者的选择，也跨窗口保留。收起后那一行照旧报「刚才干了什么」，
-  // 所以收起来不等于看不见这一轮。
-  const [collapsed, setCollapsed] = useSharedState('turnLogCollapsed', false)
+  // 展开是使用者的选择，也跨窗口、跨会话保留。没有手动选择时默认收起，
+  // 运行状态变化不能把它偷偷摊开或收起。
+  const [open, setOpen] = useSharedState(TURN_LOG_OPEN_STATE_KEY, DEFAULT_TURN_LOG_OPEN)
   const height =
     Number.isFinite(storedHeight) && storedHeight >= MIN_TURN_LOG_HEIGHT
       ? Math.min(storedHeight, window.innerHeight * MAX_TURN_LOG_HEIGHT_RATIO)
@@ -2281,7 +2287,7 @@ function TurnLogDock({
   // 拖出来的高度跟着「正在看的那一块」走：看历史轮次时落在目录上，回到最新一轮时落回
   // 正文，切换时停靠区整体高度不会跳一下。
   const paneStyle = height != null ? { height, maxHeight: 'none' } : undefined
-  const contentCollapsed = collapsed
+  const contentCollapsed = turnLogContentCollapsed(open)
   const dockVisible = turnLogVisible({ roundCount: rounds.length, running, interrupted })
   const stickToBottomRef = useRef(true)
   // 展开的历史轮次：同一时刻只摊开一轮（`null` = 看正在跑的这一轮）。两块长正文接连
@@ -2317,18 +2323,6 @@ function TurnLogDock({
   useLayoutEffect(() => {
     stickToBottomRef.current = true
   }, [liveKey, liveExpanded])
-  // 每次开跑都摊开：上一次收起的只是那一次的选择，不该带到新一轮。
-  const wasRunningRef = useRef(null)
-  useEffect(() => {
-    const previous = wasRunningRef.current
-    wasRunningRef.current = running
-    if (running && previous === false) setCollapsed(false)
-  }, [running, setCollapsed])
-  useEffect(() => {
-    if (interrupted && !running && liveRound?.messages.some((message) => message.kind === 'reasoning')) {
-      setCollapsed(true)
-    }
-  }, [interrupted, running, liveKey, setCollapsed])
   // 只有用户停留在底部时才跟随滚动，手动上翻后不打扰。依赖要含 `rounds`：
   // 思考是逐字增长的，只盯轮次数的话流式正文会跑到可视区外面。
   useLayoutEffect(() => {
@@ -2380,7 +2374,7 @@ function TurnLogDock({
 
   // 双击回到「跟着内容走」：默认高度由 CSS 的 max-height 决定，不拖过就不会有空白。
   const resetHeight = useCallback(() => setStoredHeight(null), [setStoredHeight])
-  const toggleCollapsed = useCallback(() => setCollapsed((value) => !value), [setCollapsed])
+  const toggleCollapsed = useCallback(() => setOpen(toggleTurnLogOpen), [setOpen])
 
   // 所有宽度都停靠在输入区上方；正常结束后隐藏，中断日志保留供回看。
   if (!dockVisible) return null

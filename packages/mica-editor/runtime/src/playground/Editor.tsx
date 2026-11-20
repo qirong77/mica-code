@@ -10,8 +10,9 @@ import {getExtensionDependencyFromEditor, signal} from '@lexical/extension';
 import {CharacterLimitPlugin} from '@lexical/react/LexicalCharacterLimitPlugin';
 import {useLexicalComposerContext} from '@lexical/react/LexicalComposerContext';
 import {useSignalValue} from '@lexical/react/useExtensionSignalValue';
-import {CAN_USE_DOM, registerEventListener} from 'lexical';
-import {type JSX, useCallback, useEffect, useMemo, useState} from 'react';
+import {$nodesOfType, CAN_USE_DOM, registerEventListener} from 'lexical';
+import {TableNode} from '@lexical/table';
+import {type JSX, lazy, Suspense, useCallback, useEffect, useMemo, useState} from 'react';
 
 import {useSettings} from './context/SettingsContext';
 import {useSynchronizeSettings} from './hooks/useSynchronizeSettings';
@@ -36,7 +37,28 @@ import TableFitNestedTablePlugin from './plugins/TableFitNestedTablePlugin';
 import TableScrollShadowPlugin from './plugins/TableScrollShadowPlugin';
 import ToolbarPlugin from './plugins/ToolbarPlugin';
 import ContentEditable from './ui/ContentEditable';
-import MarkdownTableLayoutPlugin from '../markdown/markdownTableLayout';
+
+const MarkdownTableLayoutPlugin = lazy(() => import('../markdown/markdownTableLayout'));
+
+function MarkdownTableLayoutGate(): JSX.Element | null {
+  const [editor] = useLexicalComposerContext();
+  const [hasTable, setHasTable] = useState(() =>
+    editor.getEditorState().read(() => $nodesOfType(TableNode).length > 0),
+  );
+
+  useEffect(() => {
+    if (hasTable) return undefined;
+    return editor.registerMutationListener(TableNode, mutations => {
+      if ([...mutations.values()].some(type => type === 'created')) setHasTable(true);
+    });
+  }, [editor, hasTable]);
+
+  return hasTable ? (
+    <Suspense fallback={null}>
+      <MarkdownTableLayoutPlugin fill />
+    </Suspense>
+  ) : null;
+}
 
 export default function Editor(): JSX.Element {
   const {
@@ -138,7 +160,7 @@ export default function Editor(): JSX.Element {
             <MarkdownPastePlugin />
             <TableControlsPlugin />
             <TableScrollShadowPlugin />
-            <MarkdownTableLayoutPlugin fill />
+            <MarkdownTableLayoutGate />
             <ExcalidrawPlugin />
             {floatingAnchorElem && (
               <>

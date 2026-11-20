@@ -67,7 +67,13 @@ import {
 import { longPressHandlers } from './hooks'
 import { useSharedState } from './ui-state'
 import {
-  DEFAULT_SESSION_SEARCH_RANGE,
+  DEFAULT_SESSION_TREE_UI_STATE,
+  SESSION_TREE_FILTER_PREVIEW_LIMIT,
+  SESSION_TREE_UI_STATE_KEY,
+  normalizeSessionTreeUiState,
+  updateSessionTreeUiState
+} from './session-tree-state'
+import {
   SESSION_SEARCH_RANGES,
   SESSION_SEARCH_RESULT_LIMIT,
   buildDraftSearchResults,
@@ -122,14 +128,10 @@ function DropBar({ position }) {
 /** 这次落点是「进到这里」（换分区 / 嵌套），而不是插到某一行前后 */
 const isIntoDrop = (over) => !!over && over.position !== 'before' && over.position !== 'after'
 
-const RECENT_PREVIEW_LIMIT = 6
-
 const RECENT_PAGE_SIZE = 10
 
 // 快捷筛选生效时同样分页：最宽的 24 小时档在忙起来的一天里也能有几十条，一次性画完
 // 既拖慢首次渲染又让「Show more」的规则和 Recent 分成两套。一次放 30 条根会话。
-const FILTER_PREVIEW_LIMIT = 30
-
 const FILTER_PAGE_SIZE = 30
 
 /**
@@ -495,17 +497,18 @@ export function SessionTree({
   const [menu, setMenu] = useState(null)
   const [detailSessionId, setDetailSessionId] = useState(null)
   const [editing, setEditing] = useState(null) // { kind: 'session'|'draft'|'group', id }
-  const [query, setQuery] = useState('')
-  // 搜索的时间范围：默认只搜最近 3 天。正文搜索要解析会话文件，全部历史都读一遍既慢又
-  // 白占内存，而用户找的多半是最近聊过的东西；范围可调，选择随组件存活（与输入框里的
-  // 查询串同一档：都是「这次搜索」的临时状态，不进界面状态）。
-  const [rangeId, setRangeId] = useState(DEFAULT_SESSION_SEARCH_RANGE)
-  // 漏斗点开才算「进入了筛选」：没点过的时候侧栏和以前一模一样，不存在任何被藏起来的
-  // 会话（默认档就是「全部」）。收起漏斗等于退出筛选、回到「全部」，不记忆上次那一档——
-  // 记住一个看不见的筛选，下次打开侧栏会以为会话丢了。
-  const [filterOpen, setFilterOpen] = useState(false)
-  const [filterMode, setFilterMode] = useState('all')
-  const [filterLimit, setFilterLimit] = useState(FILTER_PREVIEW_LIMIT)
+  // 搜索框、搜索时间范围、漏斗状态和分页都属于用户正在浏览的侧栏状态：与折叠状态一样
+  // 放进 ui-state，编辑器重启后恢复到同一份视图，而不是只恢复工作区和会话页签。
+  const [storedTreeState, setStoredTreeState] = useSharedState(
+    SESSION_TREE_UI_STATE_KEY,
+    DEFAULT_SESSION_TREE_UI_STATE
+  )
+  const treeState = normalizeSessionTreeUiState(storedTreeState)
+  const { query, rangeId, filterOpen, filterMode, filterLimit, recentLimit } = treeState
+  const updateTreeState = useCallback(
+    (patch) => setStoredTreeState((current) => updateSessionTreeUiState(current, patch)),
+    [setStoredTreeState]
+  )
   const [contentMatches, setContentMatches] = useState(() => new Map())
   const [searchingContent, setSearchingContent] = useState(false)
   const [contentTruncated, setContentTruncated] = useState(false)
@@ -524,7 +527,6 @@ export function SessionTree({
     []
   )
   const collapsedChildren = useMemo(() => new Set(collapsedChildIds), [collapsedChildIds])
-  const [recentLimit, setRecentLimit] = useState(RECENT_PREVIEW_LIMIT)
   // 「在侧栏里定位到这条会话」：⌘P 打开的会话可能在折叠的分区/分组里、被 Recent 的
   // 分页截掉，或者干脆滚出了视野。定位做三件事——展开、滚进视野、闪一下。
   const [reveal, setReveal] = useState(null) // { key, nonce }
@@ -662,7 +664,11 @@ export function SessionTree({
         return prev.filter((id) => !plan.expandParents.includes(id))
       })
     }
-    if (plan.recentLimit) setRecentLimit((value) => Math.max(value, plan.recentLimit))
+    if (plan.recentLimit) {
+      updateTreeState((current) => ({
+        recentLimit: Math.max(current.recentLimit, plan.recentLimit)
+      }))
+    }
     setReveal({ key: plan.key, nonce: revealTick })
   }, [
     collapsedChildIds,
@@ -678,7 +684,8 @@ export function SessionTree({
     sessions,
     setCollapsedChildIds,
     setCollapsedGroups,
-    setCollapsedSections
+    setCollapsedSections,
+    updateTreeState
   ])
 
   // 展开是异步的（要等这一轮渲染把行画出来），所以滚进视野放在下一帧再找；
@@ -901,18 +908,22 @@ export function SessionTree({
   )
 
   const chooseFilter = (id) => {
-    setFilterMode(sessionFilterMode(id).id)
-    setFilterLimit(FILTER_PREVIEW_LIMIT)
+    updateTreeState({
+      filterMode: sessionFilterMode(id).id,
+      filterLimit: SESSION_TREE_FILTER_PREVIEW_LIMIT
+    })
   }
-  // 收起漏斗＝退出筛选：不记忆上次那一档，否则下次打开侧栏会以为会话丢了。
+  // 收起漏斗仍退出筛选并回到「全部」；这个结果会持久化，重启后不会把用户带回隐藏的筛选。
   const toggleFilter = () => {
     if (!filterOpen) {
-      setFilterOpen(true)
+      updateTreeState({ filterOpen: true })
       return
     }
-    setFilterOpen(false)
-    setFilterMode('all')
-    setFilterLimit(FILTER_PREVIEW_LIMIT)
+    updateTreeState({
+      filterOpen: false,
+      filterMode: 'all',
+      filterLimit: SESSION_TREE_FILTER_PREVIEW_LIMIT
+    })
   }
 
   // 会话 → 所在分组名。搜索结果行的行尾用它说明「这条原来在哪儿」，用户不必回去翻分区。
@@ -1909,7 +1920,7 @@ export function SessionTree({
               height={28}
               style={{ fontSize: 13 }}
               prefix={<IconSearch size={13} />}
-              onChange={setQuery}
+              onChange={(value) => updateTreeState({ query: value })}
               onKeyDown={(event) => {
                 if (event.key === 'ArrowDown') {
                   event.preventDefault()
@@ -1925,7 +1936,7 @@ export function SessionTree({
                   openSearchItem(searchItems[Math.min(searchFocus, searchItems.length - 1)])
                 } else if (event.key === 'Escape' && query) {
                   event.preventDefault()
-                  setQuery('')
+                  updateTreeState({ query: '' })
                 }
               }}
             />
@@ -1937,7 +1948,7 @@ export function SessionTree({
                 aria-label="清除搜索"
                 className="shrink-0"
                 style={{ width: 28, height: 28 }}
-                onClick={() => setQuery('')}
+                onClick={() => updateTreeState({ query: '' })}
               >
                 <IconX size={14} />
               </ArcoAction>
@@ -1954,7 +1965,7 @@ export function SessionTree({
               onClick={() => {
                 // 筛选与搜索是两条平行入口：搜索接管列表时先关掉搜索，否则筛出来的
                 // 结果会被搜索态挡住，点了像没反应。
-                if (!filterOpen && query) setQuery('')
+                if (!filterOpen && query) updateTreeState({ query: '' })
                 toggleFilter()
               }}
             >
@@ -2018,7 +2029,7 @@ export function SessionTree({
                       ? 'bg-overlay-strong text-fg-strong'
                       : 'text-fg-muted hover:bg-overlay hover:text-fg-soft'
                   }`}
-                  onClick={() => setRangeId(range.id)}
+                  onClick={() => updateTreeState({ rangeId: range.id })}
                 >
                   {range.label}
                 </button>
@@ -2051,7 +2062,7 @@ export function SessionTree({
                   <button
                     type="button"
                     className="ml-1 text-fg-soft underline-offset-2 hover:text-fg-max hover:underline"
-                    onClick={() => setRangeId('all')}
+                    onClick={() => updateTreeState({ rangeId: 'all' })}
                   >
                     搜索全部时间
                   </button>
@@ -2103,7 +2114,11 @@ export function SessionTree({
                 type="button"
                 className={`${rowClass} w-full text-fg-muted hover:text-fg-strong`}
                 style={{ paddingLeft: rowIndent(0) }}
-                onClick={() => setFilterLimit((prev) => prev + FILTER_PAGE_SIZE)}
+                onClick={() =>
+                  updateTreeState((current) => ({
+                    filterLimit: current.filterLimit + FILTER_PAGE_SIZE
+                  }))
+                }
               >
                 <Slot />
                 <Slot>
@@ -2193,7 +2208,11 @@ export function SessionTree({
                         type="button"
                         className={`${rowClass} w-full text-fg-muted hover:text-fg-strong`}
                         style={{ paddingLeft: rowIndent(0) }}
-                        onClick={() => setRecentLimit((prev) => prev + RECENT_PAGE_SIZE)}
+                        onClick={() =>
+                          updateTreeState((current) => ({
+                            recentLimit: current.recentLimit + RECENT_PAGE_SIZE
+                          }))
+                        }
                       >
                         <Slot />
                         <Slot>

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { PromptControls, PromptSectionSnapshot, RuntimePromptInspection } from '@packages/mica-common/promptControls.js';
-import { Button, Empty, Switch } from './Ui.js';
+import { Button, Empty, Switch, Tag } from './Ui.js';
 import { JsonEditor } from './JsonEditor.js';
 import { CAPABILITY_LABELS as L, promptSectionLabel, promptSectionSourceLabel } from '../labels.js';
 import {
@@ -212,7 +212,7 @@ const PromptSectionRow = ({
         )}
         <button type="button" className="prompt-control-toggle" aria-expanded={open} onClick={() => onToggleOpen(!open)}>
           <span className="prompt-control-title">{title}</span>
-          {source ? <span className="prompt-control-source">{source}</span> : null}
+          {source ? <Tag>{source}</Tag> : null}
           {!section.editable ? <span className="prompt-control-source">只读</span> : null}
           <ChevronIcon className="prompt-control-chevron" size={15} aria-hidden="true" />
         </button>

@@ -1383,7 +1383,7 @@ export default function ToolbarPlugin({
                     onClose={onClose}
                     onInsert={payload => activeEditor.dispatchCommand(INSERT_HTML_COMMAND, payload)}
                   />
-                ));
+                ), false, 'html-insert-modal');
               }}
               className="item">
               <EditorIcon icon="code" />

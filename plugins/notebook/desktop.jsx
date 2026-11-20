@@ -1733,15 +1733,17 @@ export default function NotebookPage({ api }) {
                   )}
                 </div>
               </div>
-              <iframe
-                key={frameKey}
-                ref={iframe}
-                className="notebook-editor-frame"
-                title="笔记富文本编辑器"
-                src={`/editor/index.html#${token}`}
-                sandbox="allow-scripts allow-downloads allow-popups"
-                allow="clipboard-read; clipboard-write; fullscreen"
-              />
+              {active && (
+                <iframe
+                  key={frameKey}
+                  ref={iframe}
+                  className="notebook-editor-frame"
+                  title="笔记富文本编辑器"
+                  src={`/editor/index.html#${token}`}
+                  sandbox="allow-scripts allow-downloads allow-popups"
+                  allow="clipboard-read; clipboard-write; fullscreen"
+                />
+              )}
               {!active ? (
                 <div className="notebook-welcome">
                   <span className="notebook-welcome-icon">

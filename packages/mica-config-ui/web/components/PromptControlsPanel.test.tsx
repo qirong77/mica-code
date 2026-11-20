@@ -51,8 +51,9 @@ describe('提示词来源展示', () => {
     expect(html).toContain('并发会话');
     expect(html).not.toContain('builtin.session-autonomy');
     expect(html).not.toContain('Built-in Session Autonomy');
-    expect(html).toContain('prompt-control-source">Memory</span>');
-    expect(html).toContain('prompt-control-source">Project Notes</span>');
+    expect(html).toContain('ui-tag');
+    expect(html).toContain('>Memory</span>');
+    expect(html).toContain('>Project Notes</span>');
     expect(html).not.toContain('过时的名称');
   });
 
@@ -61,7 +62,8 @@ describe('提示词来源展示', () => {
       'user.notes': 'Notes',
       'user.policy': 'Team Policy',
     });
-    expect(html).not.toContain('prompt-control-source">Notes</span>');
-    expect(html).toContain('prompt-control-source">Team Policy</span>');
+    expect(html).toContain('class="prompt-control-title">Notes</span>');
+    expect(html).not.toContain('arco-tag-content">Notes</span>');
+    expect(html).toContain('arco-tag-content">Team Policy</span>');
   });
 });

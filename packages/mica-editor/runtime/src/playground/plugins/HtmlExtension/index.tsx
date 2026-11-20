@@ -78,6 +78,13 @@ export function normalizeLocalHtml(value: string): string {
   return `${styles}\n${body}`.trim();
 }
 
+/** Render a source fragment in the same isolated shape used by the inserted block. */
+export function buildHtmlPreviewDocument(value: string): string {
+  const source = value.trim();
+  if (/<(?:!doctype|html)\b/i.test(source)) return source;
+  return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><style>html,body{margin:0;padding:0}body{box-sizing:border-box;padding:14px;font:14px/1.6 system-ui,sans-serif;overflow-wrap:anywhere}</style></head><body>${source}</body></html>`;
+}
+
 export function insertHtmlBlock(editor: LexicalEditor, payload: InsertHtmlPayload): void {
   editor.update(() => {
     const selection = $getSelection();
@@ -108,6 +115,7 @@ function InsertHtmlDialog({
   const [kind, setKind] = useState<'react' | 'html' | 'url'>('react');
   const [runtime, setRuntime] = useState<HtmlBlockRuntime>('react');
   const [source, setSource] = useState(DEFAULT_REACT_BLOCK);
+  const [view, setView] = useState<'source' | 'preview'>('source');
   const [url, setUrl] = useState('');
   const [error, setError] = useState('');
 
@@ -126,6 +134,7 @@ function InsertHtmlDialog({
   const selectKind = (next: 'react' | 'html' | 'url') => {
     setKind(next);
     setError('');
+    setView('source');
     if (next === 'react') {
       setRuntime('react');
       if (!source.trim() || source === DEFAULT_HTML_BLOCK) setSource(DEFAULT_REACT_BLOCK);
@@ -145,6 +154,7 @@ function InsertHtmlDialog({
       setKind('html');
       setRuntime('html');
       setSource(normalizeLocalHtml(reader.result));
+      setView('preview');
       setError('');
     };
     reader.onerror = () => setError('本地 HTML 文件读取失败。');
@@ -193,17 +203,49 @@ function InsertHtmlDialog({
               ]}
             />
           </div>
-          <FileInput label="从本地 HTML 导入" accept=".html,.htm,text/html" onChange={readFile} />
-          <label className="html-insert-source">
-            {runtime === 'react' ? 'React 代码' : 'HTML 代码'}
-            <textarea
-              autoFocus
-              value={source}
-              spellCheck={false}
-              onChange={event => setSource(event.target.value)}
-              placeholder={runtime === 'react' ? DEFAULT_REACT_BLOCK : DEFAULT_HTML_BLOCK}
+          <FileInput
+            label="从本地 HTML 导入"
+            buttonLabel="选择 HTML 文件"
+            accept=".html,.htm,text/html"
+            onChange={readFile}
+          />
+          {runtime === 'html' && (
+            <div className="html-insert-view-tabs" role="tablist" aria-label="HTML 查看方式">
+              {(['source', 'preview'] as const).map((nextView) => (
+                <button
+                  type="button"
+                  key={nextView}
+                  className={view === nextView ? 'html-insert-view-tab is-active' : 'html-insert-view-tab'}
+                  role="tab"
+                  aria-selected={view === nextView}
+                  onClick={() => setView(nextView)}
+                >
+                  {nextView === 'source' ? '源码' : '预览'}
+                </button>
+              ))}
+            </div>
+          )}
+          {runtime === 'html' && view === 'preview' ? (
+            <iframe
+              className="html-insert-preview"
+              title="HTML 预览"
+              srcDoc={buildHtmlPreviewDocument(source)}
+              sandbox=""
+              referrerPolicy="no-referrer"
             />
-          </label>
+          ) : (
+            <label className="html-insert-source">
+              {runtime === 'react' ? 'React 代码' : 'HTML 代码'}
+              <textarea
+                autoFocus
+                value={source}
+                spellCheck={false}
+                wrap="soft"
+                onChange={event => setSource(event.target.value)}
+                placeholder={runtime === 'react' ? DEFAULT_REACT_BLOCK : DEFAULT_HTML_BLOCK}
+              />
+            </label>
+          )}
           <p className="html-insert-hint">本地文件会把源码复制进笔记正文；原文件删除后，已插入的内容仍可打开。相对路径资源不会自动猜测。</p>
         </>
       )}

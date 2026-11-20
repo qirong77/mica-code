@@ -30,6 +30,7 @@ import {createPortal} from 'react-dom';
 
 import Button from './Button';
 import Modal from './Modal';
+import {ensureEditorOptionalStyle} from '../../cdnStyles';
 
 export type ExcalidrawInitialElements = ExcalidrawInitialDataState['elements'];
 
@@ -91,6 +92,10 @@ export default function ExcalidrawModal({
   const [elements, setElements] =
     useState<ExcalidrawInitialElements>(initialElements);
   const [files, setFiles] = useState<BinaryFiles>(initialFiles);
+
+  useLayoutEffect(() => {
+    ensureEditorOptionalStyle('excalidraw');
+  }, []);
 
   useEffect(() => {
     excaliDrawModelRef.current?.focus();

@@ -58,8 +58,13 @@ export default function EmojiPickerPlugin() {
   const [emojis, setEmojis] = useState<Emoji[]>([]);
 
   useEffect(() => {
+    // The complete metadata list is only needed after the user opens the
+    // colon picker. Markdown shortcut conversion uses a compact alias map in
+    // the main bundle, so a normal note does not download the full metadata
+    // dataset at mount time.
+    if (queryString === null || emojis.length) return;
     import('../../utils/emoji-list').then(file => setEmojis(file.default));
-  }, []);
+  }, [emojis.length, queryString]);
 
   const emojiOptions = useMemo(
     () =>

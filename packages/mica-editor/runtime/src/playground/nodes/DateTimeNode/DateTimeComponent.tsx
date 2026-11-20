@@ -6,7 +6,6 @@
  *
  */
 
-import 'react-day-picker/style.css';
 import './DateTimeNode.css';
 
 import {
@@ -36,12 +35,13 @@ import {
   registerEventListener,
 } from 'lexical';
 import * as React from 'react';
-import {type JSX, useEffect, useRef, useState} from 'react';
+import {type JSX, useEffect, useLayoutEffect, useRef, useState} from 'react';
 import {DayPicker} from 'react-day-picker';
 
 import {$isDateTimeNode, type DateTimeNode} from './DateTimeNode';
 import Checkbox from '../../ui/Checkbox';
 import Select from '../../ui/Select';
+import {ensureEditorOptionalStyle} from '../../../cdnStyles';
 
 const FORMAT_CLASSES = [
   [IS_BOLD, 'bold'],
@@ -90,6 +90,10 @@ export default function DateTimeComponent({
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [isNodeSelected, setNodeSelected, clearNodeSelection] =
     useLexicalNodeSelection(nodeKey);
+
+  useLayoutEffect(() => {
+    ensureEditorOptionalStyle('datePicker');
+  }, []);
 
   const {refs, floatingStyles, context} = useFloating({
     elements: {

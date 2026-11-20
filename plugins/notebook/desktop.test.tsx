@@ -17,6 +17,7 @@ describe('Notebook navigation', () => {
       const Conversation = vi.fn(() => null);
       const html = renderToStaticMarkup(<NotebookPage api={{ ui: { Conversation } }} />);
       expect(html).toContain('notebook-welcome');
+      expect(html).not.toContain('notebook-editor-frame');
       expect(html).toContain('notebook-root-target');
       expect(html).toContain('aria-label="笔记目录树"');
       expect(html).toContain('aria-label="搜索笔记"');
