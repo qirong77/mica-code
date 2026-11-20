@@ -161,6 +161,27 @@ export default function setup(context: PluginContext) {
 启动时自动合并实际可用的端点，不写用户 `config.json`，输入补全只读清单而不初始化模块。
 用法与完整边界见 [独立 MCP](../../plugins/README.md#独立-mcp)。
 
+### 独立 HTTP 接口
+
+清单 `api: true` 声明随包 `api.ts` 的 `default createApi(context)`，由应用运行时挂在同一端口的
+`/plugin/<id>/api`。它与 MCP 的区别只在协议由谁定义：MCP 由 SDK 定义工具，这里由插件给出端点
+表与路由处理，调用方看到的是接口文档。
+
+- `PluginApiContext`：`pluginId`、`pluginVersion`、绑定该插件的 `data: PluginDataApi`、只读
+  `settings.get()`；不提供 agent、会话、原始 req/res 或额外 socket。
+- `PluginApiHandler`：可选 `description` / `guide`，固定 `endpoints` 表与
+  `handle(request)`。`request` 给 `method`、已解码并校验过的 `path` 段、`query`、解析后的 JSON
+  `body` 与 `signal`；成功返回 `{ status?, body }`，宿主包成 `{ ok: true, data }`。
+- 失败抛 `PluginApiError(status, code, message)`，宿主只透出这三样；其它异常统一 500 并归一成
+  固定文案，不泄漏内部堆栈。缺少 `expected_version` 这类业务约束由插件自己决定状态码。
+- 根路径 `GET /plugin/<id>/api` 由宿主回答文档（`endpoints` 加一条它自己）；其余子路径才进
+  `handle`。方法限 `GET/POST/PATCH/PUT/DELETE`（`HEAD` 按 GET），GET 与 DELETE 不带请求体。
+- `pluginApiBasePath` / `pluginApiPath` / `pluginApiId` / `pluginApiSegments` 是端点与路径段的
+  共同约定：段已解码，空段、`.`、`..` 与编码后的分隔符一律拒绝。
+- 宿主负责并发预算、单次 30 秒时限、请求/响应字节上限、启停与退出释放。命名空间在 remoteGate
+  之后分派，复用 Host/Origin 校验，未知路径不回落 SPA，分享 cookie 不开放。用法与完整边界见
+  [独立 HTTP 接口](../../plugins/README.md#独立-http-接口)。
+
 ### 跨宿主插件数据
 
 `PluginData.ts` 是通用 JSON 数据的唯一实现，桌面 host 的 core/store 只转导出它。

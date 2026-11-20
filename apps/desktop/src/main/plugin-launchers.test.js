@@ -10,7 +10,7 @@ afterEach(() => {
   for (const close of cleanups.splice(0)) close()
 })
 
-function fixture({ occupied = false, load, platform = 'darwin', webContent, pageUrl = 'http://127.0.0.1:8787/?existing=1', runtimeUrl } = {}) {
+function fixture({ occupied = false, load, platform = 'darwin', webContent, pageUrl = 'http://127.0.0.1:8787/?existing=1' } = {}) {
   let shortcutOccupied = occupied
   const home = mkdtempSync(join(tmpdir(), 'mica-launcher-test-'))
   const disabled = new Set()
@@ -122,7 +122,6 @@ function fixture({ occupied = false, load, platform = 'darwin', webContent, page
       getDisplayNearestPoint: () => ({ workArea: { x: -1920, y: 100, width: 1920, height: 1080 } })
     },
     pageUrl,
-    runtimeUrl,
     backgroundColor: () => '#ffffff',
     platform,
     deliver: async (intent) => {
@@ -156,16 +155,11 @@ function fixture({ occupied = false, load, platform = 'darwin', webContent, page
 }
 
 describe('manifest desktop launchers', () => {
-  test('protects both the development page and runtime without blocking other hosts', async () => {
-    const f = fixture({ webContent: { top: 64 }, pageUrl: 'http://localhost:5173/', runtimeUrl: 'http://127.0.0.1:8787/' })
+  test('opens the local Mica runtime like any other HTTP(S) address', async () => {
+    const f = fixture({ webContent: { top: 64 }, pageUrl: 'http://localhost:5173/' })
     await f.control('show')
-    let result
-    for (const url of ['http://localhost:5173/', 'http://127.0.0.1:8787/api/invoke']) {
-      f.views[0].request({ url }, (value) => { result = value })
-      expect(result.cancel).toBe(true)
-    }
-    f.views[0].request({ url: 'http://example.com:8787/' }, (value) => { result = value })
-    expect(result.cancel).toBe(false)
+    await f.control('web.navigate', { url: 'http://127.0.0.1:8787/plugins/pages/notebook?note=1' })
+    expect(await f.control('web.state')).toMatchObject({ url: 'http://127.0.0.1:8787/plugins/pages/notebook?note=1', home: false })
   })
 
   test('embeds a sandboxed isolated view, handles navigation and destroys it on disable', async () => {
@@ -196,18 +190,9 @@ describe('manifest desktop launchers', () => {
     expect(await f.control('web.state')).toMatchObject({ faviconUrl: 'https://cdn.example/icon.svg?cache=1' })
     view.webContents.emit('did-start-loading')
     expect((await f.control('web.state')).faviconUrl).toBeUndefined()
-    for (const url of ['javascript:alert(1)', 'file:///tmp/a', 'http://127.0.0.1:8787/', ' http://example.com', 'http://x:bad', 'http://u:p@example.com']) {
+    for (const url of ['javascript:alert(1)', 'file:///tmp/a', ' http://example.com', 'http://x:bad', 'http://u:p@example.com']) {
       await expect(f.control('web.navigate', { url })).rejects.toThrow()
     }
-    let result
-    view.request({ url: 'http://localhost:8787/api/invoke' }, (value) => { result = value })
-    expect(result.cancel).toBe(true)
-    view.request({ url: 'https://example.com/' }, (value) => { result = value })
-    expect(result.cancel).toBe(false)
-    view.request({ url: 'https://example.com:8787/' }, (value) => { result = value })
-    expect(result.cancel).toBe(false)
-    view.request({ url: 'ws://127.0.0.1:8787/' }, (value) => { result = value })
-    expect(result.cancel).toBe(true)
     let prevented = false
     view.webContents.emit('will-redirect', { preventDefault: () => { prevented = true } }, 'file:///etc/passwd')
     expect(prevented).toBe(true)

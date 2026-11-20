@@ -294,6 +294,25 @@ export type { PublishedPluginRole } from './PluginRoles.js';
 export type { PluginContext } from './PluginContext.js';
 export type { PluginLauncherContext, PluginLauncherHandler } from './PluginLauncher.js';
 export type { PluginMcpContext, PluginMcpHandler, PluginMcpTool } from './PluginMcp.js';
+export type {
+  PluginApiContext,
+  PluginApiEndpoint,
+  PluginApiHandler,
+  PluginApiMethod,
+  PluginApiParameter,
+  PluginApiRequest,
+  PluginApiResponse,
+} from './PluginApi.js';
+export {
+  PLUGIN_API_METHODS,
+  PLUGIN_API_PREFIX,
+  PluginApiError,
+  isPluginApiMethod,
+  pluginApiBasePath,
+  pluginApiId,
+  pluginApiPath,
+  pluginApiSegments,
+} from './PluginApi.js';
 export type { PluginWebContext, PluginWebHandler } from './PluginWeb.js';
 export { isPluginWebQuery, pluginWebPath } from './PluginWeb.js';
 export { PLUGIN_MCP_PREFIX, pluginMcpId, pluginMcpPath, pluginMcpServerName } from './PluginMcp.js';

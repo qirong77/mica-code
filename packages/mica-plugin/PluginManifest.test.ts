@@ -381,6 +381,19 @@ describe('parsePluginManifest desktop page', () => {
     if (result.ok) expect(result.manifest.web).toBe(false);
   });
 
+  // api.ts 与 web.ts 是两条独立通道：同一个插件可以只声明其中一个，声明值也必须是显式布尔。
+  it('only accepts an explicit boolean api declaration', () => {
+    for (const api of [null, 'true', 1, [], {}]) {
+      expect(parsePluginManifest(base({ api }))).toEqual({ ok: false, error: 'api 必须是布尔值' });
+    }
+    const disabled = parsePluginManifest(base({ api: false }));
+    expect(disabled.ok).toBe(true);
+    if (disabled.ok) expect(disabled.manifest.api).toBe(false);
+    const enabled = parsePluginManifest(base({ api: true }));
+    expect(enabled.ok).toBe(true);
+    if (enabled.ok) expect(enabled.manifest.api).toBe(true);
+  });
+
   it('turns the entry into a full page when desktop.page is declared', () => {
     const result = parsePluginManifest(base({ desktop: { entry: { label: 'Schedule' }, page: { title: '排期' } } }));
     expect(result.ok).toBe(true);

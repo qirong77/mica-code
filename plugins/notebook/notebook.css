@@ -730,25 +730,25 @@
   justify-content: flex-end;
   gap: 8px;
 }
-/* MCP 弹窗：一段说明 + 两个可复制的值。地址与配置用等宽字体，长行折行不横向滚。 */
-.notebook-mcp {
+/* 接口弹窗：一段说明 + 地址、文档两个可复制的值。地址与 curl 示例用等宽字体，长行折行不横向滚。 */
+.notebook-api {
   display: grid;
   gap: 16px;
   padding: 8px 0 0;
 }
-.notebook-mcp p {
+.notebook-api p {
   margin: 0;
   line-height: 1.8;
 }
-.notebook-mcp-field {
+.notebook-api-field {
   display: grid;
   gap: 8px;
 }
-.notebook-mcp-field > span {
+.notebook-api-field > span {
   font-size: 11px;
   color: var(--color-fg-muted);
 }
-.notebook-mcp-value {
+.notebook-api-value {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -757,8 +757,8 @@
   border-radius: 8px;
   background: var(--color-canvas);
 }
-.notebook-mcp-value code,
-.notebook-mcp-code {
+.notebook-api-value code,
+.notebook-api-code {
   min-width: 0;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 11px;
@@ -766,10 +766,10 @@
   color: var(--color-fg-strong);
   overflow-wrap: anywhere;
 }
-.notebook-mcp-value code {
+.notebook-api-value code {
   flex: 1;
 }
-.notebook-mcp-code {
+.notebook-api-code {
   margin: 0;
   padding: 8px;
   border: 1px solid var(--color-line-soft);
@@ -777,15 +777,15 @@
   background: var(--color-canvas);
   white-space: pre-wrap;
 }
-.notebook-mcp-actions {
+.notebook-api-actions {
   display: flex;
   justify-content: flex-end;
 }
-.notebook-mcp-hint {
+.notebook-api-hint {
   font-size: 11px;
   color: var(--color-fg-muted);
 }
-.notebook-mcp-hint code {
+.notebook-api p code {
   padding: 1px 4px;
   border-radius: 4px;
   background: var(--color-accent-subtle);

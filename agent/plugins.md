@@ -251,7 +251,7 @@ macOS 浮窗只取键盘焦点、不连带唤起主应用；原生窗口策略�
 ## MCP 与 Skills
 
 - 随包插件可声明 `mcp: true` 并提供 `mcp.ts` 的 default `createMcp(context)`：公共契约在 `mica-plugin/PluginMcp.ts`，上下文只有插件身份、绑定的 `data` 与只读设置，返回 `instructions/tools/dispose?`，工具 `execute(input,{signal})` 返回 JSON/文本。应用用 `host/plugin-mcp-runtime.js` 懒加载并缓存、按启停与退出释放，不启动会话；`host/plugin-mcp.js` 负责 stateless Streamable HTTP 与输入 schema 校验，挂在已有端口 `/plugin/<id>/mcp`。宿主只接线，不出现具体插件分支；首版与 launcher 一样只加载随包模块。独立 MCP 不再经 `ctx.tools` 重复注册或用 skill 充当接口。
-- 桌面/Web 会话宿主启动时，实际可用插件端点按 `mica-plugin-<id>` 合并到 `--mcp-config`，与受控能力共存，不写用户配置；`/` 候选用同一目录且不导入模块、不握手。停用后路由拒绝新调用；已运行宿主的连接目录仍为启动时快照，重新启用需重连/新起宿主。路径在 remoteGate 之后分派，复用 Host/Origin 校验，未知 `/plugin/*` 不能回落到 SPA，分享 cookie 不开放独立 MCP。Notebook 使用这条路径，旧 skill 索引与能力停用项由 Evolution 的 `notebook-mcp` 迁移，不改笔记正文。
+- 桌面/Web 会话宿主启动时，实际可用插件端点按 `mica-plugin-<id>` 合并到 `--mcp-config`，与受控能力共存，不写用户配置；`/` 候选用同一目录且不导入模块、不握手。停用后路由拒绝新调用；已运行宿主的连接目录仍为启动时快照，重新启用需重连/新起宿主。路径在 remoteGate 之后分派，复用 Host/Origin 校验，未知 `/plugin/*` 不能回落到 SPA，分享 cookie 不开放独立 MCP。Notebook 已改为下面的独立 HTTP 接口，旧 skill 索引与能力停用项仍由 Evolution 的 `notebook-mcp` 迁移，不改笔记正文。
 - `mica-mcp` 管理 `config.json.mcpServers` 生命周期；读取时展开 `url` / `headers` 里的 `${VAR}` 与 `${VAR:-默认值}`，`command` / `args` / `env` 不展开。
 - 会话能力目录（`mica/capabilities/get` 的 `mcpServers`）由 `micaMcp.catalog()` 合并三处：用户配置、会话自己的 `--mcp-config`、已连上的 server。桌面端把受控浏览器 / 终端挂进 `--mcp-config` 而不写用户配置，漏掉第二处界面上就看不到也关不掉它们。
 - MCP 工具名由 `mcpToolNamePrefix()` 生成；按 server 关闭时用前缀匹配，断开/重连失败同步清理并刷新 registry。
@@ -267,6 +267,10 @@ macOS 浮窗只取键盘焦点、不连带唤起主应用；原生窗口策略�
 随包插件可声明 `web: true` 并提供 `web.ts` 的 `default createWeb(context)`；契约在 `mica-plugin/PluginWeb.ts`。上下文仅含身份/版本、数据与配置根、只读设置及随包清单元数据，返回固定 `queries` 目录与可选 `dispose`。应用运行时懒载、合并初始化并按启停/退出释放，固定托管 `GET /plugins/<id>/api/<query>`；前端只通过 `api.web.read(query, params, { signal })` 访问，不另开 `/api/invoke` 别名。读取前后复核授权，参数/并发/时间/序列化后字节预算受限，超时/断连传取消；查询须配合中止并自行缓存有界投影，GET 不做维护写入。命名空间在 remoteGate 后过 Host/Origin，未知路径 404、不作 SPA 回退，不开放 share-cookie/CORS；该接口不是 Node 代码沙箱，也不自动穿透 Mobile Relay。Harness Review 控制台是首个使用方，复用只读聚合，不回收僵尸运行或导出报告。冷读优先安全持久派生快照、过期先回旧值再后台刷新，缓存仅由既有状态发布写入；Web 不返回健康原文、真实 cwd 或非固定任务名，工作区与非固定任务仅暴露稳定摘要。
 
 前端 `api.documents.read(key)` / `write(key,value,{expectedVersion})` 使用现有 plugin-host 数据通道的可选 `key`，落在插件 `documents/<key>.json`（6 MiB，严格损坏检查、路径标识校验、CAS 与原子写）；无 `key` 的 `data.json` 保持 256 KiB。整页 `api.page.beforeClose(handler)` 可在返回前等待保存，`false` 保持页面。
+
+### 独立 HTTP 接口
+
+随包插件声明清单 `api: true` 并提供 `api.ts` 的 `default createApi(context)`，就是给模型与任何 HTTP 客户端的一份**接口文档**（契约 `mica-plugin/PluginApi.ts`）。宿主把 `/plugin/<id>/api` 挂在应用现有端口：根路径直接回插件给的 `description` / `guide` / `endpoints` 文档，其余子路径按 `GET/POST/PATCH/PUT/DELETE` 与 JSON 体交给 `handle(request)`（method、已解码校验的路径段、query、已解析 body、signal）。成功回 `{ ok: true, data }`；插件抛 `PluginApiError(status, code, message)` 决定失败回包，其它异常统一 500 且不透出内部信息。请求/响应字节、查询串、并发与 30 秒时限由宿主兜住，超时/断连经 signal 传到插件。路由必须在 remoteGate 与独立 MCP **之前**分派（MCP 接管整个 `/plugin/*`，排在后面就轮不到），沿用 Host/Origin 校验，分享 cookie 不开放，只跑在应用运行时里，不占新端口、不启动会话。Notebook 是首个使用方：模型拿到 `$MICA_DESKTOP_ORIGIN` 后先 `GET /plugin/notebook/api` 读文档、再 `GET .../overview` 拿完整目录树与 `node_id`，正文写入带 `expected_version`，冲突回 409；不再有 `notebook_read` / `notebook_write` 工具。
 
 随包插件可提供 `web-build.mjs`，桌面 `scripts/plugin-web-assets.mjs` 通用构建到 renderer 的 `plugin-web/<id>/`，开发临时产物在 `temp/plugin-web-dev/`。此静态目录支持 CORS 供 opaque sandbox 加载，宿主 API 不开放。Notebook 是首个使用方，但它的编辑器已提成共享包 `packages/mica-editor`：一份隔离运行时承载富文本（笔记）与 Markdown（配置页 Role / Skill）两种模式，两个宿主都用它的 `editorWebAssets()` 输出 `/editor/`；固定版本 CDN 库不混入本地运行时，主题使用同一份 `mica-config-ui/web/arco-settings.css` 而不是复制皮肤。Markdown 模式的文本口径与降级策略见该包 README。
 

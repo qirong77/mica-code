@@ -1,5 +1,4 @@
 import { watchFile, unwatchFile } from 'node:fs'
-import { hostname, networkInterfaces } from 'node:os'
 import { resolveEditorTarget } from './editor-window.js'
 
 /** Native lifecycle for manifest-declared launchers. No session process is needed. */
@@ -12,7 +11,6 @@ export function createPluginLaunchers({
   globalShortcut,
   screen,
   pageUrl,
-  runtimeUrl = pageUrl,
   backgroundColor,
   deliver,
   openEditorWindow,
@@ -76,29 +74,13 @@ export function createPluginLaunchers({
     return record
   }
 
-  // Keep requests from the embedded partition away from the local runtime and
-  // its dev-server proxy, without blocking unrelated hosts on the same port.
-  const protectedPorts = new Set([pageUrl, runtimeUrl].map((value) => {
-    const url = new URL(value)
-    return url.port || (url.protocol === 'https:' ? '443' : '80')
-  }))
-  const localHosts = new Set(['localhost', '127.0.0.1', '[::1]', '0.0.0.0', hostname().toLowerCase()])
-  for (const addresses of Object.values(networkInterfaces())) {
-    for (const entry of addresses || []) localHosts.add(entry.address.toLowerCase())
-  }
-  for (const value of [pageUrl, runtimeUrl]) localHosts.add(new URL(value).hostname.toLowerCase())
-  function isRuntimeRequest(url) {
-    const port = url.port || (['https:', 'wss:'].includes(url.protocol) ? '443' : '80')
-    const host = url.hostname.toLowerCase().replace(/^\[|\]$/g, '')
-    return protectedPorts.has(port) && (localHosts.has(host) || localHosts.has(`[${host}]`) || /^127\./.test(host))
-  }
   function allowedWebUrl(value) {
     if (typeof value !== 'string' || /[\s\x00-\x1f\x7f]/.test(value) || value.length > 8192) return false
     if (value === 'about:blank') return true
     if (!/^https?:\/\//i.test(value)) return false
     try {
       const url = new URL(value)
-      return ['http:', 'https:'].includes(url.protocol) && !!url.hostname && !url.username && !url.password && !isRuntimeRequest(url)
+      return ['http:', 'https:'].includes(url.protocol) && !!url.hostname && !url.username && !url.password
     } catch { return false }
   }
 
@@ -145,12 +127,6 @@ export function createPluginLaunchers({
     const wc = view.webContents
     wc.session.setPermissionRequestHandler((_wc, _permission, callback) => callback(false))
     wc.session.setPermissionCheckHandler(() => false)
-    wc.session.webRequest.onBeforeRequest((details, callback) => {
-      try {
-        const target = new URL(details.url)
-        callback({ cancel: ['http:', 'https:', 'ws:', 'wss:'].includes(target.protocol) && isRuntimeRequest(target) })
-      } catch { callback({ cancel: true }) }
-    })
     const resize = () => {
       if (win.isDestroyed() || wc.isDestroyed()) return
       const [width, height] = win.getContentSize()
@@ -295,7 +271,7 @@ export function createPluginLaunchers({
       const wc = record.view.webContents
       if (action === 'web.state') return webState(record)
       if (action === 'web.navigate') {
-        if (!allowedWebUrl(url)) throw new Error('只允许有效的 HTTP(S) 地址或 about:blank，不能访问 Mica 运行时')
+        if (!allowedWebUrl(url)) throw new Error('只允许有效的 HTTP(S) 地址或 about:blank')
         showWebContent(record)
         record.webHome = false
         record.webError = ''

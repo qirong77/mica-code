@@ -1229,7 +1229,6 @@ app.whenReady().then(async () => {
     globalShortcut,
     screen,
     pageUrl: localPageUrl,
-    runtimeUrl: runtime.url,
     backgroundColor: windowBackgroundColor,
     deliver: deliverDesktopIntent,
     openEditorWindow,

@@ -15,7 +15,7 @@ export type OperationContext = {
   plugin: string;
   pluginVersion?: string;
   operation: string;
-  surface?: 'tool' | 'command' | 'panel' | 'action' | 'menu' | 'background' | 'hook' | 'lifecycle' | 'page' | 'mcp' | 'launcher';
+  surface?: 'tool' | 'command' | 'panel' | 'action' | 'menu' | 'background' | 'hook' | 'lifecycle' | 'page' | 'mcp' | 'api' | 'launcher';
   signal?: AbortSignal;
   /** Fixed background task identity. Routine successful ticks are combined, not sampled. */
   taskId?: string;
@@ -75,7 +75,7 @@ function metadata(context: OperationContext) {
     plugin: /^[a-z0-9][a-z0-9._-]{0,159}$/i.test(context.plugin) ? context.plugin : 'unknown',
     pluginVersion: diagnosticPluginVersion(context.pluginVersion),
     operation: /^[a-z][a-z0-9:._-]{0,79}$/i.test(context.operation) ? context.operation : 'custom',
-    surface: ['tool', 'command', 'panel', 'action', 'menu', 'background', 'hook', 'lifecycle', 'page', 'mcp', 'launcher'].includes(context.surface ?? '') ? context.surface : undefined,
+    surface: ['tool', 'command', 'panel', 'action', 'menu', 'background', 'hook', 'lifecycle', 'page', 'mcp', 'api', 'launcher'].includes(context.surface ?? '') ? context.surface : undefined,
     taskId: context.taskId && /^[a-z][a-z0-9:._-]{0,79}$/i.test(context.taskId) ? context.taskId : undefined,
     ...processIdentity(),
   };

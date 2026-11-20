@@ -42,7 +42,7 @@ import {
   SelectMenu,
 } from '@mica-config-ui/web';
 import { Modal } from '../../packages/mica-config-ui/web/components/Modal';
-import { pluginMcpPath, pluginMcpServerName } from '../../packages/mica-plugin/PluginMcp';
+import { pluginApiBasePath } from '../../packages/mica-plugin/PluginApi';
 import { createNotebookController, NotebookConflictError } from './controller';
 import { createNotebookExternalUpdateCheck } from './external-updates';
 import {
@@ -258,7 +258,7 @@ export default function NotebookPage({ api }) {
   const [busy, setBusy] = useState(false);
   const [frameState, setFrameState] = useState('loading');
   const [frameKey, setFrameKey] = useState(0);
-  const [mcpOpen, setMcpOpen] = useState(false);
+  const [apiOpen, setApiOpen] = useState(false);
   const [copied, setCopied] = useState('');
   const iframe = useRef(null);
   const pageRoot = useRef(null);
@@ -302,10 +302,10 @@ export default function NotebookPage({ api }) {
   const activeNode = byId.get(activeId);
   const active = activeNode?.trashedAt ? null : activeNode;
   const selected = byId.get(selectedId);
-  // MCP：笔记本跑在 Mica 运行时里，AI 客户端要的就是这台机器上的同一个端口。
-  const mcpServer = pluginMcpServerName('notebook');
-  const mcpUrl = `${api.currentHost?.() ?? ''}${pluginMcpPath('notebook')}`;
-  const mcpConfig = JSON.stringify({ mcpServers: { [mcpServer]: { type: 'http', url: mcpUrl } } }, null, 2);
+  // API：笔记本跑在 Mica 运行时里，模型与人对准的都是这台机器上的同一个端口。
+  // 接口根就是文档端点；`/overview` 是主接口，一次拿全目录、最近删除与端点表。
+  const apiBase = `${api.currentHost?.() ?? ''}${pluginApiBasePath('notebook')}`;
+  const overviewCurl = `curl ${apiBase}/overview`;
   const copyText = useCallback(async (text, key) => {
     try {
       await navigator.clipboard.writeText(text);
@@ -537,14 +537,14 @@ export default function NotebookPage({ api }) {
     setOutlineCollapsed(new Set());
   }, [activeId]);
 
-  // Index renames can arrive from MCP or another Notebook window. Keep the
+  // Index renames can arrive from the API or another Notebook window. Keep the
   // fixed H1 in the mounted editor aligned without reloading the document.
   useEffect(() => {
     if (!active || !ready.current || loadedNote.current !== active.id || frameState !== 'ready') return;
     bridge.current?.title(active.id, active.title);
   }, [active?.id, active?.title, frameState]);
 
-  // The Notebook can be changed through MCP or another Mica host. This check is independent of
+  // The Notebook can be changed through the API or another Mica host. This check is independent of
   // the removed embedded chat so deleting that UI cannot also disable CAS/conflict feedback.
   useEffect(() => {
     if (!loaded) return undefined;
@@ -750,14 +750,14 @@ export default function NotebookPage({ api }) {
 
   useEffect(() => {
     const escape = (event) => {
-      if (event.key !== 'Escape' || event.defaultPrevented || dialog || menu || mcpOpen) return;
+      if (event.key !== 'Escape' || event.defaultPrevented || dialog || menu || apiOpen) return;
       if (outlineVisible) setOutlineOpen(false);
       else if (focused) setFocused(false);
       else if (layout.mobile && railOpen) setRailOpen(false);
     };
     window.addEventListener('keydown', escape);
     return () => window.removeEventListener('keydown', escape);
-  }, [focused, dialog, menu, mcpOpen, outlineVisible, railOpen, layout]);
+  }, [focused, dialog, menu, apiOpen, outlineVisible, railOpen, layout]);
 
   // iframe 内的点击不冒泡到宿主；焦点进入编辑器时也要收起宿主的菜单。
   useEffect(() => {
@@ -1537,15 +1537,15 @@ export default function NotebookPage({ api }) {
               本地存储
             </span>
             <div className="notebook-rail-footer-actions">
-              {/* MCP 的地址与客户端配置放在页面上：它属于这个笔记本，不属于设置页。 */}
+              {/* HTTP 接口的地址放在页面上：它属于这个笔记本，不属于设置页。 */}
               <Button
                 variant="ghost"
                 size="compact"
                 icon={<Plug size={13} />}
-                title="查看笔记本的 MCP 接口"
-                onClick={() => setMcpOpen(true)}
+                title="查看笔记本的 HTTP 接口"
+                onClick={() => setApiOpen(true)}
               >
-                MCP
+                API
               </Button>
               <Button
                 variant="ghost"
@@ -1573,7 +1573,7 @@ export default function NotebookPage({ api }) {
         <main className="notebook-main" inert={railOverlay}>
           {externalUpdate === current.current?.id && (
             <div className="notebook-error" role="status">
-              <span>这篇笔记已在其他窗口或 MCP 客户端修改。当前草稿未被替换；加载前会备份当前内容。</span>
+              <span>这篇笔记已在其他窗口或接口调用中修改。当前草稿未被替换；加载前会备份当前内容。</span>
               <Button
                 size="compact"
                 variant="ghost"
@@ -1834,30 +1834,39 @@ export default function NotebookPage({ api }) {
           </div>
         </main>
       </div>
-      {mcpOpen && (
-        <Modal title="Notebook MCP" onClose={() => setMcpOpen(false)} portal>
-          <div className="notebook-mcp">
-            <p>复制接口地址或配置，即可从 MCP 客户端访问本机笔记。连接时请保持 Mica 应用运行。</p>
-            <div className="notebook-mcp-field">
+      {apiOpen && (
+        <Modal title="Notebook API" onClose={() => setApiOpen(false)} portal>
+          <div className="notebook-api">
+            <p>本机笔记既可在这张页面编辑，也可用 HTTP 接口读写；调用时保持 Mica 应用运行。</p>
+            <div className="notebook-api-field">
               <span>接口地址</span>
-              <div className="notebook-mcp-value">
-                <code>{mcpUrl}</code>
-                <Button variant="ghost" size="compact" onClick={() => void copyText(mcpUrl, 'url')}>
+              <div className="notebook-api-value">
+                <code>{apiBase}</code>
+                <Button variant="ghost" size="compact" onClick={() => void copyText(apiBase, 'url')}>
                   {copied === 'url' ? '已复制' : '复制'}
                 </Button>
               </div>
             </div>
-            <div className="notebook-mcp-field">
-              <span>客户端配置</span>
-              <pre className="notebook-mcp-code">{mcpConfig}</pre>
-              <div className="notebook-mcp-actions">
-                <Button variant="ghost" size="compact" onClick={() => void copyText(mcpConfig, 'config')}>
-                  {copied === 'config' ? '已复制' : '复制配置'}
+            <div className="notebook-api-field">
+              <span>接口文档</span>
+              <div className="notebook-api-value">
+                <code>{apiBase}</code>
+                <Button variant="ghost" size="compact" onClick={() => void copyText(apiBase, 'doc')}>
+                  {copied === 'doc' ? '已复制' : '复制'}
+                </Button>
+              </div>
+              <pre className="notebook-api-code">{overviewCurl}</pre>
+              <div className="notebook-api-actions">
+                <Button variant="ghost" size="compact" onClick={() => void copyText(overviewCurl, 'curl')}>
+                  {copied === 'curl' ? '已复制' : '复制 curl'}
                 </Button>
               </div>
             </div>
-            <p className="notebook-mcp-hint">
-              桌面端与 Web 应用的「笔记」角色已配置此接口。TUI 和 <code>mica exec</code> 可使用上面的客户端配置。
+            <p>
+              正文写入要带上刚读到的 <code>expected_version</code>，版本冲突返回 409；删除只是可恢复的最近删除。
+            </p>
+            <p className="notebook-api-hint">
+              桌面端与 Web 应用的「笔记」角色已让模型按这份接口操作；接口只在 Mica 运行时里存在（TUI 与外部客户端需要应用在运行）。
             </p>
           </div>
         </Modal>

@@ -64,6 +64,17 @@ export type NotebookSearchMatch = {
   excerpt?: string;
 };
 
+/**
+ * 索引里没有这个 id。单独一个类是为了让 api.ts 把它稳定映射成 404 `not_found`，
+ * 而不是和「文件夹不能写正文」这类可解释的拒绝混成同一个 400。
+ */
+export class NotebookNotFoundError extends Error {
+  constructor(public readonly id: string) {
+    super(`Notebook node not found: ${id}`);
+    this.name = 'NotebookNotFoundError';
+  }
+}
+
 const MAX_TEXT_RESULT = 30_000;
 const MAX_SEARCH_RESULTS = 100;
 const MAX_EXCERPT = 240;
@@ -225,7 +236,7 @@ export class NotebookService {
 
 function findNode(index: NotebookIndex, id: string): NotebookNode {
   const node = index.nodes.find((candidate) => candidate.id === id);
-  if (!node) throw new Error(`Notebook node not found: ${id}`);
+  if (!node) throw new NotebookNotFoundError(id);
   return node;
 }
 

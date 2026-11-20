@@ -82,6 +82,8 @@ import { setPluginMcpCatalog } from '../host/plugin-mcp-config.js'
 import { createPluginMcpRoute } from './plugin-mcp-route.js'
 import { createPluginWebRuntime } from '../host/plugin-web-runtime.js'
 import { createPluginWebRoute } from './plugin-web-route.js'
+import { createPluginApiRuntime } from '../host/plugin-api-runtime.js'
+import { createPluginApiRoute } from './plugin-api-route.js'
 import { servePluginPage } from './plugin-page-route.js'
 import { officialPluginManifests } from '@packages/mica-official-plugins/manifests.js'
 import { readDisabledPluginIds } from '@packages/mica-plugin/PluginState.js'
@@ -888,16 +890,35 @@ export async function startDesktopServer(options = {}) {
     home,
     readDisabled: () => disabledPlugins
   })
+  const pluginApiLoaders = new Map()
+  for (const [file, load] of Object.entries(import.meta.glob('../../../../plugins/*/api.ts'))) {
+    const match = /\/([^/]+)\/api\.ts$/.exec(file)
+    if (match) pluginApiLoaders.set(match[1], load)
+  }
+  const pluginApiRuntime = createPluginApiRuntime({
+    manifests: officialPluginManifests,
+    loaders: pluginApiLoaders,
+    home,
+    readDisabled: () => disabledPlugins
+  })
   const syncPluginRuntimes = () => {
     disabledPlugins = readDisabledPluginIds({ path: pluginStatePath })
     void pluginMcpRuntime.sync().catch((error) => runtimeLog.error('plugin-mcp:sync-failed', { error }))
     void pluginWebRuntime.sync().catch(() => runtimeLog.error('plugin-web:sync-failed', { code: 'sync_failed' }))
+    void pluginApiRuntime.sync().catch(() => runtimeLog.error('plugin-api:sync-failed', { code: 'sync_failed' }))
   }
   watchFile(pluginStatePath, { interval: 400, persistent: false }, syncPluginRuntimes)
   setPluginMcpCatalog(() => officialPluginManifests.filter((manifest) => pluginMcpRuntime.has(manifest.id)))
   const pluginMcpRoute = createPluginMcpRoute({
     runtime: pluginMcpRuntime,
     handle: createPluginMcpHandler({ runtime: pluginMcpRuntime }),
+    verifyOrigin: verifyRequestOrigin
+  })
+  // 机读接口（`/plugin/<id>/api`）排在 MCP 路由之前：MCP 路由接管整个 `/plugin/*`
+  // 命名空间（非 `/mcp` 的路径一律 404），注册在它后面就永远收不到请求。
+  // `/plugins/*`（复数）是只读查询与插件页面，前缀不同，两边互不影响。
+  const pluginApiRoute = createPluginApiRoute({
+    runtime: pluginApiRuntime,
     verifyOrigin: verifyRequestOrigin
   })
   const pluginWebRoute = createPluginWebRoute({
@@ -910,7 +931,7 @@ export async function startDesktopServer(options = {}) {
 
   const sharing = options.sharing !== false
   const server = createServer(
-    createRequestHandler({ rendererRoot, sharing, browserProxy, terminalProxy, controlMcp, pluginMcpRoute, pluginWebRoute })
+    createRequestHandler({ rendererRoot, sharing, browserProxy, terminalProxy, controlMcp, pluginMcpRoute, pluginWebRoute, pluginApiRoute })
   )
   const host = options.host || '0.0.0.0'
   const port = await listenWithFallback(server, host, options.port || DEFAULT_RUNTIME_PORT, {
@@ -964,7 +985,7 @@ export async function startDesktopServer(options = {}) {
     stopNotifyBridge()
     unwatchFile(pluginStatePath, syncPluginRuntimes)
     setPluginMcpCatalog()
-    await Promise.all([pluginMcpRuntime.close(), pluginWebRuntime.close()])
+    await Promise.all([pluginMcpRuntime.close(), pluginWebRuntime.close(), pluginApiRuntime.close()])
     await disposePluginHost()
     // 攒在防抖里的界面状态是用户最后那次输入/拖动，必须在退出前落盘
     flushUiState()
@@ -1037,6 +1058,7 @@ function createRequestHandler({
   terminalProxy = null,
   controlMcp = {},
   pluginMcpRoute = null,
+  pluginApiRoute = null,
   pluginWebRoute = null
 }) {
   return (req, res) => {
@@ -1085,6 +1107,9 @@ function createRequestHandler({
           return sendJson(res, 404, { ok: false, error: '分享视图已关闭' })
         }
 
+        // 独立插件机读接口（`/plugin/<id>/api`）必须排在 MCP 之前分派：MCP 路由接管整个
+        // `/plugin/*` 命名空间，其它路径直接 404，排在后面就永远轮不到这里。
+        if (pluginApiRoute && await pluginApiRoute(req, res, pathname)) return
         // 独立插件 MCP：沿用前面的远程访问门禁，并由通用路由做 Host/Origin 校验。
         if (pluginMcpRoute && await pluginMcpRoute(req, res, pathname)) return
         // Pages and read-only queries share the current HTTP port and origin guard.

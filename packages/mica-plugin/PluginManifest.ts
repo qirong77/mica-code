@@ -73,6 +73,8 @@ export type PluginManifest = {
   mcpRoles?: string[];
   /** 随包只读 web.ts 模块，挂载到现有端口的 /plugins/<id>/api/<query>。 */
   web?: boolean;
+  /** 随包 api.ts 模块，挂载到应用现有端口的 /plugin/<id>/api（任意方法的机读 HTTP 接口）。 */
+  api?: boolean;
   /** 除入口与清单外随插件一起分发的资源文件，相对插件目录。 */
   assets: string[];
   /** 必须在之前 setup 的插件 id。 */
@@ -285,6 +287,9 @@ export function parsePluginManifest(input: unknown): PluginManifestParseResult {
   if (input.web !== undefined && typeof input.web !== 'boolean') {
     return { ok: false, error: 'web 必须是布尔值' };
   }
+  if (input.api !== undefined && typeof input.api !== 'boolean') {
+    return { ok: false, error: 'api 必须是布尔值' };
+  }
 
   const dependencies = readStringList(input.dependencies, 'dependencies');
   if (!dependencies.ok) return dependencies;
@@ -343,6 +348,7 @@ export function parsePluginManifest(input: unknown): PluginManifestParseResult {
       mcp: input.mcp === true,
       ...(mcpRoles.value.length > 0 ? { mcpRoles: mcpRoles.value } : {}),
       ...(input.web !== undefined ? { web: input.web } : {}),
+      ...(input.api !== undefined ? { api: input.api === true } : {}),
       assets: assets.value,
       dependencies: dependencies.value,
       required: input.required === true,
