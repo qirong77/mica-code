@@ -22,6 +22,7 @@
 | `notebook-workbench/` | 方案 D 正式 Notebook 页面验收：真实目录/自动保存/大纲组件、内存 CAS 宿主、丰富示例与主题切换 |
 | `dock-rows/`       | 停靠区行高：回合日志的标题 / 思考 / 工具行与 todo、subagent、后台任务的行必须同样高（终端式一行一行），页内打出每种行的实测高度 |
 | `ask-dock/`        | `ask` 插件的提问卡：真实 `AskDock` 的四种形态 × 六套主题，看它是不是一屏里最先被看见的那个（选项 + 永远在的自由输入框 + 确认条） |
+| `plugin-panel/`    | 插件面板弹窗（SSH 的 `desktop.panel.display: "modal"`）：真实 `ModalShell` + `SplitView` + `PluginPanelSection`，看弹窗宽高、左栏宽度、表格列与勾选列 |
 
 ## 运行
 
@@ -39,6 +40,7 @@ npx vite --config .probe/notebook-design/vite.config.mjs # http://127.0.0.1:5286
 npx vite --config .probe/notebook-workbench/vite.config.mjs # http://127.0.0.1:5287/
 npx vite --config .probe/dock-rows/vite.config.mjs      # http://127.0.0.1:5237
 npx vite --config .probe/ask-dock/vite.config.mjs       # http://127.0.0.1:5238
+npx vite --config .probe/plugin-panel/vite.config.mjs   # http://127.0.0.1:5239/?theme=light
 ```
 
 `vite.config.mjs` 里已固定 `root`，所以在哪个目录执行都能跑；端口按上面两行分配，新增探针另取一个。
@@ -63,6 +65,11 @@ npx vite --config .probe/ask-dock/vite.config.mjs       # http://127.0.0.1:5238
 
 `digest-design/` 默认展示摘要结果；加 `?status=running` 预览正式组件的运行中文案与呼吸动效，
 `?status=warning` 预览未生成时的收尾，均不发模型请求。
+
+`plugin-panel/` 的面板内容不是手写的：`bun .probe/plugin-panel/fixture.mjs`（在 `apps/desktop`
+下跑）调真实插件的 `view()` 生成 `ssh-view.json`，SSH 面板改了字段或列就重新生成一次。
+它验的是弹窗外壳（宽度 1040px、定高、始终左右分栏），改 `app.css` 里 `.chat-plugin-modal`
+那几条规则后用它看效果；加 `?theme=light` 看亮色。
 
 ## 约定
 

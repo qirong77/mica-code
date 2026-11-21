@@ -6955,13 +6955,6 @@ html body #root {
   background: var(--color-panel);
 }
 
-/* 面板弹窗定高：切分区时内容长短不一，不定高就会一伸一缩。左栏固定、右栏自己滚。 */
-.chat-plugin-modal {
-  width: min(1080px, 100%);
-  max-width: min(1080px, 100%);
-  height: min(84vh, 760px);
-}
-
 /* 内容区交给面板自己排版：ModalShell 默认的 16px 内边距会让分栏与标题错开一条。 */
 .chat-plugin-modal .chat-modal-body {
   display: flex;
@@ -6989,12 +6982,31 @@ html body #root {
   grid-template-rows: minmax(0, 1fr);
 }
 
+/* 两块分区的内容长度差得很远，分栏本身不能跟着内容缩：行必须吃满 `minmax(0, 1fr)`，
+   否则 `split-view` 只有内容那么高，下面露出一整块底色。两个勾选项的左栏 208px 也太宽，
+   176px 装得下「服务器 / 添加」这类三个字的标题。
+
+   这一段同时覆盖设置页在窄容器（< 860px）下的「上下叠」规则：面板弹窗的宽度本来就
+   在那一档里，叠起来是「左栏 240px 高 + 右栏 min-height: 420px」两行，正好变成一条
+   悬在半空的白条。面板只有一列分区，始终左右分栏。 */
 .chat-plugin-panel .split-view {
   flex: 1 1 auto;
   height: auto;
-  grid-template-columns: 208px minmax(0, 1fr);
+  min-height: 0;
+  grid-template-columns: 176px minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
   border: 0;
   border-radius: 0;
+}
+
+.chat-plugin-panel .split-rail {
+  max-height: none;
+  border-right: 1px solid var(--line);
+  border-bottom: 0;
+}
+
+.chat-plugin-panel .split-main {
+  min-height: 0;
 }
 
 /* 右栏：标题条固定，内容自己滚。 */
@@ -7325,10 +7337,22 @@ html body #root {
 }
 
 /* 勾选列是「是/否」的一格状态：表头与勾选框同一条中轴、居中摆放；`width` 只是下限，
-   表头文字更长时列会跟着变宽，但两边仍然对齐。 */
+   表头文字更长时列会跟着变宽，但两边仍然对齐。76px 是「添加到会话」这类五字表头的
+   一行宽，再窄它就得折成两行、把表头撑高。 */
 .chat-plugin-table .is-check {
-  width: 56px;
+  width: 76px;
   text-align: center;
+}
+
+/* 一格勾选框没有文字垫着，只有 Arco 默认那圈 `--color-fill-3` 的描边：在面板底色上
+   淡到看不出勾没勾（分隔线那档 10%~16% 的黑也一样淡）。用次要文字的灰，勾选态仍是
+   模板的强调色。 */
+.chat-plugin-table .is-check .arco-checkbox-mask {
+  border-color: var(--color-fg-faint);
+}
+
+.chat-plugin-table .is-check .arco-checkbox:hover .arco-checkbox-mask {
+  border-color: var(--color-fg-dim);
 }
 
 .chat-plugin-table td.is-grow .chat-plugin-cell,
@@ -7535,6 +7559,20 @@ html body #root {
   vertical-align: middle;
   text-align: left;
   width: min(var(--modal-w), calc(100vw - 48px));
+  max-height: calc(100dvh - 64px);
+}
+
+/* 插件面板弹窗比详情弹窗宽：左边一列 176px 的分区 + 右边一列数据表，780px 里连表头都
+   排不开。宽度必须写在上面那条 `.arco-modal.chat-modal` 之后——两边同为三个类，靠顺序
+   取胜；写在插件面板那一节会被 `--modal-w` 盖回去。
+
+   高度定死：面板按分区取内容，切一下分区就一伸一缩，窗口跟着跳；内容短的分区（两个勾
+   选框）下面留一块空白，也比缩成一条悬在半空的扁条好看。上下限用 clamp：小窗口里退到
+   460px，大屏最多 740px，再高就顶到 `max-height` 自己滚。 */
+.chat-modal-arco-wrap .arco-modal.chat-plugin-modal {
+  width: min(1040px, calc(100vw - 48px));
+  max-width: min(1040px, calc(100vw - 48px));
+  height: clamp(460px, 82vh, 740px);
   max-height: calc(100dvh - 64px);
 }
 
