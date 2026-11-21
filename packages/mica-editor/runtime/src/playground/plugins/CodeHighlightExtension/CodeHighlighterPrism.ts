@@ -30,6 +30,7 @@ import {
   $isTextNode,
   $onUpdate,
   defineExtension,
+  HISTORY_MERGE_TAG,
   type LexicalEditor,
   type LexicalNode,
   mergeRegister,
@@ -339,11 +340,13 @@ export function registerHighlightingOnly(editor: LexicalEditor, tokenizer: Token
     didTransform: false,
     nodesCurrentlyHighlighting: new Set(),
   };
-  registrations.push(
-    editor.registerNodeTransform(CodeNode, $codeNodeTransform.bind(null, editor, tokenizer, transformState)),
-    editor.registerNodeTransform(TextNode, $textNodeTransform.bind(null, editor, tokenizer, transformState)),
-    editor.registerNodeTransform(CodeHighlightNode, $textNodeTransform.bind(null, editor, tokenizer, transformState)),
-  );
+  editor.update(() => {
+    registrations.push(
+      editor.registerNodeTransform(CodeNode, $codeNodeTransform.bind(null, editor, tokenizer, transformState)),
+      editor.registerNodeTransform(TextNode, $textNodeTransform.bind(null, editor, tokenizer, transformState)),
+      editor.registerNodeTransform(CodeHighlightNode, $textNodeTransform.bind(null, editor, tokenizer, transformState)),
+    );
+  }, {tag: HISTORY_MERGE_TAG});
 
   return mergeRegister(...registrations);
 }
@@ -352,7 +355,7 @@ export function registerHighlightingOnly(editor: LexicalEditor, tokenizer: Token
 export function refreshCodeHighlighting(editor: LexicalEditor): void {
   editor.update(() => {
     $nodesOfType(CodeNode).forEach((node) => node.markDirty());
-  });
+  }, {tag: HISTORY_MERGE_TAG});
 }
 
 /**

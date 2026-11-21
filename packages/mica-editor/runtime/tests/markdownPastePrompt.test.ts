@@ -6,7 +6,7 @@ import {TRANSFORMERS} from '@lexical/markdown'
 import {HeadingNode, QuoteNode} from '@lexical/rich-text'
 import {$createParagraphNode, $createTextNode, $getRoot, $getSelection, $isElementNode, $isRangeSelection, $isTextNode, PASTE_COMMAND, type LexicalEditor} from 'lexical'
 import {describe, expect, it, vi} from 'vitest'
-import {applyMarkdownPaste, isMarkdownPasteIntact, plainPasteText, registerMarkdownPaste, splitPlainParagraphs, type MarkdownPasteSpan} from '../src/playground/plugins/MarkdownPastePlugin/markdownPaste'
+import {applyMarkdownPaste, isMarkdownPasteIntact, placeMarkdownPastePrompt, plainPasteText, registerMarkdownPaste, splitPlainParagraphs, type MarkdownPasteSpan} from '../src/playground/plugins/MarkdownPastePlugin/markdownPaste'
 
 const NODES = [CodeNode, HeadingNode, QuoteNode, ListNode, ListItemNode, LinkNode]
 
@@ -204,5 +204,61 @@ describe('Markdown prompt conversion', () => {
       ['heading', '小标题'],
       ['paragraph', 'ef'],
     ])
+  })
+})
+
+describe('Markdown prompt placement', () => {
+  const view = {top: 0, bottom: 600, left: 0, right: 800}
+  const size = {width: 300, height: 56}
+
+  it('aligns to the right of the visible editor and sits below a short paste', () => {
+    const placement = placeMarkdownPastePrompt({anchor: {top: 100, bottom: 140, left: 120, right: 420}, view, size})
+    expect(placement).toEqual({top: 148, left: 492, above: false})
+  })
+
+  it('flips above a paste that ends at the bottom edge', () => {
+    const placement = placeMarkdownPastePrompt({anchor: {top: 540, bottom: 580, left: 120, right: 420}, view, size})
+    expect(placement.above).toBe(true)
+    expect(placement.top).toBeGreaterThanOrEqual(view.top)
+    expect(placement.top + size.height).toBeLessThanOrEqual(view.bottom)
+  })
+
+  it('stays inside the visible editor when a long paste ends below it', () => {
+    // 长粘贴的锚点是最后一个块，可能在视口下方很远。
+    const placement = placeMarkdownPastePrompt({anchor: {top: 560, bottom: 4200, left: 120, right: 420}, view, size})
+    expect(placement.top).toBeGreaterThanOrEqual(view.top)
+    expect(placement.top + size.height).toBeLessThanOrEqual(view.bottom)
+  })
+
+  it('fits a 340px wide editor without being cut off', () => {
+    const narrow = {top: 0, bottom: 600, left: 0, right: 340}
+    const placement = placeMarkdownPastePrompt({
+      anchor: {top: 100, bottom: 120, left: 300, right: 340},
+      view: narrow,
+      size: {width: 316, height: 56},
+    })
+    expect(placement.left).toBeGreaterThanOrEqual(narrow.left)
+    expect(placement.left + 316).toBeLessThanOrEqual(narrow.right)
+  })
+})
+
+describe('Markdown prompt after a second paste', () => {
+  it('replaces the earlier paste instead of stacking prompts', async () => {
+    const {editor, spans} = createHarness()
+    seed(editor)
+    dispatchPaste(editor, '# 第一段')
+    await flush()
+    editor.update(() => {
+      const last = $getRoot().getLastChild()
+      if ($isElementNode(last)) last.selectEnd()
+    }, {discrete: true})
+    dispatchPaste(editor, '## 第二段')
+    await flush()
+    expect(spans).toHaveLength(2)
+    // 只有刚粘贴的那一段被转换，上一段原样保留。
+    expect(applyMarkdownPaste(editor, spans[1], TRANSFORMERS)).toBe(true)
+    const output = blocks(editor)
+    expect(output).toContainEqual(['heading', '第二段'])
+    expect(output.some(([type, text]) => type === 'paragraph' && text.includes('# 第一段'))).toBe(true)
   })
 })

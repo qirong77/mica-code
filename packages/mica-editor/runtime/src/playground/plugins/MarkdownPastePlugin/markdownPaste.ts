@@ -1,4 +1,4 @@
-import {$isCodeNode} from '@lexical/code'
+import {$createCodeNode, $isCodeNode} from '@lexical/code'
 import {$createAutoLinkNode, autoLinkUrlMatcher} from '@lexical/link'
 import {$generateNodesFromMarkdownString, type Transformer} from '@lexical/markdown'
 import {$isTableSelection} from '@lexical/table'
@@ -8,6 +8,7 @@ import {
   $createParagraphNode,
   $createRangeSelection,
   $createTextNode,
+  $findMatchingParent,
   $getNodeByKey,
   $getRoot,
   $getSelection,
@@ -26,6 +27,7 @@ import {
   type ParagraphNode,
   type RangeSelection,
 } from 'lexical'
+import {$inferPastedCodeLanguages, detectPastedCodeLanguage} from './codeLanguage'
 
 export function isMarkdownText(text: string): boolean {
   return /^(?: {0,3}#{1,6}\s+\S| {0,3}>\s?\S|\s*[-+*]\s+\S|\s*\d+[.)]\s+\S| {0,3}(?:`{3,}|~{3,})|\|?.+\|.+\n\s*\|?\s*:?-{3,})/m.test(text) ||
@@ -55,14 +57,17 @@ function carriesOnlyText(root: Element): boolean {
   })
 }
 
-// Only unwrap an isolated code payload. Ordinary web/office HTML keeps its
-// original formatting, even when its text happens to contain Markdown marks.
-export function getMarkdownClipboardText(data: DataTransfer): string | null {
+type ClipboardSource = {kind: 'markdown'; text: string} | {kind: 'code'; text: string; language: string | null}
+
+// Parse HTML once. Only unwrap isolated code or neutral text wrappers; ordinary
+// web/office formatting keeps its normal import path.
+function readClipboardSource(data: DataTransfer): ClipboardSource | null {
   if (data.files?.length || Array.from(data.types).some(t => /lexical|rtf/i.test(t))) return null
   const explicit = data.getData('text/markdown') || data.getData('text/x-markdown')
-  if (explicit) return explicit
+  if (explicit) return {kind: 'markdown', text: explicit}
   let text = data.getData('text/plain')
   const html = data.getData('text/html')
+  let isolatedCode = false
   if (html) {
     if (typeof DOMParser === 'undefined') return null
     const body = new DOMParser().parseFromString(html, 'text/html').body
@@ -73,12 +78,20 @@ export function getMarkdownClipboardText(data: DataTransfer): string | null {
       code = code.firstElementChild as Element
     }
     if (code && ['PRE', 'CODE'].includes(code.tagName)) {
-      const language = code.getAttribute('data-language') || (code.querySelector('code')?.className || code.className).match(/language-([\w-]+)/)?.[1]
-      if (language && !/^(markdown|md|text|plaintext)$/i.test(language)) return null
+      const language = code.getAttribute('data-language') || code.querySelector('code')?.getAttribute('data-language') || (code.querySelector('code')?.className || code.className).match(/language-([\w-]+)/)?.[1]
       text = text || code.textContent || ''
+      if (language && !/^(markdown|md|text|plaintext)$/i.test(language)) return {kind: 'code', text, language}
+      isolatedCode = true
     } else if (!carriesOnlyText(body)) return null
   }
-  return isMarkdownText(text) ? text : null
+  if (isMarkdownText(text)) return {kind: 'markdown', text}
+  const language = detectPastedCodeLanguage(text)
+  return isolatedCode || language ? {kind: 'code', text, language} : null
+}
+
+export function getMarkdownClipboardText(data: DataTransfer): string | null {
+  const source = readClipboardSource(data)
+  return source?.kind === 'markdown' ? source.text : null
 }
 
 export type PastePoint = {key: NodeKey; offset: number; type: 'text' | 'element'}
@@ -236,6 +249,13 @@ export function markdownPasteAnchorKey(editor: LexicalEditor, span: MarkdownPast
   })
 }
 
+/** The block the paste ends in, in viewport coordinates. */
+export function markdownPasteAnchorRect(editor: LexicalEditor, span: MarkdownPasteSpan): DOMRect | null {
+  const key = markdownPasteAnchorKey(editor, span)
+  const element = key ? editor.getElementByKey(key) : null
+  return element ? element.getBoundingClientRect() : null
+}
+
 function $hasContentBefore(point: PastePoint): boolean {
   const node = $getNodeByKey(point.key)
   const block = node ? $topBlock(node) : null
@@ -268,6 +288,7 @@ export function applyMarkdownPaste(editor: LexicalEditor, span: MarkdownPasteSpa
       return
     }
     if (!nodes.length) return
+    $inferPastedCodeLanguages(nodes)
     // Absorb Lexical's first-block merge without losing a heading/quote/code
     // block when the paste started in the middle of a paragraph that already
     // has text.
@@ -302,6 +323,16 @@ export function registerMarkdownPaste(editor: LexicalEditor, transformers: Trans
     if (!editor.isEditable() || !event || !('clipboardData' in event) || !event.clipboardData) return false
     const selection = $getSelection()
     if (!$isRangeSelection(selection) || $isTableSelection(selection)) return false
+    const code = $findMatchingParent(selection.anchor.getNode(), $isCodeNode)
+    if ($isCodeNode(code)) {
+      const focusCode = $findMatchingParent(selection.focus.getNode(), $isCodeNode)
+      if (focusCode?.is(code) && !code.getLanguage()) {
+        const language = detectPastedCodeLanguage(event.clipboardData.getData('text/plain'))
+        if (language) code.setLanguage(language)
+      }
+      // The official handler inserts text into the code block in this update.
+      return false
+    }
     for (const point of [selection.anchor, selection.focus]) {
       let node = point.getNode()
       while (node.getParent()) {
@@ -316,8 +347,15 @@ export function registerMarkdownPaste(editor: LexicalEditor, transformers: Trans
       event.preventDefault()
       return true
     }
-    const markdown = getMarkdownClipboardText(event.clipboardData)
-    if (!markdown) return false
+    const source = readClipboardSource(event.clipboardData)
+    if (!source) return false
+    if (source.kind === 'code') {
+      $addUpdateTag(HISTORY_PUSH_TAG)
+      selection.insertNodes([$createCodeNode(source.language || undefined).append($createTextNode(source.text))])
+      event.preventDefault()
+      return true
+    }
+    const markdown = source.text
     const paragraphs = $createPlainParagraphs(markdown)
     if (!paragraphs.length) return false
     const before = $flatText().text
@@ -343,4 +381,35 @@ export function registerMarkdownPaste(editor: LexicalEditor, transformers: Trans
     }
     return true
   }, COMMAND_PRIORITY_HIGH)
+}
+
+export type PromptBox = {top: number; bottom: number; left: number; right: number}
+export type PromptPlacement = {top: number; left: number; above: boolean}
+
+function clampBetween(value: number, min: number, max: number): number {
+  return Math.min(Math.max(value, min), max)
+}
+
+/**
+ * Where the confirmation card goes, in viewport coordinates. It hugs the block
+ * the paste ended in while that block is on screen, but it never leaves the
+ * visible part of the editor: a long paste ends far below the fold, so anchoring
+ * blindly would put the card off-screen and read as "no prompt at all".
+ */
+export function placeMarkdownPastePrompt(input: {
+  anchor: PromptBox
+  view: PromptBox
+  size: {width: number; height: number}
+  gap?: number
+}): PromptPlacement {
+  const gap = input.gap ?? 8
+  const {anchor, view, size} = input
+  const minTop = view.top + gap
+  const maxTop = Math.max(minTop, view.bottom - gap - size.height)
+  const below = anchor.bottom + gap
+  const above = anchor.top - gap - size.height
+  const flipped = above >= minTop && below > maxTop
+  const top = clampBetween(flipped ? above : below, minTop, maxTop)
+  const left = Math.max(view.left + gap, view.right - gap - size.width)
+  return {top: Math.round(top), left: Math.round(left), above: flipped}
 }

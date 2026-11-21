@@ -79,14 +79,6 @@
 .notebook-workbench :is(.PlaygroundEditorTheme__table, .PlaygroundEditorTheme__tableCell) { border-color: var(--color-line); }
 .notebook-workbench .PlaygroundEditorTheme__tableCellHeader { background: var(--color-panel); font-size: inherit; }
 
-.notebook-workbench .toolbar .toolbar-font-size { border-color: transparent; color: var(--color-fg-soft); }
-.notebook-workbench .toolbar .toolbar-font-size:hover { border-color: var(--color-line-soft); }
-.notebook-workbench .toolbar .toolbar-font-size:focus-within { border-color: var(--color-accent); }
-.notebook-workbench .toolbar .toolbar-font-size input { width: 28px; }
-.notebook-workbench .toolbar .font-size-unit { color: var(--color-fg-faint); font-size: 11px; line-height: 1; pointer-events: none; }
-.notebook-workbench .toolbar button.toolbar-item { color: var(--color-fg-soft); }
-.notebook-workbench .toolbar button.toolbar-item:is(:hover, [aria-expanded='true']):not(:disabled),
-.notebook-workbench .toolbar button.toolbar-item:focus-visible,
 .notebook-workbench .toolbar button.toolbar-item.active { color: var(--color-accent); }
 .notebook-workbench .toolbar .color-picker .icon { background-color: currentColor; }
 

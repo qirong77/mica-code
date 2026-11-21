@@ -26,6 +26,7 @@ import {
 } from 'lexical';
 import {describe, expect, it} from 'vitest';
 
+import {placeBandActions} from '../src/playground/plugins/TableControlsPlugin/bandActionLayout';
 import {
   $applyTableAction,
   $applyTableBandAction,
@@ -684,5 +685,59 @@ describe('edge-handle band actions', () => {
     update(editor, () => $table(tableKey).remove());
     update(editor, () => {expect($applyTableBandAction(tableKey, 'row', 0, 0, 'delete-row', editor)).toBe(false);});
     expect(editor.getEditorState().read(() => $getRoot().getChildrenSize())).toBe(2);
+  });
+});
+describe('table band action placement', () => {
+  const viewport = {width: 1200, height: 800};
+
+  it('splits the row add and delete into two separate buttons', () => {
+    const edges = [100, 140, 180, 220];
+    const placement = placeBandActions({
+      axis: 'row', count: 3, startIndex: 0, endIndex: 0, edges,
+      clipStart: 100, clipEnd: 220, rail: 87, crossRail: 87, crossStart: 100, viewport,
+    });
+    // 「＋」在左侧把手外侧、该行下边界（140）居中。
+    expect(placement?.add).toEqual({left: 61, top: 129});
+    // 删除独立放在表格上方，和左侧行边界的加号分开。
+    expect(placement?.remove).toEqual({left: 106, top: 61});
+  });
+
+  it('keeps the column add on the right edge and deletion outside the left edge', () => {
+    const edges = [100, 200, 300, 400];
+    const placement = placeBandActions({
+      axis: 'column', count: 3, startIndex: 1, endIndex: 1, edges,
+      clipStart: 100, clipEnd: 400, rail: 87, crossRail: 87, crossStart: 100, viewport,
+    });
+    expect(placement?.add).toEqual({left: 289, top: 83});
+    expect(placement?.remove).toEqual({left: 61, top: 106});
+  });
+
+  it('hides the delete for the only remaining row or column', () => {
+    const placement = placeBandActions({
+      axis: 'row', count: 1, startIndex: 0, endIndex: 0, edges: [10, 50],
+      clipStart: 10, clipEnd: 50, rail: -3, crossRail: 10, crossStart: 0, viewport,
+    });
+    // 把手贴在最左侧时「＋」会被夹回视口留白，不会跑到屏幕外。
+    expect(placement?.add).toEqual({left: 2, top: 39});
+    expect(placement?.remove).toBeNull();
+  });
+
+  it('sticks to the visible range and drops a scrolled-out target', () => {
+    const edges = [0, 40, 80, 120, 160];
+    const placement = placeBandActions({
+      axis: 'column', count: 4, startIndex: 1, endIndex: 3, edges,
+      clipStart: 60, clipEnd: 160, rail: -13, crossRail: 10, crossStart: 0, viewport,
+    });
+    // 首边界（40）已经滚出可见区：删除按钮不再指向真实列，直接不渲染。
+    expect(placement?.remove).toBeNull();
+    expect(placement?.add).toEqual({left: 149, top: 2});
+  });
+
+  it('hides both buttons when the band shrank to a sliver', () => {
+    const placement = placeBandActions({
+      axis: 'row', count: 4, startIndex: 2, endIndex: 2, edges: [0, 40, 80, 88, 200],
+      clipStart: 0, clipEnd: 200, rail: 3, crossRail: 10, crossStart: 0, viewport,
+    });
+    expect(placement).toBeNull();
   });
 });

@@ -289,6 +289,26 @@ describe('fixed notebook title boundary', () => {
     expect(dispatch(editor, DELETE_CHARACTER_COMMAND, true)).toBe(true);
     expect(readBlocks(editor)).toEqual([['heading', content]]);
   });
+
+  it('lets Enter leave a title the user cleared for the body', () => {
+    const editor = makeEditor({fixedTitle: true});
+    editor.update(() => {
+      $getRoot().clear().append($createHeadingNode('h1'));
+      $getRoot().getFirstChildOrThrow().selectStart();
+    }, {discrete: true});
+    const event = keyEvent('Enter');
+
+    expect(dispatch(editor, KEY_ENTER_COMMAND, event)).toBe(true);
+    expect(event.preventDefault).toHaveBeenCalledOnce();
+    editor.read('latest', () => {
+      const blocks = $getRoot().getChildren();
+      expect(blocks).toHaveLength(2);
+      expect($isHeadingNode(blocks[0]) && blocks[0].getTag()).toBe('h1');
+      expect($isParagraphNode(blocks[1])).toBe(true);
+      const selection = $getSelection();
+      expect($isRangeSelection(selection) && selection.anchor.key).toBe(blocks[1].getKey());
+    });
+  });
 });
 
 describe('native text splitting and soft breaks', () => {

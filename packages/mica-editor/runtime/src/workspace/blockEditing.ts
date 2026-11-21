@@ -6,6 +6,7 @@ import {
   $getRoot,
   $getSelection,
   $isElementNode,
+  $isParagraphNode,
   $isRangeSelection,
   COMMAND_PRIORITY_LOW,
   DELETE_CHARACTER_COMMAND,
@@ -33,6 +34,7 @@ function $clearBlockStyleAtStart(
   editor: LexicalEditor,
   commandEditor: LexicalEditor,
   isFixedTitle: (block: ElementNode | null) => boolean,
+  enterBody: boolean,
 ): boolean {
   // Commands from a caption/nested editor can bubble to this editor. Its
   // selection must never cause a mutation in the notebook's document.
@@ -53,7 +55,21 @@ function $clearBlockStyleAtStart(
   // The first top-level H1 is the notebook title. Enter/Backspace at its
   // start must not turn it into a paragraph (or remove it); the title plugin
   // keeps it non-empty and at the head of the document.
-  if (isFixedTitle(block)) return true;
+  if (isFixedTitle(block)) {
+    // The title may be cleared completely, so Enter at its start would
+    // otherwise be a dead end with no way into the body.
+    if (enterBody && block.isEmpty()) {
+      const next = block.getNextSibling();
+      if ($isParagraphNode(next) && next.isEmpty()) {
+        next.selectStart();
+      } else {
+        const paragraph = $createParagraphNode();
+        block.insertAfter(paragraph);
+        paragraph.selectStart();
+      }
+    }
+    return true;
+  }
 
   const paragraph = $createParagraphNode()
     .setDirection(block.getDirection())
@@ -75,22 +91,22 @@ export function registerNotebookBlockEditing(
 ): () => void {
   return mergeRegister(
     editor.registerCommand(KEY_ENTER_COMMAND, (event, commandEditor) => {
-      if (!isPlainKey(event) || !$clearBlockStyleAtStart(editor, commandEditor, isFixedTitle)) return false;
+      if (!isPlainKey(event) || !$clearBlockStyleAtStart(editor, commandEditor, isFixedTitle, true)) return false;
       event?.preventDefault();
       return true;
     }, COMMAND_PRIORITY_LOW),
     // beforeinput (including mobile/Safari) can insert a paragraph without a
     // KEY_ENTER_COMMAND. Shift+Enter uses INSERT_LINE_BREAK_COMMAND instead.
     editor.registerCommand(INSERT_PARAGRAPH_COMMAND, (_payload, commandEditor) => (
-      $clearBlockStyleAtStart(editor, commandEditor, isFixedTitle)
+      $clearBlockStyleAtStart(editor, commandEditor, isFixedTitle, true)
     ), COMMAND_PRIORITY_LOW),
     editor.registerCommand(KEY_BACKSPACE_COMMAND, (event, commandEditor) => {
-      if (!isPlainKey(event) || !$clearBlockStyleAtStart(editor, commandEditor, isFixedTitle)) return false;
+      if (!isPlainKey(event) || !$clearBlockStyleAtStart(editor, commandEditor, isFixedTitle, false)) return false;
       event.preventDefault();
       return true;
     }, COMMAND_PRIORITY_LOW),
     editor.registerCommand(DELETE_CHARACTER_COMMAND, (backward, commandEditor) => (
-      backward && $clearBlockStyleAtStart(editor, commandEditor, isFixedTitle)
+      backward && $clearBlockStyleAtStart(editor, commandEditor, isFixedTitle, false)
     ), COMMAND_PRIORITY_LOW),
   );
 }

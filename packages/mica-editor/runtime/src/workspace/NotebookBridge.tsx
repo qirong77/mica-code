@@ -1,5 +1,5 @@
 import {useLexicalComposerContext} from '@lexical/react/LexicalComposerContext';
-import {type LexicalEditor} from 'lexical';
+import {type LexicalEditor, mergeRegister} from 'lexical';
 import {Component, createContext, type ReactNode, useContext, useEffect, useRef, useState} from 'react';
 
 import NotebookOutline, {type NotebookNavigation, type NotebookOutlineSnapshot} from './NotebookOutline';
@@ -8,6 +8,7 @@ import {
   $readNotebookTitle,
   DEFAULT_NOTEBOOK_TITLE,
   normalizeNotebookTitle,
+  registerNotebookTitle,
   type NotebookTitleState,
 } from './notebookTitle';
 import {applyNotebookBarInsets, applyNotebookTheme} from './theme';
@@ -87,7 +88,9 @@ export class NotebookSession {
 
     const align = this.titleNeedsAlignment;
     const missing = current.key === null || !current.firstIsTitle;
-    if (!missing && !(align && current.text !== nextTitle)) {
+    // A legacy title that still carries inline formatting is not "fine":
+    // rewriting it as plain text is part of the same ensure pass.
+    if (!missing && current.plain && !(align && current.text !== nextTitle)) {
       this.titleNeedsAlignment = false;
       return false;
     }
@@ -165,11 +168,16 @@ export class NotebookSession {
       // snapshot error through the normal load/dirty bridge path.
     }
     this.unregisterTitle?.();
-    this.unregisterTitle = typeof editor.registerUpdateListener === 'function'
-      ? editor.registerUpdateListener(({dirtyElements, dirtyLeaves}) => {
-        if (dirtyElements.size || dirtyLeaves.size) this.ensureTitle(editor);
-      })
-      : null;
+    this.unregisterTitle = mergeRegister(
+      // Keeps the title plain text while it is edited; normalizes in the same
+      // update as the edit instead of adding another pass over the document.
+      registerNotebookTitle(editor),
+      typeof editor.registerUpdateListener === 'function'
+        ? editor.registerUpdateListener(({dirtyElements, dirtyLeaves}) => {
+          if (dirtyElements.size || dirtyLeaves.size) this.ensureTitle(editor);
+        })
+        : () => {},
+    );
     this.syncEditability();
     queueMicrotask(() => {
       if (this.active && !this.loaded) {

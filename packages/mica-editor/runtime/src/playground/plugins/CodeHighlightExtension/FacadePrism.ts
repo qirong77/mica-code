@@ -17,6 +17,7 @@ import {
   $createLineBreakNode,
   $createTabNode,
   $getNodeByKey,
+  HISTORY_MERGE_TAG,
   type LexicalEditor,
   type LexicalNode,
   type NodeKey,
@@ -165,12 +166,12 @@ export async function loadCodeLanguage(language: string, editor?: LexicalEditor,
     editor.update(
       () => {
         const codeNode = $getNodeByKey(codeNodeKey);
-        if ($isCodeNode(codeNode) && codeNode.getLanguage() === language) {
+        if ($isCodeNode(codeNode) && codeNode.getLanguage() === language && !codeNode.getIsSyntaxHighlightSupported()) {
           codeNode.setIsSyntaxHighlightSupported(true);
           codeNode.markDirty();
         }
       },
-      { discrete: true },
+      { discrete: true, tag: HISTORY_MERGE_TAG },
     );
   });
 }

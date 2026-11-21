@@ -34,25 +34,30 @@ body :is(input, textarea)::placeholder { color: var(--color-fg-faint); }
 .notebook-editor .editor-shell .editor-container { flex: 1; background: transparent; }
 /* One operation bar: actual group widths decide which tools move to More.
    Horizontal scrolling only covers viewports narrower than the fixed actions. */
-.notebook-editor .toolbar { position: sticky; top: 0; display: flex; align-items: center; height: auto; border-radius: 0; padding: 7px 12px; min-height: 44px; --toolbar-group-gap: 2px; --toolbar-section-gap: 13px; gap: var(--toolbar-group-gap); background: var(--color-canvas); border-color: var(--color-line-soft); box-shadow: none; flex-wrap: nowrap; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
+.notebook-editor .toolbar { position: sticky; top: 0; display: flex; align-items: center; height: auto; border-radius: 0; padding: 5px 12px; min-height: 44px; --toolbar-group-gap: 2px; --toolbar-section-gap: 16px; gap: var(--toolbar-group-gap); background: var(--color-canvas); border-color: var(--color-line-soft); box-shadow: none; flex-wrap: nowrap; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
 .notebook-editor .toolbar::-webkit-scrollbar { display: none; }
-.notebook-editor .toolbar-group { display: flex; align-items: center; gap: 2px; flex: none; padding: 0; margin: 0; }
-.notebook-editor .toolbar-group[data-section-start='true'] { margin-left: 6px; padding-left: 6px; border-left: 1px solid var(--color-line-soft); }
+.notebook-editor .toolbar-group { position: relative; display: flex; align-items: center; gap: 2px; flex: none; padding: 0; margin: 0; }
+.notebook-editor .toolbar-group[data-section-start='true'] { margin-inline-start: calc(var(--toolbar-section-gap) / 2); padding-inline-start: calc(var(--toolbar-section-gap) / 2); }
+.notebook-editor .toolbar-group[data-section-start='true']::before { content: ''; position: absolute; inset-inline-start: 0; top: 50%; width: 1px; height: 20px; transform: translateY(-50%); background: var(--color-line-soft); }
 .notebook-editor .toolbar:not([data-measuring='true']) > .toolbar-group[data-overflowed='true'] { display: none; }
 .notebook-editor .toolbar[data-measuring='true'] > .toolbar-group { display: flex; margin: 0; padding: 0; border: 0; }
-.notebook-editor .toolbar button.toolbar-item { height: 28px; min-width: 28px; padding: 5px; margin: 0; border-radius: 4px; gap: 3px; color: var(--color-fg-soft); }
-.notebook-editor .toolbar .toolbar-item .text { font-size: 12px; color: inherit; padding: 0; line-height: 18px; white-space: nowrap; }
-.notebook-editor .toolbar .toolbar-item :is(.icon, i.format) { width: 16px; height: 16px; margin: 0; opacity: 1; }
+.notebook-editor .toolbar[data-measuring='true'] > .toolbar-group::before { display: none; }
+.notebook-editor .toolbar button.toolbar-item { display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box; height: 32px; min-width: 32px; padding: 6px 7px; margin: 0; border: 0; border-radius: 4px; gap: 6px; color: var(--color-fg); }
+.notebook-editor .toolbar button.toolbar-item[aria-haspopup='menu'] { gap: 4px; padding-inline: 5px; }
+.notebook-editor .toolbar .toolbar-item .text { font-size: 14px; font-weight: 500; color: inherit; padding: 0; height: auto; line-height: 20px; white-space: nowrap; }
+.notebook-editor .toolbar .toolbar-item :is(.icon, i.format, .editor-icon) { flex: none; width: 18px; height: 18px; margin: 0; opacity: 1; }
+.notebook-editor .toolbar button.toolbar-item:disabled { opacity: .32; }
+.notebook-editor .toolbar button.toolbar-item:disabled :is(.icon, .editor-icon, .text, .chevron-down) { opacity: 1; }
 .format-icon { display: block; flex: none; color: inherit; }
-.notebook-editor .toolbar .toolbar-item i.chevron-down { width: 10px; height: 10px; margin: 0 0 0 3px; opacity: .55; mask-image: url('../../../web/assets/yuque/chevron-down.svg'); }
-.notebook-editor .toolbar .block-controls { min-width: 64px; }
+.notebook-editor .toolbar .toolbar-item i.chevron-down { flex: none; width: 12px; height: 12px; margin: 0; opacity: .65; mask-image: url('../../../web/assets/yuque/chevron-down.svg'); }
+.notebook-editor .toolbar button.toolbar-item.block-controls { min-width: 72px; max-width: 104px; justify-content: space-between; }
 .notebook-editor .toolbar .block-controls .icon { display: none; }
-.notebook-editor .toolbar .block-controls .dropdown-button-text { width: auto; min-width: 44px; }
-.notebook-editor .toolbar .font-family { width: 64px; justify-content: space-between; }
-.notebook-editor .toolbar .font-family .text { max-width: 44px; display: block; }
-.notebook-editor .toolbar .toolbar-font-size { display: flex; align-items: center; height: 26px; border: 1px solid var(--color-line-soft); border-radius: 4px; }
-.notebook-editor .toolbar .toolbar-font-size button { width: 22px; min-width: 22px; height: 24px; padding: 3px; }
-.notebook-editor .toolbar .toolbar-font-size input { width: 30px; height: 24px; padding: 0; margin: 0; border: 0; border-radius: 0; font: 12px var(--font-family); background: transparent; color: var(--color-fg-soft); }
+.notebook-editor .toolbar .block-controls .dropdown-button-text { width: auto; min-width: 0; }
+.notebook-editor .toolbar .toolbar-font-size { display: flex; align-items: center; box-sizing: border-box; height: 32px; padding-inline-start: 5px; border: 1px solid transparent; border-radius: 4px; color: var(--color-fg); }
+.notebook-editor .toolbar .toolbar-font-size:hover { background: var(--color-active); }
+.notebook-editor .toolbar .toolbar-font-size button.toolbar-item.font-size-presets { width: 22px; min-width: 22px; height: 30px; padding: 0; }
+.notebook-editor .toolbar .toolbar-font-size input { width: 23px; height: 30px; padding: 0; margin: 0; border: 0; border-radius: 0; font: 500 14px var(--font-family); background: transparent; color: inherit; }
+.notebook-editor .toolbar .font-size-unit { color: inherit; font-size: 14px; font-weight: 500; line-height: 20px; pointer-events: none; }
 .notebook-editor .toolbar .toolbar-font-size:focus-within { border-color: var(--color-accent); }
 .notebook-editor .toolbar .toolbar-font-size :is(input, button):focus-visible { outline: none; box-shadow: none; }
 .notebook-editor .toolbar .toolbar-font-size button { border-radius: 3px; }
@@ -62,14 +67,14 @@ body :is(input, textarea)::placeholder { color: var(--color-fg-faint); }
 .notebook-editor .toolbar .toolbar-font-size input::-webkit-outer-spin-button { appearance: none; margin: 0; }
 .notebook-editor .toolbar .alignment .text { display: none; }
 .notebook-editor .toolbar .code-language { width: 136px; justify-content: space-between; }
-.notebook-editor .toolbar .insert-menu { width: 28px; color: var(--color-accent); }
-.notebook-editor .toolbar .insert-menu .icon { width: 18px; height: 18px; }
-.notebook-editor .toolbar .toolbar-more button { width: 28px; }
+.notebook-editor .toolbar .insert-menu { width: 32px; padding: 5px; }
+.notebook-editor .toolbar .toolbar-insert-symbol { display: grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; background: var(--color-success); color: var(--color-canvas); }
+.notebook-editor .toolbar .toolbar-item .toolbar-insert-symbol .editor-icon { width: 12px; height: 12px; }
+.notebook-editor .toolbar .toolbar-more > button { width: 32px; }
 .notebook-editor .toolbar .color-picker .icon { position: relative; background: currentColor; mask: none; background-image: none; }
 .notebook-editor .toolbar .color-picker .font-color { mask: url('../../../web/assets/yuque/font-color.svg') center / contain no-repeat; }
 .notebook-editor .toolbar .color-picker .bg-color { mask: url('../../../web/assets/yuque/bg-color.svg') center / contain no-repeat; }
 .notebook-editor .toolbar .color-picker { position: relative; }
-.notebook-editor .toolbar .color-picker i.chevron-down { display: none; }
 /* Recolor the glyph's own bottom stripe, preserving its original geometry. */
 .notebook-editor .toolbar .color-picker .icon::after { content: ''; position: absolute; inset: 84% 0 0; background: var(--toolbar-swatch); }
 .notebook-editor .toolbar button.toolbar-item:hover:not(:disabled) { background: var(--color-active); }
@@ -301,7 +306,6 @@ body.mica-arco-theme {
   .notebook-editor .ContentEditable__root { padding: 28px 24px; font-size: 15px; }
   .notebook-editor .ContentEditable__placeholder { top: 28px; left: 24px; }
   .notebook-editor .toolbar { padding: 5px 8px; }
-  .notebook-editor .toolbar .toolbar-item .text { font-size: 12px; }
   .find-replace-panel { top: 48px; }
 }
 @media print {

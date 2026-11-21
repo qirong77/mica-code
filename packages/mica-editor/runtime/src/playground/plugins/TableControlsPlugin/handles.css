@@ -203,70 +203,75 @@
   pointer-events: none;
 }
 
-/* 行列末端的「＋ / 垃圾桶」：一张小白胶囊，和语雀一样贴在表格外沿。 */
-.table-selection-actions {
+/* 行列的「＋ / 删除」是两个独立按钮：中性白底描边常态，只有 hover 才上色，
+   删除只在自己的 hover 里变红。落点见 bandActionLayout.ts。 */
+.table-selection-band-actions {
   position: absolute;
-  z-index: 3;
-  display: flex;
-  align-items: center;
+  left: 0;
+  top: 0;
+  pointer-events: none;
+}
+
+.table-selection-band-action {
   box-sizing: border-box;
-  width: 41px;
-  height: 22px;
-  border: 1px solid var(--color-line-soft, var(--color-border, #e5e6eb));
-  border-radius: 6px;
-  background: var(--color-canvas, #fff);
-  box-shadow: 0 2px 8px #1d21291f;
-  pointer-events: auto;
-  overflow: hidden;
-}
-
-.table-selection-actions.is-row {
-  flex-direction: column;
-  width: 22px;
-  height: 43px;
-}
-
-.table-selection-actions > button {
+  appearance: none;
+  -webkit-appearance: none;
+  position: absolute;
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 19px;
-  height: 20px;
+  width: 22px;
+  height: 22px;
   padding: 0;
-  border: 0;
-  background: transparent;
-  color: var(--color-fg-faint, var(--color-text-3, #86909c));
+  margin: 0;
+  border: 1px solid var(--color-line-soft, var(--color-border, #e5e6eb));
+  border-radius: 6px;
+  background: var(--color-canvas, #fff);
+  color: var(--color-fg-soft, var(--color-text-2, #4e5969));
+  box-shadow: 0 1px 3px #1d212914;
   font: inherit;
   line-height: 1;
   cursor: pointer;
-  transition: background-color 120ms, color 120ms;
+  pointer-events: auto;
+  transition: background-color 120ms, color 120ms, border-color 120ms;
 }
 
-.table-selection-actions.is-row > button {
-  width: 20px;
-  height: 20px;
-}
-
-.table-selection-actions > button + button {
-  border-inline-start: 1px solid var(--color-line-soft, var(--color-border, #e5e6eb));
-}
-
-.table-selection-actions.is-row > button + button {
-  border-inline-start: 0;
-  border-block-start: 1px solid var(--color-line-soft, var(--color-border, #e5e6eb));
-}
-
-.table-selection-actions > button:hover {
+.table-selection-band-action:hover {
   background: var(--color-primary-light-2, rgb(var(--primary-2, 190, 218, 255)));
+  border-color: var(--color-primary-light-3, rgb(var(--primary-3)));
   color: var(--color-accent, rgb(var(--primary-6, 22, 93, 255)));
 }
 
-.table-selection-actions > button.is-danger:hover {
-  background: color-mix(in srgb, #f53f3f 12%, transparent);
-  color: #f53f3f;
+.table-selection-band-action.is-delete:hover {
+  background: color-mix(in srgb, rgb(var(--danger-6, 245 63 63)) 10%, var(--color-canvas, #fff));
+  border-color: color-mix(in srgb, rgb(var(--danger-6, 245 63 63)) 38%, transparent);
+  color: var(--color-danger, rgb(var(--danger-6, 245 63 63)));
 }
 
-.table-selection-actions > button:focus-visible,
+.table-selection-band-icon {
+  width: 12px;
+  height: 12px;
+  background-color: currentColor;
+  -webkit-mask-position: center;
+  mask-position: center;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-size: contain;
+  mask-size: contain;
+  pointer-events: none;
+}
+
+.table-selection-band-action.is-add .table-selection-band-icon {
+  -webkit-mask-image: url('../../images/icons/plus.svg');
+  mask-image: url('../../images/icons/plus.svg');
+}
+
+.table-selection-band-action.is-delete .table-selection-band-icon {
+  -webkit-mask-image: url('../../images/icons/trash.svg');
+  mask-image: url('../../images/icons/trash.svg');
+}
+
+.table-selection-band-action:focus-visible,
 .table-selection-connector-button:focus-visible {
   outline: 2px solid var(--color-accent, rgb(var(--primary-6, 22, 93, 255)));
   outline-offset: -2px;
@@ -315,7 +320,7 @@
   .table-selection-handle,
   .table-selection-all,
   .table-selection-handle-grip,
-  .table-selection-actions > button {
+  .table-selection-band-action {
     transition: none;
   }
 }

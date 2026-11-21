@@ -39,8 +39,8 @@
     },
     {
       "key": "chevron-down",
-      "component": "DownMiniarrow",
-      "url": "https://gw.alipayobjects.com/os/chair-script/skylark/c__Icons316.89bde140.async.js"
+      "component": "Down",
+      "url": "https://gw.alipayobjects.com/os/chair-script/skylark/c__Icons314.d927ede1.async.js"
     },
     {
       "key": "clear",
@@ -176,6 +176,11 @@
       "key": "table",
       "component": "EditorTable",
       "url": "https://gw.alipayobjects.com/os/chair-script/skylark/c__Icons491.5e473375.async.js"
+    },
+    {
+      "key": "text-format",
+      "component": "EditorFontsize",
+      "url": "https://gw.alipayobjects.com/os/chair-script/skylark/c__Icons352.f31e2533.async.js"
     },
     {
       "key": "underline",

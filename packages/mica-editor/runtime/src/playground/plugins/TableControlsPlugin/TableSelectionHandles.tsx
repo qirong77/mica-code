@@ -23,6 +23,7 @@ import {createPortal} from 'react-dom';
 
 import type {TableBandAction, TableContext} from './tableActions';
 
+import {placeBandActions} from './bandActionLayout';
 import './handles.css';
 
 type Axis = 'row' | 'column';
@@ -82,10 +83,6 @@ type DropTarget = MoveDrag & {to: number; edge: number};
 const RAIL_SIZE = 12;
 const RAIL_OFFSET = 13;
 const GRIP_SIZE = 16;
-// 行用竖排胶囊（22×43）：正文左侧通常只有把手那一点边距；列用横排（41×22），
-// 落在表格下方，避开上方的表格工具栏。
-const BAND_ACTION_HORIZONTAL = {width: 41, height: 22};
-const BAND_ACTION_VERTICAL = {width: 22, height: 43};
 const CONNECTOR_REACH = 6;
 const VIEWPORT_PADDING = 3;
 const STRUCTURE_TAGS = new Set(['TABLE', 'TR', 'TD', 'TH', 'TBODY', 'THEAD', 'TFOOT', 'COL', 'COLGROUP']);
@@ -769,8 +766,9 @@ export default function TableSelectionHandles({context, onSelect, onMenu, onMove
     </div>;
   };
 
-  // 语雀在把手末端给了「＋ / 垃圾桶」两个快捷按钮：整条行列按索引处理，
-  // 不要求先改光标位置，也不用绕右键菜单。
+  // 语雀把「＋ / 垃圾桶」拆成两个独立按钮，都按索引处理整条行列：
+  // 「＋」贴在轴尾（行下边界 / 列右边界）外侧，「删除」位于另一方向的外缘，
+  // 不再挤成一张胶囊，也不在表格下方正中堆一坨。
   const renderBandActions = (axis: Axis) => {
     if (selectionDrag || move) return null;
     const isColumn = axis === 'column';
@@ -781,46 +779,53 @@ export default function TableSelectionHandles({context, onSelect, onMenu, onMove
       ? {start: isColumn ? context.minColumn : context.minRow, end: isColumn ? context.maxColumn : context.maxRow}
       : hovered === null ? null : {start: hovered, end: hovered};
     if (!band) return null;
-    const edges = isColumn ? layout.columnEdges : layout.rowEdges;
     const clipStart = isColumn ? layout.visible.left : layout.visible.top;
     const clipEnd = isColumn ? layout.visible.right : layout.visible.bottom;
-    const start = Math.max(edges[band.start] ?? clipStart, clipStart);
-    const end = Math.min(edges[band.end + 1] ?? clipEnd, clipEnd);
-    if (end - start < 8) return null;
     const count = band.end - band.start + 1;
     const label = isColumn ? '列' : '行';
-    const deletable = count < (isColumn ? context.columns : context.rows);
     const doc = layout.ownerDocument;
-    const box = isColumn ? BAND_ACTION_HORIZONTAL : BAND_ACTION_VERTICAL;
-    const maxLeft = Math.max(2, doc.documentElement.clientWidth - box.width - 2);
-    const maxTop = Math.max(2, doc.documentElement.clientHeight - box.height - 2);
-    const style: CSSProperties = isColumn
-      ? {left: clamp((start + end) / 2 - box.width / 2, 2, maxLeft), top: clamp(layout.visible.bottom + 14, 2, maxTop)}
-      : {left: clamp(layout.railLeft - 2 - box.width, 2, maxLeft), top: clamp((start + end) / 2 - box.height / 2, 2, maxTop)};
+    const placement = placeBandActions({
+      axis,
+      count: isColumn ? context.columns : context.rows,
+      startIndex: band.start,
+      endIndex: band.end,
+      edges: isColumn ? layout.columnEdges : layout.rowEdges,
+      clipStart,
+      clipEnd,
+      rail: isColumn ? layout.railTop : layout.railLeft,
+      crossRail: isColumn ? layout.railLeft : layout.railTop,
+      crossStart: isColumn ? layout.visible.top : layout.visible.left,
+      viewport: {width: doc.documentElement.clientWidth, height: doc.documentElement.clientHeight},
+    });
+    if (!placement) return null;
     const insertLabel = isColumn
       ? count > 1 ? `在右侧插入 ${count} 列` : '在右侧插入列'
       : count > 1 ? `在下方插入 ${count} 行` : '在下方插入行';
     const deleteLabel = count > 1 ? `删除 ${count} ${label}` : `删除该${label}`;
-    return <div className={`table-selection-actions is-${axis}`} data-table-controls="band-actions" style={style}
+    return <div className={`table-selection-band-actions is-${axis}`} data-table-controls="band-actions"
       role="group" aria-label={`第 ${band.start + 1} ${label}操作`}
       onMouseDown={event => event.preventDefault()}
       onPointerEnter={() => holdBand(axis, band.start)}
       onPointerLeave={releaseBand}>
-      <button type="button" aria-label={insertLabel} title={insertLabel}
+      <button type="button" className="table-selection-band-action is-add" style={placement.add}
+        data-table-band-action="add" data-table-axis={axis} aria-label={insertLabel} title={insertLabel}
         onClick={() => onBandAction(axis, band.start, band.end, isColumn ? 'column-after' : 'row-after')}>
-        <svg viewBox="0 0 12 12" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" aria-hidden="true">
-          <path d="M6 2.4v7.2M2.4 6h7.2" />
-        </svg>
+        <i className="table-selection-band-icon" aria-hidden="true" />
       </button>
-      {deletable && <button type="button" className="is-danger" aria-label={deleteLabel} title={deleteLabel}
+      {placement.remove && <button type="button" className="table-selection-band-action is-delete" style={placement.remove}
+        data-table-band-action="delete" data-table-axis={axis} aria-label={deleteLabel} title={deleteLabel}
         onClick={() => onBandAction(axis, band.start, band.end, isColumn ? 'delete-column' : 'delete-row')}>
-        <svg viewBox="0 0 12 12" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-          <path d="M2.4 3.5h7.2M4.5 3.5V2.3h3v1.2M3.5 3.5l.4 6.2h4.2l.4-6.2M5 5.4v2.9M7 5.4v2.9" />
-        </svg>
+        <i className="table-selection-band-icon" aria-hidden="true" />
       </button>}
     </div>;
   };
 
+  const columnBandActions = renderBandActions('column');
+  const rowBandActions = renderBandActions('row');
+  const columnActionEdge = fullColumns ? context.maxColumn + 1
+    : hoverBand?.axis === 'column' ? hoverBand.index + 1 : null;
+  // 列边界加号和列条带加号做的是同一件事、也在同一个点：条带加号在场时
+  // 只保留边界线（还要留给调宽），不再叠一个蓝圆按钮。
   const connectorNode = connector && layout.showColumns ? (() => {
     const index = connector.edge - 1;
     const label = `在第 ${connector.edge} 列右侧插入列`;
@@ -828,7 +833,7 @@ export default function TableSelectionHandles({context, onSelect, onMenu, onMove
     return <div className="table-selection-connector" data-table-controls="column-connector"
       style={{left: connector.x - 1, top: layout.visible.top, height: layout.visible.bottom - layout.visible.top}}>
       <span className="table-selection-connector-line" aria-hidden="true" />
-      <button type="button" className="table-selection-connector-button" data-table-connector=""
+      {!(columnBandActions && columnActionEdge === connector.edge) && <button type="button" className="table-selection-connector-button" data-table-connector=""
         style={{top: layout.railTop + RAIL_SIZE / 2 - layout.visible.top - 9}}
         aria-label={label} title={`${label} · 拖动列线可以调宽`}
         onMouseDown={event => event.preventDefault()}
@@ -839,7 +844,7 @@ export default function TableSelectionHandles({context, onSelect, onMenu, onMove
         <svg viewBox="0 0 12 12" width="11" height="11" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" aria-hidden="true">
           <path d="M6 2.4v7.2M2.4 6h7.2" />
         </svg>
-      </button>
+      </button>}
     </div>;
   })() : null;
 
@@ -864,8 +869,8 @@ export default function TableSelectionHandles({context, onSelect, onMenu, onMove
         </svg>
       </button>}
       {connectorNode}
-      {renderBandActions('column')}
-      {renderBandActions('row')}
+      {columnBandActions}
+      {rowBandActions}
       {drop && <div className={`table-selection-drop-line is-${drop.axis}`} style={dropStyle} aria-hidden="true" />}
       {move && <div className="table-selection-drag-label" aria-hidden="true"
         style={{

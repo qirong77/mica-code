@@ -522,6 +522,9 @@
   position: relative;
 }
 .notebook-editor-area {
+  display: flex;
+  flex-direction: column;
+  container: notebook-document / inline-size;
   flex: 1;
   min-width: 0;
   min-height: 0;
@@ -530,6 +533,8 @@
   background: var(--color-canvas);
 }
 .notebook-editor-frame {
+  flex: 1;
+  min-height: 0;
   width: 100%;
   height: 100%;
   display: block;
@@ -538,6 +543,19 @@
 }
 .notebook-editor-area.has-note .notebook-editor-frame {
   visibility: visible;
+}
+/* The editor can be narrow even on a desktop between two expanded sidebars. */
+@container notebook-document (max-width: 580px) {
+  .notebook-bar {
+    position: relative;
+    inset: auto;
+    flex: none;
+    align-items: center;
+    border-bottom: 1px solid var(--color-line-soft);
+  }
+  .notebook-bar-lead,
+  .notebook-bar-actions { border-bottom: 0; }
+  .notebook-bar-lead { flex: 1; max-width: none; }
 }
 /* 大纲是正文右侧的常驻面板，占位而不是浮层：鼠标移到面板上才露出标题行的
    隐藏按钮；收起后右缘变成下面的彩虹条，点它重新展开。 */

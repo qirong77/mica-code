@@ -968,18 +968,21 @@ export default function NotebookPage({ api }) {
   // 只靠 CSS 猜宽度会在标题变长或增删按钮时互相压住。
   useEffect(() => {
     const send = () => {
-      const mobile = layoutRef.current.mobile;
+      const bar = barLead.current?.parentElement;
+      // CSS decides whether the actual editor column can share this row. Page
+      // width alone misses a narrow column between the directory and outline.
+      const sharedRow = bar && getComputedStyle(bar).position === 'absolute';
       const height = barLead.current?.offsetHeight || barActions.current?.offsetHeight || 0;
       bridge.current?.layout({
-        left: mobile ? 0 : (barLead.current?.offsetWidth ?? 0),
-        right: mobile ? 0 : (barActions.current?.offsetWidth ?? 0),
-        height: mobile ? 0 : height,
+        left: sharedRow ? (barLead.current?.offsetWidth ?? 0) : 0,
+        right: sharedRow ? (barActions.current?.offsetWidth ?? 0) : 0,
+        height: sharedRow ? height : 0,
       });
     };
     send();
     syncLayout.current = send;
     const observer = new ResizeObserver(send);
-    for (const node of [barLead.current, barActions.current]) if (node) observer.observe(node);
+    for (const node of [barLead.current, barActions.current, barLead.current?.parentElement?.parentElement]) if (node) observer.observe(node);
     return () => {
       observer.disconnect();
       syncLayout.current = () => {};

@@ -193,7 +193,7 @@
 
 ## 侧栏入口与整页设置
 
-- Notebook 的目录、保存队列与文档栏在 `plugins/notebook/desktop.jsx`；富文本排版、块首键盘行为、文档样式与演示统一在 `packages/mica-editor/runtime/src/workspace/WorkspaceShell.tsx` 装配，仅属于笔记 composer。宿主用经 noteId/loadId 校验的 `action` 消息触发样式/演示，业务不进入桌面内核。正文按约 650ms 防抖自动保存，顶栏不显示保存状态，失败时才在正文上方给出带重试的提示；文档样式使用 Lexical root NodeState，演示只调整视图与临时只读；数据与交互口径见 `packages/mica-editor/README.md`、`plugins/notebook/README.md`。
+- Notebook 的目录、保存队列与文档栏在 `plugins/notebook/desktop.jsx`；篇名只保留大号纯文本，粘贴与 Markdown 快捷输入不在篇名内生成格式；实际编辑区不超过 580px 时文档栏与工具栏分行。富文本排版、块首键盘行为、文档样式与演示统一在 `packages/mica-editor/runtime/src/workspace/WorkspaceShell.tsx` 装配，仅属于笔记 composer。宿主用经 noteId/loadId 校验的 `action` 消息触发样式/演示，业务不进入桌面内核。正文按约 650ms 防抖自动保存，顶栏不显示保存状态，失败时才在正文上方给出带重试的提示；文档样式使用 Lexical root NodeState，演示只调整视图与临时只读；数据与交互口径见 `packages/mica-editor/README.md`、`plugins/notebook/README.md`。
 
 - Notebook 的桌面目录默认宽 260px，右边缘可拖动调宽（200–460px，按可用区域收紧上限；双击复位，支持方向键与 Home / End），通过插件自己的版本化文档通道保存宽度；偏好格式见 `plugins/notebook/README.md`。窄屏抽屉仍宽 260px。普通目录行高 36px，当前笔记以整行中性底色标记，更多菜单默认向按钮右下展开、边缘自动避让。标题搜索结果显示所属文件夹路径，选中后展开祖先文件夹并返回目录树。目录标题旁提供当前笔记定位和整树折叠、展开。正文顶栏常驻当前篇名，不放任何大纲开关：大纲是右侧常驻面板（占位、不是浮层），隐藏按钮只在大纲被悬停或键盘聚焦时才出现在面板标题行。收起后右缘是一条大纲彩虹条（每个标题一段刻度、按顺序取色、按级别定长短、当前位置不透明），点击整条即恢复面板，悬停才浮出展开按钮。窄屏面板更窄，没有 hover 的设备上按钮常显，目录才走带遮罩的抽屉。
 - Notebook 的目录拖放判定在 `plugins/notebook/tree-dnd.ts`，节点位置变更在 `model.ts` 的 `placeNode`：同级排序沿用 `nodes` 数组顺序，不新增存储字段。目录树提供根目录落点和文件夹悬停展开，排序只用拖动、不添加上移/下移按钮；搜索与最近删除不接拖动排序。所有结构写入复用原有索引 CAS 队列，拖动不触碰正文。

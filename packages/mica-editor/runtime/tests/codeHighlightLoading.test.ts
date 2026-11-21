@@ -1,6 +1,7 @@
 import { $createCodeNode, $isCodeNode } from '@lexical/code-core';
 import { buildEditorFromExtensions } from '@lexical/extension';
-import { $createTextNode, $getRoot, configExtension, defineExtension } from 'lexical';
+import {createEmptyHistoryState, registerHistory} from '@lexical/history';
+import { $createParagraphNode, $createTextNode, $getRoot, configExtension, defineExtension, HISTORY_PUSH_TAG, UNDO_COMMAND } from 'lexical';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { CodeHighlightExtension } from '../src/playground/plugins/CodeHighlightExtension';
@@ -17,6 +18,35 @@ afterEach(() => {
 });
 
 describe('lazy code highlighting', () => {
+  it('keeps lazy highlighting in the paste history entry so one undo removes the pasted code', async () => {
+    const editor = buildEditorFromExtensions(defineExtension({
+      name: 'test/code-paste-history',
+      dependencies: [configExtension(CodeHighlightExtension, {mode: 'prism'})],
+    }));
+    const history = createEmptyHistoryState();
+    const stopHistory = registerHistory(editor, history, 0);
+    editors.push({dispose: () => { stopHistory(); editor.dispose(); }});
+    editor.update(() => {
+      $getRoot().clear().append($createParagraphNode().append($createTextNode('保留正文')));
+    }, {discrete: true});
+    editor.update(() => {
+      $getRoot().append($createCodeNode('python').append($createTextNode('def greet():\n    print("hello")')));
+    }, {discrete: true, tag: HISTORY_PUSH_TAG});
+    for (let attempt = 0; attempt < 100; attempt++) {
+      const highlighted = editor.read('latest', () => {
+        const code = $getRoot().getLastChild();
+        return $isCodeNode(code) && code.getChildren().some(node => node.getType() === 'code-highlight');
+      });
+      if (highlighted && isCodeLanguageLoaded('python')) break;
+      await new Promise(resolve => setTimeout(resolve, 10));
+    }
+    expect(editor.read('latest', () => $getRoot().getChildren().some($isCodeNode))).toBe(true);
+    editor.dispatchCommand(UNDO_COMMAND, undefined);
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(editor.read('latest', () => $getRoot().getTextContent())).toBe('保留正文');
+    expect(editor.read('latest', () => $getRoot().getChildren().some($isCodeNode))).toBe(false);
+  });
+
   it('loads only the requested Prism grammar and makes it available to the facade', async () => {
     expect(isCodeLanguageLoaded('rust')).toBe(false);
     await loadCodeLanguage('rust');
