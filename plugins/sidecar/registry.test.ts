@@ -1,10 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { MAX_DEAD_ENTRIES, MAX_SIDECARS, SidecarRegistry, resolveSidecarRole, type SidecarEntry } from './registry.js';
+import { MAX_DEAD_ENTRIES, SidecarRegistry, resolveSidecarRole, type SidecarEntry } from './registry.js';
 
 const startMock = vi.hoisted(() => vi.fn());
 
-// 只替换起进程这一步：名额判定要的是「登记表里还活着几条」，不该为此真的去起
-// 一个 mica app-server（一次 2s 起，还会把真正的子进程留在测试机上）。
+// 只替换起进程这一步：这里测的是登记表自己的行为，不该为此真的去起一个
+// mica app-server（一次 2s 起，还会把真正的子进程留在测试机上）。
 vi.mock('./sidecarProcess.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('./sidecarProcess.js')>();
   return { ...actual, SidecarProcess: Object.assign(vi.fn(), { start: startMock }) };
@@ -24,17 +24,6 @@ function fakeEntry(id: string, closed: boolean, createdAt = 1): SidecarEntry {
     createdAt,
     process: { closed, transcript: { allTurns: () => [], latestTurn: null, busy: false } },
   } as unknown as SidecarEntry;
-}
-
-function fakeProcess(id: string): unknown {
-  return {
-    sessionId: id,
-    cwd: '/tmp',
-    closed: false,
-    transcript: { allTurns: () => [], latestTurn: null, busy: false },
-    send: async () => ({ queued: false }),
-    close: async () => undefined,
-  };
 }
 
 /** 直接往登记表里塞条目：不经过 spawn，测的是登记表自己的行为。 */
@@ -90,27 +79,6 @@ describe('SidecarRegistry.get', () => {
     expect(registry.get('20261031T034')).toBeNull();
     expect(registry.get('20261031T034146Z')?.id).toBe('20261031T034146Z-ib4gf6');
     expect(registry.get('20261031T034058Z-z6w82c')?.id).toBe('20261031T034058Z-z6w82c');
-  });
-});
-
-describe('SidecarRegistry concurrency cap', () => {
-  it('counts live processes, not dead leftovers', async () => {
-    const registry = makeRegistry();
-    seed(registry, Array.from({ length: MAX_SIDECARS }, (_, index) => fakeEntry(`dead-${index}`, true, index)));
-    startMock.mockResolvedValue(fakeProcess('child-new'));
-    const result = await registry.spawn({ prompt: 'x' });
-    // 死条目占着名额时的表现是「已经有 4 个在跑」，可实际一个都没跑。
-    expect(result.ok).toBe(true);
-    expect(startMock).toHaveBeenCalledTimes(1);
-  });
-
-  it('refuses once MAX_SIDECARS processes are alive', async () => {
-    const registry = makeRegistry();
-    seed(registry, Array.from({ length: MAX_SIDECARS }, (_, index) => fakeEntry(`live-${index}`, false, index)));
-    const result = await registry.spawn({ prompt: 'x' });
-    expect(result.ok).toBe(false);
-    expect(result.ok ? '' : result.error).toContain('已经有');
-    expect(startMock).not.toHaveBeenCalled();
   });
 });
 

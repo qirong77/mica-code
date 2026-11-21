@@ -1,5 +1,5 @@
 import { MicaTool, type ToolExecuteCallbacks } from '@packages/mica-tools/MicaTool.js';
-import { MAX_SIDECARS, MIN_MAX_TURNS, waitBaseline, waitSatisfied, type SidecarRegistry } from './registry.js';
+import { waitBaseline, waitSatisfied, type SidecarRegistry } from './registry.js';
 import {
   DEFAULT_TURN_INDEX_LIMIT,
   DEFAULT_TRANSCRIPT_CHARS,
@@ -54,16 +54,6 @@ export class SidecarSpawnTool extends MicaTool {
           role: { type: 'string', description: '角色名（$MICA_HOME/role/<name>.md），默认沿用当前配置。' },
           model: { type: 'string', description: '模型 id（provider/model），默认沿用当前配置。' },
           effort: { type: 'string', description: '推理档位，取该模型声明的档位名。' },
-          max_turns: {
-            type: 'integer',
-            minimum: MIN_MAX_TURNS,
-            description: `最多几轮模型往返，最小为 ${MIN_MAX_TURNS}，用来兜住跑飞的任务。`,
-          },
-          max_tokens: {
-            type: 'integer',
-            minimum: 0,
-            description: '累计 token 预算（输入+输出）；超过就自动打断这一轮并通知你。0 表示不限。',
-          },
         },
         required: ['prompt'],
       },
@@ -78,8 +68,6 @@ export class SidecarSpawnTool extends MicaTool {
       role?: string;
       model?: string;
       effort?: string;
-      max_turns?: number;
-      max_tokens?: number;
     },
     callbacks?: ToolExecuteCallbacks,
   ): Promise<string> {
@@ -90,8 +78,6 @@ export class SidecarSpawnTool extends MicaTool {
       ...(input.role ? { role: input.role } : {}),
       ...(input.model ? { model: input.model } : {}),
       ...(input.effort ? { effort: input.effort } : {}),
-      ...(input.max_turns !== undefined ? { maxTurns: input.max_turns } : {}),
-      ...(input.max_tokens !== undefined ? { maxTokens: input.max_tokens } : {}),
       ...(callbacks?.signal ? { signal: callbacks.signal } : {}),
     });
     if (!result.ok) return result.error;
@@ -104,9 +90,9 @@ export class SidecarSpawnTool extends MicaTool {
       '第一句话已经投出去了，它正在跑。接下来：',
       '· `sidecar_wait` 等它这一轮结束（推荐，别用 sleep 忙等）',
       '· `sidecar_status` 看它现在说到哪了、调了哪些工具',
-      `· 最多同时 ${MAX_SIDECARS} 个子会话；跑完用 \`sidecar_close\` 收掉进程`,
+      '· 跑完用 `sidecar_close` 收掉进程（不收也会一直待着，像正常会话一样）',
       '',
-      '它每一轮结束、卡住、超预算、进程退出都会记成一条动态，你下一轮开工时自动看到——不必反复轮询。',
+      '它每一轮结束、卡住、进程退出都会记成一条动态，你下一轮开工时自动看到——不必反复轮询。',
       '注意：会话文件要等它这一轮结束才会落盘，在那之前侧栏还看不到它。',
     ].join('\n');
   }
@@ -139,18 +125,20 @@ export class SidecarSendTool extends MicaTool {
     if (!entry) return `找不到子会话：${input.session_id}。用 sidecar_status 列出当前有哪些。`;
     const text = String(input.text ?? '').trim();
     if (!text) return '消息内容为空。';
-    if (entry.budgetTripped) {
-      // 预算已经撞过一次：再投一句等于让同一个跑飞的会话接着烧钱。
-      return (
-        `${entry.id} 已经超出 token 预算，不再接受新的指令。\n` +
-        '换个任务请 sidecar_spawn 新开一个；确实要继续就 attach 时给一个更大的 max_tokens。'
-      );
-    }
+    // 这里不设任何前置拦阻：能投就投。会话文件还在，进程退出了也能 attach 接回来。
     try {
       const { queued } = await entry.process.send(text);
       return queued ? `已排进 ${entry.id} 的当前这一轮（下一迭代边界注入）。` : `已发送，${entry.id} 开始新的一轮。`;
     } catch (error) {
-      return `发送失败：${error instanceof Error ? error.message : String(error)}`;
+      const message = error instanceof Error ? error.message : String(error);
+      // 进程已经不在了：会话本身还在磁盘上，接回来接着干，别让上下文白丢。
+      if (entry.process.closed) {
+        return (
+          `${entry.id} 的进程已经退出（${message}）。\n` +
+          `先 \`sidecar_attach({ session_id: "${entry.id}" })\` 接回这条会话，再 sidecar_send 就接着干。`
+        );
+      }
+      return `发送失败：${message}`;
     }
   }
 
@@ -555,7 +543,6 @@ export class SidecarAttachTool extends MicaTool {
           session_id: { type: 'string', description: '要接管的会话 id（完整 id，会话列表里那条）。' },
           cwd: { type: 'string', description: '接管后用它自己的工作目录；缺省用会话文件里记的目录。' },
           title: { type: 'string', description: '在 sidecar_status 里显示的名字，缺省取会话标题。' },
-          max_tokens: { type: 'integer', minimum: 0, description: '累计 token 预算，0 表示不限。' },
         },
         required: ['session_id'],
       },
@@ -563,14 +550,13 @@ export class SidecarAttachTool extends MicaTool {
   }
 
   async execute(
-    input: { session_id: string; cwd?: string; title?: string; max_tokens?: number },
+    input: { session_id: string; cwd?: string; title?: string },
     callbacks?: ToolExecuteCallbacks,
   ): Promise<string> {
     const result = await this.registry.attach({
       sessionId: String(input.session_id ?? ''),
       ...(input.cwd ? { cwd: input.cwd } : {}),
       ...(input.title ? { title: input.title } : {}),
-      ...(input.max_tokens !== undefined ? { maxTokens: input.max_tokens } : {}),
       ...(callbacks?.signal ? { signal: callbacks.signal } : {}),
     });
     if (!result.ok) return result.error;
@@ -639,7 +625,7 @@ export class SidecarCloseTool extends MicaTool {
   constructor(private readonly registry: SidecarRegistry) {
     super(
       'sidecar_close',
-      '收掉子会话的进程。会话本身留在会话列表里（历史不丢），只是不再占着进程与并发名额。' +
+      '收掉子会话的进程。会话本身留在会话列表里（历史不丢）。' +
         '已经拿到需要的结论就关掉它，别让一堆跑完的子会话一直挂着。' +
         '收尾时用 all: true 一次收全部，idle: true 只收跑完的（还在跑的不动）。',
       {

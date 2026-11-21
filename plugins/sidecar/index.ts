@@ -77,7 +77,7 @@ function minutesToMs(value: unknown, fallbackMinutes: number): number {
  * 每一轮都发一条会把对话淹掉，所以只留真正改变结论的那几种。
  */
 function shouldNotify(event: SidecarEvent): boolean {
-  return event.kind === 'exit' || event.kind === 'stalled' || event.kind === 'budget';
+  return event.kind === 'exit' || event.kind === 'stalled';
 }
 
 const plugin: MicaPlugin = {
@@ -135,15 +135,14 @@ const plugin: MicaPlugin = {
       });
     }
 
-    // 插件设置：阈值与预算都从设置里读，改完立刻生效（不走重启）。
+    // 插件设置：两项阈值都从设置里读，改完立刻生效（不走重启）。
     const readSettings = () => (ctx.settings?.get?.() ?? {}) as Record<string, unknown>;
     const registry = new SidecarRegistry(ctx, parentSessionId, defaultCwd, currentRole, {
       limits: () => {
         const values = readSettings();
         return {
           stallMs: minutesToMs(values.stallMinutes, 5),
-          recycleMs: minutesToMs(values.recycleMinutes, 15),
-          defaultMaxTokens: Math.max(0, Number(values.defaultMaxTokens) || 0),
+          recycleMs: minutesToMs(values.recycleMinutes, 0),
         };
       },
       onEvent: (event) => {
@@ -152,7 +151,7 @@ const plugin: MicaPlugin = {
         if (!shouldNotify(event)) return;
         ctx.ui?.notice(
           [
-            `子会话「${event.title}」${event.kind === 'exit' ? '进程已退出' : event.kind === 'budget' ? '超出 token 预算，已打断' : '可能卡住了'}：${event.summary}`,
+            `子会话「${event.title}」${event.kind === 'exit' ? '进程已退出' : '可能卡住了'}：${event.summary}`,
             event.detail ? `\n${event.detail}` : '',
           ].join(''),
           { command: 'sidecar', status: event.kind === 'stalled' ? 'warning' : 'info', surface: 'conversation' },
@@ -174,7 +173,7 @@ const plugin: MicaPlugin = {
       ctx.tools.register(new SidecarAbortTool(registry), options),
       ctx.tools.register(new SidecarCloseTool(registry), options),
     ];
-    // 推送：子会话自己发生的事（跑完、退出、卡住、超预算）下一轮直接出现在 prompt 里。
+    // 推送：子会话自己发生的事（跑完、退出、卡住）下一轮直接出现在 prompt 里。
     //
     // 放在其他插件段落之后（base prompt 的末尾），没有事件时渲染空串——整段消失，
     // 前缀不变，prompt cache 不白断。
@@ -184,7 +183,7 @@ const plugin: MicaPlugin = {
       order: 90,
       render: () => renderSidecarEvents(registry.takeEventsForPrompt()),
     });
-    // 看门狗：预算、停滞、空闲回收都需要一个钟——一个彻底卡住的子会话再也不会通知我们。
+    // 看门狗：停滞与空闲回收都需要一个钟——一个彻底卡住的子会话再也不会通知我们。
     const guard = ctx.background?.register({
       id: 'sidecar-watch',
       every: 15_000,
@@ -204,15 +203,16 @@ const plugin: MicaPlugin = {
       //
       // 这里必须 **await**：`disposeAll` 会等这个回调，而 app-server 在它返回后
       // 立刻 `process.exit` —— 用 `void` 等于在子进程还没死的时候就撒手。
-      // graceMs 压到 800 是给退出路径留预算：正常子进程收到 stdin EOF 几十毫秒
-      // 就退了，只有卡住的才走满 SIGTERM/SIGKILL 那段。
-      await registry.closeAll(800);
+      // graceMs 给 3 秒：正常子进程收到 stdin EOF 几十毫秒就退，而正在写一篇长文、
+      // 正在落盘一份结果的那一轮需要时间把状态存下来。父会话退出时多等几秒，
+      // 换回来的是「会话文件里有它跑到哪」，而不是一条被打断的半截记录。
+      await registry.closeAll(3_000);
     });
 
     if (!registration.skipped.length) {
       ctx.health.report({
         level: 'ok',
-        message: '可以派生并观测子会话（跑完/卡住/超预算会自动报到）',
+        message: '可以派生并观测子会话（跑完/卡住会自动报到，不设迭代、token、并发与嵌套上限）',
         hint: '用法见 skill「sidecar」；子会话会挂在当前会话下面出现在侧栏，桌面端右侧面板可直接打断或收掉。',
       });
     }

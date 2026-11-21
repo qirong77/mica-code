@@ -41,12 +41,26 @@ export function registerToolIcon(name: string, icon: string): () => void {
   };
 }
 
+/**
+ * 思考正文里的空行整段删掉。桌面端同一规则见 `chat-tool-views.jsx` 的
+ * `collapseThinkingBlankLines`：模型在每段之间连打几个换行时，终端每一行都是
+ * 一行真实高度，空行比桌面更贵。
+ */
+function collapseThinkingBlankLines(text: string): string {
+  return String(text ?? '')
+    .replace(/\r\n?/g, '\n')
+    .split('\n')
+    .filter((line) => line.trim() !== '')
+    .join('\n');
+}
+
 export function createThinkingLogItem(id: string, text: string): MicaUiAgentTurnLogItem {
+  const body = collapseThinkingBlankLines(text);
   function ThinkingLogItem() {
     return (
       <Box>
         <Text dimColor wrap="wrap">
-          {text}
+          {body}
         </Text>
       </Box>
     );

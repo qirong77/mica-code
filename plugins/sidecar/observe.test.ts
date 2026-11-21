@@ -118,22 +118,6 @@ describe('sidecar events', () => {
     expect(events.at(-1)?.detail).toContain('已退出');
   });
 
-  it('aborts a child that blows through its token budget', async () => {
-    const registry = makeRegistry();
-    const { process, transcript, emit } = makeProcess('child-3');
-    startMock.mockResolvedValue(process);
-    const result = await registry.spawn({ prompt: 'x', maxTokens: 1_000 });
-    expect(result.ok).toBe(true);
-
-    transcript.apply({
-      method: 'thread/tokenUsage/updated',
-      params: { tokenUsage: { total: { total_tokens: 2_000 }, last: { input_tokens: 900 } } },
-    });
-    emit();
-    expect(process.abort).toHaveBeenCalledTimes(1);
-    expect(registry.takeEventsForPrompt().some((event) => event.kind === 'budget')).toBe(true);
-  });
-
   it('notifies a stall once per turn instead of every tick', async () => {
     let now = 1_000_000;
     const registry = makeRegistry({ stallMs: 60_000, now: () => now });

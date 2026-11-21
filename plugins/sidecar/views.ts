@@ -140,8 +140,7 @@ export function renderSidecar(
 
   const usage = transcript.usage;
   if (usage.total > 0) {
-    const budget = entry.maxTokens ? ` · 预算 ${entry.maxTokens}` : '';
-    lines.push('', `用量：输入 ${usage.input} · 输出 ${usage.output} · 累计 ${usage.total}${budget}`);
+    lines.push('', `用量：输入 ${usage.input} · 输出 ${usage.output} · 累计 ${usage.total}`);
   }
   return lines.join('\n');
 }

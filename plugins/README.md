@@ -21,7 +21,7 @@
 
 [Subagent](subagent/README.md) 的文件租约限定文件工具的写入路径；shell 可从工作区内包含租约的目录执行，文件租约也能运行测试。外部 checkout 的祖先以最近 `.git` 为界，独立外部路径只放行到直接父目录；cwd 检查不是 shell 沙箱，命令仍须遵守写策略。
 
-[Sidecar](sidecar/README.md) 派一个独立的 mica 会话去干活并观测它：子会话是常驻的 `mica app-server` 进程，工具面按成本分层（`sidecar_turns` → `sidecar_grep` → `sidecar_transcript`），一个 `sidecar_collect` 收齐全部结论。它还**反向汇报**：轮次结束、进程退出、停滞、超出 token 预算都记成一条动态，父会话下一轮开工时由 prompt 段落注入一次、读后即清；`sidecar_wait` 超时会把条件登记成后台提醒，所以长任务不必把父会话钉在阻塞等待上。桌面端右侧面板与输入框上方的状态行让用户能直接看住、打断、收掉这些进程；空闲回收与 `sidecar_attach`（`thread/resume` 接管已有会话，历史从会话文件补）负责让它们既不常驻烧内存，也不至于丢了线索。
+[Sidecar](sidecar/README.md) 派一个独立的 mica 会话去干活并观测它：子会话是常驻的 `mica app-server` 进程，工具面按成本分层（`sidecar_turns` → `sidecar_grep` → `sidecar_transcript`），一个 `sidecar_collect` 收齐全部结论。它还**反向汇报**：轮次结束、进程退出、停滞都记成一条动态，父会话下一轮开工时由 prompt 段落注入一次、读后即清；`sidecar_wait` 超时会把条件登记成后台提醒，所以长任务不必把父会话钉在阻塞等待上。桌面端右侧面板与输入框上方的状态行让用户能直接看住、打断、收掉这些进程；空闲回收与 `sidecar_attach`（`thread/resume` 接管已有会话，历史从会话文件补）负责让它们既不常驻烧内存，也不至于丢了线索。
 
 面板视图可返回 `cards`（每插件最多 3 张）：`{ id, title, summary?, detail?, tone?, revision, actions?, impressionAction? }`。卡片动作 `{ id, label, key?, tone? }` 复用面板动作通道；`key` 应携带版本并由插件校验，拒绝旧界面执行新内容。`impressionAction` 仅用于记录实际展示，不应产生用户可见操作。清单声明 `desktop.panel.dynamicShortcuts: true` 让快捷区获取卡片视图。卡片里显示摘要，详细清单仍放 `sections`。
 
@@ -1112,13 +1112,13 @@ const child = spawn(micaExecutable, ['app-server', '--dir', cwd, '--parent', thi
   和 `/resume` 都能直接打开它——用户能看到，但不必为了看到而操作界面。
 - **一次 spawn 就是一个会话**，不要给一个子进程投两轮以上之外的期望：`turn/start` 在忙时
   会报错，需要排队就用 `turn/steer`（等价的用户操作是按回车）。
-- `sidecar_spawn.max_turns` 是可选的迭代上限；显式传入时必须至少为 **200**，避免子会话还没完成有效工具链就被截断。省略时不额外设置这个上限。
+- `sidecar_spawn` **没有**迭代或 token 参数：不限轮数、不限 token、不限并发、不限嵌套层数。插件里不存在会在会话干到一半时自动中止它的机制（停滞只提醒、空闲回收默认关），要停只能显式 `sidecar_abort` / `sidecar_close`。
 
 `plugins/sidecar` 是完整示例：`sidecarProcess.ts` 负责协议与进程，`transcript.ts` 把事件投影
 成轮次（纯函数，可单测），`tools.ts` 把它包成 `sidecar_*` 工具。
 
 **反向汇报同样是插件的事**。子会话跑完不会有人来问，父会话也可能正忙：`registry.ts` 在
-每个子进程的变化上挂一个观察者，把轮次终态、进程退出、停滞、超预算记成一条事件，父会话
+每个子进程的变化上挂一个观察者，把轮次终态、进程退出、停滞记成一条事件，父会话
 下一轮开工时由 `ctx.prompt.section()` 注入一次、读后即清（没有事件时渲染空串，prompt 前缀
 不变）。`sidecar_wait` 超时也走同一条通路：条件登记成后台提醒，成立时变成事件，所以长任务
 不必把父会话钉在阻塞等待上。停滞/空闲回收/预算这些要有钟的判断交给 `ctx.background`，
@@ -1151,8 +1151,8 @@ const child = spawn(micaExecutable, ['app-server', '--dir', cwd, '--parent', thi
 接手这个能力的模型十次 `status` 就会把父会话的上下文吃光。
 
 **派生必须有深度上限**。每个子会话都是一个完整的 mica 进程（自带 registry、加载 MCP 与插件），
-而 `MAX_SIDECARS` 只限制单个进程的宽度：不限制深度就是指数级的进程树，四层足以把机器拖死。
-派生子进程时写 `MICA_SIDECAR_DEPTH`（当前层数 + 1），超过上限直接拒绝派生。
+宽度与深度都交给使用方判断：层数一多就是指数级的进程树，四层足以把机器拖死。
+派生子进程时不写深度标记、也不限制派生层数：嵌套多深由使用方自己决定。
 
 **进程退出要一路降到 SIGKILL**。只发 SIGTERM 就返回等于把「它退了没有」交给一个不存在的下一个
 信号：宿主紧接着 `process.exit`，不响应 SIGTERM 的子进程就成了没人收的孤儿，继续跑它那一轮、

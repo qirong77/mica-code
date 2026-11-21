@@ -46,4 +46,25 @@ describe('ReasoningRow', () => {
     const html = renderToStaticMarkup(createElement(ReasoningRow, { text: '先看看 diff' }))
     expect(html).toBe('<div class="chat-turn-log-thinking">先看看 diff</div>')
   })
+
+  test('drops blank lines between thinking paragraphs', () => {
+    const html = renderToStaticMarkup(
+      createElement(ReasoningRow, {
+        text: '**Adding official source retrieval**\n\n\n**Building demo agent runner**\n\n\n   \n**Validating evidence sources**\n\n'
+      })
+    )
+    expect(html).toBe(
+      '<div class="chat-turn-log-thinking">**Adding official source retrieval**' +
+        '\n**Building demo agent runner**\n**Validating evidence sources**</div>'
+    )
+  })
+
+  test('renders nothing when thinking is only blank lines', () => {
+    expect(renderToStaticMarkup(createElement(ReasoningRow, { text: '\n\n  \r\n\n' }))).toBe('')
+  })
+
+  test('keeps CRLF thinking on one blank-line-free block', () => {
+    const html = renderToStaticMarkup(createElement(ReasoningRow, { text: 'a\r\n\r\nb' }))
+    expect(html).toBe('<div class="chat-turn-log-thinking">a\nb</div>')
+  })
 })

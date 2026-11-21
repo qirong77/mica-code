@@ -3,9 +3,7 @@ import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'nod
 import { homedir, tmpdir } from 'node:os';
 import { isAbsolute, join, resolve } from 'node:path';
 import {
-  currentSidecarDepth,
   inheritSessionMcpArgs,
-  MAX_SIDECAR_DEPTH,
   SidecarProcess,
   resolveSessionCwd,
 } from './sidecarProcess.js';
@@ -78,40 +76,6 @@ describe('resolveSessionCwd', () => {
 
   it('normalises . and ..', () => {
     expect(resolveSessionCwd('apps/../apps/desktop')).toBe(resolve(process.cwd(), 'apps/desktop'));
-  });
-});
-
-describe('currentSidecarDepth', () => {
-  const original = process.env.MICA_SIDECAR_DEPTH;
-  const restore = () => {
-    if (original === undefined) delete process.env.MICA_SIDECAR_DEPTH;
-    else process.env.MICA_SIDECAR_DEPTH = original;
-  };
-
-  it('is 0 when the env marker is absent', () => {
-    delete process.env.MICA_SIDECAR_DEPTH;
-    expect(currentSidecarDepth()).toBe(0);
-    restore();
-  });
-
-  it('reads the marker a parent wrote', () => {
-    process.env.MICA_SIDECAR_DEPTH = '2';
-    expect(currentSidecarDepth()).toBe(2);
-    restore();
-  });
-
-  it('treats garbage as depth 0 rather than letting nesting explode', () => {
-    // 一个坏值必须退化成「顶层」而不是「无限」，否则防护本身就失效了。
-    for (const bad of ['', 'abc', '-1', 'NaN']) {
-      process.env.MICA_SIDECAR_DEPTH = bad;
-      expect(currentSidecarDepth()).toBe(0);
-    }
-    restore();
-  });
-
-  it('keeps the ceiling at 2', () => {
-    // 每层都是完整 mica 进程；改大这个值等于放大指数级的进程数。
-    expect(MAX_SIDECAR_DEPTH).toBe(2);
   });
 });
 
@@ -228,7 +192,7 @@ describe('SidecarProcess.start', () => {
     const pid = Number(readFileSync(pidFile, 'utf8').trim());
     expect(pid).toBeGreaterThan(0);
     // 握手失败时调用方拿不到引用：不在这里收掉，它就成了没人管的进程——继续吃内存，
-    // 还不占 MAX_SIDECARS 名额，重试几次就是一份进程堆积。
+    // 重试几次就是一份进程堆积。
     expect(await waitUntilGone(pid, 5_000)).toBe(true);
   }, 20_000);
 

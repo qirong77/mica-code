@@ -16,20 +16,6 @@ import { SidecarTranscript } from './transcript.js';
 
 export type SidecarCliCommand = { command: string; prefixArgs: string[] };
 
-/**
- * 最多套几层子会话。
- *
- * 2 层已经够用（子会话里再派一个去查东西），再多就是在烧机器：每层都是一个完整的
- * mica 进程。这个上限与 `MAX_SIDECARS`（每进程 4 个）是两件事——后者管宽度，这里管深度。
- */
-export const MAX_SIDECAR_DEPTH = 2;
-
-/** 当前进程处在第几层（顶层会话是 0）。 */
-export function currentSidecarDepth(): number {
-  const raw = Number(process.env.MICA_SIDECAR_DEPTH);
-  return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : 0;
-}
-
 /** 等一件事最多 ms，问的是「它发生了没有」，不是「拿它的值」。 */
 function settledWithin(promise: Promise<void>, ms: number): Promise<boolean> {
   return new Promise((resolve) => {
@@ -50,7 +36,12 @@ function settledWithin(promise: Promise<void>, ms: number): Promise<boolean> {
 export function resolveCliCommand(): SidecarCliCommand {
   const runtimeHost = /^(bun|node)(\.exe)?$/i.test(basename(process.execPath));
   const entry = process.argv[1] ?? '';
-  if (runtimeHost && entry && !entry.startsWith('/$bunfs')) {
+  // 只认「mica 自己这个入口」：dev 下是 `apps/cli/src/index.ts` 之类的 CLI 入口。
+  // 以前这里只要 argv[1] 存在就带上，后果是——用 `bun temp/probe.mjs` 这类脚本当宿主时，
+  // 子进程会去重跑那个探针脚本，于是无限自我派生。那时靠 `MICA_SIDECAR_DEPTH` 兜着；
+  // 现在深度不再设限，这个判据就得自己站得住。
+  const looksLikeMicaEntry = /(^|[\\/])apps[\\/]cli[\\/].*\.(ts|js|mjs)$/i.test(entry);
+  if (runtimeHost && looksLikeMicaEntry && !entry.startsWith('/$bunfs')) {
     return { command: process.execPath, prefixArgs: [entry] };
   }
   return { command: process.execPath, prefixArgs: [] };
@@ -100,7 +91,6 @@ export type SidecarProcessOptions = {
   role?: string;
   /** 父会话 id：写进会话文件，侧栏据此把子会话嵌套在父会话下面。 */
   parentSessionId?: string;
-  maxTurns?: number;
   /**
    * 接管一个已经存在的会话（`sidecar_attach`）。
    *
@@ -206,20 +196,10 @@ export class SidecarProcess {
     if (options.effort) args.push('--variant', options.effort);
     if (options.role) args.push('--role', options.role);
     if (options.parentSessionId && !options.resumeSessionId) args.push('--parent', options.parentSessionId);
-    if (typeof options.maxTurns === 'number' && options.maxTurns > 0)
-      args.push('--max-turns', String(options.maxTurns));
 
     const env: NodeJS.ProcessEnv = { ...process.env };
     // 子会话是纯 headless 宿主：它没有界面，「桌面端才有的能力面」不该被假装提供。
     delete env.MICA_PLUGIN_DESKTOP_HOST;
-    // 深度标记：每派生一层 +1，超过上限就不许再派生。
-    //
-    // 没有它就是一个**指数级**风险：每个子会话自己也是一个完整 mica 进程、带着
-    // 自己的 registry 和 `MAX_SIDECARS`，4 层就是 4^4=256 个进程，每个还在加载
-    // MCP 与插件——足以把整台机器拖死。而 `MICA_SIDECAR_DEPTH` 在 dev 下还顺带
-    // 挡住另一种事故：`resolveCliCommand` 用 `process.argv[1]` 推导入口，探针脚本
-    // 会让子进程重跑探针，从而无限自我派生。
-    env.MICA_SIDECAR_DEPTH = String(currentSidecarDepth() + 1);
 
     const child = spawn(cli.command, args, {
       cwd,
@@ -236,7 +216,7 @@ export class SidecarProcess {
       options.signal?.throwIfAborted();
     } catch (error) {
       // 握手失败时子进程还活着，而调用方拿不到引用——它就成了没人收的进程：
-      // 继续跑、继续吃内存，还不占 MAX_SIDECARS 名额，重试几次就是一份进程堆积。
+      // 继续跑、继续吃内存，重试几次就是一份进程堆积。
       await process_.close(500);
       throw error;
     } finally {

@@ -34,16 +34,34 @@ function toolStatusClass(tool) {
 }
 
 /**
+ * 删掉思考正文里的空行（含只有空白的行）。
+ *
+ * OpenAI 一类模型常在每段之间连打两三个换行，而每段本身就只有一行：面板被撑成
+ * 一屏大半是空白，真正想的几句被挤到上下两端、互相看不见。思考是纯文本、一行一段，
+ * 空行不承载信息——删掉后行数就等于有内容的行数，段落仍靠换行分开。
+ *
+ * 流式追加时同样的合并规则，所以中途不会先撑高再收回去。
+ */
+export function collapseThinkingBlankLines(text) {
+  return String(text ?? '')
+    .replace(/\r\n?/g, '\n')
+    .split('\n')
+    .filter((line) => line.trim() !== '')
+    .join('\n')
+}
+
+/**
  * 思考过程的一整段（`.chat-turn-log-thinking` 自己负责边框与折行）。
  *
  * 思考正文也是纯文本，里面的路径与链接同样可点：用户读到这里想打开文件/网址时，
  * 不该先把它复制出去。
  */
 export function ReasoningRow({ text }) {
-  if (!text) return null
+  const body = collapseThinkingBlankLines(text)
+  if (!body) return null
   return (
     <div className="chat-turn-log-thinking">
-      <PathText text={text} />
+      <PathText text={body} />
     </div>
   )
 }

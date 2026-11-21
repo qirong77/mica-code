@@ -4,7 +4,7 @@ import type {
   PluginPanelItem,
   PluginPanelView,
 } from '@packages/mica-plugin/index.js';
-import { MAX_SIDECARS, type SidecarEntry, type SidecarRegistry } from './registry.js';
+import { type SidecarEntry, type SidecarRegistry } from './registry.js';
 import { renderSidecar, sinceLabel } from './views.js';
 
 /**
@@ -81,7 +81,7 @@ export function createPanelHandler(deps: PanelDeps): PluginPanelHandler {
         {
           title: '子会话',
           subtitle: entries.length
-            ? `${running} 个在跑 · ${live.length - running} 个空闲 · 最多 ${MAX_SIDECARS} 个同时在跑`
+            ? `${running} 个在跑 · ${live.length - running} 个空闲`
             : undefined,
           items: entries.map((entry) => itemOf(entry, now())),
           empty: '还没有子会话。要派活就点下面的「派一个」——模型会按你的话写清楚目标、边界和验收方式。',
@@ -97,13 +97,6 @@ export function createPanelHandler(deps: PanelDeps): PluginPanelHandler {
         {
           title: '派一个',
           subtitle: '在这里写一句要它做的事，提示词会放进输入框，由你确认后再发',
-          ...(registry.liveCount > 0
-            ? {
-                rows: [
-                  { label: '名额', value: `${registry.liveCount}/${MAX_SIDECARS} 在跑（跑完记得收，每个是完整进程）` },
-                ],
-              }
-            : {}),
           actions: [{ id: SPAWN_ACTION, label: '派一个去干活', tone: 'default' as const }],
         },
       ];

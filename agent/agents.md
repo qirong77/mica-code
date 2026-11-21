@@ -3,7 +3,7 @@
 ## Subagent
 
 - `plugins/sidecar` 派生独立 app-server 时继承父 CLI 显式的 `--mcp-config`、`--strict-mcp-config` 与 `--mcp-init-timeout-ms`；配置路径按父启动 `--dir`（省略时为启动 cwd）绝对化，不随父会话之后换目录漂移，沿用原配置中的 owner，不生成新授权、不写用户配置。共享控制资源的委派须协调各自创建的窗口与终端；子会话仍不提供桌面专属插件能力面。
-- `sidecar_spawn.max_turns` 可省略；显式传入时必须是不小于 200 的整数，避免过低的迭代上限让子会话无法完成任务。
+- sidecar 不设任何自动限制：`sidecar_spawn` / `sidecar_attach` 没有 `max_turns` / `max_tokens` 参数，迭代轮数、token、并发数、嵌套层数都不限（也不再写 `MICA_SIDECAR_DEPTH`）。插件里没有会在别人干到一半时自动按下停止键的机制——停滞只提醒、空闲回收默认关（0 = 不收）。要停只能显式 `sidecar_abort` / `sidecar_close`；父会话/宿主退出时子进程会被一起收掉，但把 grace 留到 3 秒，让正在跑的那一轮有机会落盘。删掉深度标记后，`resolveCliCommand` 只认 `apps/cli/**` 下的入口，避免 dev 下拿探针脚本当入口导致无限自我派生。
 
 - 委派能力本身是插件 `plugins/subagent/`：`agent` 工具、7 种内置类型、委派 prompt 段落都在插件里；内核只留机制（`ctx.subagents`，实现在 `apps/cli/src/agents/PluginSubagentHost.ts` + `SubagentTaskManager.ts`）。停用该插件后既没有 `agent` 工具，也没有提示词里的委派指引。
 - 内置类型：general-purpose、Explore、Implementer、Reviewer、Tester、Planner、Proposal；`maxTurns` 唯一默认值在 `plugins/subagent/definitions.ts`（999：截断一次要重做半成品，代价比多跑几轮高）。

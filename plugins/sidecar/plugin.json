@@ -3,7 +3,7 @@
   "name": "Sidecar",
   "icon": "git-branch",
   "version": "2.0.0",
-  "description": "派一个独立的 mica 会话去干活并观测它：开子会话、投消息、看进度、等结果、打断、收掉、接管已有会话。子会话挂在当前会话下面出现在侧栏，跑完/卡住/超预算会自己报到。",
+  "description": "派一个独立的 mica 会话去干活并观测它：开子会话、投消息、看进度、等结果、打断、收掉、接管已有会话。子会话挂在当前会话下面出现在侧栏，跑完/卡住会自己报到。不限迭代、不限 token、不限额、不限嵌套层数。",
   "author": "Mica",
   "main": "index.ts",
   "assets": ["README.md", "skill/SKILL.md"],
@@ -25,26 +25,17 @@
       "key": "recycleMinutes",
       "label": "空闲自动回收（分钟）",
       "type": "number",
-      "default": "15",
-      "min": 0,
-      "max": 240,
-      "description": "跑完、结果也已经被读过的子会话空闲这么久就收掉进程（会话历史保留，可用 sidecar_attach 接回）。0 表示不回收。"
-    },
-    {
-      "key": "defaultMaxTokens",
-      "label": "默认 token 预算",
-      "type": "number",
       "default": "0",
       "min": 0,
-      "max": 10000000,
-      "description": "派子会话时的累计 token 上限（输入+输出），超出自动打断。0 表示不限；单个任务可用 sidecar_spawn 的 max_tokens 覆盖。"
+      "max": 240,
+      "description": "跑完、结果也已经被读过的子会话空闲这么久就收掉进程（会话历史保留，可用 sidecar_attach 接回）。默认 0 = 不回收，让它像正常会话一样待着。"
     },
     {
       "key": "notify",
       "label": "会话内提醒",
       "type": "switch",
       "default": "true",
-      "description": "子会话退出、卡住或超预算时，在当前会话里留一条提示。"
+      "description": "子会话退出或卡住时，在当前会话里留一条提示。"
     }
   ],
   "desktop": {

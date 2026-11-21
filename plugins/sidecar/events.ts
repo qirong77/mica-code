@@ -5,7 +5,7 @@ import type { SidecarTurn } from './transcript.js';
  *
  * 没有这一层时，sidecar 的一切都靠父会话主动 `sidecar_wait` / `sidecar_status` 去捞：
  * 父会话这一轮一旦结束（用户去忙别的了），子会话跑完的结果就没人读，只能等用户回来
- * 再问一句「跑完了吗」。事件是反方向的：**子会话结束、卡住、超预算、进程退出**都记一条，
+ * 再问一句「跑完了吗」。事件是反方向的：**子会话结束、卡住、进程退出**都记一条，
  * 父会话下一轮开始时由 prompt 段落注入一次，读后即清。
  *
  * 三条硬约束：
@@ -23,8 +23,6 @@ export type SidecarEventKind =
   | 'exit'
   /** 在跑但很久没有新输出，疑似卡住。 */
   | 'stalled'
-  /** 触到 token 预算，已自动打断。 */
-  | 'budget'
   /** 空闲太久，进程被自动回收（会话历史仍在）。 */
   | 'recycled'
   /** 接管了一条已有会话。 */
@@ -132,7 +130,6 @@ const KIND_LABELS: Record<SidecarEventKind, string> = {
   watch: '等到了',
   exit: '退出',
   stalled: '停滞',
-  budget: '预算',
   recycled: '已回收',
   attach: '接管',
   info: '提示',
