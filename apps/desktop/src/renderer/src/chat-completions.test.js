@@ -331,13 +331,8 @@ describe('composer completions', () => {
       { kind: 'project', label: '.mica/skills' },
       { kind: 'builtin', label: 'browser' }
     ])
-    // 行上那枚标记：前缀说归属，实体名说具体是哪个
-    expect(options.map((option) => option.sourceText)).toEqual([
-      'mica · plugin · computer-use',
-      'you · project · .mica/skills',
-      'mica · builtin · browser'
-    ])
-    // 类型标记来自 kind：一行两枚标记，一枚说「这是什么」、一枚说「它从哪来」
+    // 行上只留类型标记；归属（前缀 + 实体名）不再出行，只在悬停提示里
+    expect(options.map((option) => option.sourceText)).toEqual([undefined, undefined, undefined])
     expect(options.map((option) => option.kind)).toEqual(['skill', 'skill', 'mcp'])
     // 说明列只讲「这个 skill 干什么」，来源不挤进去
     expect(options[0].description).toBe('操作 macOS 桌面')
@@ -362,7 +357,8 @@ describe('composer completions', () => {
     )
     expect(match.name).toBe('computer-use')
     expect(match.descriptionHighlights).toEqual([])
-    expect(match.sourceText).toBe('mica · plugin · computer-use')
+    // 只在来源里命中的条目照旧找得到；来源本身仍留在选项上（悬停提示用它的 detail）
+    expect(match.source).toEqual({ kind: 'plugin', label: 'computer-use' })
   })
 
   it('ignores a source the host spelled wrong instead of drawing a broken badge', () => {
@@ -412,7 +408,6 @@ describe('composer completions', () => {
       label: 'demand-dev',
       detail: 'user.demand-dev'
     })
-    expect(options[0].sourceText).toBe('mica · plugin · demand-dev')
     expect(completionInsertText(options[0])).toBe(insert)
   })
 
@@ -449,8 +444,12 @@ describe('composer completions', () => {
     }))
     const options = slashCompletionOptions({ completions: entries }, 'dema')
     expect(options.map((option) => option.name)).toEqual(['claim', 'desc', 'role'])
-    // 只在来源里命中，匹配到的那条来源标记照常显示
-    expect(options[0].sourceText).toBe('mica · plugin · demand-dev')
+    // 只在来源里命中，来源原样留在选项上（悬停提示用它的 detail）
+    expect(options[0].source).toEqual({
+      kind: 'plugin',
+      label: 'demand-dev',
+      detail: 'user.demand-dev'
+    })
   })
 
   it('matchIndexes finds every occurrence, ignoring case', () => {

@@ -1,17 +1,19 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { IconCommand } from '@tabler/icons-react'
 
 /**
  * 输入框上方的补全候选浮层（`@` 文件 / `/` skill）。
  *
  * 只负责展示与选中回调，选中后怎么改写输入框由 ChatView 决定——这里不执行任何动作。
- * 两种补全都是紧凑的单行：`/` 的能力行在最前面多一枚类型图标（S / M / P），来源写成
- * `mica · plugin · computer-use` 这种三段的一枚标记——一行放得下「叫什么、干什么、哪来的」，
- * 一屏能扫十几条；说明被截成一行，全文在悬停提示里。
+ * 两种补全都是紧凑的单行：一行放得下「叫什么、干什么、是哪一类」，一屏能扫十几条；说明被
+ * 截成一行，全文与出处（SKILL.md / config.json / 插件 id）在悬停提示里。
  * 名称与说明里命中查询的字符都会高亮（`highlights` / `descriptionHighlights` 是下标数组）。
  *
  * 滚动只发生在候选列表（`.chat-command-palette-body`）上：标题行与键位提示固定在顶部，
  * 键盘上下移动时由这里把当前卡片滚进视野，鼠标滚轮照常可用。
+ *
+ * `/` 的能力浮层带着筛选 tab，切 tab 时列表会变短——浮层高度因此钉在「量到过的最高内容」
+ * 上，不跟着缩（否则每切一次 tab 框体就跳一下）；第一次量到的就是它的默认高度，条目少就矮。
  */
 export default function ComposerCompletionPalette({
   title,
@@ -23,9 +25,26 @@ export default function ComposerCompletionPalette({
   filter,
   onFilter
 }) {
+  const titleRef = useRef(null)
   const bodyRef = useRef(null)
   const items = options || []
   const isCapabilities = Boolean(onFilter)
+  const pinnedHeightRef = useRef(0)
+  const [pinnedHeight, setPinnedHeight] = useState(0)
+
+  // 高度只钉在能力浮层上（`@` 文件补全跟着内容走，边打字边收是它该有的样子）。
+  // 量的是「内容自己需要多高」：标题行 + 列表的 scrollHeight + 浮层上下 padding。
+  useLayoutEffect(() => {
+    if (!isCapabilities) return
+    const body = bodyRef.current
+    const titleRow = titleRef.current
+    if (!body || !titleRow) return
+    const fit = titleRow.offsetHeight + body.scrollHeight + 6
+    if (fit > pinnedHeightRef.current) {
+      pinnedHeightRef.current = fit
+      setPinnedHeight(fit)
+    }
+  }, [isCapabilities, items.length])
 
   useEffect(() => {
     const body = bodyRef.current
@@ -42,8 +61,10 @@ export default function ComposerCompletionPalette({
   return (
     <div
       className={`chat-command-palette chat-completion-palette${isCapabilities ? ' is-capabilities' : ''}`}
+      // 同一个实例可能从 `/` 切成 `@`（触发字符换了但浮层位置没变），那时不能用上一种的钉高
+      style={isCapabilities && pinnedHeight ? { height: pinnedHeight } : undefined}
     >
-      <div className="chat-command-palette-title">
+      <div ref={titleRef} className="chat-command-palette-title">
         <IconCommand size={12} /> {title}
         {items.length > 0 && <span className="chat-command-palette-count">{items.length} 项</span>}
         {onFilter && (
@@ -84,7 +105,6 @@ export default function ComposerCompletionPalette({
             onMouseDown={(event) => event.preventDefault()}
             onClick={() => onSelect(item)}
           >
-            {isCapabilities && <CompletionKindIcon kind={item.kind} />}
             <HighlightedLabel text={item.label} highlights={item.highlights} />
             <span className="chat-command-description">
               <HighlightedText
@@ -93,14 +113,6 @@ export default function ComposerCompletionPalette({
               />
             </span>
             <CompletionKindTag kind={item.kind} />
-            {item.sourceText && (
-              <span
-                className={`chat-command-source is-${item.source.kind}`}
-                title={item.source.detail || undefined}
-              >
-                {item.sourceText}
-              </span>
-            )}
           </button>
         ))}
       </div>
@@ -119,17 +131,6 @@ export default function ComposerCompletionPalette({
 // 「清单声明的条目」这一整类。
 const COMPLETION_KIND_LABELS = { skill: 'skill', mcp: 'MCP', prompt: 'prompt' }
 
-const COMPLETION_KIND_MARKS = { skill: 'S', mcp: 'M', prompt: 'P' }
-
-function CompletionKindIcon({ kind }) {
-  const mark = COMPLETION_KIND_MARKS[kind] || '·'
-  return (
-    <span aria-hidden="true" className={`chat-completion-row-icon is-${kind || 'unknown'}`}>
-      {mark}
-    </span>
-  )
-}
-
 function CompletionKindTag({ kind }) {
   const label = COMPLETION_KIND_LABELS[kind]
   if (!label) return null
@@ -139,8 +140,8 @@ function CompletionKindTag({ kind }) {
 /**
  * 悬停提示：说明全文 + 出处（插件 id / 配置文件）+「会插进去的东西」。
  *
- * 行只放得下一行截断的说明，全文在这里补上；后两行与出处各自的 `detail` 相同，所以重复的
- * 那一段不再写第二遍。
+ * 行上不再显示来源（`mica · plugin · computer-use` 太长，右侧只留一枚类型标签），出处整个
+ * 挪到了这里。后两行与出处各自的 `detail` 相同，所以重复的那一段不再写第二遍。
  */
 function completionTitle(item) {
   const lines = []

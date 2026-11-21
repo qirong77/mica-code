@@ -274,13 +274,14 @@ function sourceSearchLabel(item) {
 /**
  * 浮层选项上的来源字段。
  *
- * `source` 原样留着（悬停要它的 `detail`），`sourceText` 是行上那枚标记的文字。排序用的
- * 别名不在这里——它在 `slashCompletionOptions` 交给 `rankCompletions` 的入口上。
+ * 只留 `source` 本身：行上不显示来源（`mica · plugin · computer-use` 太长，右侧只有一枚
+ * 类型标签），悬停提示用它的 `detail`。排序用的别名不在这里——它在
+ * `slashCompletionOptions` 交给 `rankCompletions` 的入口上。
  */
 function sourceFields(item) {
   const source = sourceOf(item)
   if (!source) return {}
-  return { source, sourceText: completionSourceText(source) }
+  return { source }
 }
 
 function skillOption(skill, query) {

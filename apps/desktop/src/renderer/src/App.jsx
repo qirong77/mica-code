@@ -3260,8 +3260,11 @@ export default function App() {
                   aria-haspopup="dialog"
                   aria-expanded={branchPickerOpen}
                   // 有路径时给分支名封顶并把宽度让给路径；没有路径就用满可用宽度。
+                  // 封顶不能用百分比：这层包裹 div 只按内容撑开，百分比的 max-width 在这里
+                  // 退化成 0，分支名被截成 0 宽就只剩图标。min(45vw,20rem) 是确定值，
+                  // 宽屏封 320px，窄屏（手机）跟着视口一起收。
                   className={`-ml-1.5 flex h-full items-center gap-1.5 px-1.5 mica-arco-row text-left ${
-                    activeCwd ? 'max-w-[45%] shrink-0' : 'min-w-0'
+                    activeCwd ? 'max-w-[min(45vw,20rem)] shrink-0' : 'min-w-0'
                   }`}
                   onClick={() => setBranchPickerOpen(true)}
                 >

@@ -3374,40 +3374,16 @@ html[data-appearance='light'] .chat-markdown code:not(pre code) {
   white-space: nowrap;
 }
 
-/* 来源标记：靠右、永不压缩（它是这一行最该看清的归属性信息），宽度只随文字取。 */
-.chat-command-source {
-  flex: none;
-  max-width: 132px;
-  overflow: hidden;
-  border: 1px solid color-mix(in srgb, var(--color-fg-max) 9%, transparent);
-  border-radius: 3px;
-  padding: 1px 4px;
-  color: color-mix(in srgb, var(--color-fg-max) 28%, transparent);
-  font-size: 8.5px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* 类型标记（skill / MCP）：实心淡底，与右侧描边的来源标记分成两种形态——一个回答「这
-   是什么」，一个回答「它从哪来」，两枚长得一样就分不清在读哪一个。透明边框只为与
-   来源标记等高（两者并排在一行里）。 */
+/* 类型标记（skill / MCP / prompt）：实心淡底，是这一行唯一的一枚标记——回答「这是什么」；
+   「它从哪来」进了悬停提示（`mica · plugin · computer-use` 那种三段式太长，右侧放不下）。 */
 .chat-command-kind {
   flex: none;
-  border: 1px solid transparent;
   border-radius: 3px;
   background: color-mix(in srgb, var(--color-fg-max) 8%, transparent);
   padding: 1px 4px;
   color: color-mix(in srgb, var(--color-fg-max) 44%, transparent);
   font-size: 8.5px;
   white-space: nowrap;
-}
-
-/* 内置（运行时自带，如受控浏览器 / 终端）与插件带的：这两类用户改不动，
-   与「自己目录里的文件」用不同颜色分开。 */
-.chat-command-source.is-builtin,
-.chat-command-source.is-plugin {
-  border-color: color-mix(in srgb, var(--color-info) 32%, transparent);
-  color: color-mix(in srgb, var(--color-info) 58%, transparent);
 }
 
 .chat-command-availability {
@@ -3536,8 +3512,10 @@ html[data-appearance='light'] .chat-markdown code:not(pre code) {
 }
 
 .chat-completion-palette:has(.chat-completion-filters) {
+  /* 高度由组件按「内容需要多高」钉住（ComposerCompletionPalette 的 pinnedHeight）：打开时
+     贴着条目收，切 skill / MCP / plugins 时不跟着缩，所以框体不跳。这里只管上限——条目
+     多到超过它之后由列表自己滚。 */
   max-height: min(420px, 56vh);
-  height: min(420px, 56vh);
 }
 
 .chat-completion-palette:not(.is-capabilities) .chat-command-palette-body > button:not(.arco-btn) {
@@ -3545,8 +3523,8 @@ html[data-appearance='light'] .chat-markdown code:not(pre code) {
   gap: 10px;
 }
 
-/* 能力补全：一行放下「图标 · 叫什么 · 干什么 · 什么类型 · 哪来的」。名称列定宽，说明的
-   起点因此每行对齐（按内容取宽会变成每行错开）；说明单行截断，全文在悬停提示里。 */
+/* 能力补全：一行放下「叫什么 · 干什么 · 什么类型」。名称列定宽，说明的起点因此每行对齐
+   （按内容取宽会变成每行错开）；说明单行截断，全文在悬停提示里。 */
 .chat-completion-palette.is-capabilities .chat-command-palette-body {
   display: flex;
   flex-direction: column;
@@ -3556,7 +3534,7 @@ html[data-appearance='light'] .chat-markdown code:not(pre code) {
 
 .chat-completion-palette.is-capabilities .chat-command-palette-body > button:not(.arco-btn) {
   min-height: 30px;
-  grid-template-columns: 20px 160px minmax(0, 1fr) auto auto;
+  grid-template-columns: 160px minmax(0, 1fr) auto;
   gap: 9px;
   padding: 4px 9px;
   border: 1px solid transparent;
@@ -3583,29 +3561,6 @@ html[data-appearance='light'] .chat-markdown code:not(pre code) {
   white-space: nowrap;
 }
 
-/* 类型图标：S / M / P，一行只占 20px，颜色与类型标记同一套语义。 */
-.chat-completion-row-icon {
-  display: grid;
-  width: 20px;
-  height: 20px;
-  place-items: center;
-  border-radius: 5px;
-  background: var(--color-overlay-strong);
-  color: var(--color-fg-soft);
-  font-size: 9px;
-  font-weight: 700;
-}
-
-.chat-completion-row-icon.is-mcp {
-  background: color-mix(in srgb, var(--color-info) 17%, transparent);
-  color: var(--color-info-soft);
-}
-
-.chat-completion-row-icon.is-prompt {
-  background: var(--color-accent-subtle);
-  color: var(--color-accent);
-}
-
 .chat-completion-palette .chat-command-description {
   color: var(--color-fg-dim);
 }
@@ -3617,10 +3572,6 @@ html[data-appearance='light'] .chat-markdown code:not(pre code) {
   white-space: nowrap;
 }
 
-.chat-completion-palette.is-capabilities .chat-command-source {
-  max-width: 220px;
-}
-
 /* 名称里命中查询的字符（CLI 的文件补全同样高亮这一段） */
 .chat-completion-palette mark {
   border-radius: 2px;
@@ -3628,10 +3579,10 @@ html[data-appearance='light'] .chat-markdown code:not(pre code) {
   color: var(--color-fg-max);
 }
 
-/* 浮层较窄时先丢掉说明列（名称与来源比截断的说明更该留），名称列也回到按内容取宽。 */
+/* 浮层较窄时先丢掉说明列（名称比截断的说明更该留），名称列也回到按内容取宽。 */
 @container (max-width: 640px) {
   .chat-completion-palette.is-capabilities .chat-command-palette-body > button:not(.arco-btn) {
-    grid-template-columns: 20px minmax(0, auto) auto auto;
+    grid-template-columns: minmax(0, auto) auto;
   }
 
   .chat-completion-palette.is-capabilities .chat-command-description {
