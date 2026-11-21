@@ -120,7 +120,7 @@ Capabilities 可按插件查看实际工具、技能和提示词贡献。工具�
 - 插件自己拿到值（注册换回的口令、探测到的地址）就用 `ctx.settings.set()` 写回去，只改传入的键、其余保持原样，写盘前过同一份校验——不要要求用户复制粘贴，那正是最容易出错的一步。
 - 运行条件由清单 `desktop.checks` 声明，取值只能来自 `mica-plugin/PluginDesktop.ts` 的 `DESKTOP_CHECKS`；配置页 Settings → Plugins 的插件详情里渲染成「运行条件」一节（状态 + 打开系统设置），插件跑在 app-server 子进程里、探测不到也渲染不了。新增一种检查项 = 在 `DESKTOP_CHECKS` 登记 + 桌面端实现探测器（`src/main/system/`）。声明了它就写 `requires: ["desktop"]`。
 - 运行状态由清单 `status` 声明（`key` / `label` / `type: text|link`），值由插件写进 `$MICA_HOME/plugin-data/<id>/data.json`，配置页插件详情渲染成「运行状态」一节。值是字符串或 `{ text, tone: ok|warn|error }`——插件判断语义，页面只上色；没写过的键显示「尚未上报」，不隐藏。插件详情因此不需要为每个插件各写一套状态界面。
-- 「得有人点一下才会好」这类状态另写一条 `attention`（`{ text, tone: warn|error, action? }`，同一份 `data.json`）：侧栏 **Plugins** 入口与插件目录的卡片上出现一枚提示点，点进去是插件详情里的一条提示 + 清单声明过的那个动作按钮，结果就地显示。`action` 必须是清单 `actions` 里的 key，页面丢弃没声明的；没 `text` 或 `tone: ok` 视为撤销。**写不写由插件判断**——没有可执行动作的 warn（中转机不可达、本机缺产物）不该上报，一枚点不动的提示比没有更糟；解析与归一化在 `mica-config-ui` 的 `plugins.ts`，侧栏那枚点由 `renderer/src/plugin-attention.js` 每 30 秒重读一次详情。**一条提示只点一次**：页面按「插件 id + 文案」记住点开过的那条（文案里带版本号，所以换了一版是另一条），插件在动作里要把这件事记上账并抹掉 `attention`（`mobile-relay` 的 `page-notice.json`）——持续状态每次重算都重新点亮红点，等于一个关不掉的通知。
+- 「得有人点一下才会好」这类状态另写一条 `attention`（`{ text, tone: warn|error, action? }`，同一份 `data.json`）：侧栏 **Plugins** 入口与插件目录的卡片上出现一枚提示点，点进去是插件详情里的一条提示 + 清单声明过的那个动作按钮，结果就地显示。`action` 必须是清单 `actions` 里的 key，页面丢弃没声明的；没 `text` 或 `tone: ok` 视为撤销。**写不写由插件判断**——没有可执行动作的 warn（远端不可达、本机缺产物）不该上报，一枚点不动的提示比没有更糟；解析与归一化在 `mica-config-ui` 的 `plugins.ts`，侧栏那枚点由 `renderer/src/plugin-attention.js` 每 30 秒重读一次详情。**一条提示只点一次**：页面按「插件 id + 文案」记住点开过的那条（文案里带版本号，所以换了一版是另一条），插件在动作里要把这件事记上账并抹掉 `attention`（存进自己的 `data.json` 或旁边一个 `*-notice.json`）——持续状态每次重算都重新点亮红点，等于一个关不掉的通知。
 
 ### completions（`/` 里的条目）
 

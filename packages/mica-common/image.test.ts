@@ -1,7 +1,7 @@
 import { deflateSync } from 'node:zlib';
 import { describe, expect, it } from 'vitest';
 import { IMAGE_MAX_API_LONG_EDGE, IMAGE_MAX_LONG_EDGE, prepareImageForApi } from './image.js';
-import { decodePng, encodePng } from './imagePng.js';
+import { decodePng, encodePng, MAX_PNG_DECODE_PIXELS } from './imagePng.js';
 import { downscaleAreaAverage } from './imageResample.js';
 
 /** 测试自己拼 PNG，不经过被测的编码器：两个方向各错一次才不会被同一个 bug 一起糊过去。 */
@@ -147,15 +147,14 @@ describe('prepareImageForApi', () => {
     expect(Math.min(...alphas)).toBeLessThan(255);
   });
 
-  it('解不开的 PNG 退回原图，读图不因为这个失败', async () => {
+  it('损坏 PNG 在本机报错，不把原图继续发到接口', async () => {
     const png = buildPng(3200, 2000, { colorType: 6, bitDepth: 8 }, () => [1, 2, 3, 255]);
     const broken = png.subarray(0, 40);
-    const processed = await prepareImageForApi(broken);
-    expect(processed.buffer.equals(broken)).toBe(true);
+    await expect(prepareImageForApi(broken)).rejects.toThrow('PNG 图片解码失败');
   });
 
   it('非 PNG 格式原样透传（重编码要先自己写解码器）', async () => {
-    const jpeg = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(4096, 7)]);
+    const jpeg = buildJpegHeader(640, 480);
     const processed = await prepareImageForApi(jpeg);
     expect(processed.mediaType).toBe('image/jpeg');
     expect(processed.buffer.equals(jpeg)).toBe(true);
@@ -174,7 +173,49 @@ describe('prepareImageForApi', () => {
 
   it('PNG 解不开又超过接口硬上限时报错，而不是把原图发出去', async () => {
     const png = buildPng(9000, 100, { colorType: 6, bitDepth: 8 }, () => [1, 2, 3, 255]);
-    await expect(prepareImageForApi(png.subarray(0, 40))).rejects.toThrow('PNG 的无损缩放没能把它缩到这个尺寸以内');
+    await expect(prepareImageForApi(png.subarray(0, 40))).rejects.toThrow('PNG 图片解码失败');
+  });
+
+  it('2360x32000 整页截图在分配像素内存前拒绝并提示分段', async () => {
+    const header = buildPng(1, 1, { colorType: 2, bitDepth: 8 }, () => [1, 2, 3]);
+    header.writeUInt32BE(2360, 16);
+    header.writeUInt32BE(32000, 20);
+    await expect(prepareImageForApi(header)).rejects.toThrow('分段截图');
+    expect(() => decodePng(header)).toThrow(String(MAX_PNG_DECODE_PIXELS));
+  });
+
+  it('解压长度超过头部声明时拒绝，不回退到原图', async () => {
+    const png = buildPng(10, 10, { colorType: 2, bitDepth: 8 }, () => [1, 2, 3]);
+    png.writeUInt32BE(1, 16);
+    png.writeUInt32BE(1, 20);
+    await expect(prepareImageForApi(png)).rejects.toThrow('PNG 图片解码失败');
+  });
+
+  it.each(['VP8 ', 'VP8L', 'VP8X'])('识别 WebP %s 的尺寸并拦截超长边', async (kind) => {
+    const webp = Buffer.alloc(30);
+    webp.write('RIFF', 0);
+    webp.writeUInt32LE(22, 4);
+    webp.write('WEBP', 8);
+    webp.write(kind, 12);
+    if (kind === 'VP8 ') {
+      Buffer.from([0x9d, 0x01, 0x2a]).copy(webp, 23);
+      webp.writeUInt16LE(9000, 26);
+      webp.writeUInt16LE(100, 28);
+    } else if (kind === 'VP8L') {
+      webp[20] = 0x2f;
+      webp.writeUInt32LE(8999 | (99 << 14), 21);
+    } else {
+      webp.writeUIntLE(8999, 24, 3);
+      webp.writeUIntLE(99, 27, 3);
+    }
+    await expect(prepareImageForApi(webp)).rejects.toThrow('图片尺寸 9000x100');
+  });
+
+  it('拒绝尺寸未知或为零的图片头', async () => {
+    await expect(prepareImageForApi(Buffer.from([0xff, 0xd8, 0xff, 0xe0]))).rejects.toThrow('有效的图片尺寸');
+    const png = buildPng(1, 1, { colorType: 2, bitDepth: 8 }, () => [1, 2, 3]);
+    png.writeUInt32BE(0, 16);
+    await expect(prepareImageForApi(png)).rejects.toThrow('有效的图片尺寸');
   });
 
   it('空文件与不认识的格式抛错', async () => {

@@ -5,6 +5,7 @@ import { floatingWindowFavorites, floatingWindowIconOrigins } from './floatingwi
 import { harnessReviewAssessments } from './harness-review.js';
 import { memoryScopes } from './memory.js';
 import { notebookComments } from './notebook-comments.js';
+import { notebookComponentBlocks } from './notebook-component-blocks.js';
 import { notebookMcpData } from './notebook-mcp.js';
 import { pluginEventIdentity } from './plugin-events.js';
 import { pluginHealthIssues, pluginStartupHealth } from './plugin-health.js';
@@ -35,6 +36,7 @@ export const DATA_MIGRATIONS: DataMigration[] = [
   sshAuditV2,
   subagentTaskFiles,
   notebookComments,
+  notebookComponentBlocks,
   notebookMcpData,
   schedulePlansStages,
   promptContributions,

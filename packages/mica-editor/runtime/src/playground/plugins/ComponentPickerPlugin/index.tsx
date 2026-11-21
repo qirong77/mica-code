@@ -37,6 +37,7 @@ import {INSERT_COLLAPSIBLE_COMMAND} from '../CollapsibleExtension';
 import {INSERT_DATETIME_COMMAND} from '../DateTimeExtension';
 import {InsertEquationDialog} from '../EquationsExtension';
 import {InsertHtmlDialog, INSERT_HTML_COMMAND} from '../HtmlExtension';
+import {InsertComponentDialog, INSERT_COMPONENT_COMMAND} from '../ComponentExtension';
 import {INSERT_EXCALIDRAW_COMMAND} from '../ExcalidrawExtension';
 import {InsertImageDialog} from '../ImagesExtension';
 import InsertLayoutDialog from '../LayoutExtension/InsertLayoutDialog';
@@ -320,9 +321,21 @@ export function getBaseOptions(editor: LexicalEditor, showModal: ShowModal) {
           <InsertImageDialog activeEditor={editor} onClose={onClose} />
         )),
     }),
+    new ComponentPickerOption('组件块 Component', {
+      icon: <i className="icon component" />,
+      keywords: ['component', 'react', 'arco', '插件', '组件', '交互', '模块', '原型', '表单'],
+      onSelect: () =>
+        showModal('插入组件块', onClose => (
+          <InsertComponentDialog
+            activeEditor={editor}
+            onClose={onClose}
+            onInsert={payload => editor.dispatchCommand(INSERT_COMPONENT_COMMAND, payload)}
+          />
+        ), false, 'block-insert-modal'),
+    }),
     new ComponentPickerOption('HTML 页面 HTML', {
       icon: <i className="icon code" />,
-      keywords: ['html', 'react', 'arco', 'embed', '网页', '页面', '组件'],
+      keywords: ['html', 'embed', '网页', '页面', '静态'],
       onSelect: () =>
         showModal('插入 HTML 块', onClose => (
           <InsertHtmlDialog
@@ -330,7 +343,7 @@ export function getBaseOptions(editor: LexicalEditor, showModal: ShowModal) {
             onClose={onClose}
             onInsert={payload => editor.dispatchCommand(INSERT_HTML_COMMAND, payload)}
           />
-        ), false, 'html-insert-modal'),
+        ), false, 'block-insert-modal'),
     }),
     new ComponentPickerOption('折叠块 Collapsible', {
       icon: <i className="icon caret-right" />,

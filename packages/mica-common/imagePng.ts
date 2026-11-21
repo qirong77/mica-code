@@ -23,6 +23,9 @@ export type RasterImage = {
 
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
+// Check before inflate/expansion: a small compressed image can allocate GB.
+export const MAX_PNG_DECODE_PIXELS = 16 * 1024 * 1024;
+
 type PngChunk = { type: string; data: Buffer };
 
 type PngHeader = {
@@ -51,6 +54,7 @@ export function decodePng(buffer: Buffer): RasterImage {
   };
   if (header.interlace !== 0) throw new Error('interlaced png unsupported');
   if (header.width <= 0 || header.height <= 0) throw new Error('png has empty dimensions');
+  assertPngDecodeSize(header.width, header.height);
   const paletteSamples = header.colorType === 3 && [1, 2, 4, 8].includes(header.bitDepth);
   const directSamples = header.colorType !== 3 && (header.bitDepth === 8 || header.bitDepth === 16);
   if (!paletteSamples && !directSamples) {
@@ -66,14 +70,23 @@ export function decodePng(buffer: Buffer): RasterImage {
   const bitsPerPixel = channels * header.bitDepth;
   const bytesPerPixel = Math.max(1, Math.ceil(bitsPerPixel / 8));
   const stride = Math.ceil((header.width * bitsPerPixel) / 8);
-  const raw = inflateSync(idat);
-  if (raw.length < (stride + 1) * header.height) throw new Error('png pixel data truncated');
+  const expectedBytes = (stride + 1) * header.height;
+  const raw = inflateSync(idat, { maxOutputLength: expectedBytes });
+  if (raw.length !== expectedBytes) throw new Error('png pixel data length mismatch');
   unfilter(raw, stride, header.height, bytesPerPixel);
 
   const outChannels: 3 | 4 = header.colorType === 6 || header.colorType === 4 || transparencyChunk ? 4 : 3;
   const data = new Uint8Array(header.width * header.height * outChannels);
   expand(raw, stride, header, outChannels, data, paletteChunk?.data, transparencyChunk?.data);
   return { width: header.width, height: header.height, channels: outChannels, data };
+}
+
+export function assertPngDecodeSize(width: number, height: number): void {
+  if (width * height > MAX_PNG_DECODE_PIXELS) {
+    throw new Error(
+      `图片尺寸 ${width}x${height} 超过本机 PNG 解码像素上限 ${MAX_PNG_DECODE_PIXELS}。请先裁剪或按区域分段截图，再重新读取。`,
+    );
+  }
 }
 
 /**

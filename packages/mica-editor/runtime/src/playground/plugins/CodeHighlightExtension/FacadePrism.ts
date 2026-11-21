@@ -62,6 +62,7 @@ function getDiffedLanguage(language: string) {
 }
 
 const PRISM_COMPONENT_DEPENDENCIES: Record<string, string[]> = {
+  bash: [],
   c: ['clike'],
   clike: [],
   cpp: ['c'],
@@ -82,6 +83,7 @@ const PRISM_COMPONENT_DEPENDENCIES: Record<string, string[]> = {
 };
 
 const PRISM_COMPONENT_BY_LANGUAGE: Record<string, string> = {
+  bash: 'bash',
   c: 'c',
   clike: 'clike',
   cpp: 'cpp',
@@ -103,6 +105,8 @@ const PRISM_COMPONENT_BY_LANGUAGE: Record<string, string> = {
   py: 'python',
   python: 'python',
   rust: 'rust',
+  sh: 'bash',
+  shell: 'bash',
   sql: 'sql',
   swift: 'swift',
   ts: 'typescript',

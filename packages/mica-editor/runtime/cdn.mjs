@@ -65,7 +65,7 @@ cdnImports['prettier/plugins/estree'] = esm('prettier', '3.6.2', '/plugins/estre
 // Prism grammars are requested by the editor only after the first code block
 // is present. Keep exact import-map entries for those dynamic imports, but do
 // not import the grammars from the editor's initial module graph.
-for (const name of ['c', 'clike', 'cpp', 'css', 'diff', 'go', 'java', 'javascript', 'markdown', 'markup', 'objectivec', 'powershell', 'python', 'rust', 'sql', 'swift', 'typescript']) {
+for (const name of ['bash', 'c', 'clike', 'cpp', 'css', 'diff', 'go', 'java', 'javascript', 'markdown', 'markup', 'objectivec', 'powershell', 'python', 'rust', 'sql', 'swift', 'typescript']) {
   cdnImports[`prismjs/components/prism-${name}.js`] = esm('prismjs', '1.30.0', `/components/prism-${name}.js`)
 }
 

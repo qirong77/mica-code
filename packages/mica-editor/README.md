@@ -2,9 +2,9 @@
 
 共享的 Lexical 编辑器。两种模式共用同一份 runtime、同一份 CDN 依赖与同一套主题适配，数据契约各自独立：
 
-| 模式 | 入口 | 文档格式 | 谁在用 |
-| --- | --- | --- | --- |
-| 富文本 | `/editor/index.html` | Lexical JSON | `plugins/notebook`（笔记正文） |
+| 模式     | 入口                               | 文档格式        | 谁在用                                   |
+| -------- | ---------------------------------- | --------------- | ---------------------------------------- |
+| 富文本   | `/editor/index.html`               | Lexical JSON    | `plugins/notebook`（笔记正文）           |
 | Markdown | `/editor/index.html?mode=markdown` | Markdown 字符串 | 文件视图 `.md`、配置页 Role / Skill 编辑 |
 
 ## 目录
@@ -84,7 +84,9 @@ Notebook 富文本画布使用分区工作台排版（`runtime/src/workspace/not
 
 篇名始终是大号纯文本：旧标题中的 code、加粗、链接、颜色、字号和对齐缩进在同一次更新内清理，保留可见字符。篇名中的格式操作禁用，手输 Markdown 标记保持字面量，粘贴只读取纯文本并把换行合成空格；正文格式与 Markdown 快捷输入照常工作。
 
-Notebook 粘贴代码只检查开头最多 4096 个字符，用固定关键字识别 JavaScript、Python、Go、TypeScript 和 SQL，不引入识别库或后台扫描。Markdown 围栏与 HTML 代码块的显式语言优先，未标语言的围栏在确认渲染时补全；纯代码粘贴可直接生成代码块，无语言代码块内的粘贴也会补语言，已选语言不覆盖，证据不足则保持原样。异步语法高亮合并到本次粘贴/渲染的撤销记录。
+Notebook 粘贴代码只检查开头最多 4096 个字符，用固定关键字识别 JavaScript、Python、Go、TypeScript、SQL 与 Bash（shebang、`$ 命令` 提示符、顶格命令 + 参数），不引入识别库或后台扫描。Markdown 围栏与 HTML 代码块的显式语言优先，未标语言的围栏在确认渲染时补全；纯代码粘贴可直接生成代码块，无语言代码块内的粘贴也会补语言，已选语言不覆盖，证据不足则保持原样。异步语法高亮合并到本次粘贴/渲染的撤销记录。
+
+代码块语言菜单里的 Bash 与 `sh` / `shell` 共用同一份 Prism 语法：grammar 走 import map 里的 `prismjs/components/prism-bash.js`，第一次出现 bash 代码块时才加载，与其它语言一样按需拉取，工具栏与行内语言菜单都不为它增加静态依赖。
 
 富文本正文默认 15px、1.74 行高，H1–H6 为 28/24/20/16/15/15px。`workspace/notebook-document.css` 管理正文默认样式；工具栏优先显示显式字号，再读取实际继承字号，混合选区留空。文档「样式设置」提供标宽/超宽、正文大小、行高和段距，保存在标准 Lexical root NodeState `notebookStyle` 中，可随正文撤销与保存，不覆盖文字的显式格式；未设置的文档直接采用默认值，不重写历史正文。
 
@@ -92,7 +94,9 @@ Notebook 粘贴代码只检查开头最多 4096 个字符，用固定关键字�
 
 `workspace/blockEditing.ts` 只在笔记富文本主编辑器注册：普通标题/引用块首的 Enter 或 Backspace 将当前块转为正文，不插入额外空行，保留文本、链接和显式行内格式；固定一级标题不会被清除。块中/块尾分段、Shift+Enter、列表和代码块仍由各自的 Lexical 扩展处理；输入法组合态、只读和嵌套图注编辑器不触发块首转换。
 
-富文本工具栏与 `/` 菜单的「HTML 页面」入口由 `HtmlExtension` 提供：`runtime: 'html'` 渲染 HTML/CSS，`runtime: 'react'` 使用 `function App({React, Arco, html})` 快速组合 Arco 组件；本地 HTML 文件在浏览器内读取后以内联源码写入文档，网页链接生成受限 iframe HTML 块。两者都仍由 `HtmlNode` 的 sandbox iframe 渲染，源码随 Lexical JSON 保存，块内脚本不能访问宿主 DOM、文件系统或笔记状态。
+两种沙箱块各有自己的节点类型与插入入口，不再靠一个 `runtime` 字段区分：`HtmlNode`（`type: 'html'`，字段 `html`）渲染静态 HTML/CSS，入口是工具栏与 `/` 菜单的「HTML 页面」（`HtmlExtension`，也支持本地 `.html` 文件内联源码与受限 iframe 网页链接）；`ComponentNode`（`type: 'component'`，字段 `code`）是「组件块」（`ComponentExtension`），源码是一段 `function App({React, Arco, html})`，用 htm 模板组合 Arco 组件，React 18.3.1 / Arco 2.66.18 / htm 3.1.1 从 esm.sh 与 jsDelivr 固定版本加载。两者共用 `nodes/sandboxBlock.tsx` 的 iframe 外壳（无 `allow-same-origin`、`ResizeObserver` 回报高度、悬停「编辑 HTML / 编辑组件」浮层）与 `blockDocument()` 的共享 CSP，源码随 Lexical JSON 保存，块内脚本不能访问宿主 DOM、文件系统或笔记状态。组件块能用的范围是刻意收窄的：没有 JSX 与打包步骤（用 htm 模板），`connect-src` 只放行 esm.sh 与 jsDelivr，读不到笔记数据，块高上限 1200px——它适合原型、表单、图表与演示，不是完整应用运行时。宿主切到深色时块自己的 `<body>` 带 `arco-theme="dark"`，Arco 的颜色 token 与宿主一致。
+
+组件块与 HTML 块的源码编辑共用独立弹窗，不受预览块高度限制；长行保留缩进并在输入区内滚动，取消不写回节点。编辑入口支持鼠标悬停、键盘聚焦与触屏。共享弹窗通过 `modalVisibility` 维护嵌套可见状态，Notebook 桥仅向宿主发送带当前 `noteId/loadId` 的 `modal` 布尔消息；宿主同步侧栏遮罩、暂停侧栏交互，并隐藏覆盖在 iframe 上的文档栏。切换文档或释放桥时清除遮罩，不改变正文数据。
 
 笔记文档只有 `version` 与 `editorState` 两个字段：整篇正文序列化在 `editorState` 里，讨论、评论锚点等界面状态不再写入文档。`editorState` 为空表示尚未初始化的新笔记；非空值必须是合法 JSON 且根节点是 Lexical root，损坏或带未知字段的文档按错误上报，不会被当作空文档覆盖。
 

@@ -5,6 +5,7 @@
  */
 
 export const CODE_LANGUAGE_FRIENDLY_NAME_MAP: Record<string, string> = {
+  bash: 'Bash',
   c: 'C',
   clike: 'C-like',
   cpp: 'C++',
@@ -33,11 +34,14 @@ export const CODE_LANGUAGE_MAP: Record<string, string> = {
   md: 'markdown',
   plaintext: 'plain',
   python: 'py',
+  sh: 'bash',
+  shell: 'bash',
   text: 'plain',
   ts: 'typescript',
 };
 
 const TOOLBAR_LANGUAGES = new Set([
+  'bash',
   'c',
   'clike',
   'cpp',

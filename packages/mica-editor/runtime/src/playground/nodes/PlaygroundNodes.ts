@@ -24,6 +24,7 @@ import {CollapsibleContentNode} from '../plugins/CollapsibleExtension/Collapsibl
 import {CollapsibleTitleNode} from '../plugins/CollapsibleExtension/CollapsibleTitleNode';
 import {PullQuoteNode} from '../plugins/PullQuoteExtension/PullQuoteNode';
 import {ReviewNode} from '../plugins/ReviewExtension/ReviewNode';
+import {ComponentNode} from './ComponentNode';
 import {DateTimeNode} from './DateTimeNode/DateTimeNode';
 import {EmojiNode} from './EmojiNode';
 import {EquationNode} from './EquationNode';
@@ -83,6 +84,7 @@ const PlaygroundNodes: Klass<LexicalNode>[] = [
   ReviewNode,
   PullQuoteNode,
   HtmlNode,
+  ComponentNode,
 ];
 
 export default PlaygroundNodes;

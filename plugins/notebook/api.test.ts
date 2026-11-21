@@ -71,11 +71,7 @@ async function request(
   return response.body as Record<string, any>;
 }
 
-async function expectFailure(
-  promise: Promise<unknown>,
-  status: number,
-  code: string,
-): Promise<PluginApiError> {
+async function expectFailure(promise: Promise<unknown>, status: number, code: string): Promise<PluginApiError> {
   let error: unknown;
   try {
     await promise;
@@ -116,10 +112,11 @@ describe('Notebook plugin API', () => {
     expect(text).toContain('const ok = true;\n\nconsole.log(ok);');
   });
 
-  it('documents itself: endpoint table, params and the calling rules', () => {
+  it('documents itself as a book: root is an index and modules hold the details', async () => {
     const { handler } = createHandler();
 
     expect(String(handler.description)).toContain('/plugin/notebook/api');
+    expect(String(handler.description)).toContain('目录');
     expect(String(handler.guide)).toContain('不可信');
     expect(String(handler.guide)).toContain('expected_version');
     expect(String(handler.guide)).toContain('409');
@@ -127,16 +124,10 @@ describe('Notebook plugin API', () => {
     expect(String(handler.guide)).toContain('$MICA_HOME/plugin-data/notebook/');
 
     const expected: [PluginApiMethod, string][] = [
+      ['GET', '/guide'],
+      ['GET', '/modules'],
+      ['GET', '/modules/:module'],
       ['GET', '/overview'],
-      ['GET', '/notes'],
-      ['GET', '/notes/:id'],
-      ['GET', '/search'],
-      ['POST', '/folders'],
-      ['POST', '/notes'],
-      ['PATCH', '/notes/:id'],
-      ['DELETE', '/notes/:id'],
-      ['POST', '/notes/:id/restore'],
-      ['POST', '/notes/:id/content'],
     ];
     expect(handler.endpoints.map((endpoint) => [endpoint.method, endpoint.path])).toEqual(expected);
     for (const endpoint of handler.endpoints) {
@@ -152,16 +143,44 @@ describe('Notebook plugin API', () => {
         expect(param.description.length).toBeGreaterThan(4);
       }
     }
-    const content = handler.endpoints.find((endpoint) => endpoint.path === '/notes/:id/content');
+
+    const guide = await request(handler, 'GET', '/guide');
+    expect(guide.modules.map((module: Record<string, any>) => module.id)).toEqual(['tree', 'content', 'blocks']);
+    expect(guide.modules[0].path).toBe('/plugin/notebook/api/modules/tree');
+    expect(guide.recipes.length).toBeGreaterThanOrEqual(4);
+    expect(guide.conventions.join('\n')).toContain('expected_version');
+    expect(guide.how_to_read.join('\n')).toContain('/modules/<id>');
+
+    // 根目录只给模块清单与端点摘要，不展开参数。
+    const index = await request(handler, 'GET', '/modules');
+    expect(index.modules.map((module: Record<string, any>) => module.id)).toEqual(['tree', 'content', 'blocks']);
+    const listed = index.modules.find((module: Record<string, any>) => module.id === 'blocks');
+    expect(listed.endpoints.map((endpoint: Record<string, any>) => endpoint.path)).toContain('/notes/:id/content');
+    for (const endpoint of listed.endpoints) {
+      expect(Object.keys(endpoint).sort()).toEqual(['method', 'path', 'summary']);
+    }
+
+    const blocks = await request(handler, 'GET', '/modules/blocks');
+    expect(blocks.module.title).toContain('组件块');
+    expect(blocks.module.path).toBe('/plugin/notebook/api/modules/blocks');
+    expect(blocks.guide).toContain('function App({React, Arco, html})');
+    expect(blocks.guide).toContain('rgb(var(--primary-6))');
+    expect(blocks.guide).toContain('1200px');
+    expect(blocks.guide).toContain('没有 JSX');
+    expect(blocks.next).toEqual(['/plugin/notebook/api/modules/content', '/plugin/notebook/api/modules/tree']);
+
+    const content = blocks.endpoints.find((endpoint: Record<string, any>) => endpoint.path === '/notes/:id/content');
     expect(content?.params).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ name: 'expected_version', in: 'body', required: true }),
         expect.objectContaining({ name: 'mode', in: 'body', required: true }),
       ]),
     );
+
+    await expectFailure(request(handler, 'GET', '/modules/unknown'), 404, 'module_not_found');
   });
 
-  it('serves an overview with tree, counts, trash and the endpoint table', async () => {
+  it('serves an overview with tree, counts, trash and links to the docs', async () => {
     const { handler } = createHandler();
     const folder = (await request(handler, 'POST', '/folders', { body: { title: '工作' } })).node;
     const note = (await request(handler, 'POST', '/notes', { body: { title: '会议', parent_id: folder.id } })).node;
@@ -186,9 +205,12 @@ describe('Notebook plugin API', () => {
     ]);
     expect(overview.tree[1]).not.toHaveProperty('children');
     expect(overview.trashed).toEqual([]);
-    expect(overview.endpoints).toHaveLength(handler.endpoints.length);
-    expect(overview.endpoints[0]).toMatchObject({ method: 'GET', path: '/overview' });
-    for (const endpoint of overview.endpoints) expect(Object.keys(endpoint).sort()).toEqual(['method', 'path', 'summary']);
+    expect(overview.docs.guide).toBe('/plugin/notebook/api/guide');
+    expect(overview.docs.modules.map((module: Record<string, any>) => module.id)).toEqual([
+      'tree',
+      'content',
+      'blocks',
+    ]);
     // 默认概览不读任何正文。
     expect(overview.tree[0].children[0]).not.toHaveProperty('version');
 
@@ -219,7 +241,12 @@ describe('Notebook plugin API', () => {
     expect(created).not.toHaveProperty('text');
 
     const text = await request(handler, 'GET', `/notes/${note.id}`);
-    expect(text).toMatchObject({ node: { id: note.id }, missing: false, text_truncated: false, version: created.version });
+    expect(text).toMatchObject({
+      node: { id: note.id },
+      missing: false,
+      text_truncated: false,
+      version: created.version,
+    });
     expect(text.text).toContain('结论');
     expect(text.text).toContain('alpha alpha');
     expect(text).not.toHaveProperty('editor_state');
@@ -383,7 +410,11 @@ describe('Notebook plugin API', () => {
     expect(noQuery.message).toContain('q');
 
     await expectFailure(request(handler, 'GET', '/notes', { query: { include_trash: 'yes' } }), 400, 'invalid_request');
-    await expectFailure(request(handler, 'GET', `/notes/${note.id}`, { query: { format: 'html' } }), 400, 'invalid_request');
+    await expectFailure(
+      request(handler, 'GET', `/notes/${note.id}`, { query: { format: 'html' } }),
+      400,
+      'invalid_request',
+    );
 
     const missingTitle = await expectFailure(
       request(handler, 'POST', '/folders', { body: { parent_id: null } }),

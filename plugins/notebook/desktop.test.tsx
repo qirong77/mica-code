@@ -1,9 +1,13 @@
 import { describe, expect, it, vi } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
 import NotebookPage, {
+  EDITOR_SKELETON_DELAY_MS,
   RAIL_DEFAULT_WIDTH,
+  RENAME_TAP_WINDOW_MS,
   clampRailWidth,
   createDefaultNote,
+  editorOverlayMode,
+  notebookRowTap,
   notebookRailLimits,
 } from './desktop.jsx';
 import { createNotebookController } from './controller';
@@ -47,7 +51,38 @@ describe('Notebook navigation', () => {
   });
 });
 
+describe('Notebook editor loading', () => {
+  it('only covers the editor for a frame that has not booted yet, and only after the quiet window', () => {
+    // 第一次打开：iframe 还没起来，先安静一小段时间才遮挡。
+    expect(editorOverlayMode({ frameState: 'loading', booted: false, delayElapsed: false })).toBe(null);
+    expect(editorOverlayMode({ frameState: 'loading', booted: false, delayElapsed: true })).toBe('skeleton');
+    // 已经启动过的 iframe 只是换一篇正文：不遮，上一篇留着。
+    expect(editorOverlayMode({ frameState: 'loading', booted: true, delayElapsed: true })).toBe(null);
+    expect(editorOverlayMode({ frameState: 'ready', booted: true, delayElapsed: false })).toBe(null);
+    // 起不来永远要说清楚，与是否 boot 过无关。
+    expect(editorOverlayMode({ frameState: 'error', booted: true, delayElapsed: false })).toBe('error');
+    expect(EDITOR_SKELETON_DELAY_MS).toBeGreaterThanOrEqual(200);
+  });
+});
+
 describe('Notebook rail width', () => {
+  it('treats a second tap on the same row as a rename, and only within the window', () => {
+    const first = notebookRowTap({ id: null, at: 0 }, 'a', 1000);
+    expect(first).toEqual({ rename: false, next: { id: 'a', at: 1000 } });
+
+    // 同一行的第二次点击（手机双击、桌面双击）进入改名，并把基准清空。
+    expect(notebookRowTap(first.next, 'a', 1000 + RENAME_TAP_WINDOW_MS)).toEqual({
+      rename: true,
+      next: { id: null, at: 0 },
+    });
+    // 停顿太久只算一次新的点击。
+    expect(notebookRowTap(first.next, 'a', 1000 + RENAME_TAP_WINDOW_MS + 1).rename).toBe(false);
+    // 换一行不算双击。
+    expect(notebookRowTap(first.next, 'b', 1010).rename).toBe(false);
+    // 改名之后紧接着的一次点击重新开始计数，不会连着又开一次改名。
+    expect(notebookRowTap({ id: null, at: 0 }, 'a', 1100).rename).toBe(false);
+  });
+
   it('clamps the width to absolute bounds and to the room the document needs', () => {
     expect(clampRailWidth(120)).toBe(200);
     expect(clampRailWidth(9999)).toBe(460);

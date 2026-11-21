@@ -7,7 +7,7 @@ const base = import.meta.env.BASE_URL;
 <DocLayout
   title="远程与手机访问"
   active="remote-access"
-  description="通过 Connections 或 Mobile Relay 连接开发机，了解会话分享、访问口令与远程操作的范围。"
+  description="通过 Connections 连接开发机，了解会话分享、访问口令与远程操作的范围。"
 >
   <h1>远程与手机访问</h1>
   <p class="lead">
@@ -31,11 +31,6 @@ const base = import.meta.env.BASE_URL;
           <td>打开主机地址，输入访问口令；也可从另一台 Mica 的 Connections 添加地址。</td>
         </tr>
         <tr>
-          <td>Mobile Relay</td>
-          <td>手机与开发机不在同一网络。</td>
-          <td>部署或接入公网中转机，打开插件生成的手机链接。</td>
-        </tr>
-        <tr>
           <td>会话分享链接</td>
           <td>给可信的人提供特定会话的操作入口。</td>
           <td>
@@ -48,7 +43,7 @@ const base = import.meta.env.BASE_URL;
   <aside class="callout">
     <strong>远程连接可以执行真实操作</strong>
     <p>
-      完整工作区拥有宿主机的文件与命令能力。分享视图也能调用运行时 API；分享链接应按访问凭据保管。Mobile Relay
+      完整工作区拥有宿主机的文件与命令能力。分享视图也能调用运行时 API；分享链接应按访问凭据保管。公网入口
       同样允许对话与真实终端，不能作为只读访问使用。
     </p>
   </aside>
@@ -86,51 +81,20 @@ const base = import.meta.env.BASE_URL;
     的运行时只能从本机访问。
   </p>
 
-  <h2 id="通过公网中转连接手机">通过公网中转连接手机</h2>
+  <h2 id="从公网访问">从公网访问</h2>
   <p>
-    Mobile Relay 由插件管理开发机与中转机之间的桥。开发机向外轮询，无需把本机运行时端口转发到公网。手机通过 HTTPS
-    访问中转机。
-  </p>
-  <h3>已有中转机</h3>
-  <ol>
-    <li>
-      打开 <strong>Settings → Plugins → Mobile Relay</strong>。
-    </li>
-    <li>
-      填写中转地址，例如 <code>https://mica.example.com</code>。
-    </li>
-    <li>
-      点击<strong>注册到中转机</strong>。插件会把生成的凭据保存到本机，并显示手机链接。
-    </li>
-    <li>
-      在手机上打开完整链接，包括其中的 <code>?t=</code> 参数。可加入主屏幕以便再次访问。
-    </li>
-  </ol>
-  <p>手机链接使用独立 token，和 Connections 的访问口令分开。不要自己编写 token；中转机只接受已经登记的值。</p>
-  <h3>首次部署</h3>
-  <p>
-    准备一台可通过 SSH 管理的公网 Linux 主机。在会话设置的 Mobile Relay 中打开<strong>手机访问</strong>面板，填写中转机
-    SSH 等信息，再执行接入 / 部署。缺少页面构建产物时，面板可以把构建部署任务交给 agent。
+    Mica 不内置公网中转。设备与开发机不在同一网络时，自己把运行时端口暴露出去：反向隧道（frp、SSH 转发）、Cloudflare
+    Tunnel 或一台带公网地址的机器都可以，出口对外只留 HTTPS。
   </p>
   <p>
-    也可以明确要求 Mica“使用 mobile-relay-setup 配置手机访问”。部署涉及服务器与域名设置，完整前提与手动流程见
-    <a href="https://github.com/qirong77/mica-code/tree/main/plugins/mobile-relay">插件说明</a>。
-  </p>
-  <h3>运行与更新</h3>
-  <p>
-    保持开发机上的运行时与插件宿主可用。插件详情会显示本机桥、中转机、手机和页面版本状态；升级后可点击
-    <strong>更新中转机页面</strong>上传本机页面产物。
+    暴露时必须自己补两层：一层 TLS，一层口令（Connections 里的访问口令，或反代上的 Basic
+    Auth）。运行时的接入判定把本机连接当作整台机器，把 <code>8787</code> 无鉴权地开到公网等于把自己的 shell
+    交出去。反代改写 <code>Host</code> 时还要注意运行时的 Host/Origin 校验。
   </p>
   <p>
-    连接异常时，可以让 Mica 使用 <code>mobile_relay</code> 的 <code>doctor</code>{' '}
-    操作逐项排查。停止手机访问可关闭插件中的<strong>启用手机访问</strong>，或停用整个插件。
+    手机浏览器打开的就是同一个运行时，只是换成移动布局；可以加入主屏幕。能力范围与局域网直连一致——对话、终端、文件与
+    Git 都是真的，别当成只读入口。
   </p>
-  <h3>手机入口的能力范围</h3>
-  <p>
-    中转支持会话操作、流式输出、工作区终端、只读文件与 Git 视图。文件和 Git
-    的直接写入操作、配置页调用、受控浏览器与受控终端窗口不在中转白名单中。
-  </p>
-  <p>这些界面限制不构成执行沙箱：对话中的 agent 与工作区终端仍可在开发机执行命令。</p>
 
   <h2 id="分享一条会话">分享一条会话</h2>
   <p>从会话的分享入口复制链接。链接形如：</p>

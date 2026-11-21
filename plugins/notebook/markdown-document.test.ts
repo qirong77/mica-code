@@ -192,7 +192,9 @@ describe('Notebook Markdown document conversion', () => {
     const root = rootOf(result.document);
     expect(root.children.map((node: Record<string, unknown>) => node.type)).toEqual(['html', 'paragraph']);
     expect(root.children[0]).toMatchObject({ html, type: 'html' });
+    expect(root.children[0]).not.toHaveProperty('runtime');
     expect(result.statistics.html_blocks).toBe(1);
+    expect(result.statistics.component_blocks).toBe(0);
     expect(result.warnings).toEqual([]);
   });
 
@@ -215,10 +217,13 @@ describe('Notebook Markdown document conversion', () => {
     const code = 'function App({html, Arco}) { return html`<${Arco.Button}>建群</${Arco.Button}>`; }';
     const result = markdownDocument(empty, '```react\n' + code + '\n```\n\n```js\nconst a = 1;\n```');
     const root = rootOf(result.document);
-    expect(root.children.map((node: Record<string, unknown>) => node.type)).toEqual(['html', 'code']);
-    expect(root.children[0]).toMatchObject({ html: code, runtime: 'react', type: 'html' });
+    expect(root.children.map((node: Record<string, unknown>) => node.type)).toEqual(['component', 'code']);
+    expect(root.children[0]).toMatchObject({ code, type: 'component' });
+    expect(root.children[0]).not.toHaveProperty('html');
+    expect(root.children[0]).not.toHaveProperty('runtime');
     expect(root.children[1]).toMatchObject({ language: 'js', type: 'code' });
-    expect(result.statistics.html_blocks).toBe(1);
+    expect(result.statistics.component_blocks).toBe(1);
+    expect(result.statistics.html_blocks).toBe(0);
     expect(result.statistics.code_blocks).toBe(2);
   });
 

@@ -11,6 +11,22 @@ beforeAll(async () => {
 });
 
 describe('notebook persistence boundary', () => {
+  it('publishes modal visibility with the current document identity only while attached', async () => {
+    const editor = createHeadlessEditor({namespace: 'notebook-modal', nodes: [HeadingNode], onError(error) {throw error;}});
+    const session = new NotebookSession('a', {version: 1, editorState: null}, 'modal-load');
+    const detach = session.attach(editor);
+    await Promise.resolve();
+    const post = vi.mocked(window.parent.postMessage);
+    post.mockClear();
+    session.publishModal(true);
+    expect(post).toHaveBeenLastCalledWith(expect.objectContaining({
+      type: 'modal', noteId: 'a', loadId: 'modal-load', open: true,
+    }), '*');
+    detach();
+    post.mockClear();
+    session.publishModal(false);
+    expect(post).not.toHaveBeenCalled();
+  });
   it('creates a fixed first-level title and keeps it aligned with the host name', async () => {
     const editor = createHeadlessEditor({namespace: 'notebook-title', nodes: [HeadingNode], onError(error) {throw error;}});
     const session = new NotebookSession('a', {version: 1, editorState: null}, 'title-load', '文件名称');
@@ -35,7 +51,12 @@ describe('notebook persistence boundary', () => {
     const post = vi.mocked(window.parent.postMessage);
     post.mockClear();
     const session = new NotebookSession('a', {version: 1, editorState: null}, 'load-failed');
-    const detach = session.attach({update: () => {}, getEditorState: () => {throw new Error('invalid node');}} as never);
+    const detach = session.attach({
+      update: () => {},
+      getEditorState: () => {throw new Error('invalid node');},
+      registerNodeTransform: () => () => {},
+      registerCommand: () => () => {},
+    } as never);
     await Promise.resolve();
     session.dirty();
     await Promise.resolve();
@@ -135,6 +156,8 @@ describe('notebook persistence boundary', () => {
     post.mockClear();
     const session = new NotebookSession('a', {version: 1, editorState: null}, 'load-current');
     const editor = {
+      registerNodeTransform: () => () => {},
+      registerCommand: () => () => {},
       getRootElement: () => ({dataset: {}}),
       update: () => {},
       getEditorState: () => ({toJSON: () => ({root: {children: []}})}),

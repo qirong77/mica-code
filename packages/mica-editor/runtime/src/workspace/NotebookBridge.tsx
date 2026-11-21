@@ -13,6 +13,7 @@ import {
 } from './notebookTitle';
 import {applyNotebookBarInsets, applyNotebookTheme} from './theme';
 import {isNotebookAction, NOTEBOOK_ACTION_COMMAND, type NotebookAction} from './notebookActions';
+import {subscribeEditorModals} from '../playground/ui/modalVisibility';
 
 export interface NotebookDocument {
   version: 1;
@@ -206,6 +207,12 @@ export class NotebookSession {
     return true;
   }
 
+  publishModal(open: boolean): void {
+    if (this.active && this.editor) {
+      post({type: 'modal', noteId: this.noteId, loadId: this.requestId, open});
+    }
+  }
+
   bindNavigation(navigate: (navigation: NotebookNavigation) => void): () => void {
     this.navigateOutline = navigate;
     return () => { if (this.navigateOutline === navigate) this.navigateOutline = null; };
@@ -344,5 +351,6 @@ export function NotebookEditorBinding() {
   const [editor] = useLexicalComposerContext();
   const session = useNotebookSession();
   useEffect(() => session?.attach(editor), [editor, session]);
+  useEffect(() => subscribeEditorModals(open => session?.publishModal(open)), [session]);
   return session ? <NotebookOutline session={session} /> : null;
 }

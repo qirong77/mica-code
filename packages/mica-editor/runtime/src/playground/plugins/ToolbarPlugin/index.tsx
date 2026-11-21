@@ -75,6 +75,7 @@ import { INSERT_COLLAPSIBLE_COMMAND } from '../CollapsibleExtension';
 import { INSERT_DATETIME_COMMAND } from '../DateTimeExtension';
 import { InsertEquationDialog } from '../EquationsExtension';
 import { InsertHtmlDialog, INSERT_HTML_COMMAND } from '../HtmlExtension';
+import { InsertComponentDialog, INSERT_COMPONENT_COMMAND } from '../ComponentExtension';
 import { INSERT_EXCALIDRAW_COMMAND } from '../ExcalidrawExtension';
 import { InsertImageDialog } from '../ImagesExtension';
 import InsertLayoutDialog from '../LayoutExtension/InsertLayoutDialog';
@@ -1096,6 +1097,27 @@ export default function ToolbarPlugin({
             <DropDownItem
               onClick={() => {
                 showModal(
+                  '插入组件块',
+                  (onClose) => (
+                    <InsertComponentDialog
+                      activeEditor={activeEditor}
+                      onClose={onClose}
+                      onInsert={(payload) => activeEditor.dispatchCommand(INSERT_COMPONENT_COMMAND, payload)}
+                    />
+                  ),
+                  false,
+                  'block-insert-modal',
+                );
+              }}
+              className="item"
+            >
+              <EditorIcon icon="component" />
+              <span className="text">组件块</span>
+            </DropDownItem>
+
+            <DropDownItem
+              onClick={() => {
+                showModal(
                   '插入 HTML 块',
                   (onClose) => (
                     <InsertHtmlDialog
@@ -1105,7 +1127,7 @@ export default function ToolbarPlugin({
                     />
                   ),
                   false,
-                  'html-insert-modal',
+                  'block-insert-modal',
                 );
               }}
               className="item"

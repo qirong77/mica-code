@@ -8,8 +8,9 @@ function fixture() {
     onChange = vi.fn(),
     onError = vi.fn(),
     onOutline = vi.fn(),
-    onLoaded = vi.fn();
-  const bridge = createEditorBridge({ token: 'nonce', target: () => target, onReady, onChange, onError, onOutline, onLoaded });
+    onLoaded = vi.fn(),
+    onModalChange = vi.fn();
+  const bridge = createEditorBridge({ token: 'nonce', target: () => target, onReady, onChange, onError, onOutline, onLoaded, onModalChange });
   const last = (type: string) => vi.mocked(target.postMessage).mock.calls
     .map(([payload]) => payload as Record<string, unknown>).filter((payload) => payload.type === type).at(-1)!;
   const receive = (data: Record<string, unknown>, source: unknown = target) =>
@@ -22,11 +23,37 @@ function fixture() {
     receive({ type: 'loaded', noteId: id });
     await loading;
   };
-  return { target, onReady, onChange, onError, onOutline, onLoaded, bridge, receive, last, load };
+  return { target, onReady, onChange, onError, onOutline, onLoaded, onModalChange, bridge, receive, last, load };
 }
 afterEach(() => vi.useRealTimers());
 
 describe('Notebook iframe boundary', () => {
+  it('mirrors only the active frame modal and clears the host mask on load or dispose', async () => {
+    const f = fixture();
+    await f.load('a');
+    const oldLoad = f.last('load').loadId;
+    f.onModalChange.mockClear();
+    for (const data of [
+      { noteId: 'a', token: 'wrong', open: true },
+      { noteId: 'other', open: true },
+      { noteId: 'a', open: 'true' },
+    ]) f.receive({ type: 'modal', ...data });
+    f.receive({ type: 'modal', noteId: 'a', open: true }, {});
+    expect(f.onModalChange).not.toHaveBeenCalled();
+    f.receive({ type: 'modal', noteId: 'a', open: true });
+    expect(f.onModalChange).toHaveBeenLastCalledWith(true);
+    f.receive({ type: 'modal', noteId: 'a', open: false });
+    expect(f.onModalChange).toHaveBeenLastCalledWith(false);
+    f.receive({ type: 'modal', noteId: 'a', open: true });
+    await f.load('b');
+    expect(f.onModalChange).toHaveBeenLastCalledWith(false);
+    f.onModalChange.mockClear();
+    f.receive({ type: 'modal', noteId: 'a', loadId: oldLoad, open: true });
+    expect(f.onModalChange).not.toHaveBeenCalled();
+    f.receive({ type: 'modal', noteId: 'b', open: true });
+    f.bridge.dispose();
+    expect(f.onModalChange).toHaveBeenLastCalledWith(false);
+  });
   it('ignores foreign frames and forged nonces', () => {
     const f = fixture();
     f.receive({ type: 'ready' }, {});

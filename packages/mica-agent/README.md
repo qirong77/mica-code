@@ -47,7 +47,7 @@ const agent = micaAgent.createModelClient({
 - 本包不依赖 UI、session、commands 等应用层模块。
 - provider adapter 只负责模型协议适配，不感知多 agent 协作或命令系统。
 - Pi 提供协议、签名和工具结果的转换；Mica 的共享循环保留权限过滤、只读并发、写入屏障、等待重叠、队列输入、压缩、展示回滚与用量归属。Pi SDK 的自动重试关闭，可见重试由 Mica 统一管理。
-- 图片预算只处理 pi user / toolResult 的图片内容块，工具参数与签名按正文计入预算并原样保留。内部预算入口不再支持旧 Chat / Responses wire 消息形态。
+- 图片保护只处理 pi user / toolResult 的图片内容块，工具参数与签名按正文计入预算并原样保留。发送前先按字节限量，再通过共享 `prepareImageForApi` 归一化图片（包括恢复的历史与插件结果），最后复核字节预算；单图处理失败用明确的占位文本替换，不中断整轮、不改落盘历史。query 内弱引用缓存避免每个工具迭代反复解码，纯文本走同步路径。内部预算入口不再支持旧 Chat / Responses wire 消息形态。
 - 不引用 pi 的完整 agent 应用；`pi-agent-core` 的执行模式不能表达 Mica 按工具输入判断的等待重叠与写入屏障，因此不额外叠加第二个执行循环。
 - pi-ai 固定版本为 `1.5.2`，Node 运行时要求 `>=22.19.0`。真实 API 冒烟用显式开关 `MICA_PI_LIVE=1 MICA_PI_SOURCE_HOME=/path/to/.mica MICA_PI_PROVIDER=<id> bunx vitest run --project unit packages/mica-agent/providers/piLive.test.ts`；默认跳过，不读取真实凭据。每种选中协议最多三次模型请求，验证工具循环与序列化后重放。
 - prompt 构建集中放在 `prompt/`，避免散落在运行时流程中。

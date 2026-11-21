@@ -532,6 +532,11 @@ i.horizontal-rule {
   mask-image: url(images/icons/plus.svg);
 }
 
+.icon.component {
+  -webkit-mask-image: url(images/icons/plug.svg);
+  mask-image: url(images/icons/plug.svg);
+}
+
 .icon.caret-right {
   -webkit-mask-image: url(images/icons/caret-right-fill.svg);
   mask-image: url(images/icons/caret-right-fill.svg);

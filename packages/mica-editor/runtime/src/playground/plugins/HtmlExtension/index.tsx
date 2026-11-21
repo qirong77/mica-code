@@ -1,9 +1,4 @@
 import {
-  $createParagraphNode,
-  $getRoot,
-  $getSelection,
-  $isParagraphNode,
-  $isRangeSelection,
   COMMAND_PRIORITY_EDITOR,
   createCommand,
   defineExtension,
@@ -12,38 +7,23 @@ import {
 } from 'lexical';
 import {type JSX, useId, useState} from 'react';
 
-import {$createHtmlNode, type HtmlBlockRuntime} from '../../nodes/HtmlNode';
+import {$createHtmlNode} from '../../nodes/HtmlNode';
 import Button from '../../ui/Button';
 import {DialogActions} from '../../ui/Dialog';
 import FileInput from '../../ui/FileInput';
 import TextInput from '../../ui/TextInput';
-import {$insertSlotHostAtRoot} from '../../nodes/slotHostEscape';
-import {Select} from '@arco-design/web-react';
+import {insertBlockNode} from '../insertBlock';
 
 export type InsertHtmlPayload = Readonly<{
   html: string;
-  runtime?: HtmlBlockRuntime;
 }>;
 
-export const INSERT_HTML_COMMAND: LexicalCommand<InsertHtmlPayload> =
-  createCommand('INSERT_HTML_COMMAND');
+export const INSERT_HTML_COMMAND: LexicalCommand<InsertHtmlPayload> = createCommand('INSERT_HTML_COMMAND');
 
 export const DEFAULT_HTML_BLOCK = `<section style="padding:20px;border:1px solid #d9d9d9;border-radius:12px;background:#fff;">
   <h3 style="margin:0 0 8px;">一个 HTML 页面</h3>
   <p style="margin:0;color:#666;">把结构、样式和交互放进这个独立块。</p>
 </section>`;
-
-export const DEFAULT_REACT_BLOCK = `function App({React, Arco, html}) {
-  const {Card, Button, Tag} = Arco;
-  const [count, setCount] = React.useState(0);
-  return html\`<\${Card} title="快速原型">
-    <p>少量代码即可使用 Mica 的 Arco 组件。</p>
-    <\${Tag} color="arcoblue">可交互</\${Tag}>
-    <\${Button} type="primary" onClick=\${() => setCount(count + 1)}>
-      点击了 \${count} 次
-    </\${Button}>
-  </\${Card}>\`;
-}`;
 
 function escapeAttribute(value: string): string {
   return value.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -96,21 +76,7 @@ export function buildHtmlPreviewDocument(value: string): string {
 }
 
 export function insertHtmlBlock(editor: LexicalEditor, payload: InsertHtmlPayload): void {
-  editor.update(() => {
-    const selection = $getSelection();
-    const node = $createHtmlNode(payload.html, payload.runtime ?? 'html');
-    if (!$isRangeSelection(selection)) {
-      const paragraph = $createParagraphNode();
-      $getRoot().append(node, paragraph);
-      paragraph.selectStart();
-      return;
-    }
-    $insertSlotHostAtRoot(node);
-    const next = node.getNextSibling();
-    const paragraph = $isParagraphNode(next) ? next : $createParagraphNode();
-    if (paragraph.getParent() === null) node.insertAfter(paragraph);
-    paragraph.selectStart();
-  }, {discrete: true});
+  insertBlockNode(editor, () => $createHtmlNode(payload.html));
 }
 
 function InsertHtmlDialog({
@@ -122,39 +88,23 @@ function InsertHtmlDialog({
   onClose: () => void;
   onInsert?: (payload: InsertHtmlPayload) => void;
 }): JSX.Element {
-  const [kind, setKind] = useState<'react' | 'html' | 'url'>('react');
-  const [runtime, setRuntime] = useState<HtmlBlockRuntime>('react');
-  const [source, setSource] = useState(DEFAULT_REACT_BLOCK);
+  const [kind, setKind] = useState<'html' | 'url'>('html');
+  const [source, setSource] = useState(DEFAULT_HTML_BLOCK);
   const [view, setView] = useState<'source' | 'preview'>('source');
   const [url, setUrl] = useState('');
   const [error, setError] = useState('');
   const sourceId = useId();
-  const runtimeId = useId();
 
   const insert = () => {
     const html = kind === 'url' ? pageEmbed(url) : source.trim();
     if (!html) {
-      setError(kind === 'url' ? '请输入可嵌入的 http(s) 网页地址。' : '请输入 HTML 或 React 代码。');
+      setError(kind === 'url' ? '请输入可嵌入的 http(s) 网页地址。' : '请输入 HTML 代码。');
       return;
     }
-    const payload: InsertHtmlPayload = {html, runtime: kind === 'url' ? 'html' : runtime};
+    const payload: InsertHtmlPayload = {html};
     if (onInsert) onInsert(payload);
     else insertHtmlBlock(activeEditor, payload);
     onClose();
-  };
-
-  const selectKind = (next: 'react' | 'html' | 'url') => {
-    setKind(next);
-    setError('');
-    setView('source');
-    if (next === 'react') {
-      setRuntime('react');
-      if (!source.trim() || source === DEFAULT_HTML_BLOCK) setSource(DEFAULT_REACT_BLOCK);
-    }
-    if (next === 'html') {
-      setRuntime('html');
-      if (!source.trim() || source === DEFAULT_REACT_BLOCK) setSource(DEFAULT_HTML_BLOCK);
-    }
   };
 
   const readFile = (files: FileList | null) => {
@@ -164,7 +114,6 @@ function InsertHtmlDialog({
     reader.onload = () => {
       if (typeof reader.result !== 'string') return;
       setKind('html');
-      setRuntime('html');
       setSource(normalizeLocalHtml(reader.result));
       setView('preview');
       setError('');
@@ -174,20 +123,25 @@ function InsertHtmlDialog({
   };
 
   return (
-    <div className="html-insert-dialog">
-      <div className="html-insert-tabs" role="tablist" aria-label="HTML 来源">
-        {([
-          ['react', '快速创建'],
-          ['html', 'HTML 源码'],
-          ['url', '网页链接'],
-        ] as const).map(([value, label]) => (
+    <div className="block-insert-dialog">
+      <div className="block-insert-tabs" role="tablist" aria-label="HTML 来源">
+        {(
+          [
+            ['html', 'HTML 源码'],
+            ['url', '网页链接'],
+          ] as const
+        ).map(([value, label]) => (
           <button
             type="button"
             key={value}
-            className={kind === value ? 'html-insert-tab is-active' : 'html-insert-tab'}
+            className={kind === value ? 'block-insert-tab is-active' : 'block-insert-tab'}
             role="tab"
             aria-selected={kind === value}
-            onClick={() => selectKind(value)}
+            onClick={() => {
+              setKind(value);
+              setError('');
+              setView('source');
+            }}
           >
             {label}
           </button>
@@ -195,59 +149,40 @@ function InsertHtmlDialog({
       </div>
       {kind === 'url' ? (
         <>
-          <TextInput
-            autoFocus
-            label="网页地址"
-            placeholder="https://example.com/page"
-            value={url}
-            onChange={setUrl}
-          />
-          <p className="html-insert-hint">网页以受限 iframe 显示。站点禁止被嵌入时（GitHub 一类很常见）块内会是空白，用块顶的「打开原网页」查看。</p>
+          <TextInput autoFocus label="网页地址" placeholder="https://example.com/page" value={url} onChange={setUrl} />
+          <p className="block-insert-hint">
+            网页以受限 iframe 显示。站点禁止被嵌入时（GitHub 一类很常见）块内会是空白，用块顶的「打开原网页」查看。
+          </p>
         </>
       ) : (
         <>
-          <div className="html-insert-runtime">
-            <label htmlFor={runtimeId}>渲染方式</label>
-            <Select
-              id={runtimeId}
-              size="small"
-              value={runtime}
-              onChange={value => setRuntime(value as HtmlBlockRuntime)}
-              options={[
-                {value: 'react', label: 'React + Arco（适合快速原型）'},
-                {value: 'html', label: 'HTML + CSS（静态结构）'},
-              ]}
-            />
-          </div>
           <FileInput
             label="从本地 HTML 导入"
             buttonLabel="选择 HTML 文件"
             accept=".html,.htm,text/html"
             onChange={readFile}
           />
-          <div className="html-insert-source">
-            <div className="html-insert-source-head">
-              <label htmlFor={sourceId}>{runtime === 'react' ? 'React 代码' : 'HTML 代码'}</label>
-              {runtime === 'html' && (
-                <div className="html-insert-view-tabs" role="tablist" aria-label="HTML 查看方式">
-                  {(['source', 'preview'] as const).map((nextView) => (
-                    <button
-                      type="button"
-                      key={nextView}
-                      className={view === nextView ? 'html-insert-view-tab is-active' : 'html-insert-view-tab'}
-                      role="tab"
-                      aria-selected={view === nextView}
-                      onClick={() => setView(nextView)}
-                    >
-                      {nextView === 'source' ? '源码' : '预览'}
-                    </button>
-                  ))}
-                </div>
-              )}
+          <div className="block-insert-source">
+            <div className="block-insert-source-head">
+              <label htmlFor={sourceId}>HTML 代码</label>
+              <div className="block-insert-view-tabs" role="tablist" aria-label="HTML 查看方式">
+                {(['source', 'preview'] as const).map(nextView => (
+                  <button
+                    type="button"
+                    key={nextView}
+                    className={view === nextView ? 'block-insert-view-tab is-active' : 'block-insert-view-tab'}
+                    role="tab"
+                    aria-selected={view === nextView}
+                    onClick={() => setView(nextView)}
+                  >
+                    {nextView === 'source' ? '源码' : '预览'}
+                  </button>
+                ))}
+              </div>
             </div>
-            {runtime === 'html' && view === 'preview' ? (
+            {view === 'preview' ? (
               <iframe
-                className="html-insert-preview"
+                className="block-insert-preview"
                 title="HTML 预览"
                 srcDoc={buildHtmlPreviewDocument(source)}
                 sandbox=""
@@ -261,17 +196,28 @@ function InsertHtmlDialog({
                 spellCheck={false}
                 wrap="soft"
                 onChange={event => setSource(event.target.value)}
-                placeholder={runtime === 'react' ? DEFAULT_REACT_BLOCK : DEFAULT_HTML_BLOCK}
+                placeholder={DEFAULT_HTML_BLOCK}
               />
             )}
           </div>
-          <p className="html-insert-hint">本地文件会把源码复制进笔记正文；原文件删除后，已插入的内容仍可打开。相对路径资源不会自动猜测。</p>
+          <p className="block-insert-hint">
+            本地文件会把源码复制进笔记正文；原文件删除后，已插入的内容仍可打开。相对路径资源不会自动猜测。要写 React +
+            Arco 交互模块，用「组件块」。
+          </p>
         </>
       )}
-      {error && <p className="html-insert-error" role="alert">{error}</p>}
+      {error && (
+        <p className="block-insert-error" role="alert">
+          {error}
+        </p>
+      )}
       <DialogActions>
-        <Button small secondary onClick={onClose}>取消</Button>
-        <Button small onClick={insert}>插入 HTML 块</Button>
+        <Button small secondary onClick={onClose}>
+          取消
+        </Button>
+        <Button small onClick={insert}>
+          插入 HTML 块
+        </Button>
       </DialogActions>
     </div>
   );
@@ -291,4 +237,3 @@ export const HtmlExtension = defineExtension({
       COMMAND_PRIORITY_EDITOR,
     ),
 });
-

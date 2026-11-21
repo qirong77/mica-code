@@ -18,6 +18,7 @@ export function createEditorBridge(options: {
   onError: (message: string) => void;
   onLoaded?: (noteId: string) => void;
   onOutline?: (noteId: string, outline: NotebookOutline) => void;
+  onModalChange?: (open: boolean) => void;
 }) {
   let disposed = false;
   let ready = false;
@@ -73,6 +74,11 @@ export function createEditorBridge(options: {
     if (disposed || !target || event.source !== target) return;
     const data = event.data;
     if (!data || data.channel !== NOTEBOOK_CHANNEL || data.token !== options.token) return;
+    if (data.type === 'modal') {
+      if (!active?.loaded || data.noteId !== active.noteId || data.loadId !== active.loadId || typeof data.open !== 'boolean') return;
+      options.onModalChange?.(data.open);
+      return;
+    }
     if (data.type === 'outline') {
       if (
         !active?.loaded || data.noteId !== active.noteId || data.loadId !== active.loadId ||
@@ -170,6 +176,7 @@ export function createEditorBridge(options: {
     receive,
     load(noteId: string, document: NotebookDocument, title = '未命名笔记'): Promise<void> {
       rejectRequests('笔记已切换，请重试');
+      options.onModalChange?.(false);
       active = { noteId, loadId: `load-${++sequence}`, loaded: false };
       return request('load', document, title).then(() => undefined);
     },
@@ -196,6 +203,7 @@ export function createEditorBridge(options: {
       return request('flush');
     },
     dispose() {
+      options.onModalChange?.(false);
       disposed = true;
       active = null;
       rejectRequests('编辑器已关闭');

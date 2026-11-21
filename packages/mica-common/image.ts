@@ -1,4 +1,11 @@
-import { decodePng, encodePng, hasTransparentPixels, isPng, type RasterImage } from './imagePng.js';
+import {
+  assertPngDecodeSize,
+  decodePng,
+  encodePng,
+  hasTransparentPixels,
+  isPng,
+  type RasterImage,
+} from './imagePng.js';
 import { downscaleAreaAverage } from './imageResample.js';
 
 export type SupportedImageMediaType = 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp';
@@ -52,7 +59,7 @@ export const IMAGE_MAX_API_LONG_EDGE = 8192;
  * - 已经够小：字节一个不改，完全无损；
  * - 尺寸超出长边上限：面积平均缩到上限，再无损重编码；
  * - 只是字节偏大：只重打包，像素一个不差；
- * - 任何一步失败：退回原图，压缩不能挡住「读这张图」这件事。
+ * - 不支持的 PNG 编码变体保留原图；损坏数据与解码资源超限在本机拒绝。
  * - 最终长边仍超过接口硬上限（8192）：抛错，而不是让请求在服务端 400。
  */
 export async function prepareImageForApi(imageBuffer: Buffer): Promise<ProcessedImage> {
@@ -62,6 +69,9 @@ export async function prepareImageForApi(imageBuffer: Buffer): Promise<Processed
   if (!mediaType) throw new Error('unsupported image format');
 
   const dimensions = detectImageDimensions(imageBuffer, mediaType);
+  if (!dimensions.width || !dimensions.height) {
+    throw new Error('无法识别有效的图片尺寸，请重新导出为 PNG/JPEG，或重新截图。');
+  }
   const original: ProcessedImage = {
     buffer: imageBuffer,
     mediaType,
@@ -72,13 +82,25 @@ export async function prepareImageForApi(imageBuffer: Buffer): Promise<Processed
   };
 
   if (mediaType !== 'image/png' || !isPng(imageBuffer)) return assertWithinApiLimit(original);
+  // Resource rejection must not fall back to sending the original image.
+  assertPngDecodeSize(dimensions.width, dimensions.height);
+  let raster: RasterImage;
+  try {
+    raster = decodePng(imageBuffer);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '';
+    if (message.startsWith('interlaced png unsupported') || message.startsWith('unsupported png bit depth')) {
+      return assertWithinApiLimit(original);
+    }
+    throw new Error('PNG 图片解码失败，数据可能损坏或解压后长度超限。请重新截图或重新导出图片。');
+  }
   const longestEdge = Math.max(dimensions.width ?? 0, dimensions.height ?? 0);
   const overLimit = longestEdge > IMAGE_MAX_LONG_EDGE;
   if (!overLimit && imageBuffer.length <= IMAGE_MIN_REPACK_BYTES) return assertWithinApiLimit(original);
 
   let processed = original;
   try {
-    processed = squeezePng(imageBuffer) ?? original;
+    processed = squeezePng(imageBuffer, raster) ?? original;
   } catch {
     processed = original;
   }
@@ -102,8 +124,7 @@ function assertWithinApiLimit(image: ProcessedImage): ProcessedImage {
   );
 }
 
-function squeezePng(buffer: Buffer): ProcessedImage | null {
-  const raster = decodePng(buffer);
+function squeezePng(buffer: Buffer, raster: RasterImage): ProcessedImage | null {
   const target = fitWithinLongEdge(raster.width, raster.height, IMAGE_MAX_LONG_EDGE);
   const scaled = downscaleAreaAverage(raster, target.width, target.height);
   const encoded = encodePng(dropAlphaIfOpaque(scaled));
@@ -149,8 +170,7 @@ export function fitWithinLongEdge(
 
 function detectImageMediaType(buffer: Buffer): SupportedImageMediaType | null {
   if (buffer.length >= 3 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) return 'image/jpeg';
-  if (buffer.length >= 8 && buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4e && buffer[3] === 0x47)
-    return 'image/png';
+  if (isPng(buffer)) return 'image/png';
   if (buffer.length >= 6 && /^GIF8[79]a$/.test(buffer.subarray(0, 6).toString('ascii'))) return 'image/gif';
   if (
     buffer.length >= 12 &&
@@ -165,7 +185,7 @@ function detectImageDimensions(
   buffer: Buffer,
   mediaType: SupportedImageMediaType,
 ): { width?: number; height?: number } {
-  if (mediaType === 'image/png' && buffer.length >= 24) {
+  if (mediaType === 'image/png' && buffer.length >= 33 && buffer.toString('ascii', 12, 16) === 'IHDR') {
     return { width: buffer.readUInt32BE(16), height: buffer.readUInt32BE(20) };
   }
   if (mediaType === 'image/gif' && buffer.length >= 10) {
@@ -173,6 +193,23 @@ function detectImageDimensions(
   }
   if (mediaType === 'image/webp' && buffer.length >= 30 && buffer.subarray(12, 16).toString('ascii') === 'VP8X') {
     return { width: readUInt24LE(buffer, 24) + 1, height: readUInt24LE(buffer, 27) + 1 };
+  }
+  if (
+    mediaType === 'image/webp' &&
+    buffer.length >= 25 &&
+    buffer.toString('ascii', 12, 16) === 'VP8L' &&
+    buffer[20] === 0x2f
+  ) {
+    const bits = buffer.readUInt32LE(21);
+    return { width: (bits & 0x3fff) + 1, height: ((bits >>> 14) & 0x3fff) + 1 };
+  }
+  if (
+    mediaType === 'image/webp' &&
+    buffer.length >= 30 &&
+    buffer.toString('ascii', 12, 16) === 'VP8 ' &&
+    buffer.subarray(23, 26).equals(Buffer.from([0x9d, 0x01, 0x2a]))
+  ) {
+    return { width: buffer.readUInt16LE(26) & 0x3fff, height: buffer.readUInt16LE(28) & 0x3fff };
   }
   if (mediaType === 'image/jpeg') return detectJpegDimensions(buffer);
   return {};

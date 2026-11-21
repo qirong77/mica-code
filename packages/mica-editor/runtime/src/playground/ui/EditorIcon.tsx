@@ -19,6 +19,7 @@ const paths: Record<string, ReactNode> = {
   ruby: <path d="m3 14 4-8 4 8M4.5 11h5M2 2h3M3.5 2v2M8 2h5m-4 2h3" />,
   'diagram-2': <><path d="M8 5v3M3 10V8h10v2" /><rect x="5.5" y="1.5" width="5" height="3.5" rx=".5" /><rect x="1" y="10" width="4" height="4" rx=".5" /><rect x="11" y="10" width="4" height="4" rx=".5" /></>,
   columns: <><rect x="1.5" y="2.5" width="13" height="11" rx="1" /><path d="M8 2.5v11" /></>,
+  component: <><rect x="1.5" y="1.5" width="13" height="13" rx="2.5" /><rect x="5" y="5" width="6" height="6" rx="1" /></>,
 };
 
 export default function EditorIcon({icon, className = ''}: {icon: string; className?: string}) {

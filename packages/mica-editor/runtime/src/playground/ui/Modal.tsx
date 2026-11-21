@@ -8,7 +8,9 @@
 
 import {Modal as ArcoModal} from '@arco-design/web-react';
 import {useLexicalFocusTrapRef} from '@lexical/react/useLexicalFocusTrapRef';
-import {type CSSProperties, type JSX, type ReactNode, useCallback} from 'react';
+import {type CSSProperties, type JSX, type ReactNode, useCallback, useEffect} from 'react';
+
+import {registerEditorModal} from './modalVisibility';
 
 export default function Modal({onClose, children, title, closeOnClickOutside = false, className, style}: {
   children: ReactNode;
@@ -18,6 +20,7 @@ export default function Modal({onClose, children, title, closeOnClickOutside = f
   className?: string;
   style?: CSSProperties;
 }): JSX.Element {
+  useEffect(registerEditorModal, []);
   // Let Lexical own focus management, including restoration to the editor.
   // Two simultaneous focus traps (Arco + Lexical) fight over nested popups.
   const trap = useLexicalFocusTrapRef(true, 'firstFocusable', target =>

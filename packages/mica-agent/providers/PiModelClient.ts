@@ -28,7 +28,7 @@ import { compactHistoricalToolResultText } from './historyCompaction.js';
 import { markProviderOmitsFinishReason } from './finishReasonSupport.js';
 import { sendWithEffortFallback } from './effortFallback.js';
 import { executeProviderToolCalls, throwIfQueryStopped } from './providerHelpers.js';
-import { applyImageBudget, describeImageBudget } from './imageBudget.js';
+import { applyImageBudget, createRequestImagePreparer, describeImageBudget } from './imageBudget.js';
 import { observeGenerationText, sampleGenerationTiming, type GenerationTiming } from './generationTiming.js';
 import { piModel, streamPiRequest } from './piTransport.js';
 import { PiThinkingDisplay } from './PiThinkingDisplay.js';
@@ -139,6 +139,7 @@ export class PiModelClient extends BaseAgent<ModelClientOptions, Message, AgentU
       if (input !== null && input !== undefined) messages.push(userMessage(input));
     };
 
+    const prepareRequestImages = createRequestImagePreparer();
     while (true) {
       throwIfQueryStopped(options);
       throwIfAgentMaxTurnsReached(options, requestIndex, totalContent);
@@ -164,7 +165,12 @@ export class PiModelClient extends BaseAgent<ModelClientOptions, Message, AgentU
               description: tool.description,
               parameters: tool.input_schema as Tool['parameters'],
             }));
-      const context = { systemPrompt: prompt, messages: budgeted.value, tools: requestTools };
+      const preparation = prepareRequestImages(budgeted.value);
+      const preparedImages = preparation instanceof Promise ? await preparation : preparation;
+      throwIfQueryStopped(options);
+      const requestMessages =
+        preparedImages === budgeted.value ? preparedImages : applyImageBudget(preparedImages).value;
+      const context = { systemPrompt: prompt, messages: requestMessages, tools: requestTools };
       const startedAt = Date.now();
       let attemptStartedAt = startedAt;
       let firstDeltaAt = 0;

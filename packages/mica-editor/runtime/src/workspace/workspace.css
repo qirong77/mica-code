@@ -152,10 +152,10 @@ kbd { font: 12px/1.5 monospace; border: 1px solid var(--workspace-line); border-
 .editor-modal .arco-modal-title { text-align: left; font-size: 16px; }
 .editor-modal .arco-modal-content { padding: 24px; }
 .editor-modal .editor-modal-body { height: min(350px, 60vh); overflow-y: auto; outline: none; }
-.editor-modal.html-insert-modal,
-.editor-modal.html-insert-modal .arco-modal-content,
-.editor-modal.html-insert-modal .editor-modal-body { min-width: 0; max-width: 100%; overflow-x: hidden; }
-.editor-modal.html-insert-modal .editor-modal-body { height: auto; max-height: calc(100vh - 180px); overflow-x: hidden; overflow-y: auto; }
+.editor-modal.block-insert-modal,
+.editor-modal.block-insert-modal .arco-modal-content,
+.editor-modal.block-insert-modal .editor-modal-body { min-width: 0; max-width: 100%; overflow-x: hidden; }
+.editor-modal.block-insert-modal .editor-modal-body { height: auto; max-height: calc(100vh - 180px); overflow-x: hidden; overflow-y: auto; }
 .editor-modal .editor-modal-body > .Modal__content { padding-top: 20px; }
 .editor-modal .Input__wrapper, .color-picker-wrapper .Input__wrapper { display: flex; flex-direction: column; align-items: stretch; margin-bottom: 18px; gap: 8px; }
 .editor-modal .Input__label, .color-picker-wrapper .Input__label { font-size: 12px; font-weight: 500; color: var(--color-text-2); }
@@ -173,38 +173,46 @@ kbd { font: 12px/1.5 monospace; border: 1px solid var(--workspace-line); border-
 .editor-modal .dialog-dropdown.arco-btn { width: 100%; border: 1px solid var(--workspace-line); border-radius: 4px; display: flex; align-items: center; justify-content: space-between; margin-bottom: 24px; color: var(--color-text-2); }
 /* Insert-HTML dialog: one source switch, then plain fields in a fixed rhythm.
    Aliases keep it readable where only Arco's own tokens exist (markdown mode). */
-.html-insert-dialog {
-  --html-insert-fg: var(--color-fg-strong, var(--color-text-1));
-  --html-insert-soft: var(--color-fg-soft, var(--color-text-2));
-  --html-insert-faint: var(--color-fg-faint, var(--color-text-3));
-  --html-insert-line: var(--color-line-soft, var(--color-border-2));
-  --html-insert-fill: var(--color-fill-1);
-  --html-insert-panel: var(--color-panel, var(--color-bg-2));
-  --html-insert-shadow: var(--color-overlay, rgb(0 0 0 / 8%));
-  --html-insert-mono: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
-  width: 100%; min-width: 0; max-width: 100%; color: var(--html-insert-soft); overflow: hidden;
+.block-insert-dialog {
+  --block-insert-fg: var(--color-fg-strong, var(--color-text-1));
+  --block-insert-soft: var(--color-fg-soft, var(--color-text-2));
+  --block-insert-faint: var(--color-fg-faint, var(--color-text-3));
+  --block-insert-line: var(--color-line-soft, var(--color-border-2));
+  --block-insert-fill: var(--color-fill-1);
+  --block-insert-panel: var(--color-panel, var(--color-bg-2));
+  --block-insert-shadow: var(--color-overlay, rgb(0 0 0 / 8%));
+  --block-insert-mono: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
+  width: 100%; min-width: 0; max-width: 100%; color: var(--block-insert-soft); overflow: hidden;
 }
-.html-insert-tabs { display: flex; gap: 2px; margin-bottom: 16px; padding: 3px; border-radius: 6px; background: var(--html-insert-fill); }
-.html-insert-tab { flex: 1; min-width: 0; height: 26px; padding: 0 8px; border: 0; border-radius: 4px; font-size: 12px; line-height: 26px; color: var(--html-insert-soft); background: transparent; cursor: pointer; }
-.html-insert-tab:hover { color: var(--html-insert-fg); }
-.html-insert-tab.is-active { color: var(--html-insert-fg); font-weight: 500; background: var(--html-insert-panel); box-shadow: 0 1px 2px var(--html-insert-shadow); }
-.html-insert-dialog .Input__wrapper { margin-bottom: 14px; gap: 6px; }
-.html-insert-dialog .Input__label { font-size: 12px; font-weight: 400; color: var(--html-insert-soft); }
-.html-insert-runtime { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
-.html-insert-runtime > label { flex: none; font-size: 12px; color: var(--html-insert-soft); }
-.html-insert-runtime .arco-select { flex: 1; min-width: 0; }
-.html-insert-source { display: flex; flex-direction: column; gap: 6px; margin-top: 4px; }
-.html-insert-source-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 20px; font-size: 12px; color: var(--html-insert-soft); }
-.html-insert-view-tabs { display: flex; gap: 2px; padding: 2px; border-radius: 4px; background: var(--html-insert-fill); }
-.html-insert-view-tab { height: 20px; padding: 0 8px; border: 0; border-radius: 3px; font-size: 11px; line-height: 20px; color: var(--html-insert-faint); background: transparent; cursor: pointer; }
-.html-insert-view-tab:hover { color: var(--html-insert-fg); }
-.html-insert-view-tab.is-active { color: var(--html-insert-fg); background: var(--html-insert-panel); }
-.html-insert-source textarea { box-sizing: border-box; width: 100%; max-width: 100%; height: clamp(160px, 30vh, 320px); min-height: 160px; max-height: 320px; resize: none; overflow-x: hidden; overflow-y: auto; white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; padding: 10px 12px; border: 1px solid var(--html-insert-line); border-radius: 6px; color: var(--html-insert-fg); background: var(--html-insert-fill); font: 12px/1.65 var(--html-insert-mono); }
-.html-insert-source textarea:focus { border-color: var(--color-accent, var(--workspace-accent)); outline: none; }
-.html-insert-preview { display: block; box-sizing: border-box; width: 100%; max-width: 100%; height: clamp(160px, 30vh, 320px); min-height: 160px; max-height: 320px; border: 1px solid var(--html-insert-line); border-radius: 6px; background: #fff; }
-.html-insert-hint { margin: 8px 0 0; color: var(--html-insert-faint); font-size: 11px; line-height: 1.65; }
-.html-insert-error { margin: 8px 0 0; color: var(--color-danger, rgb(var(--danger-6))); font-size: 12px; }
-.html-insert-dialog .DialogActions { gap: 8px; margin-top: 18px; }
+.block-insert-tabs { display: flex; gap: 2px; margin-bottom: 16px; padding: 3px; border-radius: 6px; background: var(--block-insert-fill); }
+.block-insert-tab { flex: 1; min-width: 0; height: 26px; padding: 0 8px; border: 0; border-radius: 4px; font-size: 12px; line-height: 26px; color: var(--block-insert-soft); background: transparent; cursor: pointer; }
+.block-insert-tab:hover { color: var(--block-insert-fg); }
+.block-insert-tab.is-active { color: var(--block-insert-fg); font-weight: 500; background: var(--block-insert-panel); box-shadow: 0 1px 2px var(--block-insert-shadow); }
+.block-insert-dialog .Input__wrapper { margin-bottom: 14px; gap: 6px; }
+.block-insert-dialog .Input__label { font-size: 12px; font-weight: 400; color: var(--block-insert-soft); }
+.block-insert-runtime { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
+.block-insert-runtime > label { flex: none; font-size: 12px; color: var(--block-insert-soft); }
+.block-insert-runtime .arco-select { flex: 1; min-width: 0; }
+.block-insert-source { display: flex; flex-direction: column; gap: 6px; margin-top: 4px; }
+.block-insert-source-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 20px; font-size: 12px; color: var(--block-insert-soft); }
+.block-insert-view-tabs { display: flex; gap: 2px; padding: 2px; border-radius: 4px; background: var(--block-insert-fill); }
+.block-insert-view-tab { height: 20px; padding: 0 8px; border: 0; border-radius: 3px; font-size: 11px; line-height: 20px; color: var(--block-insert-faint); background: transparent; cursor: pointer; }
+.block-insert-view-tab:hover { color: var(--block-insert-fg); }
+.block-insert-view-tab.is-active { color: var(--block-insert-fg); background: var(--block-insert-panel); }
+.block-insert-source textarea { box-sizing: border-box; width: 100%; max-width: 100%; height: clamp(160px, 30vh, 320px); min-height: 160px; max-height: 320px; resize: none; overflow-x: hidden; overflow-y: auto; white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; padding: 10px 12px; border: 1px solid var(--block-insert-line); border-radius: 6px; color: var(--block-insert-fg); background: var(--block-insert-fill); font: 12px/1.65 var(--block-insert-mono); }
+.block-insert-source textarea:focus { border-color: var(--color-accent, var(--workspace-accent)); outline: none; }
+.block-insert-source textarea[wrap='off'] { height: clamp(240px, 42vh, 460px); max-height: 460px; overflow: auto; white-space: pre; overflow-wrap: normal; word-break: normal; }
+.block-insert-help { margin-top: 6px; color: var(--block-insert-faint); font-size: 11px; line-height: 1.65; }
+.block-insert-help summary { width: fit-content; cursor: pointer; color: var(--block-insert-soft); }
+.block-insert-help p { margin: 6px 0 0; }
+.sandbox-block .sandbox-block-edit { position: absolute; top: 8px; right: 8px; opacity: 0; pointer-events: none; }
+.sandbox-block:is(:hover, :focus-within) .sandbox-block-edit,
+.sandbox-block .sandbox-block-edit:focus-visible { opacity: 1; pointer-events: auto; }
+@media (hover: none) { .sandbox-block .sandbox-block-edit { opacity: 1; pointer-events: auto; } }
+.block-insert-preview { display: block; box-sizing: border-box; width: 100%; max-width: 100%; height: clamp(160px, 30vh, 320px); min-height: 160px; max-height: 320px; border: 1px solid var(--block-insert-line); border-radius: 6px; background: #fff; }
+.block-insert-hint { margin: 8px 0 0; color: var(--block-insert-faint); font-size: 11px; line-height: 1.65; }
+.block-insert-error { margin: 8px 0 0; color: var(--color-danger, rgb(var(--danger-6))); font-size: 12px; }
+.block-insert-dialog .DialogActions { gap: 8px; margin-top: 18px; }
 .help-intro { padding: 4px 0 24px; border-bottom: 1px solid var(--workspace-line); }
 .help-intro h2 { font-size: 23px; letter-spacing: -.5px; margin: 18px 0 10px; color: var(--color-text-1); }
 .help-intro p, .help-group p { font-size: 13px; color: var(--color-text-3); line-height: 1.9; margin: 0; }

@@ -5,7 +5,6 @@ import {$createParagraphNode, $createTextNode, $getRoot} from 'lexical';
 import {describe, expect, it, vi} from 'vitest';
 
 import {
-  DEFAULT_REACT_BLOCK,
   buildHtmlPreviewDocument,
   insertHtmlBlock,
   normalizeLocalHtml,
@@ -48,12 +47,6 @@ describe('Notebook HTML blocks', () => {
     } finally {
       vi.stubGlobal('DOMParser', previousParser);
     }
-  });
-
-  it('keeps the short React/Arco template executable as block source', () => {
-    expect(DEFAULT_REACT_BLOCK).toContain('function App({React, Arco, html})');
-    expect(DEFAULT_REACT_BLOCK).toContain('<${Card}');
-    expect(DEFAULT_REACT_BLOCK).toContain('setCount(count + 1)');
   });
 
   it('wraps HTML fragments in a preview document without changing complete documents', () => {

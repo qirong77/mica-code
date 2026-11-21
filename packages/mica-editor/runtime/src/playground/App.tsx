@@ -61,6 +61,7 @@ import {PlaygroundAutoLinkExtension} from './plugins/AutoLinkExtension';
 import {CardExtension} from './plugins/CardExtension';
 import {CodeHighlightExtension} from './plugins/CodeHighlightExtension';
 import {CollapsibleExtension} from './plugins/CollapsibleExtension';
+import {ComponentExtension} from './plugins/ComponentExtension';
 import {DateTimeExtension} from './plugins/DateTimeExtension';
 import {DragDropPasteExtension} from './plugins/DragDropPasteExtension';
 import {EmojisExtension} from './plugins/EmojisExtension';
@@ -113,6 +114,7 @@ const PlaygroundRichTextExtension = defineExtension({
     }),
     ImagesExtension,
     HtmlExtension,
+    ComponentExtension,
     HorizontalRuleExtension,
     PageBreakExtension,
     TwitterExtension,

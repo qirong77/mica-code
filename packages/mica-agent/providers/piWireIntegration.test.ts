@@ -8,7 +8,7 @@ import { PiModelClient } from './PiModelClient.js';
 const servers: Server[] = [];
 const tools: MicaTool[] = [];
 const disposers: Array<() => void> = [];
-const image = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg==';
+const image = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg==';
 afterEach(async () => {
   for (const tool of tools.splice(0)) micaTools.unregisterRuntime(tool);
   while (disposers.length) disposers.pop()?.();

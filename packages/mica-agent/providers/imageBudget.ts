@@ -1,4 +1,5 @@
-import type { Message } from '@earendil-works/pi-ai';
+import type { ImageContent, Message, TextContent } from '@earendil-works/pi-ai';
+import { prepareImageForApi } from '@packages/mica-common/index.js';
 
 /**
  * 请求级的内联图片字节预算。
@@ -49,6 +50,77 @@ const IMAGE_OMITTED_FOR_BUDGET =
   '[图片已省略] 这张较早的历史图片（{size}）已从本次请求中移除：会话里的内联图片总量超过接口请求体上限。需要它时请重新读取对应文件或重新截图，并如实告知用户这张图已被省略。';
 const IMAGE_OMITTED_TOO_LARGE =
   '[图片已省略] 这张图片（{size}）超过单张上限 {limit}，本机压不下来（只有 PNG 会被重编码）。请先裁剪或缩小图片再读，并如实告知用户这张图已被省略。';
+
+/**
+ * Normalize request copies, including images restored from old sessions or
+ * returned by plugin tools. Cache by immutable content block during the query,
+ * so subsequent tool iterations do not repeatedly decode the same screenshot.
+ * Run the byte budget first to avoid decoding images that will be omitted.
+ */
+export function createRequestImagePreparer(): (messages: Message[]) => Message[] | Promise<Message[]> {
+  const cache = new WeakMap<ImageContent, (ImageContent | TextContent)[]>();
+  const prepare = async (messages: Message[]): Promise<Message[]> => {
+    let changed = false;
+    const result: Message[] = [];
+    for (const message of messages) {
+      if ((message.role !== 'user' && message.role !== 'toolResult') || typeof message.content === 'string') {
+        result.push(message);
+        continue;
+      }
+      let messageChanged = false;
+      const content: (ImageContent | TextContent)[] = [];
+      for (const part of message.content) {
+        if (part.type !== 'image') {
+          content.push(part);
+          continue;
+        }
+        let replacement = cache.get(part);
+        if (!replacement) {
+          try {
+            const source = Buffer.from(part.data, 'base64');
+            const image = await prepareImageForApi(source);
+            const sameBytes = image.buffer === source;
+            const normalized: ImageContent =
+              sameBytes && image.mediaType === part.mimeType
+                ? part
+                : { type: 'image', data: image.buffer.toString('base64'), mimeType: image.mediaType };
+            replacement = image.resized
+              ? [
+                  {
+                    type: 'text',
+                    text: `[图片已缩小] ${image.sourceWidth}x${image.sourceHeight} → ${image.width}x${image.height}。细节请裁剪或按区域分段重读。`,
+                  },
+                  normalized,
+                ]
+              : [normalized];
+          } catch (error) {
+            replacement = [
+              {
+                type: 'text',
+                text: `[图片已省略] ${error instanceof Error ? error.message : '图片处理失败'} 请重新读取缩小后的图片或分段截图；本次请求未包含这张图片。`,
+              },
+            ];
+          }
+          cache.set(part, replacement);
+        }
+        messageChanged ||= replacement.length !== 1 || replacement[0] !== part;
+        content.push(...replacement);
+      }
+      changed ||= messageChanged;
+      result.push(messageChanged ? { ...message, content } : message);
+    }
+    return changed ? result : messages;
+  };
+  return (messages) =>
+    messages.some(
+      (message) =>
+        (message.role === 'user' || message.role === 'toolResult') &&
+        typeof message.content !== 'string' &&
+        message.content.some((part) => part.type === 'image'),
+    )
+      ? prepare(messages)
+      : messages;
+}
 
 /**
  * 在发送副本中替换超限的图片块。返回的是新对象（原数组不被改动），没有超限时原样返回

@@ -23,6 +23,13 @@
   支持 `image/jpeg`、`image/png`、`image/gif`、`image/webp`；文本资源与资源链接保留为文本，
   其他图片 MIME、音频与二进制资源返回简短的不支持说明，不把二进制或未知内容 JSON 序列化进
   上下文。`isError` 仍按文本错误抛出。
+- 远端图片和本地 `read_image` 走同一道入口保护：base64 解码后交给 `prepareImageForApi`
+  （`mica-common/image.ts`）。逐张顺序处理（不并发解码多张大图），PNG 长边超过 1568 就按面积平均
+  缩小并无损重编码，长边仍超接口上限 8192 的图在本机拦下，不让请求换来服务端 400。缩小过的图
+  前面会插一段说明原始/实际尺寸，并提示要看清细节应让 MCP 工具裁剪、按区域分段重截或分段读。
+  image block 的 `media_type` 用实际识别出的格式，不信任 MCP 声明的 `mimeType`：服务端把 JPEG
+  标成 PNG 时按声明发出去只会换来一条「不认识的图片格式」。单张失败（空载荷、图头不认识、尺寸
+  超限）只换成一行简短说明，同一结果里的其它图文照常保留；说明与报错文案都不会带上 base64 载荷。
 
 桌面端浏览器 MCP 的 `screenshot` 默认按 `raw=true` 返回模型可见的图片；需要 JSON dataUrl 时可
 显式传 `raw=false`。这只改变 MCP 调用默认值，直接 HTTP 截图接口仍默认返回 JSON。
@@ -90,7 +97,8 @@ await micaMcp.init({ parallel: true, initTimeoutMs: 3000 });
 - `config.ts`：MCP 配置路径、配置类型和加载逻辑。
 - `client.ts`：MCP client 与连接状态。
 - `service.ts`：初始化、重连和关闭编排。
-- `tools.ts`：MCP tool 到 Mica tool 的适配，保留文本资源与资源链接；二进制资源只返回简短说明。
+- `tools.ts`：MCP tool 到 Mica tool 的适配，保留文本资源与资源链接；图片经 `prepareImageForApi`
+  压缩/拦截后再变成 image block，二进制资源只返回简短说明。
 - `operation.ts`：桌面独立插件后端复用的内部 operation 观察适配，仍由 `mica-diagnostics` 的
   `logger/timedResult` 负责唯一计时、聚合与轮转。事件 `operation.start/finish` 只含随机 operationId、
   固定 operation 名、可信插件 id，以及 `outcome/code/ms`；不复制输入、输出、异常消息或堆栈，

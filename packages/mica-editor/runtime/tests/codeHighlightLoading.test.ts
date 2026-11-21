@@ -54,6 +54,16 @@ describe('lazy code highlighting', () => {
     expect(typeof Prism.languages.rust).toBe('object');
   });
 
+  it('loads the bash grammar for shell code blocks', async () => {
+    expect(isCodeLanguageLoaded('bash')).toBe(false);
+    await loadCodeLanguage('bash');
+    expect(isCodeLanguageLoaded('bash')).toBe(true);
+    expect(typeof Prism.languages.bash).toBe('object');
+    // sh / shell 与 bash 共用同一份语法。
+    expect(isCodeLanguageLoaded('sh')).toBe(true);
+    expect(isCodeLanguageLoaded('shell')).toBe(true);
+  });
+
   it('highlights an existing code block after the lazy extension resolves', async () => {
     const editor = buildEditorFromExtensions(
       defineExtension({

@@ -52,6 +52,7 @@
   background: var(--color-active);
 }
 .notebook-rail {
+  position: relative;
   box-sizing: border-box;
   width: var(--notebook-rail-width);
   flex: none;
@@ -324,9 +325,6 @@
 .notebook-tree-entry.is-drop-after::after {
   bottom: -1px;
 }
-.notebook-tree-row[draggable='true'] {
-  user-select: none;
-}
 .notebook-tree-row[draggable='true']:active {
   cursor: grabbing;
 }
@@ -348,6 +346,12 @@
   font-weight: inherit;
   line-height: 22px;
   cursor: pointer;
+  /* 目录名要能选中：手机长按选字复制，桌面在空白处也能拉出选区。
+     整行仍然可拖——鼠标按住移动由 HTML5 拖拽接管，不会留下半行选区。 */
+  -webkit-user-select: text;
+  user-select: text;
+  /* 双击改名不该顺手把页面放大。 */
+  touch-action: manipulation;
 }
 .notebook-tree-chevron {
   display: grid;
@@ -544,6 +548,21 @@
 .notebook-editor-area.has-note .notebook-editor-frame {
   visibility: visible;
 }
+/* The modal lives in the sandbox. Match its mask on the host-owned sidebars;
+   hide the overlaid document bar so the iframe's mask covers the whole row. */
+.notebook-page.is-editor-modal-open :is(.notebook-rail, .notebook-outline)::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 100;
+  background: var(--color-mask-bg);
+}
+.notebook-page.is-editor-modal-open :is(.notebook-bar, .notebook-rail-resizer, .notebook-outline-rail) {
+  visibility: hidden;
+}
+.notebook-page.is-editor-modal-open :is(.notebook-rail, .notebook-outline) {
+  border-color: var(--color-mask-bg);
+}
 /* The editor can be narrow even on a desktop between two expanded sidebars. */
 @container notebook-document (max-width: 580px) {
   .notebook-bar {
@@ -556,6 +575,14 @@
   .notebook-bar-lead,
   .notebook-bar-actions { border-bottom: 0; }
   .notebook-bar-lead { flex: 1; max-width: none; }
+  /* This row sits above the iframe on narrow documents, so its empty space
+     needs the same mask too. Keep the row height to avoid moving the modal. */
+  .notebook-page.is-editor-modal-open .notebook-bar {
+    visibility: visible;
+    background: linear-gradient(var(--color-mask-bg), var(--color-mask-bg)), var(--color-canvas);
+    border-color: var(--color-mask-bg);
+  }
+  .notebook-page.is-editor-modal-open .notebook-bar > * { visibility: hidden; }
 }
 /* 大纲是正文右侧的常驻面板，占位而不是浮层：鼠标移到面板上才露出标题行的
    隐藏按钮；收起后右缘变成下面的彩虹条，点它重新展开。 */
@@ -802,6 +829,21 @@
   inset: 0;
   background: var(--color-canvas);
   padding: calc(var(--notebook-bar-height) + 36px) max(36px, calc((100% - 900px) / 2 + 36px)) 36px;
+  /* 只在真的等了一会儿才出现，所以淡入即可；热缓存下通常根本走不到这里。 */
+  animation: notebook-skeleton-in 160ms ease-out both;
+}
+@keyframes notebook-skeleton-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .notebook-editor-skeleton {
+    animation: none;
+  }
 }
 .notebook-editor-skeleton i:first-child {
   height: 32px;

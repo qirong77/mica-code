@@ -152,9 +152,10 @@ describe('pi tool iterations', () => {
     expect(client.lastUsage).toMatchObject({ inputTokens: 5, outputTokens: 3, totalTokens: 8 });
   });
   it('keeps multimodal tool results in pi history and images out of text callbacks', async () => {
+    const image = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg==';
     tool('read_image_probe', true, async () => [
       { type: 'text', text: 'screenshot' },
-      { type: 'image', source: { type: 'base64', data: 'aW1hZ2U=', media_type: 'image/png' } },
+      { type: 'image', source: { type: 'base64', data: image, media_type: 'image/png' } },
     ]);
     scripts.push(
       () => completed([call('image', 'read_image_probe')]),
@@ -166,11 +167,11 @@ describe('pi tool iterations', () => {
     expect(requests[1]!.context.messages.find((m) => m.role === 'toolResult')).toMatchObject({
       content: [
         { type: 'text', text: 'screenshot' },
-        { type: 'image', data: 'aW1hZ2U=', mimeType: 'image/png' },
+        { type: 'image', data: image, mimeType: 'image/png' },
       ],
     });
     expect(client.onToolResult).toHaveBeenCalledWith('read_image_probe', 'screenshot', 'image');
-    expect(JSON.stringify(client.toConversationMessages())).not.toContain('aW1hZ2U=');
+    expect(JSON.stringify(client.toConversationMessages())).not.toContain(image);
   });
 });
 
@@ -392,6 +393,29 @@ describe('pi abort and snapshots', () => {
     expect(client.messages).toHaveLength(1);
   });
 
+  it('continues a restored session with an extreme screenshot without sending it or altering the saved image', async () => {
+    const source = Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg==',
+      'base64',
+    );
+    source.writeUInt32BE(2360, 16);
+    source.writeUInt32BE(32000, 20);
+    const data = source.toString('base64');
+    const client = new PiModelClient(options());
+    client.loadSnapshot({
+      ...client.getSnapshot(),
+      messages: [{ role: 'user', timestamp: 1, content: [{ type: 'image', data, mimeType: 'image/png' }] }],
+    });
+    scripts.push(() => text('please capture a region'));
+    await expect(client.query('continue')).resolves.toBe('please capture a region');
+    expect(requests).toHaveLength(1);
+    expect(requests[0]!.context.messages[0]).toMatchObject({
+      content: [{ type: 'text', text: expect.stringContaining('分段截图') }],
+    });
+    expect(JSON.stringify(requests[0]!.context)).not.toContain(data);
+    expect(client.messages[0]).toMatchObject({ content: [{ type: 'image', data, mimeType: 'image/png' }] });
+  });
+
   it('rejects nonempty history without the pi format', () => {
     const client = new PiModelClient(options());
     expect(() =>
@@ -477,7 +501,9 @@ describe('pi retries and display rollback', () => {
     );
     scripts.push(
       () => completed([call('w', 'write_probe')]),
-      async function* () { throw error; },
+      async function* () {
+        throw error;
+      },
       () => text('done'),
     );
     const retry = vi.fn();

@@ -26,11 +26,14 @@ describe('bounded code language detection', () => {
     ['interface User { name: string; }', 'typescript'],
     ['const count: number = 1;', 'typescript'],
     ['SELECT id, name FROM users WHERE active = true;', 'sql'],
+    ['docker compose exec -T postgres psql -U taskbook -d taskbook', 'bash'],
+    ['#!/usr/bin/env bash\nset -euo pipefail\nnpm run build', 'bash'],
+    ['$ git status --short', 'bash'],
   ])('recognizes a common source snippet', (source, language) => {
     expect(detectPastedCodeLanguage(source)).toBe(language);
   });
 
-  it.each(['普通说明文字', '# 标题\n\n- 列表', 'a\tb\n1\t2', 'x = 1', 'Use the function to load a package.'])('leaves ambiguous prose and data alone', source => {
+  it.each(['普通说明文字', '# 标题\n\n- 列表', 'a\tb\n1\t2', 'x = 1', 'Use the function to load a package.', 'git 是一个版本控制工具'])('leaves ambiguous prose and data alone', source => {
     expect(detectPastedCodeLanguage(source)).toBeNull();
   });
 

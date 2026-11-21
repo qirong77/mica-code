@@ -18,6 +18,9 @@ export type MarkdownStatistics = {
   code_blocks: number;
   links: number;
   images: number;
+  /** 组件块：```react 围栏，React + Arco 交互模块。 */
+  component_blocks: number;
+  /** 静态 HTML 块：独占一段的单个完整 HTML 元素。 */
   html_blocks: number;
 };
 
@@ -70,6 +73,7 @@ export function markdownDocument(
       code_blocks: 0,
       links: 0,
       images: 0,
+      component_blocks: 0,
       html_blocks: 0,
     },
   };
@@ -138,17 +142,17 @@ function blocks(tokens: Token[], context: Context): JsonRecord[] {
         {
           const info = typeof item.lang === 'string' ? item.lang.trim() : '';
           const [language = '', ...metadata] = info.split(/\s+/);
-          // ```react is the notebook's component block: the fence body is a
-          // React component using htm + Arco, rendered in an isolated frame.
+          // ```react is the notebook's component block (its own node type, not
+          // a runtime flag on the HTML block): the fence body is a React
+          // component using htm + Arco, rendered in an isolated frame.
           if (language.toLowerCase() === 'react') {
-            context.statistics.html_blocks += 1;
+            context.statistics.component_blocks += 1;
             result.push({
+              code: String(item.text ?? ''),
               direction: null,
               format: '',
-              html: String(item.text ?? ''),
               indent: 0,
-              runtime: 'react',
-              type: 'html',
+              type: 'component',
               version: 1,
             });
             break;
@@ -200,7 +204,6 @@ function blocks(tokens: Token[], context: Context): JsonRecord[] {
               format: '',
               html: source,
               indent: 0,
-              runtime: 'html',
               type: 'html',
               version: 1,
             });

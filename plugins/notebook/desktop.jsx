@@ -6,6 +6,7 @@ import {
   ChevronRight,
   ChevronsDownUp,
   ChevronsUpDown,
+  Copy,
   Download,
   FilePlus2,
   Focus,
@@ -101,16 +102,50 @@ export const RAIL_KEY_STEP = 16;
 // A dot cannot occur in a note id, so preferences can never overwrite a note body.
 export const RAIL_LAYOUT_DOCUMENT = 'ui.layout';
 
+/** 同一行的两次点击落在这个窗口内就算「双击改名」（手机双击与桌面双击共用）。 */
+export const RENAME_TAP_WINDOW_MS = 320;
+
+/**
+ * 编辑器骨架出现前先安静这么久。编辑器是整份从 iframe 里重新跑起来的：CDN 依赖
+ * 命中缓存只省掉网络，不省解析与执行，热缓存下一次启动也在 0.3–0.6s。先把这段
+ * 留白，别每次打开都甩一整屏加载页。
+ */
+export const EDITOR_SKELETON_DELAY_MS = 320;
+
+/**
+ * 编辑区上方盖什么。
+ * - `error`：编辑器起不来，必须明确告知。
+ * - `skeleton`：只有「这个 iframe 还没启动过」才值得整屏遮挡；已经起来的 iframe
+ *   只是换一篇正文（几十毫秒），盖上去只会闪一下，留着上一篇更好。
+ */
+export function editorOverlayMode({ frameState, booted, delayElapsed }) {
+  if (frameState === 'error') return 'error';
+  if (frameState === 'loading' && !booted && delayElapsed) return 'skeleton';
+  return null;
+}
+
+/**
+ * 目录行的点击记账。返回这次点击要不要进入改名，以及下一次点击要比较的基准。
+ * 只认同一行、且时间不倒退的两次点击：换行点击或停顿过久都重新开始计数。
+ *
+ * @param {{ id: string | null, at: number }} previous 上一次点击记下的行与时间
+ * @param {string} id 这一行的节点 id
+ * @param {number} at 这次点击的时间戳
+ * @returns {{ rename: boolean, next: { id: string | null, at: number } }}
+ */
+export function notebookRowTap(previous, id, at) {
+  if (previous.id === id && at >= previous.at && at - previous.at <= RENAME_TAP_WINDOW_MS) {
+    return { rename: true, next: { id: null, at: 0 } };
+  }
+  return { rename: false, next: { id, at } };
+}
+
 /** 目录能拖到的区间；没有可用宽度信息时只按绝对边界算。 */
 export function notebookRailLimits(available) {
   const width = Number(available);
   const max =
     Number.isFinite(width) && width > 0
-      ? Math.min(
-          RAIL_MAX_WIDTH,
-          Math.round(width * RAIL_MAX_SHARE),
-          Math.round(width - RAIL_MIN_MAIN_WIDTH),
-        )
+      ? Math.min(RAIL_MAX_WIDTH, Math.round(width * RAIL_MAX_SHARE), Math.round(width - RAIL_MIN_MAIN_WIDTH))
       : RAIL_MAX_WIDTH;
   return { min: RAIL_MIN_WIDTH, max: Math.max(RAIL_MIN_WIDTH, max) };
 }
@@ -181,7 +216,9 @@ function MenuRow({ action, label, Icon, variant = 'ghost', onSelect, disabled = 
 }
 
 function YuqueIcon({ name, size = 16 }) {
-  return <i className="notebook-yuque-icon" data-icon={name} style={{ width: size, height: size }} aria-hidden="true" />;
+  return (
+    <i className="notebook-yuque-icon" data-icon={name} style={{ width: size, height: size }} aria-hidden="true" />
+  );
 }
 
 /**
@@ -273,6 +310,7 @@ function NoteMenu({ node, open, onOpen, onClose, onAction, extraRows, trigger, p
         </>
       )}
       <MenuRow action="rename" label="重命名" Icon={Pencil} onSelect={onAction} />
+      <MenuRow action="copy" label="复制名称" Icon={Copy} onSelect={onAction} />
       <MenuRow action="move" label="移动到…" Icon={FolderInput} onSelect={onAction} />
       <MenuSeparator />
       <MenuRow action="delete" label="移到最近删除" Icon={Trash2} variant="danger-ghost" onSelect={onAction} />
@@ -290,10 +328,13 @@ export default function NotebookPage({ api }) {
   const [query, setQuery] = useState('');
   const [trash, setTrash] = useState(false);
   const [menu, setMenu] = useState(null);
+  const [copyHint, setCopyHint] = useState('');
+  const copyHintTimer = useRef(null);
   const [draggingId, setDraggingId] = useState(null);
   const [dropTarget, setDropTarget] = useState(null);
   const dragSource = useRef(null);
   const folderHover = useRef(null);
+  const lastRowTap = useRef({ id: null, at: 0 });
   const [railOpen, setRailOpen] = useState(() => !window.matchMedia('(max-width: 760px)').matches);
   const [layout, setLayout] = useState(() => ({
     mobile: window.innerWidth <= 760,
@@ -309,6 +350,10 @@ export default function NotebookPage({ api }) {
   const [dialog, setDialog] = useState(null);
   const [busy, setBusy] = useState(false);
   const [frameState, setFrameState] = useState('loading');
+  /** 当前 iframe 是否已经完整启动过一次；换帧（重试、token 变）会重置。 */
+  const [frameBooted, setFrameBooted] = useState(false);
+  const [skeletonDelayElapsed, setSkeletonDelayElapsed] = useState(false);
+  const [editorModalOpen, setEditorModalOpen] = useState(false);
   const [frameKey, setFrameKey] = useState(0);
   const [apiOpen, setApiOpen] = useState(false);
   const [copied, setCopied] = useState('');
@@ -360,6 +405,11 @@ export default function NotebookPage({ api }) {
   const activeNode = byId.get(activeId);
   const active = activeNode?.trashedAt ? null : activeNode;
   const selected = byId.get(selectedId);
+  const overlay = editorOverlayMode({
+    frameState,
+    booted: frameBooted,
+    delayElapsed: skeletonDelayElapsed,
+  });
   // API：笔记本跑在 Mica 运行时里，模型与人对准的都是这台机器上的同一个端口。
   // 接口根就是文档端点；`/overview` 是主接口，一次拿全目录、最近删除与端点表。
   const apiBase = `${api.currentHost?.() ?? ''}${pluginApiBasePath('notebook')}`;
@@ -369,6 +419,17 @@ export default function NotebookPage({ api }) {
       await navigator.clipboard.writeText(text);
       setCopied(key);
       setTimeout(() => setCopied((value) => (value === key ? '' : value)), 1400);
+    } catch (cause) {
+      setError(message(cause));
+    }
+  }, []);
+  /** 桌面上的整行要能拖动，鼠标拖动会被拖拽接管，所以名字另外给一个「复制名称」。 */
+  const copyRowName = useCallback(async (node) => {
+    try {
+      await navigator.clipboard.writeText(node.title);
+      setCopyHint(`已复制「${node.title}」`);
+      if (copyHintTimer.current) clearTimeout(copyHintTimer.current);
+      copyHintTimer.current = setTimeout(() => setCopyHint(''), 1800);
     } catch (cause) {
       setError(message(cause));
     }
@@ -415,7 +476,13 @@ export default function NotebookPage({ api }) {
   useEffect(() => {
     if (!canArrange) clearDrag();
   }, [canArrange]);
-  useEffect(() => () => clearFolderHover(), []);
+  useEffect(
+    () => () => {
+      clearFolderHover();
+      if (copyHintTimer.current) clearTimeout(copyHintTimer.current);
+    },
+    [],
+  );
   const railOverlay = layout.mobile && railOpen && !focused;
   const outlineAvailable = !focused && !!active;
 
@@ -458,7 +525,9 @@ export default function NotebookPage({ api }) {
           // Layout failure must not interrupt writing. Newer drags still get saved.
         }
       }
-    })().finally(() => { pending.saving = null; });
+    })().finally(() => {
+      pending.saving = null;
+    });
     return pending.saving;
   }, [api.documents]);
   const flushRailRef = useRef(flushRailWidth);
@@ -552,7 +621,8 @@ export default function NotebookPage({ api }) {
       try {
         const stored = await documents.read(RAIL_LAYOUT_DOCUMENT);
         if (cancelled) return;
-        if (railSave.current.touched || stored?.value?.version !== 1 || typeof stored.value.railWidth !== 'number') return;
+        if (railSave.current.touched || stored?.value?.version !== 1 || typeof stored.value.railWidth !== 'number')
+          return;
         const width = clampRailWidth(stored.value.railWidth);
         railWidthRef.current = width;
         const applied = applyRailWidth(width);
@@ -852,15 +922,27 @@ export default function NotebookPage({ api }) {
     };
   }, [controller]);
 
+  // 骨架要「等一小会儿再出现」：热缓存下编辑器通常在这段留白里就已经起来了。
+  useEffect(() => {
+    if (frameState !== 'loading' || frameBooted) {
+      setSkeletonDelayElapsed(false);
+      return undefined;
+    }
+    const timer = setTimeout(() => setSkeletonDelayElapsed(true), EDITOR_SKELETON_DELAY_MS);
+    return () => clearTimeout(timer);
+  }, [frameState, frameBooted]);
+
   useEffect(() => {
     ready.current = false;
     loadedNote.current = null;
+    setFrameBooted(false);
     setFrameState('loading');
     const instance = createEditorBridge({
       token,
       target: () => iframe.current?.contentWindow ?? null,
       onReady() {
         ready.current = true;
+        setFrameBooted(true);
         syncTheme();
         // The iframe listener only exists now; re-send the bar insets it needs.
         syncLayout.current();
@@ -878,6 +960,7 @@ export default function NotebookPage({ api }) {
       onOutline(id, next) {
         if (current.current?.id === id) setOutline(next);
       },
+      onModalChange: setEditorModalOpen,
       onChange: (...args) => acceptChangeRef.current(...args),
       onError(text) {
         setError(text);
@@ -982,7 +1065,8 @@ export default function NotebookPage({ api }) {
     send();
     syncLayout.current = send;
     const observer = new ResizeObserver(send);
-    for (const node of [barLead.current, barActions.current, barLead.current?.parentElement?.parentElement]) if (node) observer.observe(node);
+    for (const node of [barLead.current, barActions.current, barLead.current?.parentElement?.parentElement])
+      if (node) observer.observe(node);
     return () => {
       observer.disconnect();
       syncLayout.current = () => {};
@@ -1062,7 +1146,8 @@ export default function NotebookPage({ api }) {
   };
   const showMenu = (source, node) => {
     if (busy || creating.current) return;
-    setDialog(null);
+    // 同一个节点的改名表单已经开着时，重复的「打开菜单」不该把它顶掉。
+    setDialog((value) => (value?.type === 'rename' && node && value.node.id === node.id ? value : null));
     if (node && source !== 'header') setSelectedId(node.id);
     setMenu({ source, id: node?.id });
   };
@@ -1155,6 +1240,16 @@ export default function NotebookPage({ api }) {
     }
   };
   const edit = (node) => setDialog({ type: 'rename', node, title: '重命名', name: node.title });
+  /**
+   * 双击（手机上是双击、桌面是双击）直接改名：行尾菜单只用来给改名表单当定位锚，
+   * 用户看到的就是那一行旁边的输入框。菜单开着时表单才渲染，所以两件事一起设置。
+   */
+  const startRename = (node) => {
+    if (trash || busy || creating.current || lifecycle.closing || lifecycle.switching) return;
+    setSelectedId(node.id);
+    setMenu({ source: 'row', id: node.id });
+    edit(node);
+  };
   const downloadActive = async () => {
     setMenu(null);
     const note = active;
@@ -1176,7 +1271,10 @@ export default function NotebookPage({ api }) {
       return;
     }
     if (action === 'rename') edit(node);
-    else if (action === 'move') {
+    else if (action === 'copy') {
+      setMenu(null);
+      void copyRowName(node);
+    } else if (action === 'move') {
       setMenu(null);
       setDialog({ type: 'move', title: '移动到', node, parentId: node.parentId || '' });
     } else {
@@ -1290,19 +1388,40 @@ export default function NotebookPage({ api }) {
     if (node.kind === 'note') void openNote(node.id);
     else if (!searchTerm) toggleFolder(node.id);
   };
+  /**
+   * 目录行的一次点击：正在这一行里选字时什么也不做（手机长按选字之后不要顺手打开笔记），
+   * 否则记一次点击；同一行的第二次点击直接进入改名。
+   */
+  const handleRowClick = (event, node) => {
+    const selection = window.getSelection?.();
+    const selecting = !!selection && !selection.isCollapsed && event.currentTarget.contains(selection.anchorNode);
+    if (selecting) return;
+    const tap = notebookRowTap(lastRowTap.current, node.id, event.timeStamp || Date.now());
+    lastRowTap.current = tap.next;
+    if (tap.rename) {
+      // 双击会顺手选中一个词；进入改名时把那一段选区收掉。
+      selection?.removeAllRanges?.();
+      startRename(node);
+      return;
+    }
+    // 行不再是 <button>（要允许选字），键盘导航得自己把焦点放到点中的行上。
+    event.currentTarget.focus({ preventScroll: true });
+    selectRow(node);
+  };
   const navigateTree = (event) => {
     if (event.defaultPrevented || !event.target.matches('[role="treeitem"]')) return;
-    if (!['ArrowDown', 'ArrowUp', 'Home', 'End', 'ArrowRight', 'ArrowLeft', 'Enter', 'F2'].includes(event.key)) return;
+    if (!['ArrowDown', 'ArrowUp', 'Home', 'End', 'ArrowRight', 'ArrowLeft', 'Enter', ' ', 'F2'].includes(event.key))
+      return;
     if (busy || creating.current) return;
     const position = visible.findIndex(({ node }) => node.id === event.target.dataset.nodeId);
     const row = visible[position];
     if (event.key === 'F2' && row && !trash) {
       event.preventDefault();
-      showMenu('row', row.node);
-      edit(row.node);
+      startRename(row.node);
       return;
     }
-    if (event.key === 'Enter' && row) {
+    // 行是 div：Enter/Space 的「按下即激活」要自己补上，与原来的 <button> 一致。
+    if ((event.key === 'Enter' || event.key === ' ') && row) {
       event.preventDefault();
       selectRow(row.node);
       return;
@@ -1371,7 +1490,10 @@ export default function NotebookPage({ api }) {
     const stack = [];
     for (const item of outline.items) {
       while (stack.length && stack.at(-1).level >= item.level) stack.pop();
-      parents.set(item.key, stack.map((entry) => entry.key));
+      parents.set(
+        item.key,
+        stack.map((entry) => entry.key),
+      );
       stack.push(item);
     }
     return parents;
@@ -1389,56 +1511,61 @@ export default function NotebookPage({ api }) {
       return changed ? next : previous;
     });
     if (!outlineAvailable) return;
-    const frame = requestAnimationFrame(() => outlineItemRefs.current.get(outline.activeKey)?.scrollIntoView({block: 'nearest'}));
+    const frame = requestAnimationFrame(() =>
+      outlineItemRefs.current.get(outline.activeKey)?.scrollIntoView({ block: 'nearest' }),
+    );
     return () => cancelAnimationFrame(frame);
   }, [outline.activeKey, outlineAncestors, outlineAvailable]);
 
-  const outlineEntries = (entries) => entries.flatMap((item) => {
-    const currentHeading = item.key === outline.activeKey;
-    const collapsed = outlineCollapsed.has(item.key);
-    const button = (
-      <div
-        key={item.key}
-        className="notebook-outline-tree-entry"
-        ref={(element) => {
-          if (element) outlineItemRefs.current.set(item.key, element);
-          else outlineItemRefs.current.delete(item.key);
-        }}
-      >
-        <Button
-          variant="ghost"
-          fullWidth
-          className={`mica-arco-row notebook-outline-entry ${currentHeading ? 'is-active' : ''}`}
-          style={{ '--heading-level': item.level }}
-          aria-current={currentHeading ? 'location' : undefined}
-          aria-level={item.level}
-          aria-expanded={item.children.length ? !collapsed : undefined}
-          title={item.text || '未命名标题'}
-          disabled={busy}
-          onClick={() => jump({heading: item.key})}
+  const outlineEntries = (entries) =>
+    entries.flatMap((item) => {
+      const currentHeading = item.key === outline.activeKey;
+      const collapsed = outlineCollapsed.has(item.key);
+      const button = (
+        <div
+          key={item.key}
+          className="notebook-outline-tree-entry"
+          ref={(element) => {
+            if (element) outlineItemRefs.current.set(item.key, element);
+            else outlineItemRefs.current.delete(item.key);
+          }}
         >
-          {item.children.length ? (
-            <span
-              className="notebook-outline-toggle"
-              onClick={(event) => {
-                event.stopPropagation();
-                setOutlineCollapsed((previous) => {
-                  const next = new Set(previous);
-                  if (next.has(item.key)) next.delete(item.key);
-                  else next.add(item.key);
-                  return next;
-                });
-              }}
-            >
-              {collapsed ? <ChevronRight size={13} /> : <ChevronDown size={13} />}
-            </span>
-          ) : <span className="notebook-outline-toggle notebook-outline-toggle-empty" />}
-          <span>{item.text || '未命名标题'}</span>
-        </Button>
-      </div>
-    );
-    return collapsed ? [button] : [button, ...outlineEntries(item.children)];
-  });
+          <Button
+            variant="ghost"
+            fullWidth
+            className={`mica-arco-row notebook-outline-entry ${currentHeading ? 'is-active' : ''}`}
+            style={{ '--heading-level': item.level }}
+            aria-current={currentHeading ? 'location' : undefined}
+            aria-level={item.level}
+            aria-expanded={item.children.length ? !collapsed : undefined}
+            title={item.text || '未命名标题'}
+            disabled={busy}
+            onClick={() => jump({ heading: item.key })}
+          >
+            {item.children.length ? (
+              <span
+                className="notebook-outline-toggle"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  setOutlineCollapsed((previous) => {
+                    const next = new Set(previous);
+                    if (next.has(item.key)) next.delete(item.key);
+                    else next.add(item.key);
+                    return next;
+                  });
+                }}
+              >
+                {collapsed ? <ChevronRight size={13} /> : <ChevronDown size={13} />}
+              </span>
+            ) : (
+              <span className="notebook-outline-toggle notebook-outline-toggle-empty" />
+            )}
+            <span>{item.text || '未命名标题'}</span>
+          </Button>
+        </div>
+      );
+      return collapsed ? [button] : [button, ...outlineEntries(item.children)];
+    });
 
   const localForm =
     dialog?.type === 'rename' ? (
@@ -1487,9 +1614,9 @@ export default function NotebookPage({ api }) {
     ) : null;
 
   return (
-    <div ref={pageRoot} className={`notebook-page ${railOpen ? 'is-rail-open' : ''} ${focused ? 'is-focused' : ''}`}>
+    <div ref={pageRoot} className={`notebook-page ${railOpen ? 'is-rail-open' : ''} ${focused ? 'is-focused' : ''} ${editorModalOpen ? 'is-editor-modal-open' : ''}`}>
       <div className="notebook-layout">
-        <aside ref={rail} className="notebook-rail" aria-label="笔记目录">
+        <aside ref={rail} className="notebook-rail" aria-label="笔记目录" inert={editorModalOpen}>
           <div className="notebook-rail-title">
             <span className="notebook-book-icon" aria-hidden="true">
               <BookMarked size={22} strokeWidth={1.6} />
@@ -1593,6 +1720,7 @@ export default function NotebookPage({ api }) {
                 />
               </div>
               {draggingId && <span className="notebook-drag-hint">行间排序 · 拖入文件夹归档</span>}
+              {!draggingId && copyHint && <span className="notebook-drag-hint">{copyHint}</span>}
             </div>
           )}
           <div
@@ -1632,8 +1760,7 @@ export default function NotebookPage({ api }) {
                   }}
                   onDrop={(event) => void finishDrop(event, rowDrop(event, node))}
                 >
-                  <button
-                    type="button"
+                  <div
                     role="treeitem"
                     aria-selected={node.id === selectedId}
                     aria-current={node.id === activeId ? 'page' : undefined}
@@ -1643,7 +1770,7 @@ export default function NotebookPage({ api }) {
                     tabIndex={node.id === tabStop ? 0 : -1}
                     title={node.title}
                     className="notebook-tree-row"
-                    onClick={() => selectRow(node)}
+                    onClick={(event) => handleRowClick(event, node)}
                     onContextMenu={(event) => {
                       if (trash) return;
                       event.preventDefault();
@@ -1682,7 +1809,7 @@ export default function NotebookPage({ api }) {
                         </small>
                       )}
                     </span>
-                  </button>
+                  </div>
                   {trash ? (
                     <Button
                       variant="ghost"
@@ -1862,7 +1989,7 @@ export default function NotebookPage({ api }) {
           )}
           <div className="notebook-document-body">
             <div className={`notebook-editor-area ${active ? 'has-note' : ''}`}>
-              <div className="notebook-bar">
+              <div className="notebook-bar" inert={editorModalOpen}>
                 <div className="notebook-bar-lead" ref={barLead}>
                   {(focused || !railOpen) && (
                     <Button
@@ -1988,15 +2115,15 @@ export default function NotebookPage({ api }) {
                     新建笔记
                   </Button>
                 </div>
-              ) : frameState === 'loading' ? (
+              ) : overlay === 'skeleton' ? (
                 <div className="notebook-editor-skeleton">
                   <i />
                   <i />
                   <i />
                   <i />
-                  <span>首次打开将从 CDN 加载编辑器，笔记内容不会上传。</span>
+                  <span>正在启动编辑器：首次打开需要联网下载依赖，之后走本机缓存，笔记内容只保存在本机。</span>
                 </div>
-              ) : frameState === 'error' ? (
+              ) : overlay === 'error' ? (
                 <div className="notebook-load-error">
                   <Empty
                     title="编辑器暂时无法加载"
@@ -2018,7 +2145,7 @@ export default function NotebookPage({ api }) {
             </div>
             {outlineAvailable &&
               (outlineOpen ? (
-                <aside className="notebook-outline" aria-label="文档大纲">
+                <aside className="notebook-outline" aria-label="文档大纲" inert={editorModalOpen}>
                   <header>
                     <strong>文档大纲</strong>
                     <Button
@@ -2054,7 +2181,11 @@ export default function NotebookPage({ api }) {
                           key={item.key}
                           data-level={Math.min(6, Math.max(1, item.level))}
                           className={item.key === outline.activeKey ? 'is-active' : undefined}
-                          style={{ '--outline-rail-hue': Math.round(205 - (index / Math.max(1, outline.items.length - 1)) * 245) }}
+                          style={{
+                            '--outline-rail-hue': Math.round(
+                              205 - (index / Math.max(1, outline.items.length - 1)) * 245,
+                            ),
+                          }}
                         />
                       ))
                     ) : (
@@ -2072,7 +2203,10 @@ export default function NotebookPage({ api }) {
       {apiOpen && (
         <Modal title="Notebook API" onClose={() => setApiOpen(false)} portal>
           <div className="notebook-api">
-            <p>本机笔记既可在这张页面编辑，也可用 HTTP 接口读写；调用时保持 Mica 应用运行。</p>
+            <p>
+              本机笔记既可在这张页面编辑，也可用 HTTP 接口读写；调用时保持 Mica 应用运行。根地址是目录：先读
+              <code>/guide</code>，再按任务翻 <code>/modules/&lt;id&gt;</code>。
+            </p>
             <div className="notebook-api-field">
               <span>接口地址</span>
               <div className="notebook-api-value">
@@ -2092,6 +2226,9 @@ export default function NotebookPage({ api }) {
               </div>
               <pre className="notebook-api-code">{overviewCurl}</pre>
               <div className="notebook-api-actions">
+                <Button variant="ghost" size="compact" onClick={() => void copyText(`${apiBase}/guide`, 'guide')}>
+                  {copied === 'guide' ? '已复制' : '复制导读地址'}
+                </Button>
                 <Button variant="ghost" size="compact" onClick={() => void copyText(overviewCurl, 'curl')}>
                   {copied === 'curl' ? '已复制' : '复制 curl'}
                 </Button>
@@ -2101,7 +2238,8 @@ export default function NotebookPage({ api }) {
               正文写入要带上刚读到的 <code>expected_version</code>，版本冲突返回 409；删除只是可恢复的最近删除。
             </p>
             <p className="notebook-api-hint">
-              桌面端与 Web 应用的「笔记」角色已让模型按这份接口操作；接口只在 Mica 运行时里存在（TUI 与外部客户端需要应用在运行）。
+              桌面端与 Web 应用的「笔记」角色已让模型按这份接口操作；接口只在 Mica 运行时里存在（TUI
+              与外部客户端需要应用在运行）。
             </p>
           </div>
         </Modal>

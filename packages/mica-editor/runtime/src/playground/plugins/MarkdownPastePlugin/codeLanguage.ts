@@ -19,6 +19,11 @@ export function detectPastedCodeLanguage(source: string): string | null {
       /\bconsole\.(?:log|warn|error|info)\s*\(|\([^\n)]*\)\s*=>/.test(text)) return 'js';
   if (/^\s*SELECT\b[\s\S]*\bFROM\s+[\w"`[]/i.test(text) ||
       /^\s*(?:CREATE\s+TABLE|INSERT\s+INTO|UPDATE\s+\w+\s+SET)\b/im.test(text)) return 'sql';
+  // 终端片段：shebang、`$ 命令` 提示符，或顶格出现的常见命令 + 参数/开关。
+  // 命令后面紧跟的是中文（说明文字）时不算，避免把「git 是一个版本控制工具」认成脚本。
+  if (/^#!\s*\S*\b(?:bash|zsh|sh|dash)\b/m.test(text) ||
+      /^\s*\$\s+\S/m.test(text) ||
+      /^\s*(?:[A-Za-z_]\w*=\S+\s+)*(?:sudo\s+)?(?:\.{0,2}\/[\w./-]+|apt|apt-get|brew|bun|chmod|chown|cp|curl|docker|docker-compose|export|git|helm|jq|kubectl|mkdir|mv|mysql|npm|npx|pnpm|psql|rm|scp|source|ssh|systemctl|tar|wget|yarn)\s+(?:-[-\w]|[\w./~$@"'])/m.test(text)) return 'bash';
   return null;
 }
 
