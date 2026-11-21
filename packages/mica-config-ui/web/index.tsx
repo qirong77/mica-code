@@ -56,6 +56,8 @@ export { SecretInput } from './components/SecretInput.js';
  * 在该作用域内）。
  */
 export { Alert, Button, Checkbox, CollapsiblePanel, Empty, Segmented, SplitView, Tag } from './components/Ui.js';
+/** 插件与宿主共用的 Arco 弹窗，包含焦点锁和嵌套弹窗的 Esc / 焦点恢复。 */
+export { Modal } from './components/Modal.js';
 export { Input, InputNumber, Select } from './components/ArcoSettings.js';
 export { ArcoAction, ArcoPopover, ArcoProvider } from './components/ArcoSettings.js';
 /** Shared action-menu surface and rows for host popovers and iframe portals. */

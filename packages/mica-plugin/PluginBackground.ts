@@ -19,7 +19,8 @@ export type PluginBackgroundTask = {
    * 两轮之间的间隔（毫秒）。传函数时每轮结束后调用一次，可以按状态退避。
    *
    * 宿主不为它设上下限：退避策略是插件的事（例如「有人看才快、没人看就慢」）。
-   * 但间隔小于 1000ms 会被抬到 1000ms，避免插件无意间把宿主拖成忙循环。
+   * 但间隔小于宿主的最小间隔会被抬到那个下限（默认 1000ms），避免插件无意间把
+   * 宿主拖成忙循环。要更快（剪贴板监听这类 500ms 轮询）的宿主会显式调低下限。
    */
   every: number | (() => number);
   /** 一轮工作。tick 是尝试序号（失败后也递增）；抛错只记日志，不影响后续调度。 */
@@ -51,7 +52,7 @@ export type PluginBackgroundApi = {
   disposeAll(): void;
 };
 
-const MIN_INTERVAL_MS = 1000;
+const DEFAULT_MIN_INTERVAL_MS = 1000;
 const MAX_INTERVAL_MS = 2 ** 31 - 1;
 
 /**
@@ -69,9 +70,22 @@ export function createPluginBackgroundScheduler(options: {
    * 插件仍能拿到 `ctx.background`，因此不会因为「缺能力」而整块跳过或写出误导性的健康状态。
    */
   enabled?: boolean;
+  /**
+   * 本宿主接受的最小间隔，默认 1000ms。
+   *
+   * 大部分插件按秒级轮询就够，把下限压到 0 只会换来无意义的唤醒；但有些**宿主**
+   * 诚实地需要更快（桌面启动器的剪贴板监听就是 500ms 一次）。下限因此由宿主声明，
+   * 而不是写死成一个所有场景都得遵守的数字。
+   */
+  minIntervalMs?: number;
 }): PluginBackgroundApi {
   const now = options.now ?? Date.now;
   const enabled = options.enabled ?? true;
+  const rawMinInterval = options.minIntervalMs;
+  const minIntervalMs =
+    typeof rawMinInterval === 'number' && Number.isFinite(rawMinInterval) && rawMinInterval > 0
+      ? Math.max(1, Math.floor(rawMinInterval))
+      : DEFAULT_MIN_INTERVAL_MS;
   const tasks = new Map<string, RegisteredTask>();
   let disposed = false;
 
@@ -98,11 +112,11 @@ export function createPluginBackgroundScheduler(options: {
     try {
       const raw = typeof entry.task.every === 'function' ? entry.task.every() : entry.task.every;
       if (raw === Infinity) return MAX_INTERVAL_MS;
-      const value = Number.isFinite(raw) ? Math.floor(raw) : MIN_INTERVAL_MS;
-      return Math.min(MAX_INTERVAL_MS, Math.max(MIN_INTERVAL_MS, value));
+      const value = Number.isFinite(raw) ? Math.floor(raw) : minIntervalMs;
+      return Math.min(MAX_INTERVAL_MS, Math.max(minIntervalMs, value));
     } catch (error) {
       reportFailure(entry, error);
-      return MIN_INTERVAL_MS;
+      return minIntervalMs;
     }
   };
 

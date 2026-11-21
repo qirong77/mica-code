@@ -319,6 +319,16 @@ export function parsePluginManifest(input: unknown): PluginManifestParseResult {
   if (id === 'pages' && desktop.value.page?.route !== undefined) {
     return { ok: false, error: '插件 id pages 不能声明自定义页面 route：该前缀由宿主保留' };
   }
+  const shortcutSetting = desktop.value.launcher?.shortcutSetting;
+  if (
+    shortcutSetting &&
+    ![...settings.value, ...llmFields].some((field) => field.key === shortcutSetting)
+  ) {
+    return {
+      ok: false,
+      error: `desktop.launcher.shortcutSetting 必须是清单里已声明的设置键：${shortcutSetting}`,
+    };
+  }
 
   const status = readStatus(input.status);
   if (!status.ok) return status;
@@ -626,6 +636,15 @@ function readDesktopLauncher(
   if (input.shortcut !== undefined && (typeof input.shortcut !== 'string' || !input.shortcut.trim())) {
     return { ok: false, error: 'desktop.launcher.shortcut 必须是非空字符串' };
   }
+  if (input.background !== undefined && typeof input.background !== 'boolean') {
+    return { ok: false, error: 'desktop.launcher.background 必须是布尔值' };
+  }
+  if (
+    input.shortcutSetting !== undefined &&
+    (typeof input.shortcutSetting !== 'string' || !input.shortcutSetting.trim())
+  ) {
+    return { ok: false, error: 'desktop.launcher.shortcutSetting 必须是非空字符串' };
+  }
   for (const key of ['width', 'height'] as const) {
     if (input[key] !== undefined && (typeof input[key] !== 'number' || !Number.isFinite(input[key]))) {
       return { ok: false, error: `desktop.launcher.${key} 必须是有限数字` };
@@ -643,6 +662,10 @@ function readDesktopLauncher(
       shortcut: typeof input.shortcut === 'string' ? input.shortcut.trim() : 'Alt+Space',
       width: typeof input.width === 'number' ? Math.min(1000, Math.max(400, input.width)) : 720,
       height: typeof input.height === 'number' ? Math.min(800, Math.max(160, input.height)) : 480,
+      background: input.background === true,
+      ...(typeof input.shortcutSetting === 'string'
+        ? { shortcutSetting: input.shortcutSetting.trim() }
+        : {}),
       ...(isRecord(input.webContent) ? { webContent: { top: input.webContent.top as number } } : {}),
     },
   };

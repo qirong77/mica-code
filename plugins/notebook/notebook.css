@@ -486,46 +486,8 @@
 .notebook-editor-area.has-note .notebook-editor-frame {
   visibility: visible;
 }
-.notebook-outline-marks {
-  display: flex;
-  flex-direction: column;
-  flex: 0 0 36px;
-  align-self: flex-start;
-  margin-block-start: calc(var(--notebook-bar-height) - 1px);
-  max-height: calc(100% - var(--notebook-bar-height) - 40px);
-  padding: 48px 8px 0 0;
-  border-block-start: 1px solid var(--color-line-soft);
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  scrollbar-width: none;
-}
-.notebook-page .notebook-outline-mark {
-  display: flex;
-  justify-content: flex-end;
-  align-items: center;
-  flex: none;
-  width: 100%;
-  height: 24px;
-  padding: 0 5px;
-  border: 0;
-  border-radius: 4px;
-  color: var(--color-fg-muted);
-  background: transparent;
-}
-.notebook-outline-mark::after {
-  content: '';
-  width: clamp(9px, calc(22px - (var(--heading-level, 1) - 1) * 3px), 22px);
-  height: 2px;
-  border-radius: 2px;
-  background: currentColor;
-}
-.notebook-page .notebook-outline-mark:is(:hover, :focus-visible) {
-  color: var(--color-fg-strong);
-  background: var(--color-overlay);
-}
-.notebook-page .notebook-outline-mark[aria-current]:not([aria-current='false']) {
-  color: var(--color-accent);
-}
+/* 大纲是正文右侧的常驻面板，占位而不是浮层：鼠标移到面板上才露出标题行的
+   隐藏按钮；收起后右缘变成下面的彩虹条，点它重新展开。 */
 .notebook-outline {
   position: relative;
   display: flex;
@@ -534,6 +496,7 @@
   width: clamp(208px, 17cqw, 248px);
   min-height: 0;
   padding-top: calc(var(--notebook-bar-height) + 28px);
+  border-inline-start: 1px solid var(--color-line-soft);
   background: var(--color-canvas);
   color: var(--color-fg-muted);
   box-sizing: border-box;
@@ -545,6 +508,90 @@
   height: var(--notebook-bar-height);
   border-bottom: 1px solid var(--color-line-soft);
   pointer-events: none;
+}
+.notebook-outline > header .ui-button {
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+.notebook-outline:is(:hover, :focus-within) > header .ui-button,
+.notebook-outline > header .ui-button:focus-visible {
+  opacity: 1;
+}
+/* 收起态是一条大纲彩虹条：每个标题一段，按级别取色与长短；鼠标移上去才
+   浮出展开按钮，点击整条恢复面板。 */
+.notebook-outline-rail {
+  position: absolute;
+  inset-block: var(--notebook-bar-height) 0;
+  inset-inline-end: 0;
+  z-index: 6;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  width: 26px;
+  padding: 10px 4px;
+  border: 0;
+  border-radius: 6px 0 0 6px;
+  background: transparent;
+  cursor: pointer;
+  transition: background-color 120ms ease;
+}
+.notebook-outline-rail:is(:hover, :focus-visible) {
+  background: color-mix(in srgb, var(--color-overlay) 70%, transparent);
+}
+.notebook-outline-rail-ticks {
+  display: flex;
+  flex: 0 1 auto;
+  min-height: 0;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 5px;
+  width: 100%;
+  overflow: hidden;
+}
+.notebook-outline-rail-ticks > i {
+  --outline-rail-width: 12px;
+  flex: none;
+  width: var(--outline-rail-width);
+  height: 3px;
+  border-radius: 2px;
+  background: hsl(var(--outline-rail-hue, 210) 68% 56%);
+  opacity: 0.5;
+  transition: width 120ms ease, opacity 120ms ease;
+}
+.notebook-outline-rail-ticks > i[data-level='1'] { --outline-rail-width: 18px; }
+.notebook-outline-rail-ticks > i[data-level='2'] { --outline-rail-width: 16px; }
+.notebook-outline-rail-ticks > i[data-level='3'] { --outline-rail-width: 14px; }
+.notebook-outline-rail-ticks > i[data-level='4'] { --outline-rail-width: 12px; }
+.notebook-outline-rail-ticks > i[data-level='5'] { --outline-rail-width: 10px; }
+.notebook-outline-rail-ticks > i[data-level='6'] { --outline-rail-width: 8px; }
+.notebook-outline-rail-ticks > i.is-active,
+.notebook-outline-rail:is(:hover, :focus-visible) .notebook-outline-rail-ticks > i {
+  opacity: 1;
+}
+.notebook-outline-rail-ticks > i.is-empty {
+  width: 10px;
+  background: var(--color-line-strong);
+  opacity: 0.45;
+}
+.notebook-outline-rail-icon {
+  position: absolute;
+  top: 10px;
+  right: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 5px;
+  background: var(--color-canvas);
+  color: var(--color-fg-strong);
+  box-shadow: 0 1px 4px #1d212926;
+  opacity: 0;
+  transition: opacity 120ms ease;
+  pointer-events: none;
+}
+.notebook-page .notebook-outline-rail:is(:hover, :focus-visible) .notebook-outline-rail-icon {
+  opacity: 1;
 }
 .notebook-outline > header {
   display: flex;
@@ -804,8 +851,7 @@
   padding-top: 2px;
 }
 
-.notebook-mobile-mask,
-.notebook-outline-mask {
+.notebook-mobile-mask {
   display: none;
   position: absolute;
   inset: 0;
@@ -814,31 +860,8 @@
   background: color-mix(in srgb, var(--color-mask-bg) 50%, transparent);
 }
 @container notebook (max-width: 1100px) {
-  .notebook-outline-marks {
-    display: none;
-  }
-  /* 抽屉与遮罩共用整页的定位容器，打开时目录也在遮罩下面。 */
-  .notebook-document-body {
-    position: static;
-  }
-  .notebook-outline-mask {
-    display: block;
-    z-index: 15;
-  }
   .notebook-outline {
-    position: absolute;
-    inset: 0 0 0 auto;
-    z-index: 16;
-    width: min(260px, calc(100% - 40px));
-    padding-top: 12px;
-    border-inline-start: 1px solid var(--color-line-soft);
-  }
-  .notebook-outline::before {
-    display: none;
-  }
-  .notebook-outline > header {
-    height: var(--notebook-bar-height);
-    color: var(--color-fg-soft);
+    width: 200px;
   }
 }
 @container notebook (max-width: 760px) {
@@ -882,6 +905,14 @@
     height: auto;
     min-height: 0;
   }
+  .notebook-outline {
+    width: min(208px, 46%);
+    padding-top: calc(var(--notebook-bar-height) + 16px);
+  }
+  /* 触屏与窄窗口没有可靠的 hover，隐藏按钮直接常显。 */
+  .notebook-outline > header .ui-button {
+    opacity: 1;
+  }
   .notebook-error {
     padding: 8px;
     flex-direction: column;
@@ -904,6 +935,13 @@
   }
 }
 @media (hover: none), (any-pointer: coarse) {
+  /* 没有 hover 的设备上没有「移到面板上才出现」这回事，按钮常显。 */
+  .notebook-outline > header .ui-button {
+    opacity: 1;
+  }
+  .notebook-page .notebook-outline-rail-icon {
+    opacity: 1;
+  }
   .notebook-page :is(.notebook-tree-tools, .notebook-bar, .notebook-outline header) .ui-button-icon-only {
     width: 34px;
     height: 34px;

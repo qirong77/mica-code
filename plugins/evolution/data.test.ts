@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { configModelDiscovery } from './data/config.js';
-import { floatingWindowFavorites } from './data/floatingwindow.js';
+import { floatingWindowFavorites, floatingWindowIconOrigins } from './data/floatingwindow.js';
 import { memoryScopes } from './data/memory.js';
 import { sessionTagSlots } from './data/session-tags.js';
 
@@ -227,5 +227,33 @@ describe('Floating Window 收藏数据迁移', () => {
     const file = join(root, 'plugin-data', 'floatingwindow', 'data.json');
     write(file, JSON.stringify({ recentUrls: [], favoriteUrls: ['https://example.com/'], favicons: {} }));
     expect(run(floatingWindowFavorites, root)).toBe(0);
+  });
+
+  it('把 favicon 的键从地址改成站点 origin，并保持幂等', () => {
+    const root = home();
+    const file = join(root, 'plugin-data', 'floatingwindow', 'data.json');
+    write(file, JSON.stringify({
+      recentUrls: ['https://a.example/', 'https://a.example/deep'],
+      favoriteUrls: [],
+      favicons: { 'https://a.example/': 'https://a.example/icon.svg', 'https://a.example/deep': 'https://a.example/deep.svg', 'https://b.example:8443/': 'https://b.example/icon.png' },
+    }));
+
+    expect(run(floatingWindowIconOrigins, root)).toBe(1);
+    expect(JSON.parse(readFileSync(file, 'utf-8'))).toEqual({
+      recentUrls: ['https://a.example/', 'https://a.example/deep'],
+      favoriteUrls: [],
+      favicons: { 'https://a.example': 'https://a.example/icon.svg', 'https://b.example:8443': 'https://b.example/icon.png' },
+    });
+    expect(run(floatingWindowIconOrigins, root)).toBe(0);
+  });
+
+  it('favicon 已是 origin 键、或没有 favicon 集合时不写盘', () => {
+    const root = home();
+    expect(run(floatingWindowIconOrigins, root)).toBe(0);
+    const file = join(root, 'plugin-data', 'floatingwindow', 'data.json');
+    write(file, JSON.stringify({ recentUrls: [], favoriteUrls: [], favicons: { 'https://a.example': 'https://a.example/icon.svg' } }));
+    expect(run(floatingWindowIconOrigins, root)).toBe(0);
+    write(file, JSON.stringify({ recentUrls: [] }));
+    expect(run(floatingWindowIconOrigins, root)).toBe(0);
   });
 });

@@ -50,6 +50,19 @@ describe('upsertChatNotice', () => {
     ).toEqual([other, notice('new', 'info', '/retry')])
   })
 
+  test('settles the retry row into the success notice the host rewrote', () => {
+    // 「在重试」是 retrying 事件建的（没有 slot）；宿主落盘后推来的「重试成功」带 slot，
+    // 一个 slot 也对不上时按 command 认领同一行——次数与错误原因换成绿字，不多出一行。
+    const red = { ...notice('retry', '', '/retry'), text: '请求暂时失败，将在 2s 后自动重试（第 1/5 次）\n错误：socket closed' }
+    const green = {
+      ...notice('new', '', '/retry'),
+      text: '重试成功（第 1/5 次）\n错误：socket closed',
+      variant: 'success',
+      noticeIndex: 0
+    }
+    expect(upsertChatNotice([red], green)).toEqual([{ ...green, id: 'retry' }])
+  })
+
   test('keeps a running row id and position even when finish asks to replace', () => {
     const tail = { id: 'tail', kind: 'message', text: 'live' }
     expect(

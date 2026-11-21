@@ -28,7 +28,9 @@ import {describe, expect, it} from 'vitest';
 
 import {
   $applyTableAction,
+  $applyTableBandAction,
   $readTableContext,
+  type TableBandAction,
   type TableContext,
 } from '../src/playground/plugins/TableControlsPlugin/tableActions';
 
@@ -631,5 +633,56 @@ describe('nested tables and stale selection isolation', () => {
     expect(editor.getEditorState().read($readTableContext)).toBeNull();
     act(editor, 'merge', saved);
     expect(matrix(editor, tableKey)).toEqual([['0:0', '0:1'], ['1:0']]);
+  });
+});
+
+describe('edge-handle band actions', () => {
+  const bandAct = (
+    editor: LexicalEditor,
+    tableKey: string,
+    axis: 'row' | 'column',
+    start: number,
+    end: number,
+    action: TableBandAction,
+  ) => update(editor, () => {expect($applyTableBandAction(tableKey, axis, start, end, action, editor)).toBe(true);});
+
+  it('adds and removes the row the handle points at, not the caret row', () => {
+    const {editor, tableKey, keys} = fixture(grid(3, 2));
+    select(editor, tableKey, keys[0][0]);
+    bandAct(editor, tableKey, 'row', 2, 2, 'row-after');
+    expect(matrix(editor, tableKey)).toEqual([...grid(3, 2), ['', '']]);
+    select(editor, tableKey, keys[2][1]);
+    bandAct(editor, tableKey, 'row', 1, 1, 'delete-row');
+    expect(matrix(editor, tableKey)).toEqual([['0:0', '0:1'], ['2:0', '2:1'], ['', '']]);
+  });
+
+  it('inserts and deletes a column at the boundary index', () => {
+    const {editor, tableKey, keys} = fixture(grid(2, 3));
+    select(editor, tableKey, keys[0][0]);
+    bandAct(editor, tableKey, 'column', 1, 1, 'column-after');
+    expect(matrix(editor, tableKey)).toEqual([['0:0', '0:1', '', '0:2'], ['1:0', '1:1', '', '1:2']]);
+    bandAct(editor, tableKey, 'column', 0, 0, 'column-before');
+    expect(matrix(editor, tableKey)[0]).toEqual(['', '0:0', '0:1', '', '0:2']);
+    bandAct(editor, tableKey, 'column', 4, 4, 'column-before');
+    expect(matrix(editor, tableKey)[0]).toEqual(['', '0:0', '0:1', '', '', '0:2']);
+  });
+
+  it('works while the caret sits outside the table', () => {
+    const {editor, tableKey} = fixture(grid(3, 2));
+    update(editor, () => {
+      const paragraph = $getRoot().getFirstChild();
+      if ($isParagraphNode(paragraph)) paragraph.select();
+    });
+    bandAct(editor, tableKey, 'column', 1, 1, 'delete-column');
+    expect(matrix(editor, tableKey)).toEqual([['0:0'], ['1:0'], ['2:0']]);
+  });
+
+  it('clamps an out-of-range band and ignores a removed table', () => {
+    const {editor, tableKey} = fixture(grid(2, 2));
+    bandAct(editor, tableKey, 'row', 99, 99, 'row-after');
+    expect(matrix(editor, tableKey)).toEqual([...grid(2, 2), ['', '']]);
+    update(editor, () => $table(tableKey).remove());
+    update(editor, () => {expect($applyTableBandAction(tableKey, 'row', 0, 0, 'delete-row', editor)).toBe(false);});
+    expect(editor.getEditorState().read(() => $getRoot().getChildrenSize())).toBe(2);
   });
 });

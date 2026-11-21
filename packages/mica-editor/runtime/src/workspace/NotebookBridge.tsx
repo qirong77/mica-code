@@ -1,9 +1,15 @@
 import {useLexicalComposerContext} from '@lexical/react/LexicalComposerContext';
-import {$createHeadingNode, $isHeadingNode} from '@lexical/rich-text';
-import {$createTextNode, $getRoot, type LexicalEditor} from 'lexical';
+import {type LexicalEditor} from 'lexical';
 import {Component, createContext, type ReactNode, useContext, useEffect, useRef, useState} from 'react';
 
 import NotebookOutline, {type NotebookNavigation, type NotebookOutlineSnapshot} from './NotebookOutline';
+import {
+  $ensureNotebookTitle,
+  $readNotebookTitle,
+  DEFAULT_NOTEBOOK_TITLE,
+  normalizeNotebookTitle,
+  type NotebookTitleState,
+} from './notebookTitle';
 import {applyNotebookBarInsets, applyNotebookTheme} from './theme';
 import {isNotebookAction, NOTEBOOK_ACTION_COMMAND, type NotebookAction} from './notebookActions';
 
@@ -12,24 +18,10 @@ export interface NotebookDocument {
   editorState: string | null;
 }
 
-export const DEFAULT_NOTEBOOK_TITLE = '未命名笔记';
+export {DEFAULT_NOTEBOOK_TITLE};
 
-function normalizeNotebookTitle(value: string | undefined): string {
-  const title = value?.trim();
-  return title || DEFAULT_NOTEBOOK_TITLE;
-}
-
-function $readNotebookTitle(editor: LexicalEditor): {key: string | null; text: string; firstIsTitle: boolean} {
-  return editor.getEditorState().read(() => {
-    const root = $getRoot();
-    const first = root.getFirstChild();
-    const title = first && $isHeadingNode(first) && first.getTag() === 'h1' ? first : null;
-    return {
-      key: title?.getKey() ?? null,
-      text: title?.getTextContent() ?? '',
-      firstIsTitle: title !== null && root.getFirstChild() === title,
-    };
-  });
+function readNotebookTitle(editor: LexicalEditor): NotebookTitleState {
+  return editor.getEditorState().read($readNotebookTitle);
 }
 
 const CHANNEL = 'mica-notebook';
@@ -79,29 +71,29 @@ export class NotebookSession {
     return changed;
   }
 
-  /** Ensure that the first top-level block is a non-empty H1 title. */
+  /**
+   * Keep the first top-level block an H1 title block. The block's text is only
+   * rewritten when the host explicitly renamed the note: clearing the title in
+   * the editor is a valid state and must stay empty instead of snapping back to
+   * the previous name.
+   */
   ensureTitle(editor = this.editor): boolean {
     if (!editor) return false;
 
-    const current = $readNotebookTitle(editor);
+    const current = readNotebookTitle(editor);
     if (!this.titleNeedsAlignment && current.text.trim()) this.title = current.text.trim();
     const nextTitle = normalizeNotebookTitle(this.title);
     this.title = nextTitle;
 
-    const needsUpdate = current.key === null || !current.firstIsTitle || !current.text.trim() ||
-      (this.titleNeedsAlignment && current.text !== nextTitle);
-    if (!needsUpdate) {
+    const align = this.titleNeedsAlignment;
+    const missing = current.key === null || !current.firstIsTitle;
+    if (!missing && !(align && current.text !== nextTitle)) {
       this.titleNeedsAlignment = false;
       return false;
     }
 
     editor.update(() => {
-      const root = $getRoot();
-      const first = root.getFirstChild();
-      const title = first && $isHeadingNode(first) && first.getTag() === 'h1' ? first : null;
-      const heading = title ?? $createHeadingNode('h1');
-      if (root.getFirstChild() !== heading) root.splice(0, 0, [heading]);
-      if (heading.getTextContent() !== nextTitle) heading.clear().append($createTextNode(nextTitle));
+      $ensureNotebookTitle(align ? nextTitle : null);
     }, {discrete: true});
     this.titleNeedsAlignment = false;
     return true;
@@ -160,6 +152,13 @@ export class NotebookSession {
     this.active = true;
     let titleChanged = false;
     try {
+      // A document that already carries a title block owns its text, including
+      // the empty title the user just cleared. Only a missing title block (or
+      // one that is not an H1) is filled from the note name.
+      const loaded = readNotebookTitle(editor);
+      if (this.titleNeedsAlignment && loaded.key !== null && loaded.firstIsTitle && !loaded.text.trim()) {
+        this.titleNeedsAlignment = false;
+      }
       titleChanged = this.ensureTitle(editor);
     } catch {
       // Keep the session attachable so a malformed editor can report its

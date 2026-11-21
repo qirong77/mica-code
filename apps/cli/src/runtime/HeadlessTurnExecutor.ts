@@ -11,7 +11,15 @@ import type { SessionController } from '../session/SessionController.js';
 import { AgentAbortError, type AgentRuntime } from '../agent/AgentRuntime.js';
 import type { SubagentTaskManager } from '../agents/SubagentTaskManager.js';
 import { uncommittedResponseText } from './conversationHistory.js';
-import { TurnNoticeLog, createRetryNotice, createTurnErrorNotice, mergeInFlightUserMessage } from './turnNotices.js';
+import {
+  TurnNoticeLog,
+  createRetryNotice,
+  createRetryRecoveredNotice,
+  createTurnErrorNotice,
+  mergeInFlightUserMessage,
+  type NoticeUpsertOptions,
+  type TurnNotice,
+} from './turnNotices.js';
 import { compactIdleSessionHistory } from '../agent/agentCompaction.js';
 import type { PluginTurnPrepareEvent } from '@packages/mica-plugin/index.js';
 import { readPromptControls } from '@packages/mica-config/promptControls.js';
@@ -98,6 +106,12 @@ export type HeadlessTurnExecutorOptions = {
 export type HeadlessNoticeSource = {
   /** Rebinds to the live session (a resume rebuilds it from the session file). */
   ensure(): TurnNoticeLog;
+  /**
+   * 落盘并推给正在看的客户端（常驻宿主才有）。写进去的 notice 只是会话记录的一部分，
+   * 就地改写（重试中 → 重试成功）必须同时通知客户端，否则屏幕上那条要等到重新打开
+   * 会话才会变。
+   */
+  show?: (notice: TurnNotice, options?: NoticeUpsertOptions) => void;
 };
 
 /**
@@ -148,6 +162,11 @@ export class HeadlessTurnExecutor {
    */
   private idleTask: Promise<unknown> | null = null;
   private starting = false;
+  /**
+   * 本轮最近一次重试。失败的那条提示是在重试之前写下的，得有人负责收尾：重试之后的
+   * 那次请求跑通了，就把它改写成「重试成功」，否则一条红条会让成功的回合看起来是坏的。
+   */
+  private pendingRetry: { attempt: number; maxAttempts: number; error: unknown } | null = null;
   constructor(options: HeadlessTurnExecutorOptions) {
     this.options = options;
     options.sessionController.setTodoPersistenceEnabled?.(options.save !== false);
@@ -563,6 +582,7 @@ export class HeadlessTurnExecutor {
         const replayInputs: AgentQueryContent[] = [];
         const retryDelayMs = this.options.retryDelayMs ?? TURN_RETRY_DELAY_MS;
         const promptControls = readPromptControls();
+        this.pendingRetry = null;
         for (let attempt = 0; attempt <= maxRetries; attempt++) {
           this.throwIfTurnStopped(signal);
           const attemptInputs: AgentQueryContent[] = [];
@@ -597,8 +617,9 @@ export class HeadlessTurnExecutor {
               onRetry: (info) => {
                 if (signal.aborted || !agent.isCurrent(attemptRunId)) return;
                 const notice = createRetryNotice(info.error, info.attempt, MAX_PROVIDER_RETRIES, info.delayMs);
+                this.pendingRetry = { attempt: info.attempt, maxAttempts: MAX_PROVIDER_RETRIES, error: info.error };
                 try {
-                  this.options.notices?.ensure().upsert(notice);
+                  this.writeNotice(notice);
                   this.saveCurrent({ allowEmpty: true, turnState: 'running' }, inFlightUser);
                 } catch {
                   // A diagnostic notice must never turn a retryable provider
@@ -612,6 +633,10 @@ export class HeadlessTurnExecutor {
                   delayMs: info.delayMs,
                   error: info.error instanceof Error ? info.error.message : String(info.error),
                 });
+              },
+              // 重试后的那次请求收尾时才知道它到底通没通：红了整轮的提示要在这里转绿。
+              onRequestEnd: (info) => {
+                if (info.outcome === 'completed') this.settleRetryNotice();
               },
             });
             break;
@@ -640,7 +665,8 @@ export class HeadlessTurnExecutor {
             // Persist the hint before announcing the wait: the desktop app shows
             // it inside the conversation, so a client that reconnects during the
             // delay finds it in the session file instead of a frozen run.
-            this.options.notices?.ensure().upsert(createRetryNotice(error, attempt + 1, maxRetries, retryDelayMs));
+            this.pendingRetry = { attempt: attempt + 1, maxAttempts: maxRetries, error };
+            this.writeNotice(createRetryNotice(error, attempt + 1, maxRetries, retryDelayMs));
             this.saveCurrent({ allowEmpty: true, turnState: 'running' });
             onEvent({
               type: 'turn:retrying',
@@ -722,6 +748,35 @@ export class HeadlessTurnExecutor {
     // used to lose it on reload. Notices stay out of the provider history.
     this.options.notices?.ensure().upsert(createTurnErrorNotice(error));
     return finalization.finish('error', error, inFlightUser);
+  }
+
+  /**
+   * 写一条会话 notice。常驻宿主会顺手推给客户端（`show`），`mica exec` 这类没有
+   * 客户端的地方只落盘。
+   */
+  private writeNotice(notice: TurnNotice, options: NoticeUpsertOptions = {}): void {
+    const notices = this.options.notices;
+    if (!notices) return;
+    // `--no-save` 不写会话文件，也就没有能推给客户端的那一份：只留在内存里。
+    if (notices.show && this.persistsSession) notices.show(notice, options);
+    else notices.ensure().upsert(notice, options);
+  }
+
+  /**
+   * 重试后的那次请求跑通了：把「将在 Ns 后重试」就地改成「重试成功」。
+   *
+   * 位置不动（`inPlace`）——这条提示说的还是同一次重试，不该因为期间提交了正文就被
+   * 挤到下面，读成「先失败后成功」的两件事。
+   */
+  private settleRetryNotice(): void {
+    const retry = this.pendingRetry;
+    if (!retry) return;
+    this.pendingRetry = null;
+    try {
+      this.writeNotice(createRetryRecoveredNotice(retry.error, retry.attempt, retry.maxAttempts), { inPlace: true });
+    } catch {
+      // 与重试提示本身同理：诊断性质的 notice 不能把一次成功的回合变成失败。
+    }
   }
 
   private async emitTurnAfter(

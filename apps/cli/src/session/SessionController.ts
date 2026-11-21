@@ -980,7 +980,8 @@ function sanitizeConversationMessage(value: unknown): MicaUiConversationMessage 
       record.variant === 'config' ||
       record.variant === 'compact' ||
       record.variant === 'digest' ||
-      record.variant === 'error'
+      record.variant === 'error' ||
+      record.variant === 'success'
         ? { variant: record.variant }
         : {}),
       ...(typeof record.command === 'string' ? { command: record.command } : {}),

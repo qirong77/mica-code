@@ -53,6 +53,7 @@ export const themeColors = {
   messageCompact: 'warning',
   messageNotice: 'warning',
   messageError: 'error',
+  messageSuccess: 'success',
   messagePending: 'inactive',
   responseGuide: 'subtle',
   toolDefault: 'inactive',

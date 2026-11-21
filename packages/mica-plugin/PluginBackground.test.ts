@@ -71,6 +71,71 @@ describe('plugin background scheduler', () => {
     scheduler.disposeAll();
   });
 
+  it('raises a 500ms request to the default one-second floor', async () => {
+    const run = vi.fn();
+    const scheduler = createPluginBackgroundScheduler({ pluginId: 'demo', onError: vi.fn() });
+    scheduler.register({ id: 'clipboard', every: () => 500, run, immediate: true });
+
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(999);
+    expect(run).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(run).toHaveBeenCalledTimes(2);
+    scheduler.disposeAll();
+  });
+
+  it('honours a lower host floor so a launcher can poll every 500ms', async () => {
+    const run = vi.fn();
+    const scheduler = createPluginBackgroundScheduler({
+      pluginId: 'demo',
+      onError: vi.fn(),
+      minIntervalMs: 100,
+    });
+    scheduler.register({ id: 'clipboard', every: () => 500, run, immediate: true });
+
+    await vi.advanceTimersByTimeAsync(0);
+    expect(run).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(499);
+    expect(run).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(run).toHaveBeenCalledTimes(2);
+    scheduler.disposeAll();
+  });
+
+  it('still raises faster requests to the configured floor', async () => {
+    const run = vi.fn();
+    const scheduler = createPluginBackgroundScheduler({
+      pluginId: 'demo',
+      onError: vi.fn(),
+      minIntervalMs: 100,
+    });
+    scheduler.register({ id: 'poll', every: () => 5, run, immediate: true });
+
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(99);
+    expect(run).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(run).toHaveBeenCalledTimes(2);
+    scheduler.disposeAll();
+  });
+
+  it('falls back to the default floor for an invalid minimum', async () => {
+    const run = vi.fn();
+    const scheduler = createPluginBackgroundScheduler({
+      pluginId: 'demo',
+      onError: vi.fn(),
+      minIntervalMs: Number.NaN,
+    });
+    scheduler.register({ id: 'clipboard', every: () => 500, run, immediate: true });
+
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(999);
+    expect(run).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(run).toHaveBeenCalledTimes(2);
+    scheduler.disposeAll();
+  });
+
   it('keeps scheduling after a failing round and reports the error', async () => {
     const onError = vi.fn();
     const run = vi.fn().mockRejectedValueOnce(new Error('boom')).mockResolvedValue(undefined);

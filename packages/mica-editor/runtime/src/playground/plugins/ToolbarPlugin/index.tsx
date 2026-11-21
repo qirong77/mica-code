@@ -80,7 +80,7 @@ import { InsertImageDialog } from '../ImagesExtension';
 import InsertLayoutDialog from '../LayoutExtension/InsertLayoutDialog';
 import { $isRubyNode, $toggleRuby } from '../RubyExtension/RubyNode';
 import { shortcut } from '../ShortcutsExtension/shortcuts';
-import { InsertTableDialog } from '../TablePlugin';
+import {insertDefaultTable} from '../tableInsert';
 import {
   CODE_LANGUAGE_OPTIONS_PRISM,
   CODE_LANGUAGE_OPTIONS_SHIKI,
@@ -527,33 +527,38 @@ export default function ToolbarPlugin({
     settings: { isCodeHighlighted, isCodeShiki },
   } = useSettings();
   const showCodeOptions = toolbarState.blockType === 'code' && isCodeHighlighted;
+  // 语雀的顺序：撤销/清除格式在左，段落样式与字号紧随其后，再是 B I U S、
+  // 颜色、对齐与列表，插入类收在行尾。没有 priority 的组在任何宽度都常驻，
+  // 清除格式因此不会被收进「更多」；有 priority 的组按数值从小到大依次保留。
   const groups: ToolbarGroup[] = [
-    ...(!toolbarState.isImageCaption ? [{ id: 'insert', section: 'insert' }] : []),
-    { id: 'history', section: 'history', priority: 2 },
-    { id: 'clear', section: 'history', priority: 9 },
+    // 排版优先：字号、下划线、颜色、删除线、对齐、列表比撤销/重做留得久，
+    // 窄窗口先收的是编辑历史与插入类，不是最常用的文字格式。
+    { id: 'history', section: 'history', priority: 7 },
+    { id: 'clear', section: 'history' },
     ...(toolbarState.blockType in blockTypeToBlockName && activeEditor === editor
-      ? [{ id: 'paragraph', section: 'typography', priority: 1 }]
+      ? [{ id: 'paragraph', section: 'typography' }]
       : []),
     ...(showCodeOptions
       ? [{ id: 'code-options', section: 'typography' }]
       : [
-          { id: 'font-family', section: 'typography', priority: 7 },
-          { id: 'font-size', section: 'typography', priority: 0 },
+          { id: 'font-family', section: 'typography', priority: 11 },
+          { id: 'font-size', section: 'typography', priority: 1 },
         ]),
     { id: 'emphasis', section: 'format' },
-    { id: 'strikethrough', section: 'format', priority: 6 },
-    { id: 'underline', section: 'format' },
-    ...(!toolbarState.isImageCaption ? [{ id: 'code', section: 'format', priority: 11 }] : []),
+    { id: 'underline', section: 'format', priority: 2 },
+    { id: 'strikethrough', section: 'format', priority: 4 },
     { id: 'colors', section: 'colors', priority: 3 },
-    { id: 'alignment', section: 'structure', priority: 4 },
+    { id: 'alignment', section: 'structure', priority: 5 },
     ...(activeEditor === editor
       ? [
-          { id: 'lists', section: 'structure', priority: 5 },
+          { id: 'lists', section: 'structure', priority: 6 },
           { id: 'indent', section: 'structure', priority: 10 },
           { id: 'links', section: 'insert-shortcuts', priority: 8 },
-          { id: 'blocks', section: 'insert-shortcuts', priority: 12 },
+          { id: 'blocks', section: 'insert-shortcuts', priority: 9 },
         ]
       : []),
+    ...(!toolbarState.isImageCaption ? [{ id: 'code', section: 'insert-shortcuts', priority: 12 }] : []),
+    ...(!toolbarState.isImageCaption ? [{ id: 'insert', section: 'insert' }] : []),
     { id: 'more', section: 'more' },
   ];
   const { toolbarElementRef, overflowed } = useAdaptiveToolbar(
@@ -1046,7 +1051,6 @@ export default function ToolbarPlugin({
         {actionItem(actions.redo)}
       </>
     ),
-    clear: actionItem(actions.clear),
     paragraph: (
       <>
         {actionItem(actions.title)}
@@ -1069,6 +1073,7 @@ export default function ToolbarPlugin({
       <>
         {actionItem(actions.bullet)}
         {actionItem(actions.number)}
+        {actionItem(actions.check)}
       </>
     ),
     indent: (
@@ -1078,10 +1083,7 @@ export default function ToolbarPlugin({
       </>
     ),
     links: (
-      <>
-        {actionItem(actions.check)}
-        {actionItem(actions.link)}
-      </>
+      actionItem(actions.link)
     ),
     blocks: (
       <>
@@ -1130,107 +1132,6 @@ export default function ToolbarPlugin({
 
   return (
     <div ref={toolbarRef} className="toolbar" role="toolbar" aria-label="编辑工具栏">
-      {!toolbarState.isImageCaption && (
-        <div {...groupProps('insert', '插入内容', 'toolbar-insert')}>
-          <DropDown
-            disabled={!isEditable}
-            buttonClassName="toolbar-item insert-menu"
-            hideChevron
-            buttonAriaLabel="插入内容"
-            buttonIcon={<EditorIcon icon="plus" />}
-          >
-            <DropDownItem
-              onClick={() => {
-                showModal('插入表格', (onClose) => <InsertTableDialog activeEditor={activeEditor} onClose={onClose} />);
-              }}
-              className="item"
-            >
-              <EditorIcon icon="table" />
-              <span className="text">表格</span>
-            </DropDownItem>
-            <DropDownItem onClick={() => dispatchToolbarCommand(INSERT_HORIZONTAL_RULE_COMMAND)} className="item">
-              <EditorIcon icon="horizontal-rule" />
-              <span className="text">分隔线</span>
-            </DropDownItem>
-
-            <DropDownItem
-              onClick={() => {
-                showModal('插入图片', (onClose) => <InsertImageDialog activeEditor={activeEditor} onClose={onClose} />);
-              }}
-              className="item"
-            >
-              <EditorIcon icon="image" />
-              <span className="text">图片</span>
-            </DropDownItem>
-
-            <DropDownItem
-              onClick={() => {
-                showModal(
-                  '插入 HTML 块',
-                  (onClose) => (
-                    <InsertHtmlDialog
-                      activeEditor={activeEditor}
-                      onClose={onClose}
-                      onInsert={(payload) => activeEditor.dispatchCommand(INSERT_HTML_COMMAND, payload)}
-                    />
-                  ),
-                  false,
-                  'html-insert-modal',
-                );
-              }}
-              className="item"
-            >
-              <EditorIcon icon="code" />
-              <span className="text">HTML 页面</span>
-            </DropDownItem>
-
-            <DropDownItem onClick={() => dispatchToolbarCommand(INSERT_EXCALIDRAW_COMMAND)} className="item">
-              <EditorIcon icon="diagram-2" />
-              <span className="text">绘图</span>
-            </DropDownItem>
-
-            <DropDownItem
-              onClick={() => {
-                showModal('插入分栏', (onClose) => (
-                  <InsertLayoutDialog activeEditor={activeEditor} onClose={onClose} />
-                ));
-              }}
-              className="item"
-            >
-              <EditorIcon icon="columns" />
-              <span className="text">分栏布局</span>
-            </DropDownItem>
-
-            <DropDownItem
-              onClick={() => {
-                showModal('插入公式', (onClose) => (
-                  <InsertEquationDialog activeEditor={activeEditor} onClose={onClose} />
-                ));
-              }}
-              className="item"
-            >
-              <EditorIcon icon="equation" />
-              <span className="text">公式</span>
-            </DropDownItem>
-
-            <DropDownItem onClick={() => dispatchToolbarCommand(INSERT_COLLAPSIBLE_COMMAND)} className="item">
-              <EditorIcon icon="caret-right" />
-              <span className="text">折叠区块</span>
-            </DropDownItem>
-            <DropDownItem
-              onClick={() => {
-                const dateTime = new Date();
-                dateTime.setHours(0, 0, 0, 0);
-                dispatchToolbarCommand(INSERT_DATETIME_COMMAND, { dateTime });
-              }}
-              className="item"
-            >
-              <EditorIcon icon="calendar" />
-              <span className="text">日期</span>
-            </DropDownItem>
-          </DropDown>
-        </div>
-      )}
       <div {...groupProps('history', '编辑历史')}>
         {actionButton(actions.undo)}
         {actionButton(actions.redo)}
@@ -1361,9 +1262,8 @@ export default function ToolbarPlugin({
         {actionButton(actions.bold)}
         {actionButton(actions.italic)}
       </div>
-      <div {...groupProps('strikethrough', '删除线')}>{actionButton(actions.strikethrough)}</div>
       <div {...groupProps('underline', '下划线')}>{actionButton(actions.underline)}</div>
-      {!toolbarState.isImageCaption && <div {...groupProps('code', '行内代码')}>{actionButton(actions.code)}</div>}
+      <div {...groupProps('strikethrough', '删除线')}>{actionButton(actions.strikethrough)}</div>
       <div {...groupProps('colors', '文字颜色', 'toolbar-colors')}>
         <DropdownColorPicker
           disabled={!isEditable}
@@ -1397,13 +1297,13 @@ export default function ToolbarPlugin({
           <div {...groupProps('lists', '列表')}>
             {actionButton(actions.bullet)}
             {actionButton(actions.number)}
+            {actionButton(actions.check)}
           </div>
           <div {...groupProps('indent', '段落缩进')}>
             {actionButton(actions.outdent)}
             {actionButton(actions.indent)}
           </div>
-          <div {...groupProps('links', '任务与链接')}>
-            {actionButton(actions.check)}
+          <div {...groupProps('links', '链接')}>
             {actionButton(actions.link)}
           </div>
           <div {...groupProps('blocks', '引用与分隔线')}>
@@ -1411,6 +1311,106 @@ export default function ToolbarPlugin({
             {actionButton(actions.rule)}
           </div>
         </>
+      )}
+      {!toolbarState.isImageCaption && <div {...groupProps('code', '行内代码')}>{actionButton(actions.code)}</div>}
+      {!toolbarState.isImageCaption && (
+        <div {...groupProps('insert', '插入内容', 'toolbar-insert')}>
+          <DropDown
+            disabled={!isEditable}
+            buttonClassName="toolbar-item insert-menu"
+            hideChevron
+            buttonAriaLabel="插入内容"
+            buttonIcon={<EditorIcon icon="plus" />}
+          >
+            <DropDownItem
+              onClick={() => insertDefaultTable(activeEditor)}
+              className="item"
+            >
+              <EditorIcon icon="table" />
+              <span className="text">表格</span>
+            </DropDownItem>
+            <DropDownItem onClick={() => dispatchToolbarCommand(INSERT_HORIZONTAL_RULE_COMMAND)} className="item">
+              <EditorIcon icon="horizontal-rule" />
+              <span className="text">分隔线</span>
+            </DropDownItem>
+
+            <DropDownItem
+              onClick={() => {
+                showModal('插入图片', (onClose) => <InsertImageDialog activeEditor={activeEditor} onClose={onClose} />);
+              }}
+              className="item"
+            >
+              <EditorIcon icon="image" />
+              <span className="text">图片</span>
+            </DropDownItem>
+
+            <DropDownItem
+              onClick={() => {
+                showModal(
+                  '插入 HTML 块',
+                  (onClose) => (
+                    <InsertHtmlDialog
+                      activeEditor={activeEditor}
+                      onClose={onClose}
+                      onInsert={(payload) => activeEditor.dispatchCommand(INSERT_HTML_COMMAND, payload)}
+                    />
+                  ),
+                  false,
+                  'html-insert-modal',
+                );
+              }}
+              className="item"
+            >
+              <EditorIcon icon="code" />
+              <span className="text">HTML 页面</span>
+            </DropDownItem>
+
+            <DropDownItem onClick={() => dispatchToolbarCommand(INSERT_EXCALIDRAW_COMMAND)} className="item">
+              <EditorIcon icon="diagram-2" />
+              <span className="text">绘图</span>
+            </DropDownItem>
+
+            <DropDownItem
+              onClick={() => {
+                showModal('插入分栏', (onClose) => (
+                  <InsertLayoutDialog activeEditor={activeEditor} onClose={onClose} />
+                ));
+              }}
+              className="item"
+            >
+              <EditorIcon icon="columns" />
+              <span className="text">分栏布局</span>
+            </DropDownItem>
+
+            <DropDownItem
+              onClick={() => {
+                showModal('插入公式', (onClose) => (
+                  <InsertEquationDialog activeEditor={activeEditor} onClose={onClose} />
+                ));
+              }}
+              className="item"
+            >
+              <EditorIcon icon="equation" />
+              <span className="text">公式</span>
+            </DropDownItem>
+
+            <DropDownItem onClick={() => dispatchToolbarCommand(INSERT_COLLAPSIBLE_COMMAND)} className="item">
+              <EditorIcon icon="caret-right" />
+              <span className="text">折叠区块</span>
+            </DropDownItem>
+            <DropDownItem
+              onClick={() => {
+                const dateTime = new Date();
+                dateTime.setHours(0, 0, 0, 0);
+                dispatchToolbarCommand(INSERT_DATETIME_COMMAND, { dateTime });
+              }}
+              className="item"
+            >
+              <EditorIcon icon="calendar" />
+              <span className="text">日期</span>
+            </DropDownItem>
+          </DropDown>
+        </div>
       )}
       <div {...groupProps('more', '更多操作', 'toolbar-more')}>
         <DropDown

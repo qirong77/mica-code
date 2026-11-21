@@ -13,6 +13,8 @@
 
 [Long Reply Digest](reply-digest/README.md) 在成功回合结束后识别过长的 Agent 回复，先展示运行中摘要卡，再调用模型并原位更新简短摘要；失败或取消会停止运行态，各轮摘要分别保留，短回复不会额外调用模型。
 
+[Mica Maccy](mica-maccy/README.md) 提供 macOS 本地剪贴板历史：⇧⌘C 或菜单栏图标唤出，搜索与预览文字、富文本、图片和文件引用，点一下复制、⌥ 点击回贴，固定与整理在右键菜单里，历史按 31 天自动过期。监听由桌面启动器独立承载，不依赖聊天会话；隐私过滤、存储与菜单栏行为都在插件内。
+
 [Harness Review](harness-review/README.md) 记录运行轨迹并聚合问题候选，工具错误与健康率共用分类并标出数据覆盖缺口；同端口的 `/plugins/harness-review/console` 是 Arco 只读运行控制台，也可从插件详情打开。条件命令链无法确定非零退出来源时记为未知，不当成功或已确认工具故障。评估按历史追加，验证后的新证据提醒复核但不自动宣判回归。用户纠正独立持久化，仅由下一次同会话主运行消费。它不自动修改代码、提示词或记忆，也不把运行完成当成验收通过。
 
 所有插件（含用户插件和一次性动作）自动接入宿主的 `operation.start/finish` 元数据日志， 新信封绑定装载版本及 pid/generation，后台重复 success/skipped/waiting合并为每分钟心跳计数；首次终态、失败、取消与状态转换不采样。覆盖工具/命令、面板/动作、菜单、后台 tick、数据、hook 与装配/释放；独立 MCP/launcher 不依赖主对话轨迹。内部步骤可调用 `ctx.operations?.run('固定操作名', task, { signal })`。禁止传正文、命令、路径、地址或异常原文；处理器完成不代表业务验收。随包页面/卡片/启动器的实际曝光与点击由共享容器记录，预取和轮询不算曝光。
@@ -629,8 +631,13 @@ macOS 使用非激活式浮窗，唤出搜索时只接收键盘输入，不连�
 
 不依赖会话的后端来自同目录 `launcher.js` 的 default `createLauncher(context)`，返回
 `{ request(action, input), dispose?() }`。宿主按插件只创建一个实例，并在停用时调用 `dispose`。
-`context` 提供 `pluginId`、`settings.get()`、`readData()` 和 `writeData(value, { expectedVersion })`，
-数据版本与现有插件数据 API 相同。插件前端通过 `api.launcher.request(action, input)` 调它；
+`context` 提供 `pluginId`、`settings.get()/set()`、`readData()` 和 `writeData(value, { expectedVersion })`，
+数据版本与现有插件数据 API 相同；`dataDirectory` 是宿主创建的本插件私有目录（0700）。
+后端可用 `background.register()` 声明周期任务（最小间隔 100ms，单任务不重叠，停用时中止），
+用 `health.report()/clear()` 按问题上报运行状态，用 `control(action, input?)` 调用原生窗口动作；
+原生控制的插件身份由宿主绑定，没有桌面外壳时仅该调用失败。清单 `background: true` 使后端在启用时立即初始化，
+普通启动器仍按需加载；`shortcutSetting: "设置键"` 让全局快捷键跟随本插件设置，修改即时撤旧注册新，
+空值或冲突显示为错误。插件前端通过 `api.launcher.request(action, input)` 调后端；
 `status()` 读取快捷键注册状态，`retry()` 重试注册，`openPath(path)` 让外壳新开一扇**编辑器窗口**
 （`?editor=<路径>`，主窗口不动；同一条路径只留一扇），`configure()` 打开本插件设置，`close()` 收起浮窗。后端模块、界面模块和清单
 按目录发现，宿主不登记具体插件的业务代码。与 `desktop.jsx` 一样，运行时安装的用户插件
@@ -639,13 +646,15 @@ macOS 使用非激活式浮窗，唤出搜索时只接收键盘输入，不连�
 随包启动器可额外声明 `webContent: { "top": 64 }`（顶部高度为 0–512 的整数），由外壳在同一窗口的顶部区域下方嵌入
 隔离网页视图。此类窗口可调整大小、失焦不隐藏；插件通过 `api.launcher.web` 的 `state()`、
 `navigate(url)`、`back()`、`forward()`、`reload()` 与 `subscribe(callback)` 控制并接收状态，
-订阅返回取消函数，空白页的状态地址为空；有页面 favicon 时状态还会带 `faviconUrl`（仅 HTTP(S)）。网页与插件界面分离，不获得插件 API；该能力需要桌面外壳。
+订阅返回取消函数，空白页的状态地址为空；有页面 favicon 时状态还会带 `faviconUrl`（仅 HTTP(S)）。
+页面自身的 CSP 只允许 `data:` 图片，远端图标要用 `favicon(url)` 让外壳取回并内联成 `data:` URL，
+直接写进 `<img src>` 一定加载不出来。网页与插件界面分离，不获得插件 API；该能力需要桌面外壳。
 网页视图按普通浏览器规则访问网络，本机地址（含 Mica 运行时与开发服务）同样可以打开；
 只拒绝非 HTTP(S)/`about:blank`、带账号密码和格式不合法的地址。独立分区不是网络隔离，
 也不是对其他本机服务的访问授权机制。
 
 [Floating Window](floatingwindow/README.md) 使用这个入口：⌘` 显示或隐藏同一个浏览器
-浮窗，在地址栏输入域名或网址直接导航；只记最近站点根地址，不保存路径和参数。
+浮窗，在地址栏输入域名或网址直接导航；最近访问和收藏记完整地址，点回去落到的就是当时那个页面。
 
 [Global Search](global-search/README.md) 使用这个入口迁移 VsGo 的文件启动能力：
 Option + 空格唤起，搜索插件设置中配置的多个目录；每条结果两行，第一行用 VS Code 打开、

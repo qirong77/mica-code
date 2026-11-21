@@ -75,6 +75,8 @@ Plugins 贡献页列官方与用户插件；宿主内部 `builtin.*` 能力在 T
 
 ## 约定
 
+- 共享入口 `@mica-config-ui/web` 导出 `Modal`（`title` / `onClose` / `children`，可选 `wide` / `portal`），供宿主和插件复用 Arco 弹窗的焦点锁、嵌套 Esc 与关闭后的焦点恢复；窗口内确认也使用这一份组件。
+
 - `Segmented` 的 `variant` 支持默认 `segmented`、紧凑单选 `radio` 和图文选项卡 `cards`；`options[].label` 可传 ReactNode。三种布局复用同一个 Arco Radio.Group 的受控值、键盘与禁用行为，卡片只改共享样式，不在业务页面重画单选控件。未传 `variant` 时保留现有分段外观。
 
 - **Roles**：内置 `default` 以「默认系统提示词」展示，只读、可复制，不可创建同名覆盖、编辑或删除。自定义 Role 编辑的只是追加正文，紧接默认正文且同属系统提示词。会话详情优先使用历史存档；没有记录时只展示当前默认正文与 Role 的参考，不写回快照。

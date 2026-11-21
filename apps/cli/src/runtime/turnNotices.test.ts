@@ -3,6 +3,7 @@ import type { MicaUiConversationMessage } from '@packages/mica-ui/index.js';
 import {
   TurnNoticeLog,
   createRetryNotice,
+  createRetryRecoveredNotice,
   createTurnErrorNotice,
   mergeInFlightUserMessage,
   type TurnNotice,
@@ -59,6 +60,27 @@ describe('TurnNoticeLog', () => {
 
     expect(log.size).toBe(1);
     expect(log.compose().map((message) => message.content)).toEqual(['one', 'retry 2']);
+  });
+
+  it('rewrites the same notice in place even after the turn committed text', () => {
+    // 重试成功后正文已经提交进历史：同一条提示换了状态，位置不动，也不该多出一条。
+    const base: MicaUiConversationMessage[] = [{ role: 'user', content: 'one' }];
+    const log = new TurnNoticeLog(() => base);
+    log.upsert(createRetryNotice(new Error('socket closed'), 1, 5, 2_000));
+    base.push({ role: 'assistant', content: 'answer' });
+    log.upsert(createRetryRecoveredNotice(new Error('socket closed'), 1, 5), { inPlace: true });
+
+    expect(log.size).toBe(1);
+    expect(log.compose()).toEqual([
+      { role: 'user', content: 'one' },
+      {
+        role: 'notice',
+        content: '重试成功（第 1/5 次）\n错误：socket closed',
+        variant: 'success',
+        command: '/retry',
+      },
+      { role: 'assistant', content: 'answer' },
+    ]);
   });
 
   it('replaces a running progress notice wherever it sits', () => {
@@ -231,6 +253,16 @@ describe('notice message builders', () => {
       role: 'notice',
       content: '请求暂时失败，将在 10s 后自动重试（第 2/5 次）\n错误：socket closed',
       variant: 'error',
+      command: '/retry',
+    });
+  });
+
+  it('keeps the attempt and the reason when the retry lands', () => {
+    // 重试成功后同一条提示换成结论：次数与错误原因留着，红转绿只换「在等」那句。
+    expect(createRetryRecoveredNotice(new Error('socket closed'), 2, 5)).toEqual({
+      role: 'notice',
+      content: '重试成功（第 2/5 次）\n错误：socket closed',
+      variant: 'success',
       command: '/retry',
     });
   });

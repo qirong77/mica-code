@@ -292,7 +292,7 @@ export {
 } from './PluginRoles.js';
 export type { PublishedPluginRole } from './PluginRoles.js';
 export type { PluginContext } from './PluginContext.js';
-export type { PluginLauncherContext, PluginLauncherHandler } from './PluginLauncher.js';
+export type { PluginLauncherContext, PluginLauncherHandler, PluginLauncherSettings } from './PluginLauncher.js';
 export type { PluginMcpContext, PluginMcpHandler, PluginMcpTool } from './PluginMcp.js';
 export type {
   PluginApiContext,

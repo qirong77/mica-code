@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import mitt from 'mitt';
 import { AgentAbortError } from '../agent/AgentRuntime.js';
 import { HeadlessTurnExecutor, type HeadlessTurnEvent } from './HeadlessTurnExecutor.js';
-import { TurnNoticeLog } from './turnNotices.js';
+import { publishTurnNotice, TurnNoticeLog, type TurnNotice } from './turnNotices.js';
 import { attachCodexProjector } from './CodexProjector.js';
 import { LocalRuntimeController } from '../app/adapters/LocalRuntimeController.js';
 import type { MicaUiConversationMessage } from '@packages/mica-ui/index.js';
@@ -85,6 +85,7 @@ class MockAgent {
     options: {
       onIterationComplete?: () => unknown | Promise<unknown>;
       onRetry?: (info: { attempt: number; delayMs: number; error: unknown }) => void;
+      onRequestEnd?: (info: { outcome: 'completed' | 'error' | 'aborted'; attempts: number }) => void;
     } = {},
   ): Promise<{ runId: number; text: string }> {
     this.runCalls.push({ content, options });
@@ -104,7 +105,11 @@ class MockAgent {
     }
     for (const retry of this.nextProviderRetries.shift() ?? []) options.onRetry?.(retry);
     const nextError = this.nextErrors.shift();
-    if (nextError) throw nextError;
+    if (nextError) {
+      options.onRequestEnd?.({ outcome: 'error', attempts: 1 });
+      throw nextError;
+    }
+    options.onRequestEnd?.({ outcome: 'completed', attempts: 1 });
     return { runId: this.runId, text: 'done' };
   }
 }
@@ -131,7 +136,9 @@ function createHarness(
   const sessionController = {
     getCurrentSessionId: () => sessionId,
     acquireTurnLease: vi.fn(() => micaSession.acquireTurnLease(sessionId)),
-    saveCurrent: (options: { turnState?: string; conversationMessages?: Array<{ role: string }> } = {}) => {
+    saveCurrent: (
+      options: { allowEmpty?: boolean; turnState?: string; conversationMessages?: Array<{ role: string }> } = {},
+    ) => {
       savedStates.push(options.turnState ?? 'completed');
       savedConversations.push(options.conversationMessages);
       return true;
@@ -139,6 +146,11 @@ function createHarness(
     refreshFromStore: () => null,
   };
   let idleCount = 0;
+  /**
+   * 常驻宿主的推送给客户端的那条路：执行器写 notice 时会走 `show`，
+   * 这里照着 HeadlessPluginHost 接上同一套（落盘 + 推送）。
+   */
+  const noticePushes: TurnNotice[] = [];
   const noticeLog = new TurnNoticeLog(() => agent.toConversationMessages() as unknown as MicaUiConversationMessage[]);
   const hooks = options.withPluginLayer ? new micaPlugin.HookRegistry() : undefined;
   const executor = new HeadlessTurnExecutor({
@@ -156,7 +168,19 @@ function createHarness(
     } as never,
     // 子代理在 turn:after 之前收尾；没有插件层时仍需释放 lease 并报告终态。
     ...(hooks ? { hooks, host: { getCurrentSessionId: () => sessionId } } : {}),
-    notices: { ensure: () => noticeLog },
+    notices: {
+      ensure: () => noticeLog,
+      show: (notice, upsertOptions = {}) =>
+        publishTurnNotice(
+          noticeLog,
+          notice,
+          {
+            save: (conversationMessages) => sessionController.saveCurrent({ allowEmpty: true, conversationMessages }),
+            onNotice: (pushed) => noticePushes.push(pushed),
+          },
+          upsertOptions,
+        ),
+    },
     // Mirrors HeadlessPluginHost: the persisted conversation is the provider
     // history with the notices threaded back in.
     getConversationMessages: (extra?: Array<{ role: string; content: unknown }>) => {
@@ -175,6 +199,7 @@ function createHarness(
     sessionId,
     sessionController,
     noticeLog,
+    noticePushes,
     savedStates,
     savedConversations,
     subagentSettleCalls,
@@ -934,6 +959,27 @@ describe('HeadlessTurnExecutor', () => {
       command: '/retry',
       content: expect.stringContaining('request body reset'),
     }));
+  });
+
+  it('turns the retry notice into a success notice once the retried request lands', async () => {
+    const { agent, executor, noticeLog, noticePushes, getIdleCount } = createHarness();
+    agent.nextProviderRetries = [[{ attempt: 1, delayMs: 2000, error: new Error('socket closed') }]];
+
+    await executor.start(input('provider retry lands'));
+    await vi.waitFor(() => expect(getIdleCount()).toBe(1));
+
+    // 同一条 notice 换了状态：没多出一行，次数与错误原因都还在。
+    expect(noticeLog.size).toBe(1);
+    expect(noticeLog.compose().filter((message) => message.role === 'notice')).toEqual([
+      {
+        role: 'notice',
+        content: '重试成功（第 1/5 次）\n错误：socket closed',
+        variant: 'success',
+        command: '/retry',
+      },
+    ]);
+    // 常驻宿主还要把这次改写推给正在看的客户端，否则屏幕上那条要等重开会话才变。
+    expect(noticePushes.map((notice) => notice.variant)).toEqual(['error', 'success']);
   });
 
   it('keeps prompt controls fixed across turn retries and refreshes them for the next turn', async () => {

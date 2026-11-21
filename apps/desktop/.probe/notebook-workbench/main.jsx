@@ -46,7 +46,11 @@ function createMemoryHost() {
     ['index', { value: fixtureIndex(), version: crypto.randomUUID() }],
     ...previewNotes.map((note) => [
       `document:${note.id}`,
-      { value: parseNotebookDocument(note.document), version: crypto.randomUUID() }
+      // 设计样例多带了预览用的 comments 字段，正式文档只认 version/editorState。
+      {
+        value: parseNotebookDocument({ version: note.document.version, editorState: note.document.editorState }),
+        version: crypto.randomUUID()
+      }
     ])
   ])
   const beforeClose = new Set()

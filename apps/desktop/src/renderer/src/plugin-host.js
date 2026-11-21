@@ -223,6 +223,8 @@ export function createPluginHostApi(pluginId, session = null, { createSession, b
         back: () => launcherControl('web.back'),
         forward: () => launcherControl('web.forward'),
         reload: () => launcherControl('web.reload'),
+        /** 页面本身只允许 data: 图片，站点图标由外壳取回后内联返回。 */
+        favicon: (url) => launcherControl('web.favicon', undefined, url),
         subscribe: (callback) => {
           if (typeof callback !== 'function') throw new Error('网页状态订阅需要回调函数')
           if (!isElectronShell(navigator.userAgent)) throw new Error('网页浮窗需要 Mica 桌面应用')

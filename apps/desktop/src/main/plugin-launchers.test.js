@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from 'bun:test'
 import { EventEmitter } from 'node:events'
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { createPluginLaunchers } from './plugin-launchers.js'
@@ -10,9 +10,24 @@ afterEach(() => {
   for (const close of cleanups.splice(0)) close()
 })
 
-function fixture({ occupied = false, load, platform = 'darwin', webContent, pageUrl = 'http://127.0.0.1:8787/?existing=1' } = {}) {
+function fixture({
+  occupied = false,
+  load,
+  platform = 'darwin',
+  webContent,
+  launcher: launcherOverride = {},
+  settingsFile,
+  settingsValues,
+  extraManifests = [],
+  pageUrl = 'http://127.0.0.1:8787/?existing=1'
+} = {}) {
   let shortcutOccupied = occupied
   const home = mkdtempSync(join(tmpdir(), 'mica-launcher-test-'))
+  const settingsPath = join(home, 'plugin-settings', 'sample.json')
+  if (settingsFile) {
+    mkdirSync(join(home, 'plugin-settings'), { recursive: true })
+    writeFileSync(settingsPath, `${JSON.stringify(settingsFile)}\n`)
+  }
   const disabled = new Set()
   const bindings = new Map()
   const windows = []
@@ -100,11 +115,22 @@ function fixture({ occupied = false, load, platform = 'darwin', webContent, page
     manifests: [
       {
         id: 'sample',
-        desktopLauncher: { title: 'Sample', shortcut: 'Alt+Space', width: 720, height: 480, ...(webContent ? { webContent } : {}) }
-      }
+        settings: [{ key: 'keyboardShortcut', type: 'text', label: '快捷键', default: '' }],
+        desktopLauncher: {
+          title: 'Sample',
+          shortcut: 'Alt+Space',
+          width: 720,
+          height: 480,
+          ...(webContent ? { webContent } : {}),
+          ...launcherOverride
+        }
+      },
+      ...extraManifests
     ],
     statePath: join(home, 'state.json'),
     readDisabled: () => disabled,
+    home,
+    ...(settingsValues ? { readSettings: () => settingsValues } : {}),
     BrowserWindow: Window,
     WebContentsView: View,
     globalShortcut: {
@@ -148,6 +174,9 @@ function fixture({ occupied = false, load, platform = 'darwin', webContent, page
     delivered,
     opened,
     home,
+    settingsPath,
+    sync: () => controller.sync(),
+    settingsValues,
     releaseShortcut: () => {
       shortcutOccupied = false
     }
@@ -188,6 +217,10 @@ describe('manifest desktop launchers', () => {
     expect(win.script).toContain('mica:launcher-web-state')
     view.webContents.emit('page-favicon-updated', {}, ['javascript:alert(1)', 'https://cdn.example/icon.svg?cache=1'])
     expect(await f.control('web.state')).toMatchObject({ faviconUrl: 'https://cdn.example/icon.svg?cache=1' })
+    // 页面内联声明的图标（这类站点通常没有 /favicon.ico）也要带出来，别的 data: 一律不认。
+    const inline = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3C/svg%3E"
+    view.webContents.emit('page-favicon-updated', {}, ['data:text/html,<b>x</b>', inline])
+    expect(await f.control('web.state')).toMatchObject({ faviconUrl: inline })
     view.webContents.emit('did-start-loading')
     expect((await f.control('web.state')).faviconUrl).toBeUndefined()
     for (const url of ['javascript:alert(1)', 'file:///tmp/a', ' http://example.com', 'http://x:bad', 'http://u:p@example.com']) {
@@ -361,5 +394,96 @@ describe('manifest desktop launchers', () => {
     expect(f.windows).toHaveLength(2)
     f.controller.close()
     expect(f.bindings.size).toBe(0)
+  })
+
+  test('takes the global shortcut from a declared plugin setting', async () => {
+    const f = fixture({
+      launcher: { shortcutSetting: 'keyboardShortcut' },
+      settingsValues: { keyboardShortcut: ' CommandOrControl+Shift+V ' }
+    })
+    expect(f.bindings.has('CommandOrControl+Shift+V')).toBe(true)
+    // The manifest default is not registered as a second, silent fallback.
+    expect(f.bindings.has('Alt+Space')).toBe(false)
+    expect(await f.control('status')).toEqual({
+      shortcut: 'CommandOrControl+Shift+V',
+      registered: true,
+      error: ''
+    })
+  })
+
+  test('swaps the global shortcut when the setting changes', async () => {
+    const values = { keyboardShortcut: 'Alt+1' }
+    const f = fixture({
+      launcher: { shortcutSetting: 'keyboardShortcut' },
+      settingsValues: values
+    })
+    expect(f.bindings.has('Alt+1')).toBe(true)
+    values.keyboardShortcut = 'Alt+2'
+    f.sync()
+    expect(f.bindings.has('Alt+1')).toBe(false)
+    expect(f.bindings.has('Alt+2')).toBe(true)
+    expect(await f.control('status')).toMatchObject({ shortcut: 'Alt+2', registered: true, error: '' })
+  })
+
+  test('reports an empty shortcut setting instead of falling back to the manifest', async () => {
+    const values = { keyboardShortcut: '   ' }
+    const f = fixture({
+      launcher: { shortcutSetting: 'keyboardShortcut' },
+      settingsValues: values
+    })
+    expect(f.bindings.has('Alt+Space')).toBe(false)
+    const status = await f.control('status')
+    expect(status).toMatchObject({ shortcut: '', registered: false })
+    expect(status.error).toContain('keyboardShortcut')
+    values.keyboardShortcut = 'Alt+9'
+    f.sync()
+    expect(f.bindings.has('Alt+9')).toBe(true)
+    expect((await f.control('status')).error).toBe('')
+  })
+
+  test('keeps a conflict visible for a setting-driven shortcut', async () => {
+    const f = fixture({
+      occupied: true,
+      launcher: { shortcutSetting: 'keyboardShortcut' },
+      settingsValues: { keyboardShortcut: 'Alt+1' }
+    })
+    expect(await f.control('status')).toMatchObject({ shortcut: 'Alt+1', registered: false })
+    expect((await f.control('status')).error).toContain('占用')
+    f.releaseShortcut()
+    expect(await f.control('retry')).toMatchObject({ registered: true, error: '' })
+  })
+
+  test('watches the plugin settings file and moves the global shortcut', async () => {
+    const f = fixture({
+      launcher: { shortcutSetting: 'keyboardShortcut' },
+      settingsFile: { keyboardShortcut: 'Alt+1' },
+      extraManifests: [
+        {
+          id: 'other',
+          desktopLauncher: { title: 'Other', shortcut: 'Alt+7', width: 720, height: 480 }
+        }
+      ]
+    })
+    expect(f.bindings.has('Alt+1')).toBe(true)
+    // A launcher that declares no setting keeps its manifest shortcut untouched.
+    expect(f.bindings.has('Alt+7')).toBe(true)
+    writeFileSync(f.settingsPath, `${JSON.stringify({ keyboardShortcut: 'Alt+2' })}\n`)
+    const deadline = Date.now() + 3000
+    while (!f.bindings.has('Alt+2') && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 50))
+    }
+    expect(f.bindings.has('Alt+2')).toBe(true)
+    expect(f.bindings.has('Alt+1')).toBe(false)
+    expect(f.bindings.has('Alt+7')).toBe(true)
+    expect(await f.control('status')).toMatchObject({
+      shortcut: 'Alt+2',
+      registered: true
+    })
+  })
+
+  test('launchers without a shortcut setting keep their manifest shortcut', async () => {
+    const f = fixture({ settingsValues: { keyboardShortcut: 'Alt+1' } })
+    expect(f.bindings.has('Alt+Space')).toBe(true)
+    expect(f.bindings.has('Alt+1')).toBe(false)
   })
 })

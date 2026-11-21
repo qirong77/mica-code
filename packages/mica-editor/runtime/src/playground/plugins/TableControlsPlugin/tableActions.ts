@@ -476,6 +476,51 @@ function $sortRows(target: TableTarget, descending: boolean, header: boolean): v
   });
 }
 
+export type TableBandAxis = 'row' | 'column';
+export type TableBandAction =
+  | 'row-before'
+  | 'row-after'
+  | 'column-before'
+  | 'column-after'
+  | 'delete-row'
+  | 'delete-column';
+
+/**
+ * Runs an action on the whole row/column band the user pointed at, instead of
+ * on whatever cells the caret happens to select. The band is selected first so
+ * the shared action path can re-read and validate it like any other selection.
+ * The caller owns editor.update(); returns false when nothing was applied.
+ */
+export function $applyTableBandAction(
+  tableKey: string,
+  axis: TableBandAxis,
+  start: number,
+  end: number,
+  action: TableBandAction,
+  editor: LexicalEditor,
+): boolean {
+  if ($getEditor() !== editor) return false;
+  const table = $getNodeByKey(tableKey);
+  if (!$isTableNode(table) || !table.isAttached()) return false;
+  const [map] = $computeTableMapSkipCellCheck(table, null, null);
+  const rows = map.length;
+  const columns = map[0]?.length ?? 0;
+  const length = axis === 'row' ? rows : columns;
+  if (!rows || !columns || !length) return false;
+  // Clamp a stale index (the table shrank between render and click) to the
+  // nearest surviving band instead of silently dropping the action.
+  const min = Math.min(length - 1, Math.max(0, Math.min(start, end)));
+  const max = Math.min(length - 1, Math.max(0, Math.max(start, end)));
+  const anchor = axis === 'row' ? map[min]?.[0]?.cell : map[0]?.[min]?.cell;
+  const focus = axis === 'row' ? map[max]?.[columns - 1]?.cell : map[rows - 1]?.[max]?.cell;
+  if (!anchor || !focus) return false;
+  $setSelection($createTableSelectionFrom(table, anchor, focus));
+  const context = $readTableContext();
+  if (!context || context.tableKey !== table.getKey()) return false;
+  $applyTableAction(action, context, editor);
+  return true;
+}
+
 /**
  * The caller restores its selection and owns editor.update()/editable checks.
  * Re-read coordinates/styles here: context is a UI snapshot, not mutation authority.

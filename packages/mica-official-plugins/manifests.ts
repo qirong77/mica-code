@@ -11,6 +11,7 @@ import floatingWindowManifest from '../../plugins/floatingwindow/plugin.json';
 import globalSearchManifest from '../../plugins/global-search/plugin.json';
 import harnessReviewManifest from '../../plugins/harness-review/plugin.json';
 import memoryManifest from '../../plugins/memory/plugin.json';
+import maccyManifest from '../../plugins/mica-maccy/plugin.json';
 import mobileRelayManifest from '../../plugins/mobile-relay/plugin.json';
 import notebookManifest from '../../plugins/notebook/plugin.json';
 import quickButtonsManifest from '../../plugins/quick-buttons/plugin.json';
@@ -60,6 +61,7 @@ export const officialPluginManifests: PluginManifest[] = [
   readManifest(evolutionManifest),
   readManifest(floatingWindowManifest),
   readManifest(globalSearchManifest),
+  readManifest(maccyManifest),
   readManifest(mobileRelayManifest),
   readManifest(notebookManifest),
   readManifest(quickButtonsManifest),

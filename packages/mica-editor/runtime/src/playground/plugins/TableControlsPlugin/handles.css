@@ -6,7 +6,7 @@
   pointer-events: none;
   user-select: none;
   -webkit-user-select: none;
-  color: var(--color-text-3);
+  color: var(--color-fg-faint, var(--color-text-3, #86909c));
   font-family: inherit;
 }
 
@@ -14,6 +14,8 @@
   position: absolute;
   overflow: hidden;
   pointer-events: none;
+  border-radius: 6px;
+  background: var(--color-panel-hi, var(--color-fill-1, #f7f8fa));
 }
 
 .table-selection-handle-slot {
@@ -35,16 +37,16 @@
   margin: 0;
   min-width: 0;
   min-height: 0;
-  border: 1px solid var(--color-border-2, #e5e6eb);
-  border-radius: 3px;
-  background: var(--color-fill-1, #f7f8fa);
-  color: var(--color-text-3, #86909c);
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--color-fg-faint, var(--color-text-3, #86909c));
   font: inherit;
   line-height: 1;
   pointer-events: auto;
   cursor: pointer;
   touch-action: none;
-  transition: background-color 120ms, border-color 120ms, color 120ms;
+  transition: background-color 120ms, color 120ms;
 }
 
 .table-selection-handle {
@@ -59,93 +61,48 @@
   margin-block: 1px;
 }
 
-.table-selection-handle.is-column.has-grip {
-  padding-right: 18px;
+.table-selection-handle:hover {
+  background: var(--color-primary-light-2, rgb(var(--primary-2, 190, 218, 255)));
+  color: var(--color-accent, rgb(var(--primary-6, 22, 93, 255)));
 }
 
-.table-selection-handle.is-row.has-grip {
-  padding-bottom: 18px;
-}
-
-.table-selection-handle:hover,
-.table-selection-all:hover {
-  background: rgb(var(--primary-1, 232, 243, 255));
-  border-color: rgb(var(--primary-3, 148, 191, 255));
-  color: rgb(var(--primary-6, 22, 93, 255));
-}
-
-.table-selection-handle.is-active,
-.table-selection-all.is-active {
-  background: rgb(var(--primary-1, 232, 243, 255));
-  border-color: rgb(var(--primary-3, 148, 191, 255));
-  color: rgb(var(--primary-6, 22, 93, 255));
+.table-selection-handle.is-active {
+  background: var(--color-accent, rgb(var(--primary-6, 22, 93, 255)));
+  color: var(--color-canvas, #fff);
 }
 
 .table-selection-handle:focus-visible,
 .table-selection-all:focus-visible,
 .table-selection-handle-grip:focus-visible {
-  outline: 2px solid rgb(var(--primary-6, 22, 93, 255));
+  outline: 2px solid var(--color-accent, rgb(var(--primary-6, 22, 93, 255)));
   outline-offset: -2px;
 }
 
-.table-selection-handle-mark {
-  width: 10px;
-  height: 2px;
-  border-radius: 2px;
-  background: currentColor;
-  opacity: 0.5;
-  pointer-events: none;
-}
-
-.table-selection-handle.is-row .table-selection-handle-mark {
-  width: 2px;
-  height: 10px;
-}
-
-.table-selection-handle-count {
-  display: block;
-  max-width: 100%;
-  overflow: hidden;
-  font-size: 9px;
-  font-weight: 600;
-  line-height: 10px;
-  font-variant-numeric: tabular-nums;
-  pointer-events: none;
-}
-
-.table-selection-handle.is-row .table-selection-handle-count {
-  writing-mode: vertical-rl;
-  text-orientation: mixed;
-}
-
+/* 六点把手直接坐在选择条上，不再单独画一个拖拽按钮。 */
 .table-selection-handle-grip {
   z-index: 1;
-  border-color: transparent;
-  background: rgb(var(--primary-1, 232, 243, 255));
-  color: rgb(var(--primary-5, 64, 128, 255));
+  background: transparent;
+  color: var(--color-accent, rgb(var(--primary-6, 22, 93, 255)));
   cursor: grab;
   touch-action: auto;
-}
-
-.table-selection-handle-grip.is-column {
-  width: 18px;
-  height: 12px;
-}
-
-.table-selection-handle-grip.is-row {
-  width: 12px;
-  height: 18px;
-}
-
-.table-selection-handle-grip .arco-icon {
-  width: 12px;
-  height: 12px;
+  opacity: 0;
   pointer-events: none;
+  transition: opacity 120ms, background-color 120ms;
+}
+
+.table-selection-handle-slot:has(:hover) .table-selection-handle-grip,
+.table-selection-handle-slot:has(.table-selection-handle.is-active) .table-selection-handle-grip,
+.table-selection-handle-slot:has(.table-selection-handle:focus-visible) .table-selection-handle-grip {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.table-selection-handle-grip.is-on-active {
+  color: var(--color-canvas, #fff);
 }
 
 .table-selection-handle-grip:hover {
-  background: rgb(var(--primary-2, 190, 218, 255));
-  color: rgb(var(--primary-6, 22, 93, 255));
+  background: color-mix(in srgb, currentColor 16%, transparent);
 }
 
 .table-selection-handle-grip:active {
@@ -153,7 +110,18 @@
 }
 
 .table-selection-all {
-  background: var(--color-bg-2, #fff);
+  background: transparent;
+  color: var(--color-fg-faint, var(--color-text-3, #86909c));
+}
+
+.table-selection-all:hover {
+  background: var(--color-primary-light-2, rgb(var(--primary-2, 190, 218, 255)));
+  color: var(--color-accent, rgb(var(--primary-6, 22, 93, 255)));
+}
+
+.table-selection-all.is-active {
+  background: var(--color-accent, rgb(var(--primary-6, 22, 93, 255)));
+  color: var(--color-canvas, #fff);
 }
 
 .table-selection-all svg {
@@ -164,8 +132,8 @@
   position: absolute;
   z-index: 2;
   border-radius: 2px;
-  background: rgb(var(--primary-6, 22, 93, 255));
-  box-shadow: 0 0 0 1px var(--color-bg-2, #fff);
+  background: var(--color-accent, rgb(var(--primary-6, 22, 93, 255)));
+  box-shadow: 0 0 0 1px var(--color-canvas, #fff);
   pointer-events: none;
 }
 
@@ -178,6 +146,20 @@
   height: 6px;
   border-radius: 50%;
   background: inherit;
+}
+
+.table-selection-drag-label {
+  position: absolute;
+  z-index: 3;
+  padding: 5px 10px;
+  border-radius: 4px;
+  background: var(--color-accent, rgb(var(--primary-6, 22, 93, 255)));
+  color: var(--color-canvas, #fff);
+  font-size: 12px;
+  line-height: 16px;
+  white-space: nowrap;
+  box-shadow: 0 4px 12px #1d212926;
+  pointer-events: none;
 }
 
 .table-selection-screen-reader {
@@ -193,10 +175,119 @@
   pointer-events: none;
 }
 
+/* 行列末端的「＋ / 垃圾桶」：一张小白胶囊，和语雀一样贴在表格外沿。 */
+.table-selection-actions {
+  position: absolute;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  box-sizing: border-box;
+  width: 41px;
+  height: 22px;
+  border: 1px solid var(--color-line-soft, var(--color-border, #e5e6eb));
+  border-radius: 6px;
+  background: var(--color-canvas, #fff);
+  box-shadow: 0 2px 8px #1d21291f;
+  pointer-events: auto;
+  overflow: hidden;
+}
+
+.table-selection-actions.is-row {
+  flex-direction: column;
+  width: 22px;
+  height: 43px;
+}
+
+.table-selection-actions > button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 19px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--color-fg-faint, var(--color-text-3, #86909c));
+  font: inherit;
+  line-height: 1;
+  cursor: pointer;
+  transition: background-color 120ms, color 120ms;
+}
+
+.table-selection-actions.is-row > button {
+  width: 20px;
+  height: 20px;
+}
+
+.table-selection-actions > button + button {
+  border-inline-start: 1px solid var(--color-line-soft, var(--color-border, #e5e6eb));
+}
+
+.table-selection-actions.is-row > button + button {
+  border-inline-start: 0;
+  border-block-start: 1px solid var(--color-line-soft, var(--color-border, #e5e6eb));
+}
+
+.table-selection-actions > button:hover {
+  background: var(--color-primary-light-2, rgb(var(--primary-2, 190, 218, 255)));
+  color: var(--color-accent, rgb(var(--primary-6, 22, 93, 255)));
+}
+
+.table-selection-actions > button.is-danger:hover {
+  background: color-mix(in srgb, #f53f3f 12%, transparent);
+  color: #f53f3f;
+}
+
+.table-selection-actions > button:focus-visible,
+.table-selection-connector-button:focus-visible {
+  outline: 2px solid var(--color-accent, rgb(var(--primary-6, 22, 93, 255)));
+  outline-offset: -2px;
+}
+
+/* 列边界：悬停时一条蓝线，顶端一个「＋」直接插入列。 */
+.table-selection-connector {
+  position: absolute;
+  z-index: 2;
+  width: 2px;
+  pointer-events: none;
+}
+
+.table-selection-connector-line {
+  position: absolute;
+  inset: 0;
+  border-radius: 1px;
+  background: var(--color-accent, rgb(var(--primary-6, 22, 93, 255)));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-canvas, #fff) 65%, transparent);
+}
+
+.table-selection-connector-button {
+  position: absolute;
+  left: 1px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 2px solid var(--color-canvas, #fff);
+  border-radius: 50%;
+  background: var(--color-accent, rgb(var(--primary-6, 22, 93, 255)));
+  color: #fff;
+  box-shadow: 0 2px 6px #1d212933;
+  transform: translateX(-50%);
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.table-selection-connector-button:hover {
+  background: color-mix(in srgb, var(--color-accent, #165dff) 86%, #000);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .table-selection-handle,
   .table-selection-all,
-  .table-selection-handle-grip {
+  .table-selection-handle-grip,
+  .table-selection-actions > button {
     transition: none;
   }
 }

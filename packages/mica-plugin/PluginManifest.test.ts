@@ -186,9 +186,74 @@ describe('parsePluginManifest desktop launcher', () => {
       shortcut: 'Alt+Space',
       width: 720,
       height: 480,
+      background: false,
     });
     expect(result.manifest.desktopEntry).toBeNull();
   });
+
+  it('reads the optional eager background flag', () => {
+    const result = parse({ title: 'Clipboard', background: true });
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.manifest.desktopLauncher?.background).toBe(true);
+    const off = parse({ title: 'Clipboard', background: false });
+    expect(off.ok && off.manifest.desktopLauncher?.background).toBe(false);
+  });
+
+  it.each([null, 'true', 1, [], {}].map((background) => ({ background })))(
+    'rejects nonboolean background flags: %j',
+    ({ background }) => {
+      expect(parse({ title: 'Clipboard', background })).toEqual({
+        ok: false,
+        error: 'desktop.launcher.background 必须是布尔值',
+      });
+    },
+  );
+
+  it('accepts a shortcut setting that is declared in settings', () => {
+    const result = parsePluginManifest(
+      base({
+        settings: [{ key: 'keyboardShortcut', type: 'text', label: '快捷键' }],
+        desktop: {
+          launcher: { title: 'Clipboard', shortcutSetting: ' keyboardShortcut ' },
+        },
+      }),
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.manifest.desktopLauncher).toMatchObject({
+        shortcutSetting: 'keyboardShortcut',
+        background: false,
+      });
+    }
+  });
+
+  it('rejects a shortcut setting that is not declared', () => {
+    expect(
+      parsePluginManifest(
+        base({
+          settings: [{ key: 'roots', type: 'text', label: '目录' }],
+          desktop: { launcher: { title: 'Clipboard', shortcutSetting: 'keyboardShortcut' } },
+        }),
+      ),
+    ).toEqual({
+      ok: false,
+      error: 'desktop.launcher.shortcutSetting 必须是清单里已声明的设置键：keyboardShortcut',
+    });
+    expect(parse({ title: 'Clipboard', shortcutSetting: 'missing' })).toEqual({
+      ok: false,
+      error: 'desktop.launcher.shortcutSetting 必须是清单里已声明的设置键：missing',
+    });
+  });
+
+  it.each([null, '', '  ', true, 1, [], {}].map((shortcutSetting) => ({ shortcutSetting })))(
+    'rejects invalid shortcutSetting values: %j',
+    ({ shortcutSetting }) => {
+      expect(parse({ title: 'Clipboard', shortcutSetting })).toEqual({
+        ok: false,
+        error: 'desktop.launcher.shortcutSetting 必须是非空字符串',
+      });
+    },
+  );
 
   it('validates the optional embedded web top inset', () => {
     const result = parse({ title: 'Browser', webContent: { top: 64 } });

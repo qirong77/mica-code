@@ -92,16 +92,20 @@ function editorNodeText(value) {
   return editorNodeText(record.children);
 }
 
-/** The first top-level H1 is the file title; the runtime keeps it fixed. */
+/**
+ * The first top-level H1 is the file title; the runtime keeps it fixed.
+ * Returns null when the document has no title block at all, so an intentionally
+ * emptied title reads as `''` instead of looking like a missing title.
+ */
 function notebookDocumentTitle(document) {
-  if (!document?.editorState) return '';
+  if (!document?.editorState) return null;
   try {
     const state = JSON.parse(document.editorState);
     const first = state?.root?.children?.[0];
-    if (first?.type !== 'heading' || first?.tag !== 'h1') return '';
+    if (first?.type !== 'heading' || first?.tag !== 'h1') return null;
     return editorNodeText(first.children).replace(/\s+/g, ' ').trim().slice(0, 100);
   } catch {
-    return '';
+    return null;
   }
 }
 
@@ -247,7 +251,6 @@ export default function NotebookPage({ api }) {
   const [railOpen, setRailOpen] = useState(() => !window.matchMedia('(max-width: 760px)').matches);
   const [layout, setLayout] = useState(() => ({
     mobile: window.innerWidth <= 760,
-    overlay: window.innerWidth <= 1100,
   }));
   const [focused, setFocused] = useState(false);
   const [outlineOpen, setOutlineOpen] = useState(() => !window.matchMedia('(max-width: 1100px)').matches);
@@ -263,7 +266,6 @@ export default function NotebookPage({ api }) {
   const iframe = useRef(null);
   const pageRoot = useRef(null);
   const rail = useRef(null);
-  const outlinePanel = useRef(null);
   const outlineItemRefs = useRef(new Map());
   const barLead = useRef(null);
   const barActions = useRef(null);
@@ -278,6 +280,8 @@ export default function NotebookPage({ api }) {
   const saveTimer = useRef(null);
   const titleTimer = useRef(null);
   const pendingTitle = useRef(null);
+  // 正文最近一次上报的标题。索引改名如果是正文自己引起的，就不再回灌到编辑器。
+  const reportedTitle = useRef('');
   const mounted = useRef(true);
   const loadedNote = useRef(null);
   const tree = useRef(null);
@@ -359,8 +363,7 @@ export default function NotebookPage({ api }) {
   }, [canArrange]);
   useEffect(() => () => clearFolderHover(), []);
   const railOverlay = layout.mobile && railOpen && !focused;
-  const outlineVisible = outlineOpen && !focused && !!active;
-  const outlineOverlay = layout.overlay && outlineVisible;
+  const outlineAvailable = !focused && !!active;
 
   const commitTitle = useCallback(
     async ({ id, title, baseTitle }) => {
@@ -373,8 +376,6 @@ export default function NotebookPage({ api }) {
           if (baseTitle && node.title !== baseTitle) return latest;
           return renameNode(latest, id, title, new Date().toISOString());
         });
-        const committed = result?.nodes.find((entry) => entry.id === id);
-        if (current.current?.id === id && committed) bridge.current?.title(id, committed.title);
         return result;
       } catch (cause) {
         if (mounted.current && current.current?.id === id) setError(message(cause));
@@ -394,9 +395,13 @@ export default function NotebookPage({ api }) {
   }, [commitTitle]);
   const scheduleTitle = useCallback(
     (draft, document) => {
-      const title = notebookDocumentTitle(document);
+      const text = notebookDocumentTitle(document);
       const node = byId.get(draft.id);
-      if (!title || !node || node.title === title) return;
+      if (text === null || !node) return;
+      // 清空标题时笔记名回落成「未命名笔记」，正文那边保持空白，不再被填回旧名字。
+      const title = text || '未命名笔记';
+      reportedTitle.current = title;
+      if (node.title === title) return;
       pendingTitle.current = { id: draft.id, title, baseTitle: node.title };
       if (titleTimer.current) clearTimeout(titleTimer.current);
       titleTimer.current = setTimeout(() => {
@@ -535,12 +540,15 @@ export default function NotebookPage({ api }) {
   useEffect(() => {
     setExternalUpdate(null);
     setOutlineCollapsed(new Set());
+    reportedTitle.current = '';
   }, [activeId]);
 
   // Index renames can arrive from the API or another Notebook window. Keep the
   // fixed H1 in the mounted editor aligned without reloading the document.
   useEffect(() => {
     if (!active || !ready.current || loadedNote.current !== active.id || frameState !== 'ready') return;
+    // 正文自己刚上报的标题已经写在文档里了；再对齐一次会把清空的标题填回旧名字。
+    if (reportedTitle.current === active.title) return;
     bridge.current?.title(active.id, active.title);
   }, [active?.id, active?.title, frameState]);
 
@@ -712,12 +720,9 @@ export default function NotebookPage({ api }) {
 
   useEffect(() => {
     const observer = new ResizeObserver(([entry]) => {
-      const next = {
-        mobile: entry.contentRect.width <= 760,
-        overlay: entry.contentRect.width <= 1100,
-      };
+      const next = { mobile: entry.contentRect.width <= 760 };
       const previous = layoutRef.current;
-      if (previous.mobile === next.mobile && previous.overlay === next.overlay) return;
+      if (previous.mobile === next.mobile) return;
       layoutRef.current = next;
       setLayout(next);
       if (next.mobile !== previous.mobile) setRailOpen(!next.mobile);
@@ -751,13 +756,13 @@ export default function NotebookPage({ api }) {
   useEffect(() => {
     const escape = (event) => {
       if (event.key !== 'Escape' || event.defaultPrevented || dialog || menu || apiOpen) return;
-      if (outlineVisible) setOutlineOpen(false);
-      else if (focused) setFocused(false);
+      // 大纲是常驻面板，Esc 不去动它；这里只退专注与窄屏目录抽屉。
+      if (focused) setFocused(false);
       else if (layout.mobile && railOpen) setRailOpen(false);
     };
     window.addEventListener('keydown', escape);
     return () => window.removeEventListener('keydown', escape);
-  }, [focused, dialog, menu, apiOpen, outlineVisible, railOpen, layout]);
+  }, [focused, dialog, menu, apiOpen, railOpen, layout]);
 
   // iframe 内的点击不冒泡到宿主；焦点进入编辑器时也要收起宿主的菜单。
   useEffect(() => {
@@ -771,7 +776,7 @@ export default function NotebookPage({ api }) {
   }, [menu]);
 
   useEffect(() => {
-    const panel = railOverlay ? rail.current : outlineOverlay ? outlinePanel.current : null;
+    const panel = railOverlay ? rail.current : null;
     if (!panel) return;
     const previous = document.activeElement;
     panel.querySelector('button:not(:disabled), input:not(:disabled)')?.focus({ preventScroll: true });
@@ -781,7 +786,7 @@ export default function NotebookPage({ api }) {
           previous.focus({ preventScroll: true });
       });
     };
-  }, [railOverlay, outlineOverlay]);
+  }, [railOverlay]);
 
   const jump = (target) => {
     if (!activeId || !ready.current || loadedNote.current !== activeId) return;
@@ -1147,39 +1152,10 @@ export default function NotebookPage({ api }) {
       }
       return changed ? next : previous;
     });
-    if (!outlineOpen || !outlineVisible) return;
+    if (!outlineAvailable) return;
     const frame = requestAnimationFrame(() => outlineItemRefs.current.get(outline.activeKey)?.scrollIntoView({block: 'nearest'}));
     return () => cancelAnimationFrame(frame);
-  }, [outline.activeKey, outlineAncestors, outlineOpen, outlineVisible]);
-
-  const outlineLinks =
-    active && !focused && (outlineVisible || !layout.overlay)
-      ? outline.items.map((item) => {
-          const currentHeading = item.key === outline.activeKey;
-          return (
-            <Button
-              key={item.key}
-              variant="ghost"
-              fullWidth={outlineVisible}
-              className={
-                outlineVisible
-                  ? `mica-arco-row notebook-outline-entry ${currentHeading ? 'is-active' : ''}`
-                  : 'notebook-outline-mark'
-              }
-              style={{ '--heading-level': item.level }}
-              aria-current={currentHeading ? 'location' : undefined}
-              title={item.text || '未命名标题'}
-              disabled={busy}
-              onClick={() => {
-                jump({ heading: item.key });
-                if (outlineOverlay) setOutlineOpen(false);
-              }}
-            >
-              {outlineVisible && <span>{item.text || '未命名标题'}</span>}
-            </Button>
-          );
-        })
-      : null;
+  }, [outline.activeKey, outlineAncestors, outlineAvailable]);
 
   const outlineEntries = (entries) => entries.flatMap((item) => {
     const currentHeading = item.key === outline.activeKey;
@@ -1277,7 +1253,7 @@ export default function NotebookPage({ api }) {
   return (
     <div ref={pageRoot} className={`notebook-page ${railOpen ? 'is-rail-open' : ''} ${focused ? 'is-focused' : ''}`}>
       <div className="notebook-layout">
-        <aside ref={rail} className="notebook-rail" aria-label="笔记目录" inert={outlineOverlay}>
+        <aside ref={rail} className="notebook-rail" aria-label="笔记目录">
           <div className="notebook-rail-title">
             <span className="notebook-book-icon" aria-hidden="true">
               <BookMarked size={22} strokeWidth={1.6} />
@@ -1627,7 +1603,7 @@ export default function NotebookPage({ api }) {
             </div>
           )}
           <div className="notebook-document-body">
-            <div className={`notebook-editor-area ${active ? 'has-note' : ''}`} inert={outlineOverlay}>
+            <div className={`notebook-editor-area ${active ? 'has-note' : ''}`}>
               <div className="notebook-bar">
                 <div className="notebook-bar-lead" ref={barLead}>
                   {(focused || !railOpen) && (
@@ -1678,16 +1654,6 @@ export default function NotebookPage({ api }) {
                         pressed={focused}
                         onClick={() => setFocused(!focused)}
                       />
-                      {!focused && (
-                        <Button
-                          variant="ghost"
-                          icon={<PanelRightOpen size={16} />}
-                          title={outlineOpen ? '收起大纲' : '展开大纲'}
-                          aria-expanded={outlineOpen}
-                          pressed={outlineOpen}
-                          onClick={() => setOutlineOpen(!outlineOpen)}
-                        />
-                      )}
                       <NoteMenu
                         node={active}
                         open={menu?.id === active.id && menu.source === 'header'}
@@ -1792,24 +1758,16 @@ export default function NotebookPage({ api }) {
                 </div>
               ) : null}
             </div>
-            {outlineVisible ? (
-              <>
-                {outlineOverlay && (
-                  <button
-                    type="button"
-                    className="notebook-outline-mask"
-                    aria-label="关闭大纲"
-                    tabIndex={-1}
-                    onClick={() => setOutlineOpen(false)}
-                  />
-                )}
-                <aside ref={outlinePanel} className="notebook-outline" aria-label="文档大纲">
+            {outlineAvailable &&
+              (outlineOpen ? (
+                <aside className="notebook-outline" aria-label="文档大纲">
                   <header>
                     <strong>文档大纲</strong>
                     <Button
                       variant="ghost"
                       icon={<PanelRightClose size={16} />}
-                      title="关闭文档大纲"
+                      title="隐藏文档大纲"
+                      aria-label="隐藏文档大纲"
                       onClick={() => setOutlineOpen(false)}
                     />
                   </header>
@@ -1823,14 +1781,33 @@ export default function NotebookPage({ api }) {
                     )}
                   </nav>
                 </aside>
-              </>
-            ) : (
-              outlineLinks?.length > 0 && (
-                <nav className="notebook-outline-marks" aria-label="文档大纲刻度">
-                  {outlineLinks}
-                </nav>
-              )
-            )}
+              ) : (
+                <button
+                  type="button"
+                  className="notebook-outline-rail"
+                  aria-label="显示文档大纲"
+                  title="显示文档大纲"
+                  onClick={() => setOutlineOpen(true)}
+                >
+                  <span className="notebook-outline-rail-ticks" aria-hidden="true">
+                    {outline.items.length ? (
+                      outline.items.map((item, index) => (
+                        <i
+                          key={item.key}
+                          data-level={Math.min(6, Math.max(1, item.level))}
+                          className={item.key === outline.activeKey ? 'is-active' : undefined}
+                          style={{ '--outline-rail-hue': Math.round(205 - (index / Math.max(1, outline.items.length - 1)) * 245) }}
+                        />
+                      ))
+                    ) : (
+                      <i className="is-empty" />
+                    )}
+                  </span>
+                  <span className="notebook-outline-rail-icon">
+                    <PanelRightOpen size={13} />
+                  </span>
+                </button>
+              ))}
           </div>
         </main>
       </div>

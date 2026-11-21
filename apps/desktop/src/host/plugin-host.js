@@ -81,12 +81,19 @@ export function registerPluginHostIpc() {
   }
   const launchers = createPluginLauncherRuntime({
     manifests: officialPluginManifests, loaders, home,
-    readDisabled: () => readDisabledPluginIds({ path: statePath })
+    readDisabled: () => readDisabledPluginIds({ path: statePath }),
+    // Native window actions stay on the existing private system socket. Without
+    // MICA_SYSTEM_SOCKET the adapter rejects per call: the backend still loads so
+    // the plugin can render「当前宿主不支持」itself.
+    control: controlPluginLauncher
   })
   const syncLaunchers = () => {
     void launchers.sync().catch((error) => console.error('[plugin-launcher]', error))
   }
   watchFile(statePath, { interval: 400, persistent: false }, syncLaunchers)
+  // Manifests declaring `background: true` must start without waiting for a window
+  // (and without waiting for the first plugins-state.json change).
+  syncLaunchers()
   ipcMain.handle('plugin-host:launcher-request', (_event, payload = {}) =>
     launchers.request(payload.pluginId, payload.action, payload.input)
   )

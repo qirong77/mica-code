@@ -21,9 +21,20 @@ export function normalizeAddress(value) {
   return url.href;
 }
 
-/** Paths, queries and fragments may contain secrets; only remember the origin. */
+/**
+ * The address as it is stored: exactly what the user opened, path, query and
+ * fragment included. Shortening it to the origin loses the page — a deep link or a
+ * search result reopened from 最近访问 must land on the address that was visited, not
+ * on the site home. Credentials are rejected by `normalizeAddress`.
+ */
 export function persistableAddress(value) {
-  let url;
-  try { url = new URL(normalizeAddress(value)); } catch { return null; }
-  return `${url.origin}/`;
+  // `normalizeAddress` already returns the canonical `href` and rejects credentials.
+  try { return normalizeAddress(value); } catch { return null; }
+}
+
+/** Site identity for per-site data (favicons): the origin of a stored address. */
+export function persistableOrigin(value) {
+  const address = persistableAddress(value);
+  if (!address) return null;
+  try { return new URL(address).origin; } catch { return null; }
 }

@@ -1396,6 +1396,20 @@ html[data-appearance='light'] .chat-modal-arco-wrap {
   color: var(--color-danger);
 }
 
+/* 同一条提示从失败里恢复（重试成功）：整条转绿，次数与错误原因留在正文里。
+   底色与 error 同一条带子，只是换了语义色——它在会话里的位置与分量不变。 */
+.chat-notice-success {
+  background: color-mix(in srgb, var(--color-success) 10%, var(--color-canvas));
+  box-shadow:
+    24px 0 0 color-mix(in srgb, var(--color-success) 10%, var(--color-canvas)),
+    -24px 0 0 color-mix(in srgb, var(--color-success) 10%, var(--color-canvas));
+  color: var(--color-success);
+}
+
+.chat-notice-success .chat-notice-title {
+  color: var(--color-success);
+}
+
 .chat-notice-compact {
   background: var(--color-panel);
   box-shadow:

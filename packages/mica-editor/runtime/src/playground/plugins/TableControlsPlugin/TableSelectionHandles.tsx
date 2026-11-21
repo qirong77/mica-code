@@ -1,4 +1,3 @@
-import {IconDragDot, IconDragDotVertical} from '@arco-design/web-react/icon';
 import {autoUpdate} from '@floating-ui/react';
 import {useLexicalComposerContext} from '@lexical/react/LexicalComposerContext';
 import {
@@ -22,7 +21,7 @@ import {
 } from 'react';
 import {createPortal} from 'react-dom';
 
-import type {TableContext} from './tableActions';
+import type {TableBandAction, TableContext} from './tableActions';
 
 import './handles.css';
 
@@ -32,6 +31,7 @@ type Props = {
   onSelect: (axis: Axis | 'table', start: number, end: number) => void;
   onMenu: (axis: Axis, index: number, event: ReactMouseEvent) => void;
   onMove: (axis: Axis, from: number, to: number) => void;
+  onBandAction: (axis: Axis, start: number, end: number, action: TableBandAction) => void;
 };
 type Box = {left: number; right: number; top: number; bottom: number};
 type CellDOM = {
@@ -80,6 +80,12 @@ type DropTarget = MoveDrag & {to: number; edge: number};
 
 const RAIL_SIZE = 12;
 const RAIL_OFFSET = 13;
+const GRIP_SIZE = 16;
+// 行用竖排胶囊（22×43）：正文左侧通常只有把手那一点边距；列用横排（41×22），
+// 落在表格下方，避开上方的表格工具栏。
+const BAND_ACTION_HORIZONTAL = {width: 41, height: 22};
+const BAND_ACTION_VERTICAL = {width: 22, height: 43};
+const CONNECTOR_REACH = 6;
 const VIEWPORT_PADDING = 3;
 const STRUCTURE_TAGS = new Set(['TABLE', 'TR', 'TD', 'TH', 'TBODY', 'THEAD', 'TFOOT', 'COL', 'COLGROUP']);
 const CLIPPING_OVERFLOW = /^(auto|scroll|hidden|clip)$/;
@@ -243,20 +249,54 @@ function findDrop(layout: Layout, move: MoveDrag, x: number, y: number): DropTar
   return to === move.from ? null : {...move, to, edge: edges[slot]};
 }
 
-export default function TableSelectionHandles({context, onSelect, onMenu, onMove}: Props) {
+/** 语雀式六点把手：行是 2×3，列是 3×2。 */
+function GripDots({vertical}: {vertical: boolean}) {
+  const dots = vertical
+    ? [[4, 3], [8.5, 3], [4, 6.5], [8.5, 6.5], [4, 10], [8.5, 10]]
+    : [[3, 4], [6.5, 4], [10, 4], [3, 8.5], [6.5, 8.5], [10, 8.5]];
+  return <svg viewBox="0 0 13 13" width="11" height="11" fill="currentColor" aria-hidden="true">
+    {dots.map(([cx, cy]) => <circle key={`${cx}-${cy}`} cx={cx} cy={cy} r="1.1" />)}
+  </svg>;
+}
+
+export default function TableSelectionHandles({context, onSelect, onMenu, onMove, onBandAction}: Props) {
   const [editor] = useLexicalComposerContext();
   const [layout, setLayout] = useState<Layout | null>(null);
   const [drop, setDrop] = useState<DropTarget | null>(null);
   const [selectionDrag, setSelectionDrag] = useState<{axis: Axis; origin: number} | null>(null);
+  const [move, setMove] = useState<{axis: Axis; x: number; y: number} | null>(null);
+  const [hoverBand, setHoverBand] = useState<{axis: Axis; index: number} | null>(null);
+  const [connector, setConnector] = useState<{edge: number; x: number} | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
   const layoutRef = useRef<Layout | null>(null);
-  const propsRef = useRef({context, onSelect, onMenu, onMove});
-  propsRef.current = {context, onSelect, onMenu, onMove};
+  const propsRef = useRef({context, onSelect, onMenu, onMove, onBandAction});
+  propsRef.current = {context, onSelect, onMenu, onMove, onBandAction};
   const anchorRef = useRef<{axis: Axis; index: number; tableKey: string} | null>(null);
   const selectionDragRef = useRef<SelectionDrag | null>(null);
   const moveRef = useRef<MoveDrag | null>(null);
   const pointerFrameRef = useRef<number | null>(null);
   const pendingPointerRef = useRef<{x: number; y: number} | null>(null);
+  const hoverTimerRef = useRef<number | null>(null);
+
+  /** 指针从把手挪到同一行/列的快捷按钮时，不要立刻把按钮收掉。 */
+  const holdBand = useCallback((axis: Axis, index: number) => {
+    const win = layoutRef.current?.ownerDocument.defaultView;
+    if (hoverTimerRef.current !== null && win) win.clearTimeout(hoverTimerRef.current);
+    hoverTimerRef.current = null;
+    setHoverBand({axis, index});
+  }, []);
+  const releaseBand = useCallback(() => {
+    const win = layoutRef.current?.ownerDocument.defaultView;
+    if (hoverTimerRef.current !== null && win) win.clearTimeout(hoverTimerRef.current);
+    hoverTimerRef.current = win?.setTimeout(() => {
+      hoverTimerRef.current = null;
+      setHoverBand(null);
+    }, 140) ?? null;
+  }, []);
+  useEffect(() => () => {
+    const win = layoutRef.current?.ownerDocument.defaultView;
+    if (hoverTimerRef.current !== null && win) win.clearTimeout(hoverTimerRef.current);
+  }, []);
 
   useLayoutEffect(() => {
     const root = editor.getRootElement();
@@ -408,6 +448,73 @@ export default function TableSelectionHandles({context, onSelect, onMenu, onMove
     };
   }, [editor, context.tableKey]);
 
+  // 语雀式列边界提示：指针贴近列分隔线时画一条蓝线，并在把手槽上给出「＋」。
+  useEffect(() => {
+    const root = editor.getRootElement();
+    const doc = root?.ownerDocument;
+    const win = doc?.defaultView;
+    if (!doc || !win) return;
+    let frame: number | null = null;
+    let point: {x: number; y: number} | null = null;
+    let last: {edge: number; x: number} | null = null;
+    const apply = () => {
+      frame = null;
+      const geometry = layoutRef.current;
+      if (!geometry || !point || selectionDragRef.current || moveRef.current) {
+        last = null;
+        setConnector(null);
+        return;
+      }
+      const {visible} = geometry;
+      const x = point.x;
+      const y = point.y;
+      // 指针落在「＋」按钮上时保持蓝线，否则横跨 18px 的按钮会先把自己关掉。
+      if (doc.elementFromPoint(x, y)?.closest('[data-table-connector]')) return;
+      if (x < visible.left || x > visible.right || y < visible.top - 20 || y > visible.bottom) {
+        if (last) {last = null; setConnector(null);}
+        return;
+      }
+      let edge = -1;
+      let distance = CONNECTOR_REACH;
+      geometry.columnEdges.forEach((edgeX, index) => {
+        const current = Math.abs(edgeX - x);
+        if (current <= distance) {distance = current; edge = index;}
+      });
+      // 只提示列与列之间的边界：最外侧留给行列把手，免得「＋」压住全选方块。
+      if (edge < 1 || edge > geometry.columnEdges.length - 2) {
+        if (last) {last = null; setConnector(null);}
+        return;
+      }
+      const edgeX = geometry.columnEdges[edge];
+      if (!last || last.edge !== edge || Math.abs(last.x - edgeX) >= 0.5) {
+        last = {edge, x: edgeX};
+        setConnector({edge, x: edgeX});
+      }
+    };
+    const pointerMove = (event: PointerEvent) => {
+      if (event.pointerType === 'touch') return;
+      point = {x: event.clientX, y: event.clientY};
+      if (frame === null) frame = win.requestAnimationFrame(apply);
+    };
+    const hide = () => {
+      point = null;
+      last = null;
+      setConnector(null);
+    };
+    const leftWindow = (event: PointerEvent) => {if (!event.relatedTarget) hide();};
+    doc.addEventListener('pointermove', pointerMove, {capture: true, passive: true});
+    doc.addEventListener('scroll', hide, true);
+    win.addEventListener('blur', hide);
+    win.addEventListener('pointerout', leftWindow);
+    return () => {
+      if (frame !== null) win.cancelAnimationFrame(frame);
+      doc.removeEventListener('pointermove', pointerMove, true);
+      doc.removeEventListener('scroll', hide, true);
+      win.removeEventListener('blur', hide);
+      win.removeEventListener('pointerout', leftWindow);
+    };
+  }, [editor, context.tableKey]);
+
   const finishSelection = useCallback(() => {
     const drag = selectionDragRef.current;
     selectionDragRef.current = null;
@@ -476,7 +583,7 @@ export default function TableSelectionHandles({context, onSelect, onMenu, onMove
     const pointerCancel = (event: PointerEvent) => {
       if (event.pointerId === selectionDragRef.current?.pointerId) finishSelection();
     };
-    const clearMove = () => {moveRef.current = null; setDrop(null);};
+    const clearMove = () => {moveRef.current = null; setDrop(null); setMove(null);};
     const blur = () => {finishSelection(); clearMove();};
     const dragOver = (event: DragEvent) => {
       const move = moveRef.current;
@@ -490,6 +597,7 @@ export default function TableSelectionHandles({context, onSelect, onMenu, onMove
         event.stopPropagation();
         if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
       }
+      setMove(previous => previous ? {...previous, x: event.clientX, y: event.clientY} : previous);
       setDrop(previous => previous?.axis === next?.axis && previous?.to === next?.to && previous?.edge === next?.edge ? previous : next);
     };
     const dropMove = (event: DragEvent) => {
@@ -578,6 +686,7 @@ export default function TableSelectionHandles({context, onSelect, onMenu, onMove
     event.stopPropagation();
     moveRef.current = {axis, from: index};
     setDrop(null);
+    setMove({axis, x: event.clientX, y: event.clientY});
     event.dataTransfer.effectAllowed = 'move';
     // No text/html payload: dropping outside this table must not insert content.
     event.dataTransfer.setData('application/x-lexical-table-axis', `${axis}:${index}`);
@@ -605,26 +714,28 @@ export default function TableSelectionHandles({context, onSelect, onMenu, onMove
     const bands = edges.slice(0, -1).map((start, index) => ({
       index, start: Math.max(start, clipStart), end: Math.min(edges[index + 1], clipEnd),
     })).filter(band => band.end - band.start >= 4 && (!layout.compact || band.index === compactIndex));
-    const countIndex = bands.find(band => full && band.index >= minimum && band.index <= maximum)?.index;
     const railStyle: CSSProperties = isColumn
       ? {left: clipStart, top: layout.railTop, width: clipEnd - clipStart, height: RAIL_SIZE}
       : {left: layout.railLeft, top: clipStart, width: RAIL_SIZE, height: clipEnd - clipStart};
     return <div className={`table-selection-rail is-${axis}`} style={railStyle} role="group" aria-label={`表格${label}选择`}>
       {bands.map(({index, start, end}) => {
         const active = full && index >= minimum && index <= maximum;
-        const canMove = layout.simple && context.simple && active && count === 1 &&
-          end - start >= (isColumn ? 28 : 32) && !selectionDrag;
+        const movable = layout.simple && context.simple && count === 1 && !selectionDrag &&
+          end - start >= (isColumn ? 28 : 32);
         const style: CSSProperties = isColumn
           ? {left: start - clipStart, top: 0, width: end - start, height: RAIL_SIZE}
           : {left: 0, top: start - clipStart, width: RAIL_SIZE, height: end - start};
         const gripStyle: CSSProperties = isColumn
-          ? {right: 1, top: 0} : {left: 0, bottom: 1};
+          ? {right: 0, top: 0, width: GRIP_SIZE, height: RAIL_SIZE}
+          : {left: 0, top: 0, width: RAIL_SIZE, height: GRIP_SIZE};
         return <div className="table-selection-handle-slot" style={style} key={index}>
-          <button type="button" className={`table-selection-handle is-${axis}${active ? ' is-active' : ''}${canMove ? ' has-grip' : ''}`}
+          <button type="button" className={`table-selection-handle is-${axis}${active ? ' is-active' : ''}`}
             aria-label={`选中第 ${index + 1} ${label}`} aria-pressed={active}
             title={`第 ${index + 1} ${label} · 单击选择，Shift 连续选择，右键更多操作`}
             data-table-selection-axis={axis} data-table-selection-index={index}
             onPointerDown={event => startSelection(axis, index, event)}
+            onPointerEnter={() => holdBand(axis, index)}
+            onPointerLeave={releaseBand}
             onLostPointerCapture={event => {
               if (event.pointerId === selectionDragRef.current?.pointerId) finishSelection();
             }}
@@ -639,12 +750,8 @@ export default function TableSelectionHandles({context, onSelect, onMenu, onMove
                 select(axis, index, event.shiftKey);
               }
             }}
-            onContextMenu={event => openMenu(axis, index, event)}>
-            {active && countIndex === index
-              ? <span className="table-selection-handle-count" aria-hidden="true" title={`已选 ${count} ${label}`}>{count}</span>
-              : <span className="table-selection-handle-mark" aria-hidden="true" />}
-          </button>
-          {canMove && <button type="button" draggable className={`table-selection-handle-grip is-${axis}`}
+            onContextMenu={event => openMenu(axis, index, event)} />
+          {movable && <button type="button" draggable className={`table-selection-handle-grip is-${axis}${active ? ' is-on-active' : ''}`}
             style={gripStyle} aria-label={`拖动第 ${index + 1} ${label}`} tabIndex={-1}
             title={`拖动移动第 ${index + 1} ${label}；也可在右键菜单中移动`}
             data-table-selection-axis={axis} data-table-selection-index={index}
@@ -653,12 +760,86 @@ export default function TableSelectionHandles({context, onSelect, onMenu, onMove
             onClick={event => event.preventDefault()}
             onDragStart={event => startMove(axis, index, event)}
             onContextMenu={event => openMenu(axis, index, event)}>
-            {isColumn ? <IconDragDot /> : <IconDragDotVertical />}
+            <GripDots vertical={!isColumn} />
           </button>}
         </div>;
       })}
     </div>;
   };
+
+  // 语雀在把手末端给了「＋ / 垃圾桶」两个快捷按钮：整条行列按索引处理，
+  // 不要求先改光标位置，也不用绕右键菜单。
+  const renderBandActions = (axis: Axis) => {
+    if (selectionDrag || move) return null;
+    const isColumn = axis === 'column';
+    if (isColumn ? !layout.showColumns : !layout.showRows) return null;
+    const full = isColumn ? fullColumns : fullRows;
+    const hovered = hoverBand?.axis === axis ? hoverBand.index : null;
+    const band = full
+      ? {start: isColumn ? context.minColumn : context.minRow, end: isColumn ? context.maxColumn : context.maxRow}
+      : hovered === null ? null : {start: hovered, end: hovered};
+    if (!band) return null;
+    const edges = isColumn ? layout.columnEdges : layout.rowEdges;
+    const clipStart = isColumn ? layout.visible.left : layout.visible.top;
+    const clipEnd = isColumn ? layout.visible.right : layout.visible.bottom;
+    const start = Math.max(edges[band.start] ?? clipStart, clipStart);
+    const end = Math.min(edges[band.end + 1] ?? clipEnd, clipEnd);
+    if (end - start < 8) return null;
+    const count = band.end - band.start + 1;
+    const label = isColumn ? '列' : '行';
+    const deletable = count < (isColumn ? context.columns : context.rows);
+    const doc = layout.ownerDocument;
+    const box = isColumn ? BAND_ACTION_HORIZONTAL : BAND_ACTION_VERTICAL;
+    const maxLeft = Math.max(2, doc.documentElement.clientWidth - box.width - 2);
+    const maxTop = Math.max(2, doc.documentElement.clientHeight - box.height - 2);
+    const style: CSSProperties = isColumn
+      ? {left: clamp((start + end) / 2 - box.width / 2, 2, maxLeft), top: clamp(layout.visible.bottom + 14, 2, maxTop)}
+      : {left: clamp(layout.railLeft - 2 - box.width, 2, maxLeft), top: clamp((start + end) / 2 - box.height / 2, 2, maxTop)};
+    const insertLabel = isColumn
+      ? count > 1 ? `在右侧插入 ${count} 列` : '在右侧插入列'
+      : count > 1 ? `在下方插入 ${count} 行` : '在下方插入行';
+    const deleteLabel = count > 1 ? `删除 ${count} ${label}` : `删除该${label}`;
+    return <div className={`table-selection-actions is-${axis}`} data-table-controls="band-actions" style={style}
+      role="group" aria-label={`第 ${band.start + 1} ${label}操作`}
+      onMouseDown={event => event.preventDefault()}
+      onPointerEnter={() => holdBand(axis, band.start)}
+      onPointerLeave={releaseBand}>
+      <button type="button" aria-label={insertLabel} title={insertLabel}
+        onClick={() => onBandAction(axis, band.start, band.end, isColumn ? 'column-after' : 'row-after')}>
+        <svg viewBox="0 0 12 12" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" aria-hidden="true">
+          <path d="M6 2.4v7.2M2.4 6h7.2" />
+        </svg>
+      </button>
+      {deletable && <button type="button" className="is-danger" aria-label={deleteLabel} title={deleteLabel}
+        onClick={() => onBandAction(axis, band.start, band.end, isColumn ? 'delete-column' : 'delete-row')}>
+        <svg viewBox="0 0 12 12" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <path d="M2.4 3.5h7.2M4.5 3.5V2.3h3v1.2M3.5 3.5l.4 6.2h4.2l.4-6.2M5 5.4v2.9M7 5.4v2.9" />
+        </svg>
+      </button>}
+    </div>;
+  };
+
+  const connectorNode = connector && layout.showColumns ? (() => {
+    const index = connector.edge - 1;
+    const label = `在第 ${connector.edge} 列右侧插入列`;
+    const action: TableBandAction = 'column-after';
+    return <div className="table-selection-connector" data-table-controls="column-connector"
+      style={{left: connector.x - 1, top: layout.visible.top, height: layout.visible.bottom - layout.visible.top}}>
+      <span className="table-selection-connector-line" aria-hidden="true" />
+      <button type="button" className="table-selection-connector-button" data-table-connector=""
+        style={{top: layout.railTop + RAIL_SIZE / 2 - layout.visible.top - 9}}
+        aria-label={label} title={`${label} · 拖动列线可以调宽`}
+        onMouseDown={event => event.preventDefault()}
+        onClick={() => {
+          setConnector(null);
+          onBandAction('column', index, index, action);
+        }}>
+        <svg viewBox="0 0 12 12" width="11" height="11" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" aria-hidden="true">
+          <path d="M6 2.4v7.2M2.4 6h7.2" />
+        </svg>
+      </button>
+    </div>;
+  })() : null;
 
   let dropStyle: CSSProperties | undefined;
   if (drop) {
@@ -680,7 +861,17 @@ export default function TableSelectionHandles({context, onSelect, onMenu, onMove
           <path d="M1 1h4v4H1zm6 0h4v4H7zM1 7h4v4H1zm6 0h4v4H7z" />
         </svg>
       </button>}
+      {connectorNode}
+      {renderBandActions('column')}
+      {renderBandActions('row')}
       {drop && <div className={`table-selection-drop-line is-${drop.axis}`} style={dropStyle} aria-hidden="true" />}
+      {move && <div className="table-selection-drag-label" aria-hidden="true"
+        style={{
+          left: Math.min(move.x + 14, layout.ownerDocument.documentElement.clientWidth - 116),
+          top: Math.min(move.y + 16, layout.ownerDocument.documentElement.clientHeight - 38),
+        }}>
+        正在移动 1 {move.axis === 'row' ? '行' : '列'}
+      </div>}
       <span className="table-selection-screen-reader" role="status" aria-live="polite" aria-atomic="true">
         {allSelected ? `已选整个表格，${context.rows} 行 ${context.columns} 列` : fullRows ? `已选 ${rowCount} 行` : fullColumns ? `已选 ${columnCount} 列` : ''}
       </span>

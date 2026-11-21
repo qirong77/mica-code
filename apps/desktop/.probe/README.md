@@ -23,6 +23,7 @@
 | `dock-rows/`       | 停靠区行高：回合日志的标题 / 思考 / 工具行与 todo、subagent、后台任务的行必须同样高（终端式一行一行），页内打出每种行的实测高度 |
 | `ask-dock/`        | `ask` 插件的提问卡：真实 `AskDock` 的四种形态 × 六套主题，看它是不是一屏里最先被看见的那个（选项 + 永远在的自由输入框 + 确认条） |
 | `plugin-panel/`    | 插件面板弹窗（SSH 的 `desktop.panel.display: "modal"`）：真实 `ModalShell` + `SplitView` + `PluginPanelSection`，看弹窗宽高、左栏宽度、表格列与勾选列 |
+| `maccy/`           | 剪贴板浮窗：真实 `Launcher` + 假 launcher，按清单的 760×560 看搜索行、列表与预览、右键菜单、暂停胶囊；`#probe-out` 打出头部/行内/预览的按钮数与行高 |
 
 ## 运行
 
@@ -38,6 +39,7 @@ npx vite --config .probe/stats-design/vite.config.mjs    # http://127.0.0.1:5233
 npx vite --config .probe/digest-design/vite.config.mjs   # http://127.0.0.1:5234
 npx vite --config .probe/notebook-design/vite.config.mjs # http://127.0.0.1:5286/comparison.html
 npx vite --config .probe/notebook-workbench/vite.config.mjs # http://127.0.0.1:5287/
+npx vite --config .probe/maccy/vite.config.mjs          # http://127.0.0.1:5240/?theme=light
 npx vite --config .probe/dock-rows/vite.config.mjs      # http://127.0.0.1:5237
 npx vite --config .probe/ask-dock/vite.config.mjs       # http://127.0.0.1:5238
 npx vite --config .probe/plugin-panel/vite.config.mjs   # http://127.0.0.1:5239/?theme=light

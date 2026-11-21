@@ -101,6 +101,13 @@ const NOTICE_PRESENTATION_BY_VARIANT: Record<NoticeVariant, NoticePresentation> 
     backgroundColor: themeColors.surfaceError,
     title: '/error',
   },
+  // 同一条提示从失败状态恢复（重试成功）：标题沿用调用方的 command，颜色走绿。
+  success: {
+    tone: 'notice',
+    color: themeColors.messageSuccess,
+    backgroundColor: themeColors.surfaceNotice,
+    title: 'success',
+  },
 };
 
 function noticePresentationFor(item: LogItem): NoticePresentation {

@@ -1,10 +1,19 @@
-import { persistableAddress } from './address.js';
+import { persistableAddress, persistableOrigin } from './address.js';
 
 const MAX_WRITE_ATTEMPTS = 8;
 export const MAX_RECENT_SITES = 20;
 export const MAX_FAVORITE_SITES = 20;
 
-function siteOrigins(value, limit) {
+/**
+ * Another host (a second window, the mobile relay, a data migration holding the
+ * data.json lock) can win a write for a few milliseconds. Without a pause between
+ * attempts all eight retries land inside the same lock window and the visit is
+ * silently lost, so back off — but stay well under the next debounced write.
+ */
+const RETRY_DELAY_MS = 15;
+const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+function siteAddresses(value, limit) {
   if (!Array.isArray(value)) return [];
   const sites = [];
   for (const item of value) {
@@ -15,26 +24,50 @@ function siteOrigins(value, limit) {
   return sites;
 }
 
-function recentSites(value) { return siteOrigins(value, MAX_RECENT_SITES); }
-function favoriteSites(value) { return siteOrigins(value, MAX_FAVORITE_SITES); }
+function recentSites(value) { return siteAddresses(value, MAX_RECENT_SITES); }
+function favoriteSites(value) { return siteAddresses(value, MAX_FAVORITE_SITES); }
 
+/**
+ * An icon as stored: an HTTP(S) address (keeping its query — `/favicon.ico?v=3` is a
+ * different resource, minus the fragment), or the inline `data:image/…` a page
+ * declared. Single-file sites and many SPAs ship only the inline kind, and they have
+ * no `/favicon.ico` to fall back to, so keeping it is the difference between their
+ * icon and a globe. One entry per site, so the length cap bounds the whole file.
+ */
 function persistableFavicon(value) {
-  if (typeof value !== 'string' || !value || value.length > 8192 || /[\s\u0000-\u001f\u007f\\]/u.test(value)) return null;
+  if (typeof value !== 'string' || !value || value.length > 8192 || /[\u0000-\u001f\u007f\\]/u.test(value)) return null;
+  // Inline icons carry spaces (an SVG data URL is full of them), so they are matched
+  // before the "no whitespace anywhere" rule that guards a real address.
+  if (/^data:image\/[a-z0-9.+-]+[;,]/.test(value)) return value;
+  if (/\s/.test(value)) return null;
   try {
     const url = new URL(value);
     if (!['http:', 'https:'].includes(url.protocol) || !url.hostname || url.username || url.password) return null;
-    return `${url.origin}${url.pathname || '/'}`;
+    return `${url.origin}${url.pathname || '/'}${url.search}`;
   } catch { return null; }
 }
 
-function faviconMap(value) {
+/**
+ * Icons are per site, not per page: the map is keyed by origin, so every page of a
+ * site shares one entry and the file cannot grow with one key per visited deep link.
+ */
+function faviconMap(value, keep = null) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
   const result = {};
   for (const [site, favicon] of Object.entries(value)) {
-    const origin = persistableAddress(site);
+    const key = persistableOrigin(site);
     const safeFavicon = persistableFavicon(favicon);
-    if (origin && safeFavicon) result[origin] = safeFavicon;
+    if (!key || !safeFavicon || (keep && !keep.has(key))) continue;
+    result[key] = safeFavicon;
   }
+  return result;
+}
+
+/** Keep only the icons of sites the two lists still show, then record the fresh one. */
+function keptFavicons(previous, addresses, icon, iconOrigin) {
+  const origins = new Set(addresses.map(persistableOrigin).filter(Boolean));
+  const result = faviconMap(previous, origins);
+  if (icon && iconOrigin && origins.has(iconOrigin)) result[iconOrigin] = icon;
   return result;
 }
 
@@ -46,15 +79,19 @@ export default function createLauncher(ctx) {
   async function remember(input) {
     const url = persistableAddress(input.url);
     if (!url) return { ok: true, saved: false };
+    // The address the user typed before a redirect: the final address replaces it
+    // instead of sitting next to it, so a single visit never fills two cards.
+    const replaced = persistableAddress(input.replaces);
+    const origin = persistableOrigin(url);
     for (let attempt = 0; attempt < MAX_WRITE_ATTEMPTS; attempt++) {
+      if (attempt) await delay(RETRY_DELAY_MS * attempt);
       active();
       const snapshot = await ctx.readData();
       active();
       const previous = snapshot.value && typeof snapshot.value === 'object' && !Array.isArray(snapshot.value) ? snapshot.value : {};
-      const urls = [url, ...recentSites(previous.recentUrls).filter((item) => item !== url)].slice(0, MAX_RECENT_SITES);
-      const favicons = faviconMap(previous.favicons);
-      const favicon = persistableFavicon(input.faviconUrl);
-      if (favicon) favicons[url] = favicon;
+      const favorites = favoriteSites(previous.favoriteUrls);
+      const urls = [url, ...recentSites(previous.recentUrls).filter((item) => item !== url && item !== replaced)].slice(0, MAX_RECENT_SITES);
+      const favicons = keptFavicons(previous.favicons, [...urls, ...favorites], persistableFavicon(input.faviconUrl), origin);
       const result = await ctx.writeData({ ...previous, recentUrls: urls, favicons }, { expectedVersion: snapshot.version });
       if (result?.conflict === true) continue;
       if (result?.ok !== true) throw new Error(result?.error || '保存最近地址失败');
@@ -67,6 +104,7 @@ export default function createLauncher(ctx) {
     if (!url) return { ok: true, saved: false, favorite: false };
     const favorite = input.favorite === true;
     for (let attempt = 0; attempt < MAX_WRITE_ATTEMPTS; attempt++) {
+      if (attempt) await delay(RETRY_DELAY_MS * attempt);
       active();
       const snapshot = await ctx.readData();
       active();

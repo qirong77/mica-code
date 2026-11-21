@@ -17,7 +17,9 @@
 
 `mica-plugin` 的 `PluginDesktopLauncher` 与 `PluginLauncherContext` 描述随包系统启动器：
 清单声明全局快捷键，桌面运行时按插件承载独立浮窗与 `launcher.js` 后端，不依赖聊天会话。
-后端可读插件设置并读写版本化插件数据；停用时回收。启动器可声明隔离网页视图，
+后端可读写插件设置、版本化数据并使用私有 `dataDirectory`、`background` 调度（100ms 起）、健康报告与
+原生窗口 `control`；`background: true` 在启用时初始化后端，`shortcutSetting` 让快捷键跟随设置。
+停用时统一回收。启动器可声明隔离网页视图，
 由插件界面经 `api.launcher.web` 控制导航。完整约定见 [插件文档](../plugins/README.md)。
 
 `mica-plugin` 的 `PluginTurnPrepareEvent` 描述持久 headless 会话的异步轮前维护钩子：
@@ -59,6 +61,8 @@
 - `mica-config-ui`：配置页（Mica Config）的唯一实现——页面组件、数据动作与共享类型；Web 基础控件统一以 Arco Design React 实现，公开 `Input` / `InputNumber` / `Select`、全应用 `ArcoProvider`、富内容浮层 `ArcoPopover`、共享动作菜单 `MenuList` / `MenuItem` / `MenuSeparator`、透传原生按钮事件与 ref 的 `ArcoAction` 和保留业务接口的按钮、开关、下拉、日期、表格供宿主与插件复用，布局不由组件库接管。浏览器宿主 `apps/config-web` 用它托管页面（HTTP `/api/*`），桌面宿主 `apps/desktop` 直接渲染它的组件、数据走运行时 IPC，两边各有一份数据实现（见该包 README）。
 
   `Segmented` 复用 Arco Radio.Group，`variant` 提供 `segmented` / `radio` / `cards` 三种单选布局，选项标签接受 ReactNode；图文卡片与紧凑设置项也使用这一份控件，默认外观保持原样。
+
+`@mica-config-ui/web` 导出的 `Modal` 供插件与宿主复用同一份 Arco 弹窗、焦点锁和嵌套 Esc / 焦点恢复。
 
 ## 应用目录
 

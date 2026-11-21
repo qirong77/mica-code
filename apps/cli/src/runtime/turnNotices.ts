@@ -10,6 +10,18 @@ export const TURN_ERROR_NOTICE_COMMAND = '/error';
 
 type NoticeEntry = { message: TurnNotice; after: number };
 
+export type NoticeUpsertOptions = {
+  /** 「同一个 command 只留最新一条」，并把新的放回当前位置。 */
+  replace?: boolean;
+  /**
+   * 就地改写最后一条同 command 的 notice，位置与前后的锚点都不动。
+   *
+   * 走这条路的是「同一条提示换了状态」：重试中 → 重试成功。它描述的还是同一件事，
+   * 期间已经提交的正文不该把它挤到下面去（那会读成「先失败后成功」的两条记录）。
+   */
+  inPlace?: boolean;
+};
+
 /**
  * Notices that live in the session's `conversationMessages` (retry hints, turn
  * failures, command results) but never in the provider history.
@@ -63,7 +75,14 @@ export class TurnNoticeLog {
    * （压缩到多大、同步到第几页）描述的是「现在怎样」，留着几小时前的旧结论只会把对话
    * 顶掉，而事件型 notice（命令输出）必须逐条留痕，所以这件事由调用方声明。
    */
-  upsert(message: TurnNotice, options: { replace?: boolean } = {}): void {
+  upsert(message: TurnNotice, options: NoticeUpsertOptions = {}): void {
+    if (options.inPlace && message.command) {
+      const index = this.entries.findLastIndex((entry) => entry.message.command === message.command);
+      if (index >= 0) {
+        this.entries[index] = { ...this.entries[index], message };
+        return;
+      }
+    }
     // A progress notice (status=running) is updated wherever it sits: /commit
     // and /compact walk from running to success and must not leave two rows.
     const runningIndex = message.command ? findLastRunningIndex(this.entries, message.command) : -1;
@@ -198,6 +217,45 @@ export function createTurnErrorNotice(error: unknown): TurnNotice {
   };
 }
 
+/**
+ * 同一条重试提示的「已恢复」版本：次数与错误原因原样留着，把「在等下一次」换成结论。
+ *
+ * 它和 `createRetryNotice` 共用一个 command，所以是同一行 notice 换了个状态，不是新的一条
+ * ——重试成功之后，那条红字描述的事情已经过去了，留着红条会让成功的回合看起来是失败的。
+ */
+export function createRetryRecoveredNotice(error: unknown, attempt: number, maxAttempts: number): TurnNotice {
+  return {
+    role: 'notice',
+    content: [`重试成功（第 ${attempt}/${maxAttempts} 次）`, `错误：${errorMessageOf(error)}`].join('\n'),
+    variant: 'success',
+    command: TURN_RETRY_NOTICE_COMMAND,
+  };
+}
+
+/**
+ * 写入一条会话 notice 的完整动作：先落盘，再推给正在看的客户端。
+ *
+ * 插件命令的 notice 与执行器的重试提示走同一条路，宿主只回答「存到哪」「推给谁」。
+ * 顺序不能反：客户端拿到的是「已经记下来的这一条」，它断线重连时读到的必须是同一份。
+ */
+export function publishTurnNotice(
+  log: TurnNoticeLog,
+  notice: TurnNotice,
+  host: {
+    /** 把整份 notice 记录写进会话文件。 */
+    save: (messages: MicaUiConversationMessage[]) => void;
+    /** 常驻宿主才有：把这一条推给已连着的客户端。 */
+    onNotice?: (notice: TurnNotice, options: { replace?: boolean; noticeIndex: number }) => void;
+  },
+  upsert: NoticeUpsertOptions = {},
+): void {
+  log.upsert(notice, upsert);
+  const messages = log.compose();
+  host.save(messages);
+  const noticeIndex = messages.filter((message) => message.role === 'notice').indexOf(notice);
+  host.onNotice?.(notice, { ...(upsert.replace ? { replace: true } : {}), noticeIndex });
+}
+
 function errorMessageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -215,7 +273,14 @@ function toNotice(value: Record<string, unknown>): TurnNotice | null {
 }
 
 function isNoticeVariant(value: unknown): value is NonNullable<TurnNotice['variant']> {
-  return value === 'commit' || value === 'config' || value === 'compact' || value === 'digest' || value === 'error';
+  return (
+    value === 'commit' ||
+    value === 'config' ||
+    value === 'compact' ||
+    value === 'digest' ||
+    value === 'error' ||
+    value === 'success'
+  );
 }
 
 function isNoticeStatus(value: unknown): value is MicaUiCommandStatus {

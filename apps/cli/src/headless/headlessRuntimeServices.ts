@@ -11,7 +11,7 @@ import type { AgentRuntime } from '../agent/AgentRuntime.js';
 import type { SubagentTaskManager } from '../agents/SubagentTaskManager.js';
 import type { SessionController } from '../session/SessionController.js';
 import { toCompactedConversationDisplay } from '../plugins/commands/compactConversation.js';
-import type { TurnNotice, TurnNoticeLog } from '../runtime/turnNotices.js';
+import { publishTurnNotice, type TurnNotice, type TurnNoticeLog } from '../runtime/turnNotices.js';
 
 export type HeadlessRuntimeServicesOptions = {
   runtimeOverride?: AgentRuntimeConfigOverride;
@@ -42,10 +42,15 @@ export function createHeadlessRuntimeServices(options: HeadlessRuntimeServicesOp
   };
 
   const showNotice = (notice: TurnNotice, noticeOptions: { replace?: boolean } = {}): void => {
-    noticeLog().upsert(notice, noticeOptions);
-    save({ allowEmpty: true });
-    const noticeIndex = noticeLog().compose().filter((message) => message.role === 'notice').indexOf(notice);
-    options.onNotice?.(notice, { ...noticeOptions, noticeIndex });
+    publishTurnNotice(
+      noticeLog(),
+      notice,
+      {
+        save: (conversationMessages) => sessionController.saveCurrent({ allowEmpty: true, conversationMessages }),
+        onNotice: options.onNotice,
+      },
+      noticeOptions,
+    );
   };
 
   return {

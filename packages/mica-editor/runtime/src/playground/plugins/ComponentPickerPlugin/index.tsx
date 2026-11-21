@@ -40,7 +40,7 @@ import {InsertHtmlDialog, INSERT_HTML_COMMAND} from '../HtmlExtension';
 import {INSERT_EXCALIDRAW_COMMAND} from '../ExcalidrawExtension';
 import {InsertImageDialog} from '../ImagesExtension';
 import InsertLayoutDialog from '../LayoutExtension/InsertLayoutDialog';
-import {InsertTableDialog} from '../TablePlugin';
+import {insertDefaultTable} from '../tableInsert';
 
 export class ComponentPickerOption extends MenuOption {
   // What shows up in the editor
@@ -178,10 +178,7 @@ export function getBaseOptions(editor: LexicalEditor, showModal: ShowModal) {
         '行',
         '列',
       ],
-      onSelect: () =>
-        showModal('插入表格', onClose => (
-          <InsertTableDialog activeEditor={editor} onClose={onClose} />
-        )),
+      onSelect: () => insertDefaultTable(editor),
     }),
     new ComponentPickerOption('有序列表 Numbered List', {
       icon: <i className="icon number" />,

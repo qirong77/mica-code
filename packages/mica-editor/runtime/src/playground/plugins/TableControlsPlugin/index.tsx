@@ -18,7 +18,7 @@ import {type KeyboardEvent, useCallback, useEffect, useLayoutEffect, useRef, use
 import {createPortal} from 'react-dom';
 
 import ColorPicker from '../../ui/ColorPicker';
-import {$applyTableAction, $readTableContext, registerTableCellPresentation, type TableContext} from './tableActions';
+import {$applyTableAction, $applyTableBandAction, $readTableContext, registerTableCellPresentation, type TableBandAction, type TableContext} from './tableActions';
 import TableOperationsMenu, {isMarkdownTableAction, type TableMenuKind} from './TableOperationsMenu';
 import TableSelectionHandles from './TableSelectionHandles';
 
@@ -41,8 +41,9 @@ export default function TableControlsPlugin({markdownOnly = false}: {markdownOnl
   const selectionRef = useRef<BaseSelection | null>(null);
   const rightSelectionRef = useRef<BaseSelection | null>(null);
   const toolbar = useFloating({
-    placement: 'top-start', strategy: 'fixed',
-    middleware: [offset(30), flip({padding: 12}), shift({padding: 12}), hide()],
+    // 语雀的表格工具栏浮在表格上方居中，不压住行列把手。
+    placement: 'top', strategy: 'fixed',
+    middleware: [offset(16), flip({padding: 12}), shift({padding: 12}), hide()],
     whileElementsMounted: autoUpdate,
   });
   const menu = useFloating({
@@ -249,6 +250,20 @@ export default function TableControlsPlugin({markdownOnly = false}: {markdownOnl
     setPopup(null);
   }, [editor, sync]);
 
+  /** 把手末端的「＋ / 垃圾桶」：按索引选中整条行列，再复用同一套动作。 */
+  const actOnBand = useCallback((axis: 'row' | 'column', start: number, end: number, action: TableBandAction) => {
+    if (!editor.isEditable()) return;
+    if (markdownOnly && !isMarkdownTableAction(action)) return;
+    const current = contextRef.current;
+    if (!current) return;
+    editor.update(() => {
+      $applyTableBandAction(current.tableKey, axis, start, end, action, editor);
+      sync();
+    }, {tag: HISTORY_PUSH_TAG});
+    popupRef.current = null;
+    setPopup(null);
+  }, [editor, markdownOnly, sync]);
+
   const openPopup = (kind: PopupKind, event: Event) => {
     const anchor = event.currentTarget;
     if (!(anchor instanceof HTMLElement)) return;
@@ -307,7 +322,7 @@ export default function TableControlsPlugin({markdownOnly = false}: {markdownOnl
     aria-label={label} aria-haspopup="menu" aria-expanded={popup?.kind === kind} onClick={event => openPopup(kind, event)} />;
 
   return <>
-    <TableSelectionHandles context={context} onSelect={select} onMove={move}
+    <TableSelectionHandles context={context} onSelect={select} onMove={move} onBandAction={actOnBand}
       onMenu={(axis, index, event) => {
         const fullAxisSelected = axis === 'row' ? context.minColumn === 0 && context.maxColumn === context.columns - 1 && index >= context.minRow && index <= context.maxRow : context.minRow === 0 && context.maxRow === context.rows - 1 && index >= context.minColumn && index <= context.maxColumn;
         if (!fullAxisSelected) select(axis, index, index);

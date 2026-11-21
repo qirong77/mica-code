@@ -132,13 +132,17 @@ Capabilities 可按插件查看实际工具、技能和提示词贡献。工具�
 Electron 外壳 `main/plugin-launchers.js` 管理系统快捷键与独立浮窗；页面 `PluginLauncher.jsx`
 只挂载插件 `desktop.jsx` 的 `Launcher`，不挂聊天。后端通过 `host/plugin-launcher-runtime.js`
 按目录加载插件 `launcher.js` 的 default `createLauncher(context)`，不依赖会话 app-server。
-接口类型在 `mica-plugin/PluginLauncher.ts`；context 只有插件设置与版本化插件数据，返回
-`request(action,input)` 和可选 `dispose`。停用时两端一起释放；宿主不认识搜索等业务逻辑。
+接口类型在 `mica-plugin/PluginLauncher.ts`；context 提供插件设置（get/set）、版本化数据、私有 `dataDirectory`、
+`background` 调度、`health` 与绑定插件身份的原生 `control`，返回 `request(action,input)` 和可选 `dispose`。
+清单 `background: true` 在启用时立即初始化后端，常驻任务最小间隔 100ms、同任务不重叠，停用时中止；
+`shortcutSetting` 指向本插件设置键，修改后即时撤旧注册新，空值或冲突显式报错。
+停用时两端一起释放；宿主不认识搜索等业务逻辑。
 前端 `api.launcher` 提供 `request` / `status` / `retry` / `show` / `close` / `configure` / `openPath`；
 原生动作走已有私有系统 socket 的 `/plugin-launcher`，路径交给主窗口唯一的编辑器入口。
 插件设置页可打开启动器；浏览器宿主用整页显示同一组件，系统快捷键与浮窗仅桌面应用可用。
 声明 `webContent: { top }` 时，外壳在同一个窗口内为不可信网页提供隔离视图；窗口可调整大小、失焦不隐藏，
-插件通过 `api.launcher.web` 控制导航和订阅状态。未经声明的启动器不能操作网页视图。
+插件通过 `api.launcher.web` 控制导航和订阅状态；`favicon(url)` 把远端图标交给外壳取回并内联成
+`data:` URL（页面 CSP 只允许 `data:` 图片）。未经声明的启动器不能操作网页视图。
 macOS 浮窗只取键盘焦点、不连带唤起主应用；原生窗口策略见 `desktop.md` 的「三层边界与装配」。
 这类模块同 `desktop.jsx` 一样只支持随包插件，无用户插件运行期代码加载。
 

@@ -1,7 +1,7 @@
 import { browserCookieSyncExtension } from './browser-cookie-sync.js';
 import { configModelDiscovery } from './config.js';
 import { connectionsPeerStore } from './connections.js';
-import { floatingWindowFavorites } from './floatingwindow.js';
+import { floatingWindowFavorites, floatingWindowIconOrigins } from './floatingwindow.js';
 import { harnessReviewAssessments } from './harness-review.js';
 import { memoryScopes } from './memory.js';
 import { notebookComments } from './notebook-comments.js';
@@ -25,6 +25,7 @@ export const DATA_MIGRATIONS: DataMigration[] = [
   sessionTagSlots,
   configModelDiscovery,
   floatingWindowFavorites,
+  floatingWindowIconOrigins,
   browserCookieSyncExtension,
   harnessReviewAssessments,
   pluginEventIdentity,

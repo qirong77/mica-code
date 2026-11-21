@@ -46,7 +46,7 @@ import {
 import { officialPlugins } from '@packages/mica-official-plugins/index.js';
 import { createHeadlessRuntimeServices } from './headlessRuntimeServices.js';
 import type { HeadlessRuntimeServicesOptions } from './headlessRuntimeServices.js';
-import { TurnNoticeLog } from '../runtime/turnNotices.js';
+import { publishTurnNotice, TurnNoticeLog, type NoticeUpsertOptions, type TurnNotice } from '../runtime/turnNotices.js';
 import type { HeadlessTurnStartResult } from '../runtime/HeadlessTurnExecutor.js';
 import type { PluginAskHost } from './PluginAskBroker.js';
 
@@ -128,7 +128,11 @@ export type HeadlessPluginHost = {
   /** Persisted conversation messages: provider history + plugin notices. */
   getConversationMessages(extra?: MicaUiConversationMessage[]): MicaUiConversationMessage[] | undefined;
   /** Session notices (retry hints, failures, command results), never in the provider history. */
-  notices: { ensure(): TurnNoticeLog };
+  notices: {
+    ensure(): TurnNoticeLog;
+    /** 落盘并推给客户端；`mica exec` 这类没有客户端的地方只落盘。 */
+    show(notice: TurnNotice, options?: NoticeUpsertOptions): void;
+  };
   emitRuntimeStart(): Promise<void>;
   emitRuntimeStop(): Promise<void>;
   dispose(): Promise<void>;
@@ -200,6 +204,21 @@ export function createHeadlessPluginHost(options: HeadlessPluginHostOptions): He
         noticeLog.restore(sessionController.load(sessionId)?.snapshot.conversationMessages);
       }
       return noticeLog;
+    },
+    /**
+     * 落盘 + 推给客户端。执行器用它写重试提示：那条提示先是「在重试」，重试成功后
+     * 就地改成「重试成功」，客户端得跟着变，不能等重新打开会话才看到。
+     */
+    show(notice: TurnNotice, noticeOptions: NoticeUpsertOptions = {}): void {
+      publishTurnNotice(
+        notices.ensure(),
+        notice,
+        {
+          save: (conversationMessages) => sessionController.saveCurrent({ allowEmpty: true, conversationMessages }),
+          onNotice: options.onNotice,
+        },
+        noticeOptions,
+      );
     },
   };
 

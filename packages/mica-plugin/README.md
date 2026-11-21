@@ -18,7 +18,9 @@ lease 并应用配置后、保存用户输入前执行，可通过事件上的 `
 - 随包系统启动器：清单 `desktop.launcher` 声明全局快捷键和独立浮窗，界面为插件
   `desktop.jsx` 的 `Launcher`，后端为 `launcher.js` 的 `createLauncher(context)`，
   类型见 `PluginLauncher.ts`。桌面运行时按插件持有唯一实例，不依赖会话；context 提供
-  插件设置与版本化插件数据，停用释放资源。可选 `webContent` 为启动器声明隔离的原生网页视图；
+  插件设置 get/set、版本化数据、私有 `dataDirectory`、`background`（最小 100ms）、`health` 和绑定插件身份的
+  原生 `control`。清单 `background: true` 在启用时初始化后端；`shortcutSetting` 指向设置键并即时重注册快捷键。
+  停用时中止任务并释放资源。可选 `webContent` 为启动器声明隔离的原生网页视图；
   插件界面通过 `api.launcher.web` 管理导航与订阅状态。完整约定见根 `plugins/README.md`。
 
 - 只读运行观察：`AgentObservationEvent` 定义 `agent:observe`，由 `HookRegistry.notify()` 按注册顺序调用，观察者抛错或返回挂起的 Promise 均不阻塞任务。异步完成顺序由观察插件负责，磁盘队列在插件 dispose 时 flush。覆盖主运行的起止、实际请求边界与工具定义、最终 prompt、工具调用/结果、用量、重试及历史改写；不在任何一轮里的工作（压缩摘要、旁问线程、插件 `ctx.llm` 请求）作为独立的 helper 运行出现，带 `helper: { kind, pluginId?, purpose? }` 与完整的请求边界。

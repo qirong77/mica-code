@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <title>probe · mica-maccy</title>
+    <style>
+      /* 一块桌面底色 + 清单里声明的浮窗尺寸（760×560），看的是窗口里那一层。 */
+      html,
+      body {
+        height: 100%;
+        margin: 0;
+      }
+      body {
+        display: grid;
+        place-items: center;
+        background: radial-gradient(120% 120% at 20% 0%, #2b3446 0%, #141820 60%, #0d1016 100%);
+      }
+      #probe-frame {
+        width: 760px;
+        height: 560px;
+        overflow: hidden;
+        border-radius: 12px;
+        box-shadow:
+          0 0 0 1px rgba(255, 255, 255, 0.08),
+          0 24px 64px rgba(0, 0, 0, 0.55);
+      }
+      #root {
+        height: 100%;
+      }
+      #probe-out {
+        position: fixed;
+        right: 8px;
+        bottom: 8px;
+        max-width: 46vw;
+        margin: 0;
+        color: #9aa4b2;
+        font-size: 11px;
+        white-space: pre-wrap;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="probe-stage">
+      <div id="probe-frame"><div id="root"></div></div>
+    </div>
+    <pre id="probe-out" hidden></pre>
+    <script type="module" src="./main.jsx"></script>
+  </body>
+</html>

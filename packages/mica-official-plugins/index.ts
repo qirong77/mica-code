@@ -11,6 +11,7 @@ import floatingWindowSetup from '../../plugins/floatingwindow/index.js';
 import globalSearchSetup from '../../plugins/global-search/index.js';
 import harnessReviewSetup from '../../plugins/harness-review/index.js';
 import memorySetup from '../../plugins/memory/index.js';
+import maccySetup from '../../plugins/mica-maccy/index.js';
 import mobileRelaySetup from '../../plugins/mobile-relay/index.js';
 import notebookSetup from '../../plugins/notebook/index.js';
 import notebookRole from '../../plugins/notebook/roles/笔记.md' with { type: 'text' };
@@ -61,6 +62,7 @@ const officialSetups: Record<string, MicaPlugin['setup']> = {
   evolution: evolutionSetup,
   floatingwindow: floatingWindowSetup,
   'global-search': globalSearchSetup,
+  'mica-maccy': maccySetup,
   'mobile-relay': mobileRelaySetup,
   notebook: notebookSetup,
   'quick-buttons': quickButtonsSetup,

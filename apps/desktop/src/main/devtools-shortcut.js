@@ -20,3 +20,48 @@ export function isDevToolsShortcut(input, platform = process.platform) {
   const key = String(input.key || '')
   return key.toLowerCase() === 'i' || key === 'I'
 }
+
+/**
+ * 开关某个 webContents 的开发者工具。
+ *
+ * 开在独立窗口里（`mode: 'detach'`）：主窗口装的就是整套界面，嵌进去会挤压布局，排查时
+ * 看到的已经不是用户那一屏了。再按一次关掉。
+ */
+export function toggleDevTools(contents) {
+  if (!contents || contents.isDestroyed()) return
+  if (contents.isDevToolsOpened()) {
+    contents.closeDevTools()
+    return
+  }
+  contents.openDevTools({ mode: 'detach', activate: true })
+}
+
+const attached = new WeakSet()
+
+/**
+ * 给一个 webContents 挂上 ⌥⌘I。主窗口、编辑器窗口、终端窗口、受控浏览器的每个标签页、
+ * 插件浮窗里的网页视图都是各自独立的 webContents，`before-input-event` 也只发给持有焦点
+ * 的那一个——所以按窗口逐个挂迟早漏一个，主进程统一在 `web-contents-created` 里挂。
+ *
+ * DevTools 自己的 webContents（`type: 'remote'`）跳过：它也会触发同一个事件，给它再开一层
+ * 开发者工具没有意义。
+ *
+ * 返回解除函数；同一个 webContents 重复调用只挂一次（否则一次按键会开了又关）。
+ */
+export function attachDevToolsShortcut(contents, platform = process.platform) {
+  if (!contents || typeof contents.on !== 'function') return () => {}
+  if (typeof contents.isDestroyed === 'function' && contents.isDestroyed()) return () => {}
+  if (typeof contents.getType === 'function' && contents.getType() === 'remote') return () => {}
+  if (attached.has(contents)) return () => {}
+  const onInput = (event, input) => {
+    if (!isDevToolsShortcut(input, platform)) return
+    event.preventDefault()
+    toggleDevTools(contents)
+  }
+  attached.add(contents)
+  contents.on('before-input-event', onInput)
+  return () => {
+    attached.delete(contents)
+    if (typeof contents.removeListener === 'function') contents.removeListener('before-input-event', onInput)
+  }
+}

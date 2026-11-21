@@ -152,9 +152,13 @@ body.mica-arco-theme {
 .table-context-label .arco-icon { color: inherit; }
 .table-context-toolbar .arco-btn[aria-expanded='true'], .table-context-label.has-selection { color: var(--color-accent); background: var(--color-primary-light-1); }
 .table-format-alignment .arco-btn { width: 28px; height: 28px; }
-.table-selection-handle, .table-selection-all { background: var(--color-panel-hi); border-color: var(--color-line); color: var(--color-fg-faint); }
-.table-selection-handle:is(:hover, .is-active), .table-selection-all:is(:hover, .is-active), .table-selection-handle-grip { background: var(--color-primary-light-1); border-color: var(--color-primary-light-3); color: var(--color-accent); }
-.table-selection-handle-grip:hover { background: var(--color-primary-light-2); color: var(--color-accent); }
+/* 语雀式行列把手：平时不画按钮，悬停出浅蓝条，选中是实色蓝条。 */
+.table-selection-handle, .table-selection-all { background: transparent; border: 0; color: var(--color-fg-faint); }
+.table-selection-handle:hover, .table-selection-all:hover { background: var(--color-primary-light-2); color: var(--color-accent); }
+.table-selection-handle.is-active, .table-selection-all.is-active { background: var(--color-accent); color: var(--color-canvas); }
+.table-selection-handle-grip { background: transparent; color: var(--color-accent); }
+.table-selection-handle-grip.is-on-active { color: var(--color-canvas); }
+.table-selection-handle-grip:hover { background: color-mix(in srgb, currentColor 16%, transparent); }
 .table-selection-drop-line { background: var(--color-accent); box-shadow: 0 0 0 1px var(--color-canvas); }
 }
 

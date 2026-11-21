@@ -1,7 +1,7 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { ArrowLeft, ArrowRight, Globe, GripVertical, House, Star } from 'lucide-react';
 import { ArcoAction, Input } from '@mica-config-ui/web';
-import { normalizeAddress, persistableAddress } from './address.js';
+import { normalizeAddress, persistableAddress, persistableOrigin } from './address.js';
 import './desktop.css';
 
 function check(result) {
@@ -10,26 +10,74 @@ function check(result) {
 }
 function message(error) { return error instanceof Error ? error.message : String(error); }
 
-function faviconSources(url, faviconUrl) {
+export function faviconSources(url, faviconUrl) {
   const sources = [];
   if (typeof faviconUrl === 'string' && faviconUrl) sources.push(faviconUrl);
   try { sources.push(`${new URL(url).origin}/favicon.ico`); } catch { /* fallback icon below */ }
   return [...new Set(sources)];
 }
 
-export function SiteIcon({ url, faviconUrl }) {
-  const sources = faviconSources(url, faviconUrl);
-  const [sourceIndex, setSourceIndex] = useState(0);
-  useEffect(() => setSourceIndex(0), [sources.join('\n')]);
-  const source = sources[sourceIndex];
-  if (!source) return <Globe className="floatingwindow-site-icon" size={16} aria-hidden="true" />;
-  return <img className="floatingwindow-site-icon" src={source} alt="" loading="lazy" referrerPolicy="no-referrer" onError={() => setSourceIndex((index) => index + 1)} />;
+/** First candidate the host can materialize wins; failures and misses fall through. */
+export async function resolveIcon(sources, loadIcon) {
+  if (typeof loadIcon !== 'function') return '';
+  for (const candidate of sources) {
+    let dataUrl = '';
+    try { dataUrl = await loadIcon(candidate); } catch { dataUrl = ''; }
+    if (typeof dataUrl === 'string' && dataUrl) return dataUrl;
+  }
+  return '';
 }
 
-function SiteEntry({ url, faviconUrl, favorite, onOpen, onToggle }) {
+/**
+ * The launcher page is served under `img-src 'self' data: file:`, so a remote icon
+ * URL never draws here: it is fetched and inlined by the host (`web.favicon`) and
+ * only the resulting `data:` URL is rendered. Until an icon resolves — and for sites
+ * that have none — the generic globe stays, so a missing icon never leaves a hole.
+ */
+export function SiteIcon({ url, faviconUrl, loadIcon = null }) {
+  const sources = faviconSources(url, faviconUrl);
+  const [source, setSource] = useState('');
+  const key = sources.join('\n');
+  useEffect(() => {
+    setSource('');
+    if (typeof loadIcon !== 'function') return undefined;
+    let live = true;
+    void (async () => {
+      const dataUrl = await resolveIcon(sources, loadIcon);
+      if (live && dataUrl) setSource(dataUrl);
+    })();
+    return () => { live = false; };
+    // `key` is the candidate list itself; the array identity changes on every render.
+  }, [key, loadIcon]);
+  if (!source) return <Globe className="floatingwindow-site-icon" size={16} aria-hidden="true" />;
+  return <img className="floatingwindow-site-icon" src={source} alt="" />;
+}
+
+/**
+ * An address typed on Enter is recorded right away; when the site redirects, the
+ * final address must replace that entry instead of sitting next to it. The seed only
+ * covers the one navigation it was made for: a page reached by clicking a link later
+ * is a visit of its own and must not drop what came before it, so a push carrying the
+ * page the open started from — or a navigation that already settled — ends it.
+ */
+export function seedAfterPush(seed, url, loading) {
+  if (!seed || !url) return { replaces: '', seed };
+  if (url !== seed.url && url !== seed.from) return { replaces: seed.url, seed: null };
+  if (url === seed.url && !loading) return { replaces: '', seed: null };
+  return { replaces: '', seed };
+}
+
+/** Icons are stored per site: every page of a site shares the icon of its origin. */
+export function siteFavicon(favicons, url) {
+  const origin = persistableOrigin(url);
+  return (origin && favicons && favicons[origin]) || '';
+}
+
+function SiteEntry({ url, favicons, favorite, onOpen, onToggle, loadIcon }) {
+  const faviconUrl = siteFavicon(favicons, url);
   return <div className="floatingwindow-site">
     <button type="button" className="floatingwindow-site-open" title={url} onClick={() => onOpen(url)}>
-      <SiteIcon url={url} faviconUrl={faviconUrl} />
+      <SiteIcon url={url} faviconUrl={faviconUrl} loadIcon={loadIcon} />
       <span>{url}</span>
       <ArrowRight size={14} aria-hidden="true" />
     </button>
@@ -39,16 +87,16 @@ function SiteEntry({ url, faviconUrl, favorite, onOpen, onToggle }) {
   </div>;
 }
 
-export function Welcome({ favorites = [], recent = [], favicons = {}, onOpen, onToggle }) {
+export function Welcome({ favorites = [], recent = [], favicons = {}, onOpen, onToggle, loadIcon = null }) {
   return <main className="floatingwindow-home">
     <div className="floatingwindow-home-inner">
       <div className="floatingwindow-home-icon" aria-hidden="true"><Globe size={22} /></div>
       <h1>欢迎使用 Floating Window</h1>
       <p>在上方输入网址，或从最近访问的站点快速打开。</p>
       <h2>收藏</h2>
-      {favorites.length ? <div className="floatingwindow-sites">{favorites.map((url) => <SiteEntry key={url} url={url} faviconUrl={favicons[url]} favorite onOpen={onOpen} onToggle={onToggle} />)}</div> : <p className="floatingwindow-empty">还没有收藏的站点</p>}
+      {favorites.length ? <div className="floatingwindow-sites">{favorites.map((url) => <SiteEntry key={url} url={url} favicons={favicons} favorite onOpen={onOpen} onToggle={onToggle} loadIcon={loadIcon} />)}</div> : <p className="floatingwindow-empty">还没有收藏的站点</p>}
       <h2>最近访问</h2>
-      {recent.length ? <div className="floatingwindow-sites">{recent.map((url) => <SiteEntry key={url} url={url} faviconUrl={favicons[url]} favorite={favorites.includes(url)} onOpen={onOpen} onToggle={onToggle} />)}</div> : <p className="floatingwindow-empty">还没有最近访问的站点</p>}
+      {recent.length ? <div className="floatingwindow-sites">{recent.map((url) => <SiteEntry key={url} url={url} favicons={favicons} favorite={favorites.includes(url)} onOpen={onOpen} onToggle={onToggle} loadIcon={loadIcon} />)}</div> : <p className="floatingwindow-empty">还没有最近访问的站点</p>}
     </div>
   </main>;
 }
@@ -71,8 +119,65 @@ export function Launcher({ api }) {
   const mounted = useRef(false);
   const saveTimer = useRef(null);
   const lastQueued = useRef(null);
+  const opened = useRef(null);
   const version = useRef(0);
   const recentVersion = useRef(0);
+  const iconCache = useRef(new Map());
+
+  /**
+   * Load one site's stored collections. Every path that shows the welcome page goes
+   * through here — first mount, coming back home, window focus — so a list can never
+   * stay stuck at whatever it looked like when the page was first opened.
+   */
+  const loadSites = useCallback(async () => {
+    if (!launcher?.request) return;
+    const currentVersion = ++recentVersion.current;
+    try {
+      const result = check(await launcher.request('recent'));
+      if (!mounted.current || currentVersion !== recentVersion.current) return;
+      setRecent(Array.isArray(result?.urls) ? result.urls : []);
+      setFavorites(Array.isArray(result?.favorites) ? result.favorites : []);
+      setFavicons(result?.favicons && typeof result.favicons === 'object' ? result.favicons : {});
+      setSaveNotice('');
+    } catch (cause) {
+      if (mounted.current && currentVersion === recentVersion.current) setSaveNotice(`无法读取最近地址：${message(cause)}`);
+    }
+  }, [launcher]);
+
+  /**
+   * Record a site and adopt the list the backend returns. The debounced push path
+   * and the explicit "the user asked for this address" path share it, so opening an
+   * address never depends on a later state push arriving.
+   */
+  const rememberSite = useCallback(async (url, faviconUrl = '', replaces = '') => {
+    if (!launcher?.request) return;
+    try {
+      const result = check(await launcher.request('remember', { url, faviconUrl, replaces }));
+      if (!mounted.current) return;
+      recentVersion.current += 1;
+      if (Array.isArray(result?.urls)) setRecent(result.urls);
+      if (result?.favicons && typeof result.favicons === 'object') setFavicons(result.favicons);
+      setSaveNotice(result?.saved === false ? '无法保存当前站点地址' : '');
+    } catch (cause) {
+      if (mounted.current) setSaveNotice(`无法保存最近地址：${message(cause)}`);
+    }
+  }, [launcher]);
+
+  /** Icons reach the page as `data:` URLs; the cache keeps re-renders off the host. */
+  const loadIcon = useCallback(async (url) => {
+    if (typeof url !== 'string' || !url) return '';
+    const cache = iconCache.current;
+    if (cache.has(url)) return cache.get(url);
+    let dataUrl = '';
+    try {
+      const result = typeof web?.favicon === 'function' ? await web.favicon(url) : null;
+      if (result?.ok === false) dataUrl = '';
+      else if (typeof result?.dataUrl === 'string' && result.dataUrl.startsWith('data:image/')) dataUrl = result.dataUrl;
+    } catch { dataUrl = ''; }
+    if (cache.size >= 200) cache.clear();
+    cache.set(url, dataUrl);
+    return dataUrl;
+  }, [web]);
 
   useEffect(() => {
     mounted.current = true;
@@ -99,21 +204,15 @@ export function Launcher({ api }) {
       if (!dirty.current) setAddress(url);
       if (!url) lastQueued.current = null;
       const faviconUrl = typeof next.faviconUrl === 'string' ? next.faviconUrl : '';
+      const decided = seedAfterPush(opened.current, url, !!next.loading);
+      opened.current = decided.seed;
+      const replaces = decided.replaces;
       if (url && !next.home && (!lastQueued.current || lastQueued.current.url !== url || lastQueued.current.faviconUrl !== faviconUrl)) {
-        lastQueued.current = { url, faviconUrl };
+        lastQueued.current = { url, faviconUrl, replaces };
         clearTimeout(saveTimer.current);
-        saveTimer.current = setTimeout(async () => {
-          try {
-            const result = check(await launcher.request('remember', { url, faviconUrl }));
-            if (live) {
-              recentVersion.current += 1;
-              if (Array.isArray(result?.urls)) setRecent(result.urls);
-              if (result?.favicons && typeof result.favicons === 'object') setFavicons(result.favicons);
-              setSaveNotice(result?.saved === false ? '无法保存当前站点地址' : '');
-            }
-          } catch (cause) {
-            if (live) { lastQueued.current = null; setSaveNotice(`无法保存最近地址：${message(cause)}`); }
-          }
+        saveTimer.current = setTimeout(() => {
+          if (!live) return;
+          void rememberSite(url, faviconUrl, replaces);
         }, 400);
       }
     };
@@ -133,35 +232,36 @@ export function Launcher({ api }) {
       clearTimeout(saveTimer.current);
       if (typeof unsubscribe === 'function') unsubscribe();
     };
-  }, [available, launcher, web]);
+  }, [available, launcher, rememberSite, web]);
 
   useEffect(() => {
     if (!available || !state.home) return undefined;
-    let live = true;
-    const currentVersion = ++recentVersion.current;
-    void (async () => {
-      try {
-        const result = check(await launcher.request('recent'));
-        if (live && currentVersion === recentVersion.current) {
-          setRecent(Array.isArray(result?.urls) ? result.urls : []);
-          setFavorites(Array.isArray(result?.favorites) ? result.favorites : []);
-          setFavicons(result?.favicons && typeof result.favicons === 'object' ? result.favicons : {});
-          setSaveNotice('');
-        }
-      } catch (cause) { if (live && currentVersion === recentVersion.current) setSaveNotice(`无法读取最近地址：${message(cause)}`); }
-    })();
-    return () => { live = false; };
-  }, [available, launcher, state.home]);
+    void loadSites();
+    // The welcome page can be on screen without a home state push (the native view
+    // is hidden either way), so re-read whenever the user comes back to the window.
+    const refresh = () => { if (document.visibilityState !== 'hidden') void loadSites(); };
+    window.addEventListener('focus', refresh);
+    document.addEventListener('visibilitychange', refresh);
+    return () => {
+      window.removeEventListener('focus', refresh);
+      document.removeEventListener('visibilitychange', refresh);
+    };
+  }, [available, loadSites, state.home]);
 
   const run = async (name) => {
     try {
       setError('');
+      opened.current = null;
       const startedVersion = editVersion.current;
       check(await web[name]());
       if (name === 'home' && editVersion.current === startedVersion && mounted.current) {
         dirty.current = false;
         setAddress('');
       }
+      // Coming home must show the sites visited since the last read, whether or not
+      // the host reports the home state (and whatever it reported, an extra read of
+      // an in-memory-backed JSON file is cheap).
+      if (name === 'home' && mounted.current) void loadSites();
     }
     catch (cause) { if (mounted.current) setError(`操作失败：${message(cause)}`); }
   };
@@ -174,6 +274,12 @@ export function Launcher({ api }) {
       dirty.current = false;
       setError('');
       check(await web.navigate(url));
+      // Remember the address the user asked for right away: the page may redirect,
+      // fail or ignore the load, and a missing/slow state push must not cost the
+      // visit its place in 最近访问.
+      opened.current = { url, from: latest.current };
+      lastQueued.current = { url, faviconUrl: '', replaces: '' };
+      void rememberSite(url);
       if (editVersion.current === submittedVersion) {
         if (mounted.current && version.current === startedVersion) setAddress(url);
       }
@@ -221,7 +327,7 @@ export function Launcher({ api }) {
         <span>{notice}</span>
         {available && shortcutNotice && status?.native !== false ? <ArcoAction onClick={() => void retry()}>重试快捷键</ArcoAction> : null}
       </div> : null}
-      {available && state.home ? <Welcome favorites={favorites} recent={recent} favicons={favicons} onOpen={(url) => void open(url)} onToggle={(url, value) => void toggleFavorite(url, value)} /> : null}
+      {available && state.home ? <Welcome favorites={favorites} recent={recent} favicons={favicons} loadIcon={loadIcon} onOpen={(url) => void open(url)} onToggle={(url, value) => void toggleFavorite(url, value)} /> : null}
     </section>
   );
 }

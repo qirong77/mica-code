@@ -76,6 +76,7 @@ mica 选后者，这个插件就是「洗」的地方。
 | `prompt-contributions` | 历史回查控制从 `plugin:builtin.command-memory/guidance` 迁到 `plugin:memory/history`，保留正文、开关与顺序，已有新控制优先；撤下 Todo / 会话自治 / Video / Web Search 的静态段落前将原控制文件归档到 `legacy-prompt-controls/`。归档 Schedule 随包 skill 索引到 `legacy-schedule-skill/`，不改排期数据、用户 skill 或能力停用选择（同名用户 skill 可能仍存在）。旧入口不再支持。 |
 
 | `floatingwindow-favorites`         | 给已有 Floating Window 数据补上 `favoriteUrls` 收藏集合和 `favicons` 图标集合。                                                                                                                 |
+| `floatingwindow-icon-origins`      | 把 Floating Window 的 `favicons` 从按保存的地址存键改为按站点 origin 存键（同一站点的多个地址只留第一个图标）；最近访问 / 收藏里的地址本身不动，已是 origin 键时为 0 改动。                        |
 
 新增一条迁移 = 在 `migrations.ts` 里加一个 `Migration`（`id`、`description`、纯函数 `apply`），
 然后写进 `MIGRATIONS`。账本按 id 记进度，所以追加迁移会让所有会话重新评估一次；已经洗过的

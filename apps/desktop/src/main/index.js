@@ -38,7 +38,7 @@ import { officialPluginManifests } from '@packages/mica-official-plugins/manifes
 import { readDisabledPluginIds, resolvePluginStatePath } from '@packages/mica-plugin/PluginState.js'
 import { createPluginLaunchers } from './plugin-launchers.js'
 import { EDITOR_WINDOW_CHANNEL, createEditorWindows, resolveEditorTarget } from './editor-window.js'
-import { isDevToolsShortcut } from './devtools-shortcut.js'
+import { attachDevToolsShortcut } from './devtools-shortcut.js'
 import {
   CLIENT_CONTEXT_CHANNEL,
   createClientContextHandler,
@@ -801,21 +801,6 @@ function watchThemeChanges(onChange) {
 }
 
 /**
- * 开发者工具开在独立窗口里（⌥⌘I，判定见 devtools-shortcut.js）。
- *
- * 不用内嵌在右侧/底部：主窗口装的就是整套界面，嵌进去会挤压布局，排查问题时看到的
- * 已经不是用户那一屏了。再按一次关掉。
- */
-function toggleDevTools(contents) {
-  if (contents.isDestroyed()) return
-  if (contents.isDevToolsOpened()) {
-    contents.closeDevTools()
-    return
-  }
-  contents.openDevTools({ mode: 'detach', activate: true })
-}
-
-/**
  * 开一个窗口装载 `url`。`primary` 是启动时那个本机窗口：关掉它只是隐藏（应用继续留在
  * dock 里）。其余窗口是各台远程运行时，切走时隐藏、页面保活两小时后释放 renderer。
  */
@@ -930,11 +915,6 @@ function createWindow(url, { primary = false } = {}) {
 
   win.webContents.on('before-input-event', (event, input) => {
     if (input.type !== 'keyDown') return
-    if (isDevToolsShortcut(input)) {
-      event.preventDefault()
-      toggleDevTools(win.webContents)
-      return
-    }
     const modifier = process.platform === 'darwin' ? input.meta : input.control
     if (!modifier || !input.shift || input.key.toLowerCase() !== 'm') return
     event.preventDefault()
@@ -1069,6 +1049,13 @@ function startMainDiagnostics() {
     contents.on('responsive', () => log.info('responsive', { url: url() }))
   })
 }
+
+// ⌥⌘I 打开开发者工具，所有窗口一视同仁：主窗口、编辑器窗口、终端、受控浏览器的每个
+// 标签页、插件浮窗里的网页视图都是独立 webContents，按键只发给持有焦点的那个，所以统一在
+// 创建时挂上，而不是按窗口类型逐个补（判定与开关见 devtools-shortcut.js）。生产包同样生效。
+app.on('web-contents-created', (_event, contents) => {
+  attachDevToolsShortcut(contents)
+})
 
 app.whenReady().then(async () => {
   electronApp.setAppUserModelId('com.mica.code')

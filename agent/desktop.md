@@ -12,6 +12,16 @@
   销毁浮窗并 dispose 后端。
 - 启动器可通过清单 `webContent` 显式申请同窗内嵌的隔离网页视图；视图布局跟随窗口尺寸，
   保留顶部插件工具栏。网页与插件 UI 使用不同上下文，窗口失焦不隐藏，停用时随启动器释放。
+  状态推送按「页面参数 `pluginLauncher` 等于本启动器 + 同源」判定目标页面，不比对整条 URL：
+  页面自己规范查询串或加片段时，逐字比较会把之后每一帧状态都丢掉，插件界面就再也收不到
+  导航（表现为不留最近记录、欢迎页停在第一次挂载的内容）。网页视图只允许 `img-src 'self' data: file:`，
+  所以页面拿不到远端图标：`web.favicon(url)` 由外壳用该视图的 session 取回字节、只认图片类型、
+  上限 128 KiB / 4s 超时，回内联 `data:` URL（`main/launcher-favicon.js`，成功结果缓存到启动器记录）。
+  页面自己用 `<link rel="icon" href="data:image/…">` 声明图标时，`page-favicon-updated` 交上来的
+  就是这个 `data:` URL，外壳按同样的类型/大小闸口直接透传，不发起 fetch——这类站点往往没有
+  `/favicon.ico` 可退，丢了它卡片就只能画地球。
+- 启动器 `background: true` 的后端在启用时初始化，不随窗口隐藏停止；运行时提供私有数据目录、
+  100ms 起的 `background` 调度、健康报告与绑定身份的原生窗口控制。`shortcutSetting` 让快捷键跟随插件设置即时重注册。
 
 | 层                    | 职责                                                                    |
 | --------------------- | ----------------------------------------------------------------------- |
@@ -178,7 +188,7 @@
 
 - Notebook 的目录、保存队列与文档栏在 `plugins/notebook/desktop.jsx`；富文本排版、块首键盘行为、文档样式与演示统一在 `packages/mica-editor/runtime/src/workspace/WorkspaceShell.tsx` 装配，仅属于笔记 composer。宿主用经 noteId/loadId 校验的 `action` 消息触发样式/演示，业务不进入桌面内核。正文按约 650ms 防抖自动保存，顶栏不显示保存状态，失败时才在正文上方给出带重试的提示；文档样式使用 Lexical root NodeState，演示只调整视图与临时只读；数据与交互口径见 `packages/mica-editor/README.md`、`plugins/notebook/README.md`。
 
-- Notebook 的桌面目录宽 260px，普通目录行高 36px，当前笔记以整行中性底色标记。标题搜索结果显示所属文件夹路径，选中后展开祖先文件夹并返回目录树。目录标题旁提供当前笔记定位和整树折叠、展开。正文顶栏常驻当前篇名和大纲开关。宽屏默认显示标题刻度，窄屏按需打开带遮罩的目录或大纲抽屉。
+- Notebook 的桌面目录宽 260px，普通目录行高 36px，当前笔记以整行中性底色标记。标题搜索结果显示所属文件夹路径，选中后展开祖先文件夹并返回目录树。目录标题旁提供当前笔记定位和整树折叠、展开。正文顶栏常驻当前篇名，不放任何大纲开关：大纲是右侧常驻面板（占位、不是浮层），隐藏按钮只在大纲被悬停或键盘聚焦时才出现在面板标题行。收起后右缘是一条大纲彩虹条（每个标题一段刻度、按顺序取色、按级别定长短、当前位置不透明），点击整条即恢复面板，悬停才浮出展开按钮。窄屏面板更窄，没有 hover 的设备上按钮常显，目录才走带遮罩的抽屉。
 - Notebook 的目录拖放判定在 `plugins/notebook/tree-dnd.ts`，节点位置变更在 `model.ts` 的 `placeNode`：同级排序沿用 `nodes` 数组顺序，不新增存储字段。目录树提供根目录落点和文件夹悬停展开，排序只用拖动、不添加上移/下移按钮；搜索与最近删除不接拖动排序。所有结构写入复用原有索引 CAS 队列，拖动不触碰正文。
 
 - 会话侧栏顶部保持一行入口的固定顺序：New Session / Stats / Settings / 插件声明的侧栏入口 / Plugins。插件入口由清单 `desktop.entry` 声明、按清单顺序渲染（`Connections` 是浮层卡片）；`placement: "header"` 的入口不占侧栏位置，画在主区顶栏右侧那一簇的最左边（`Schedule` 是整页 + 顶栏图标——顶栏只有 32px 高，所以只画图标，窗口类图标仍贴最右），宿主只画一行与容器，不知道里面是什么；加一个桌面插件只改插件目录，不改侧栏代码。只声明 `desktop.page`、不写 `entry` 的插件不占这一列：它的整页入口是 Plugins 页里那张卡的「打开…」按钮（`plugin-entries.js` 的 `loadPluginPageEntry` 按 id 现取模块，`SettingsView` 经 `onOpenPluginPage` 交回 `App` 打开；标签就这样，不再占侧栏一行）。Plugins 虽然在最末，但它只是一个页面入口——点它进插件整页（目录 → 点一张卡进详情），不做下拉面板、不在侧栏里列插件。
@@ -213,7 +223,7 @@
 - **Bun 进程不写 heap**：`collectMemory()` 在 Bun/JSC 下只留 `rss` 并标 `heapReliable: false`。那套 `heapUsed` / `heapTotal` / `external` 与实际占用对不上（实测 `heapUsed 524MB > heapTotal 374MB`，日志里还出现过 `heap 5014MB / heapT 161MB`、`rss 95MB / ext 430MB`），写进去会让「谁在涨」的判断整体失真。判断进程内存一律看 RSS；要看 JS 堆只能拍快照。
 - **内存尖峰单独记一条**：采样每 30s 一次，一个回合把宿主顶到 2GB 再还回去只会留下两三个点，事后看不出那一刻在跑什么。`startMemorySampler` 在 RSS 越过 `MICA_LOG_SPIKE_MB`（默认 1024）时补一条 `warn` + `event: 'spike'`，带完整 `describe()` 现场；降到阈值以下再越过才会再报一次（10 分钟冷却）。`mem` 的 warn / error 会进事件流，info 采样不会。
 - **渲染层堆快照**：Performance 页的「抓堆快照」→ `config-web:invoke('takeHeapSnapshot')` → 运行时的 `host/system-checks.js` → 主进程那条 Unix socket（`POST /heap-snapshot`）。只有主进程拿得到 `webContents`，所以必须走这条通道；文件写在日志目录（`heap-<webContentsId>-<时间>.heapsnapshot`），用 Chrome DevTools 的 Memory 面板打开。快照期间目标页面会停住几秒、文件可能上百 MB，因此只做用户手动触发，不自动跑。
-- **主窗口开发者工具**：⌥⌘I（Windows / Linux 是 Ctrl+Alt+I）开关 renderer 的 DevTools，生产包同样生效——应用不设菜单，Electron 默认菜单那条靠不住，页面自己也没有入口。判定在 `main/devtools-shortcut.js`（按物理键位 `code`，macOS 上 ⌥ 会让 `input.key` 变成 `ˆ`），开在独立窗口里，不挤压主窗口布局；`createWindow` 开的窗口（含切服务器的那些）都有，终端 / 浏览器窗口没有。
+- **所有窗口的开发者工具**：⌥⌘I（Windows / Linux 是 Ctrl+Alt+I）开关当前焦点窗口的 DevTools，生产包同样生效——应用不设菜单，Electron 默认菜单那条靠不住，页面自己也没有入口。判定与开关都在 `main/devtools-shortcut.js`（按物理键位 `code`，macOS 上 ⌥ 会让 `input.key` 变成 `ˆ`；开在独立窗口里，不挤压布局；再按一次关掉）。挂载点只有一个：主进程在 `app.on('web-contents-created')` 里给**每个** webContents 挂上（跳过 DevTools 自己那种 `type: 'remote'`），所以主窗口（含切服务器的那些）、编辑器窗口、终端窗口、受控浏览器的每个标签页、插件浮窗里的网页视图都认这个键。按键只发给持有焦点的那个 webContents，按窗口类型逐个补必然漏，新增窗口也别再单独接。
 - 崩溃现场必须有落盘的一行：会话宿主非正常退出记 `host.exit`（退出码、信号、stderr 尾部 2KB），spawn 失败记 `host.spawn-failed`，主进程听 `render-process-gone` / `child-process-gone` / `unresponsive`，app-server 的 `uncaughtException` 先写日志再通知客户端。
 - 通道耗时只在 `handleInvoke` 用 `logger('invoke').timedResult()` 量一次；超过 `SLOW_MS`（默认 300ms）记 slow。它还会把「调用成功、返回体里带 `error` / `ok:false`」的那些记为失败并在聚合表计入 `fails`——大量通道（git/stats/plugin-host）把失败包在返回值里而不抛。慢且失败的调用只写一条带 `failed` 标记的 slow 记录，不能把同一次调用算两次。新增功能不要自己再包一层计时。
 - `chat:compact` 额外记一条 `compact.finished`（请求模式、子进程回报的 strategy、前后 token 估算）——只按通道计时分不出本地清理与模型摘要。

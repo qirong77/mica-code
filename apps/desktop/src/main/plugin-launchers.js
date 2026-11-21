@@ -1,7 +1,18 @@
 import { watchFile, unwatchFile } from 'node:fs'
+import { createPluginSettingsStore } from '@packages/mica-plugin/PluginSettings.js'
+import { resolveMicaHome } from '@packages/mica-config/index.js'
 import { resolveEditorTarget } from './editor-window.js'
+import { createLauncherFavicons, inlineIconDataUrl } from './launcher-favicon.js'
 
-/** Native lifecycle for manifest-declared launchers. No session process is needed. */
+/**
+ * Native lifecycle for manifest-declared launchers. No session process is needed.
+ *
+ * The global shortcut normally comes from the manifest. A launcher may instead point
+ * at one of its settings (`shortcutSetting`), in which case the value is read from the
+ * same `$MICA_HOME/plugin-settings/<id>.json` the config page writes and re-applied
+ * whenever that file changes — no restart, and no silent fall back to the manifest
+ * default when the user clears it.
+ */
 export function createPluginLaunchers({
   manifests,
   readDisabled,
@@ -15,55 +26,166 @@ export function createPluginLaunchers({
   deliver,
   openEditorWindow,
   platform = process.platform,
+  home = process.env.MICA_HOME || resolveMicaHome(),
+  readSettings,
   onError = console.warn
 }) {
   const records = new Map()
+  const settingsStores = new Map()
   let disposed = false
 
+  function settingsStore(manifest) {
+    let store = settingsStores.get(manifest.id)
+    if (!store) {
+      store = createPluginSettingsStore(
+        manifest.id,
+        Array.isArray(manifest.settings) ? manifest.settings : [],
+        { configDir: home }
+      )
+      settingsStores.set(manifest.id, store)
+    }
+    return store
+  }
+
+  function settingsValues(manifest) {
+    if (typeof readSettings === 'function') return readSettings(manifest) ?? {}
+    return settingsStore(manifest).get()
+  }
+
+  /**
+   * The accelerator a launcher should own right now. A declared setting always wins,
+   * including when it is empty: an empty value is a visible error, because quietly
+   * registering the manifest default makes the user's edit look applied while the key
+   * they configured does nothing.
+   */
+  function resolveShortcut(manifest) {
+    const spec = manifest.desktopLauncher
+    const key = spec.shortcutSetting
+    if (!key) return { shortcut: spec.shortcut, error: '' }
+    let raw
+    try {
+      raw = settingsValues(manifest)[key]
+    } catch (error) {
+      return { shortcut: '', error: `无法读取快捷键设置 ${key}：${error?.message || error}` }
+    }
+    const shortcut = typeof raw === 'string' ? raw.trim() : ''
+    if (!shortcut) return { shortcut: '', error: `快捷键设置 ${key} 为空，请填写一个全局快捷键` }
+    return { shortcut, error: '' }
+  }
+
+  function toggle(id, record) {
+    if (record.win?.isVisible() && (record.spec.webContent || record.win.isFocused())) {
+      record.win.hide()
+      return
+    }
+    void show(id).catch((error) => onError(error.message))
+  }
+
   function register(id, record) {
-    if (record.registered) return
+    if (record.registered || !record.shortcut) return
     record.error = ''
     try {
-      record.registered = globalShortcut.register(record.spec.shortcut, () => {
-        if (record.win?.isVisible() && (record.spec.webContent || record.win.isFocused())) {
-          record.win.hide()
-          return
-        }
-        void show(id).catch((error) => onError(error.message))
-      })
+      record.registered = globalShortcut.register(record.shortcut, () => toggle(id, record))
       if (!record.registered)
-        record.error = `快捷键 ${record.spec.shortcut} 已被其他应用占用，请释放后重试`
+        record.error = `快捷键 ${record.shortcut} 已被其他应用占用，请释放后重试`
     } catch (error) {
-      record.error = `无法注册快捷键 ${record.spec.shortcut}：${error.message}`
+      record.error = `无法注册快捷键 ${record.shortcut}：${error.message}`
     }
     if (record.error) onError(record.error)
   }
 
+  /**
+   * Make the registered shortcut match the current settings.
+   *
+   * Idempotent on purpose: it runs from `sync()`, from showing the window and from the
+   * settings watcher. Only a changed accelerator or a cleared error retries the
+   * registration, so an occupied key is not re-announced on every request.
+   */
+  function applyShortcut(id, record, { retry = false } = {}) {
+    const next = resolveShortcut(record.manifest)
+    // `settingError` is what the setting says; `error` may also hold a registration
+    // failure. Keeping them apart means a status poll does not retry (and re-log) an
+    // occupied key, while a new value from the settings file always does.
+    const changed = next.shortcut !== record.shortcut || next.error !== record.settingError
+    if (record.registered && (next.error || next.shortcut !== record.shortcut)) {
+      globalShortcut.unregister(record.shortcut)
+      record.registered = false
+    }
+    record.shortcut = next.shortcut
+    record.settingError = next.error
+    if (next.error) {
+      record.error = next.error
+      if (changed) onError(next.error)
+      return
+    }
+    // The setting itself is fine; a registration failure from the previous attempt
+    // stays visible until something actually retries it (`show` / `retry` / a change).
+    if (record.registered) {
+      record.error = ''
+      return
+    }
+    if (!changed && !retry) return
+    register(id, record)
+  }
+
+  function watchSettings(id, record) {
+    if (typeof readSettings === 'function') return
+    // Only a launcher whose shortcut comes from a setting has a file worth polling;
+    // ordinary launchers must not add a watcher (or a settings store) for nothing.
+    if (!record.spec.shortcutSetting) return
+    const path = settingsStore(record.manifest).path
+    if (!path) return
+    record.settingsPath = path
+    record.onSettings = () => {
+      if (disposed || records.get(id) !== record) return
+      sync()
+    }
+    watchFile(path, { interval: 400, persistent: false }, record.onSettings)
+  }
+
+  function createRecord(manifest) {
+    const spec = manifest.desktopLauncher
+    return {
+      manifest,
+      spec,
+      win: null,
+      view: null,
+      webAttached: false,
+      webHome: !!spec.webContent,
+      loading: null,
+      shortcut: '',
+      settingError: '',
+      registered: false,
+      error: '',
+      webError: '',
+      webFavicon: '',
+      webIcons: null,
+      settingsPath: null,
+      onSettings: null
+    }
+  }
+
   function sync() {
+    if (disposed) return
     const disabled = readDisabled()
+    for (const [id, record] of [...records]) {
+      if (disabled.has(id)) remove(id, record)
+    }
     for (const manifest of manifests) {
       if (!manifest.desktopLauncher) continue
-      const id = manifest.id
-      if (disabled.has(id)) {
-        remove(id)
-        continue
+      if (disabled.has(manifest.id)) continue
+      let record = records.get(manifest.id)
+      if (!record) {
+        record = createRecord(manifest)
+        records.set(manifest.id, record)
+        watchSettings(manifest.id, record)
       }
-      if (records.has(id)) continue
-      const spec = manifest.desktopLauncher
-      const record = {
-        spec,
-        win: null,
-        view: null,
-        webAttached: false,
-        webHome: !!spec.webContent,
-        loading: null,
-        registered: false,
-        error: '',
-        webError: '',
-        webFavicon: ''
+      applyShortcut(manifest.id, record)
+    }
+    for (const id of [...settingsStores.keys()]) {
+      if (!manifests.some((manifest) => manifest.id === id && manifest.desktopLauncher)) {
+        settingsStores.delete(id)
       }
-      records.set(id, record)
-      register(id, record)
     }
   }
 
@@ -101,9 +223,35 @@ export function createPluginLaunchers({
   function pushWebState(id, record) {
     const win = record.win
     if (!win || win.isDestroyed() || !record.view || record.view.webContents.isDestroyed()) return
-    if (win.webContents.getURL() !== launcherUrl(id)) return
+    if (!isLauncherPage(win.webContents.getURL(), id)) return
     const detail = JSON.stringify({ pluginId: id, state: webState(record) })
     void win.webContents.executeJavaScript(`window.dispatchEvent(new CustomEvent('mica:launcher-web-state', { detail: ${detail} }))`).catch(() => {})
+  }
+
+  /**
+   * The launcher page is identified by its `pluginLauncher` parameter, not by the
+   * exact URL string: the page normalizes its own query and may grow a fragment, and
+   * a byte-for-byte comparison would then silently drop every state push — the view
+   * keeps browsing while the plugin UI never hears about it, so nothing is
+   * remembered and the welcome page keeps showing a list from its first mount.
+   */
+  function isLauncherPage(current, id) {
+    try {
+      const url = new URL(current)
+      return url.origin === new URL(pageUrl).origin && url.searchParams.get('pluginLauncher') === id
+    } catch {
+      return false
+    }
+  }
+
+  /** Icons are inlined here because the plugin page may only draw `data:` images. */
+  function webIcons(record) {
+    if (!record.webIcons) {
+      record.webIcons = createLauncherFavicons({
+        fetchImage: (url, options) => record.view.webContents.session.fetch(url, options)
+      })
+    }
+    return record.webIcons
   }
 
   function showWebContent(record) {
@@ -154,8 +302,10 @@ export function createPluginLaunchers({
     }
     wc.on('page-favicon-updated', (_event, favicons) => {
       if (record.webHome) return
+      // Inline icons arrive as `data:image/…` and are already drawable by the page;
+      // sites that declare one this way usually have no `/favicon.ico` to fall back to.
       const candidate = Array.isArray(favicons) ? favicons.find((value) => {
-        return allowedWebUrl(value)
+        return allowedWebUrl(value) || Boolean(inlineIconDataUrl(value))
       }) : ''
       record.webFavicon = candidate || ''
       pushWebState(id, record)
@@ -168,7 +318,9 @@ export function createPluginLaunchers({
 
   async function show(id) {
     const record = requireRecord(id)
-    register(id, record)
+    // A failed or occupied shortcut is retried when the user opens the launcher, and
+    // a settings change made in the meantime is picked up here too.
+    applyShortcut(id, record, { retry: true })
     if (!record.win || record.win.isDestroyed()) {
       const spec = record.spec
       const win = new BrowserWindow({
@@ -193,6 +345,8 @@ export function createPluginLaunchers({
         if (record.view && !record.view.webContents.isDestroyed()) record.view.webContents.close()
         record.view = null
         record.webAttached = false
+        record.webIcons?.clear()
+        record.webIcons = null
         record.win = null
       })
       // macOS panels accept keyboard focus without activating the app and already
@@ -252,15 +406,21 @@ export function createPluginLaunchers({
     return url.href
   }
 
-  function remove(id) {
-    const record = records.get(id)
+  function remove(id, record = records.get(id)) {
     if (!record) return
-    records.delete(id)
-    if (record.registered) globalShortcut.unregister(record.spec.shortcut)
+    if (records.get(id) === record) records.delete(id)
+    if (record.settingsPath && record.onSettings) unwatchFile(record.settingsPath, record.onSettings)
+    record.settingsPath = null
+    record.onSettings = null
+    if (record.registered) globalShortcut.unregister(record.shortcut)
+    record.registered = false
     if (record.view && !record.view.webContents.isDestroyed()) record.view.webContents.close()
     record.view = null
     record.webAttached = false
+    record.webIcons?.clear()
+    record.webIcons = null
     if (record.win && !record.win.isDestroyed()) record.win.destroy()
+    settingsStores.delete(id)
   }
 
   async function control({ pluginId, action, path, url } = {}) {
@@ -298,17 +458,21 @@ export function createPluginLaunchers({
       } else if (action === 'web.reload') {
         if (!record.webHome) wc.reload()
       }
+      else if (action === 'web.favicon') {
+        if (!allowedWebUrl(url) && !inlineIconDataUrl(url)) throw new Error('只允许有效的 HTTP(S) 图标地址')
+        return { dataUrl: (await webIcons(record).load(url)) ?? '' }
+      }
       else throw new Error('不支持的网页动作')
       return {}
     }
     if (action === 'status')
-      return { shortcut: record.spec.shortcut, registered: record.registered, error: record.error }
+      return { shortcut: record.shortcut, registered: record.registered, error: record.error }
     if (action === 'show') {
       await show(pluginId)
       return {}
     }
     if (action === 'retry') {
-      register(pluginId, record)
+      applyShortcut(pluginId, record, { retry: true })
       return control({ pluginId, action: 'status' })
     }
     if (action === 'close') {
@@ -330,10 +494,11 @@ export function createPluginLaunchers({
   watchFile(statePath, { interval: 400, persistent: false }, sync)
   return {
     control,
+    sync,
     close() {
       disposed = true
       unwatchFile(statePath, sync)
-      for (const id of [...records.keys()]) remove(id)
+      for (const [id, record] of [...records]) remove(id, record)
     }
   }
 }

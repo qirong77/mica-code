@@ -170,6 +170,11 @@ type AgentRunOptions = {
   onIterationComplete?: () => AgentQueryContent | null | undefined | Promise<AgentQueryContent | null | undefined>;
   /** provider 层重试（零输出安全重发）每次触发前回调，供调用方展示重试状态。 */
   onRetry?: (info: { attempt: number; error: unknown; delayMs: number }) => void;
+  /**
+   * 每次请求结束回调。重试后的那一次也走这里，调用方据此把「在重试」改写成结论
+   * ——重试状态是在 onRetry 里写下的，只有这条能说清它后来怎么了。
+   */
+  onRequestEnd?: (info: { outcome: 'completed' | 'error' | 'aborted'; attempts: number }) => void;
   maxTurns?: number;
   reservedRunId?: number;
   /** Hosts may share one snapshot across whole-turn retry attempts. */
@@ -1281,6 +1286,7 @@ export class AgentRuntime {
             // 请求级耗时：turn 级的 `run:finish` 只说整轮花了多久，回答不了「这一轮是
             // 排队久、还是首字慢、还是重试拖的」。观察方据此算 TTFT 与重试代价。
             this.observeActive({ type: 'request:end', ...info });
+            options.onRequestEnd?.({ outcome: info.outcome, attempts: info.attempts });
           },
           onRetry: (info) => {
             if (!this.isCurrent(runId)) return;

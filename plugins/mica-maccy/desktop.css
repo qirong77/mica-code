@@ -1,0 +1,640 @@
+/**
+ * 剪贴板浮窗（Maccy 风格）。
+ *
+ * 密度对齐桌面端的 quick pick：13px 行文、38px 行高、6px 行圆角、底部一条 11px 状态行。
+ * 颜色只取 app.css 的 --color-* 令牌，括号里是配置页宿主的兜底——同一个组件在整页宿主里
+ * 也不会因为少了几组变量而变成一块透明色。
+ *
+ * 三块结构：搜索行 / 筛选行 / 列表 + 预览。界面上没有成排的动作按钮——点条目就是用它，
+ * 整理动作收在右键菜单里（.maccy-menu），所以列表和预览各自把空间留给内容本身。
+ */
+.mica-config-ui.maccy {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--color-panel, var(--panel));
+  color: var(--color-fg-strong, var(--text));
+  font-family:
+    'Segoe WPC',
+    'Segoe UI',
+    -apple-system,
+    BlinkMacSystemFont,
+    'SF Pro Text',
+    system-ui,
+    sans-serif;
+  font-size: 13px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* 搜索行：只有图标 + 无边框输入，和 quick pick 的头部同高。 */
+.maccy-head {
+  display: flex;
+  height: 44px;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px 0 12px;
+  border-bottom: 1px solid var(--color-line-soft, var(--line-soft));
+}
+
+.maccy-head > svg.maccy-head-icon {
+  flex: none;
+  color: var(--color-fg-faint, var(--text-faint));
+}
+
+/* 继续使用共享 Arco Input，只在搜索行内恢复无框外观与继承字号。
+   三个类名压过设置页 scoped 控件的高度与字号，不依赖 chunk 加载顺序。 */
+.maccy .maccy-input.arco-input {
+  width: auto;
+  min-width: 0;
+  flex: 1 1 auto;
+  height: 100%;
+  padding: 0;
+  background: transparent;
+  border: none;
+  outline: none;
+  box-shadow: none;
+  color: inherit;
+  font: inherit;
+}
+
+/* 桌面 app.css 的窄屏规则是 #root input；浮窗宽度也会命中它，字号仍跟随搜索行。 */
+#root .maccy .maccy-input.arco-input {
+  font: inherit;
+}
+
+.maccy .maccy-input.arco-input:is(:hover, :focus, :focus-visible, :disabled, .arco-input-disabled) {
+  background: transparent;
+  border: none;
+  outline: none;
+  box-shadow: none;
+}
+
+.maccy .maccy-input.arco-input:disabled {
+  color: var(--color-fg-muted, var(--text-soft));
+}
+
+.maccy .maccy-input.arco-input::placeholder {
+  color: var(--color-fg-muted, var(--text-soft));
+  opacity: 1;
+}
+
+.maccy-spin {
+  flex: none;
+  color: var(--color-fg-muted, var(--text-soft));
+  animation: maccy-spin 900ms linear infinite;
+}
+
+@keyframes maccy-spin {
+  to {
+    transform: rotate(1turn);
+  }
+}
+
+/* 提示条上的纯图标动作统一 22px 见方：Arco 的默认内边距会让它们和文字对不齐。 */
+.maccy .maccy-action.arco-btn {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border-radius: 5px;
+  color: var(--color-fg-muted, var(--text-soft));
+}
+
+.maccy .maccy-action.arco-btn:not(.arco-btn-disabled):not([aria-pressed='true']):hover {
+  background: var(--color-overlay, var(--overlay));
+  color: var(--color-fg-max, var(--text));
+}
+
+.maccy .maccy-action.arco-btn[aria-pressed='true'] {
+  background: var(--color-accent-subtle, color-mix(in srgb, var(--accent) 16%, transparent));
+  color: var(--color-accent, var(--accent));
+}
+
+.maccy .maccy-action.arco-btn.is-danger:not(.arco-btn-disabled):hover {
+  color: var(--color-danger, var(--red));
+}
+
+.maccy-text-action.arco-btn {
+  flex: none;
+  padding: 0 2px;
+  color: var(--color-accent, var(--accent));
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+/* 筛选行：类型分段 + 「已暂停 / 下一次不记录」+ 计数。 */
+.maccy-filters {
+  display: flex;
+  height: 34px;
+  flex: none;
+  align-items: center;
+  gap: 10px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--color-line-soft, var(--line-soft));
+}
+
+.maccy-filters-meta {
+  display: flex;
+  min-width: 0;
+  flex: 1 1 auto;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.maccy-chip {
+  flex: none;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--color-overlay-subtle, var(--overlay));
+  color: var(--color-fg-muted, var(--text-soft));
+  font-size: 10px;
+  line-height: 16px;
+  white-space: nowrap;
+}
+
+.maccy-chip.is-warn {
+  background: color-mix(in srgb, var(--color-warn, var(--amber)) 18%, transparent);
+  color: var(--color-warn, var(--amber));
+}
+
+/* 暂停时这个胶囊本身就是开关：看起来还是标签，点一下继续记录。 */
+.maccy-chip.is-action {
+  border: 0;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.maccy-chip.is-action:not(:disabled):hover {
+  background: color-mix(in srgb, var(--color-warn, var(--amber)) 28%, transparent);
+}
+
+.maccy-chip.is-action:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.maccy-count {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--color-fg-faint, var(--text-faint));
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 提示条：动作失败、系统权限、快捷键注册。一条一行，右端是能修它的入口。 */
+.maccy-notice {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 12px;
+  border-bottom: 1px solid var(--color-line-soft, var(--line-soft));
+  color: var(--color-fg-muted, var(--text-soft));
+  font-size: 11px;
+}
+
+.maccy-notice > svg {
+  flex: none;
+}
+
+.maccy-notice > span {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow-wrap: anywhere;
+}
+
+.maccy-notice.is-error {
+  color: var(--color-danger, var(--red));
+}
+
+.maccy-notice[data-tone='warn'] {
+  color: var(--color-warn, var(--amber));
+}
+
+/* 重命名行：和提示条同一条节奏，输入框吃掉剩余宽度。 */
+.maccy-rename {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 12px;
+  border-bottom: 1px solid var(--color-line-soft, var(--line-soft));
+  background: var(--color-overlay-subtle, var(--overlay));
+  color: var(--color-fg-muted, var(--text-soft));
+}
+
+.maccy-rename > svg {
+  flex: none;
+}
+
+.maccy .maccy-rename-input.arco-input {
+  height: 24px;
+  min-width: 0;
+  flex: 1 1 auto;
+  font: inherit;
+}
+
+/* 列表 + 预览：预览默认 292px，够放一行 13px 的正文与一段图片。 */
+.maccy-body {
+  position: relative;
+  display: grid;
+  min-height: 0;
+  flex: 1 1 auto;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.maccy-body.has-preview {
+  grid-template-columns: minmax(0, 1fr) 292px;
+}
+
+.maccy-list {
+  min-height: 0;
+  margin: 0;
+  padding: 6px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  list-style: none;
+}
+
+/* 列表行：类型图标 + 标题 + 固定徽标 + 来源时间。行内不放动作按钮：
+   点击这一行就是用它，整理动作在右键菜单里。 */
+.maccy-row {
+  position: relative;
+  display: flex;
+  height: 38px;
+  align-items: center;
+  gap: 8px;
+  padding: 0 8px;
+  border-radius: 6px;
+  color: var(--color-fg-soft, var(--text-soft));
+  cursor: default;
+  transition:
+    background-color 90ms ease,
+    color 90ms ease;
+}
+
+.maccy-row:hover {
+  background: var(--color-list-hover, var(--overlay));
+}
+
+.maccy-row[aria-selected='true'] {
+  background: var(--color-active, var(--panel-hover));
+}
+
+.maccy-row.is-image {
+  height: 50px;
+}
+
+.maccy-thumbnail {
+  display: grid;
+  width: 44px;
+  height: 34px;
+  place-items: center;
+  overflow: hidden;
+  border: 1px solid var(--color-line-soft, var(--line-soft));
+  border-radius: 4px;
+  background: var(--color-canvas, var(--bg));
+}
+
+.maccy-thumbnail img {
+  width: 42px;
+  height: 32px;
+  min-width: 0;
+  min-height: 0;
+  object-fit: contain;
+}
+
+.maccy-row-icon {
+  display: grid;
+  flex: none;
+  place-items: center;
+  color: var(--color-fg-faint, var(--text-faint));
+}
+
+.maccy-row:hover .maccy-row-icon,
+.maccy-row[aria-selected='true'] .maccy-row-icon {
+  color: var(--color-fg-muted, var(--text-soft));
+}
+
+.maccy-row-title {
+  min-width: 0;
+  flex: 0 1 auto;
+  overflow: hidden;
+  color: var(--color-fg-strong, var(--text));
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.maccy-row[aria-selected='true'] .maccy-row-title {
+  color: var(--color-fg-max, var(--text));
+}
+
+/* 固定徽标使用图钉，不占用主内容的位置展示辅助快捷键。 */
+.maccy-row-pin {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 2px;
+  padding: 0 4px;
+  border-radius: 4px;
+  background: var(--color-accent-subtle, color-mix(in srgb, var(--accent) 16%, transparent));
+  color: var(--color-accent, var(--accent));
+  font-size: 10px;
+  line-height: 16px;
+  white-space: nowrap;
+}
+
+/* 来源与时间是次要信息：宽度不够时先截它，标题尽量留全。 */
+.maccy-row-meta {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  color: var(--color-fg-faint, var(--text-faint));
+  font-size: 11px;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 右键菜单：内容样式来自共享的 .mica-menu，这里只负责把它锚在列表区里。 */
+.maccy-menu {
+  position: absolute;
+  z-index: 20;
+}
+
+/* 预览：标题行（类型 / 已固定 / 时间）+ 正文 + 来源统计。 */
+.maccy-preview {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 14px;
+  border-left: 1px solid var(--color-line-soft, var(--line-soft));
+  overflow: hidden;
+}
+
+.maccy-preview-head {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  color: var(--color-fg-faint, var(--text-faint));
+  font-size: 11px;
+}
+
+.maccy-preview-kind,
+.maccy-preview-pinned {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+}
+
+.maccy-preview-pinned {
+  color: var(--color-accent, var(--accent));
+}
+
+.maccy-preview-time {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.maccy-preview-body {
+  position: relative;
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+.maccy-preview-text {
+  margin: 0;
+  color: var(--color-fg, var(--text));
+  font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.maccy-preview-image {
+  display: block;
+  max-width: 100%;
+  max-height: 100%;
+  border-radius: 6px;
+  background: var(--color-canvas, var(--bg));
+  object-fit: contain;
+}
+
+.maccy-preview-files {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.maccy-preview-files li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: var(--color-fg-soft, var(--text-soft));
+  font-size: 12px;
+}
+
+.maccy-preview-files li > svg {
+  flex: none;
+  color: var(--color-fg-faint, var(--text-faint));
+}
+
+.maccy-preview-files li > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.maccy-preview-placeholder {
+  margin: 0;
+  color: var(--color-fg-faint, var(--text-faint));
+  font-size: 12px;
+}
+
+.maccy-preview-loading {
+  display: block;
+  margin-top: 6px;
+  color: var(--color-fg-faint, var(--text-faint));
+  font-size: 11px;
+}
+
+.maccy-preview-meta {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  color: var(--color-fg-faint, var(--text-faint));
+  font-size: 11px;
+}
+
+.maccy-preview-source {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.maccy-preview-stats {
+  flex: none;
+  margin-left: auto;
+  white-space: nowrap;
+}
+
+/* 空态：铺满列表区，三句话分别对应搜索、筛选与暂停。 */
+/* 空态与载入铺在列表区之上，不参与栅格排布：否则行高会被它们带着一起长。 */
+.maccy-empty,
+.maccy-loading {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 28px 24px;
+  text-align: center;
+}
+
+.maccy-empty-icon {
+  display: grid;
+  width: 36px;
+  height: 36px;
+  place-items: center;
+  border-radius: 10px;
+  background: var(--color-overlay-subtle, var(--overlay));
+  color: var(--color-fg-faint, var(--text-faint));
+}
+
+.maccy-empty-title {
+  margin: 2px 0 0;
+  color: var(--color-fg-strong, var(--text));
+  font-size: 13px;
+}
+
+.maccy-empty-text {
+  max-width: 320px;
+  margin: 0;
+  color: var(--color-fg-muted, var(--text-soft));
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.maccy-loading {
+  margin: 0;
+  color: var(--color-fg-muted, var(--text-soft));
+  font-size: 12px;
+}
+
+/* 底栏只有一行：左边四个常用键，右边唤出快捷键与「选中之后做什么」。 */
+.maccy-foot {
+  display: flex;
+  height: 26px;
+  flex: none;
+  align-items: center;
+  gap: 10px;
+  padding: 0 12px;
+  border-top: 1px solid var(--color-line-soft, var(--line-soft));
+  color: var(--color-fg-faint, var(--text-faint));
+  font-size: 11px;
+}
+
+.maccy-hints {
+  display: flex;
+  min-width: 0;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: 10px;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.maccy-hints > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.maccy-foot-meta {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+}
+
+.maccy-foot-shortcut,
+.maccy-hints kbd {
+  padding: 0 4px;
+  border: 1px solid var(--color-line-soft, var(--line-soft));
+  border-radius: 3px;
+  background: var(--color-overlay-subtle, var(--overlay));
+  color: var(--color-fg-muted, var(--text-soft));
+  font-family: inherit;
+  font-size: 10px;
+  line-height: 15px;
+}
+
+.maccy-foot-mode {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.maccy-clear-description {
+  margin: 0;
+  color: var(--color-fg-muted, var(--text-soft));
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.maccy-dialog-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.maccy-dialog-gap {
+  flex: 1 1 auto;
+}
+
+/* 窄屏（浮窗被拖小、或整页宿主在手机上）：只留列表，预览让位给行内摘要。 */
+@media (max-width: 640px) {
+  .maccy-body.has-preview {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .maccy-preview {
+    display: none;
+  }
+
+  .maccy-filters {
+    gap: 6px;
+  }
+
+  .maccy-hints > span:nth-child(n + 3) {
+    display: none;
+  }
+}

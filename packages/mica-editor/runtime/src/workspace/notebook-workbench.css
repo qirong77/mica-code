@@ -48,6 +48,19 @@ body:has(.notebook-workbench) {
   gap: 2px;
 }
 
+/* 窄尺寸先压缩分组间距、再收起按钮：语雀在窄窗口里也是先把视觉间距收窄，
+   让「清除格式」这类常用项留在行内，而不是第一批进「更多」。 */
+@media (max-width: 900px) {
+  .notebook-editor.notebook-workbench .toolbar {
+    --toolbar-section-gap: 9px;
+  }
+
+  .notebook-workbench .toolbar-group[data-section-start='true'] {
+    margin-left: 4px;
+    padding-left: 4px;
+  }
+}
+
 .notebook-workbench .toolbar .toolbar-font-size {
   box-sizing: border-box;
   height: 28px;
@@ -280,8 +293,16 @@ body.mica-arco-theme .notebook-workbench .editor-image .image-caption-container 
     --notebook-body-bottom: 90px;
   }
 
-  .notebook-workbench .toolbar {
-    padding: 6px 10px;
+  .notebook-editor.notebook-workbench .toolbar {
+    /* 窄视口也要让出宿主文档栏的两端，否则行首的撤销/清除格式会被盖在它下面。 */
+    padding-block: 6px;
+    padding-inline: calc(10px + var(--notebook-bar-inset-left, 0px)) calc(10px + var(--notebook-bar-inset-right, 0px));
+    --toolbar-section-gap: 6px;
+  }
+
+  .notebook-workbench .toolbar-group[data-section-start='true'] {
+    margin-left: 3px;
+    padding-left: 3px;
   }
 
 }
@@ -294,8 +315,16 @@ body.mica-arco-theme .notebook-workbench .editor-image .image-caption-container 
     --notebook-body-size: 15px;
   }
 
-  .notebook-workbench .toolbar {
-    padding-inline: 8px;
+  .notebook-editor.notebook-workbench .toolbar {
+    padding-block: 6px;
+    padding-inline: calc(8px + var(--notebook-bar-inset-left, 0px)) calc(8px + var(--notebook-bar-inset-right, 0px));
+    --toolbar-section-gap: 2px;
+  }
+
+  .notebook-workbench .toolbar-group[data-section-start='true'] {
+    border-left: 0;
+    margin-left: 2px;
+    padding-left: 0;
   }
 
   .notebook-workbench .PlaygroundEditorTheme__h1 {
