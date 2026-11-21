@@ -14,17 +14,74 @@ body {
 
 .probe-stage {
   display: flex;
-  width: 760px;
+  width: 860px;
   flex-direction: column;
   padding: 24px 0 40px;
 }
 
-/* 停靠区在真实界面里贴着输入条：这里给它一个「输入条」的底，看得出边界在哪。 */
-.probe-dock {
+/* 一组场景：标题行 + 一块「输入区」外框（停靠区贴着输入条，边框标出边界）。 */
+.probe-scenes {
   display: flex;
   flex-direction: column;
-  border-top: 1px solid var(--color-line);
+  gap: 26px;
+}
+
+/* 探针自己的开关，不属于产品样式。 */
+.probe-toggle {
+  align-self: flex-start;
+  margin: 0 0 16px 12px;
+  padding: 2px 8px;
+  border: 1px solid var(--color-line);
+  border-radius: 4px;
+  background: var(--color-panel);
+  color: var(--color-fg-dim);
+  font:
+    12px/1.6 ui-monospace,
+    monospace;
+  cursor: pointer;
+}
+
+.probe-scene {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.probe-scene-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 0 12px;
+  color: var(--color-fg-soft);
+  font:
+    12px/1.6 ui-monospace,
+    monospace;
+}
+
+.probe-scene-title {
+  color: var(--color-fg-strong);
+  font-weight: 600;
+}
+
+.probe-scene-note {
+  color: var(--color-fg-faint);
+}
+
+.probe-pane {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  justify-content: flex-end;
+  border: 1px solid var(--color-line);
   background: var(--color-canvas);
+}
+
+/* 场景里只留停靠区本身：`TurnLogDock` 顶部那条 1px 线与外框重叠，看着像画了两条。 */
+.probe-stack {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
 }
 
 .probe-verdict {
@@ -50,7 +107,7 @@ body {
 }
 
 .probe-out {
-  margin: 16px 12px 0;
+  margin: 22px 12px 0;
   color: var(--color-fg-faint);
   font:
     11px/1.5 ui-monospace,
@@ -58,15 +115,18 @@ body {
   white-space: pre-wrap;
 }
 
-/* 另外两个消费者：subagent 详情弹窗的时间线（左）与 By The Way 抽屉（右）。 */
-.probe-elsewhere {
-  display: flex;
-  gap: 12px;
-  margin-top: 16px;
-  padding: 0 12px;
+/* 输入条动作区里的两个占位图标：只是让这行看起来完整，不参与对齐判断。 */
+.probe-composer-icon {
+  display: grid;
+  width: 22px;
+  height: 22px;
+  place-items: center;
+  color: var(--color-fg-dim);
+  font-size: 12px;
 }
 
-.probe-elsewhere > * {
-  flex: 0 0 auto;
-  width: 320px;
+.probe-composer-icon.is-stop {
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--color-danger) 22%, transparent);
+  color: var(--color-danger);
 }

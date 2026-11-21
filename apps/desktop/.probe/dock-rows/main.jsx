@@ -1,167 +1,390 @@
-// 探针「停靠区行高」：一句话——输入区上方那串停靠区（回合日志 + todo / subagent /
-// 后台任务的续行）是终端式的一行一行，每一行必须一样高。
+// 探针「停靠区」：输入框上方那串停靠区的**版式预览 + 量取**。
 //
 // 三件事必须与产品一致，否则这个页面只是示意图：
-// 1. 样式用 `app.css` 的真实类名，不在这里抄一份；
-// 2. 思考行与工具行直接用正式组件（`ReasoningRow` / `ToolActivityRow`），
-//    行首那几个 Arco 按钮也用正式 `ArcoAction`（`.arco-btn` 的基础样式会参与行高）；
-// 3. todo / subagent / 后台那几块的行是 `ChatView.jsx` 里的手写结构，这里照抄类名与
-//    层级（只省掉 `Collapse`：展开态的内容在 DOM 上和它一样是 `.chat-task-children`）。
+// 1. 块本身用**真组件**（`TurnLogDock` / `TodoDock` / `SubagentStatusDock` /
+//    `BackgroundTasksDock` / `WaitTasksDock`），数据是这里写死的示例——不连运行中的
+//    会话、不发起任何模型或工具请求，几组场景随时可看；
+// 2. 样式全部来自 `app.css` 的真实类名，不在这里抄一份；
+// 3. 只有「输入条那一行」是照抄的：产品里这段标记同时存在于 `ChatView.jsx`（可点，带
+//    角色切换）与 `BtwDrawer.jsx`（只读），这里照抄只读那份的三个类名。
 //
-// 页面右上角打出每种行的实测高度；`#probe-out` 里是同一份数据的 JSON。
-import { useEffect, useState } from 'react'
+// 页面顶部打出结论：每行的高度是否落在同一条格子上、收起箭头是否落在同一条竖轨上。
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { createRoot } from 'react-dom/client'
-import { IconChevronDown, IconChevronRight } from '@tabler/icons-react'
-import { ArcoAction, ArcoProvider } from '@mica-config-ui/web'
-import { ReasoningRow, ToolActivityRow } from '../../src/renderer/src/chat-tool-views.jsx'
+import { ArcoProvider } from '@mica-config-ui/web'
+import {
+  BackgroundTasksDock,
+  SubagentStatusDock,
+  TodoDock,
+  TurnLogDock,
+  WaitTasksDock,
+  todoPanelForTurn
+} from '../../src/renderer/src/ChatView.jsx'
+import { groupActivityRounds } from '../../src/renderer/src/chat-turn-activity.js'
+import { keepsBackgroundTaskRow } from '@packages/mica-common/backgroundTaskVisibility.ts'
+import { keepsSubagentTaskRow } from '@packages/mica-common/subagentVisibility.ts'
 import '../../src/renderer/assets/app.css'
 import './probe.css'
 
-const NOW = Date.now()
+// 假 host：停靠区的折叠状态写在共享界面状态里，探针没有运行时，给它一个空实现，
+// 点箭头仍然能展开/收起（本地状态照常生效）。
+window.mica = {
+  ...(window.mica || {}),
+  uiState: {
+    get: async () => ({}),
+    set: async () => ({ ok: true }),
+    onChanged: () => () => {}
+  }
+}
 
-const THINKING_ONE_LINE = '先读一遍 CodexGo 的 skill，确认它到底要不要联网。'
-const THINKING_MULTI = [
-  '先读一遍 CodexGo 的 skill，确认它到底要不要联网；然后看本机有没有现成的命令行可以直接跑。',
-  '',
-  '如果本地没有，再考虑让用户自己装——不要自己往系统里塞东西。'
-].join('\n')
+const BASE = Date.parse('2026-11-21T05:40:00.000Z')
+const at = (seconds) => BASE + seconds * 1000
+// 「现在」定在示例时间轴上，耗时因此是固定值，每次打开都一样。
+const NOW = at(96)
 
-const TOOLS = [
-  {
-    tool: 'read_file',
+const todoMessage = (turnId, items, seconds = 5) => ({
+  id: `${turnId}-todo`,
+  kind: 'tool',
+  turnId,
+  tool: {
+    tool: 'todo_write',
     status: 'completed',
-    input: { file_path: '/Users/qironglin/Desktop/mica-code/plugins/schedule/SKILL.md' },
-    startedAt: NOW - 1400,
-    finishedAt: NOW - 300
-  },
+    input: { todos: items.map(([content, status]) => ({ content, status })) },
+    startedAt: at(seconds - 1),
+    finishedAt: at(seconds)
+  }
+})
+
+const thinking = (turnId, text, seconds) => ({
+  id: `${turnId}-think-${seconds}`,
+  kind: 'reasoning',
+  turnId,
+  text,
+  updatedAt: at(seconds)
+})
+
+const tool = (turnId, id, name, input, status, from, to) => ({
+  id: `${turnId}-${id}`,
+  kind: 'tool',
+  turnId,
+  tool: {
+    tool: name,
+    input,
+    status,
+    startedAt: at(from),
+    finishedAt: to == null ? null : at(to),
+    updatedAt: at(to ?? from)
+  }
+})
+
+// ① 运行中：一条正在跑的轮次（思考 + 读文件 + grep + 写入 + 正在跑的测试）。
+const LIVE_TURN = 'turn-live'
+const liveMessages = [
+  thinking(LIVE_TURN, '先看示例仓库里的队列实现和测试，确认补取消支持要动哪几处。', 6),
+  tool(LIVE_TURN, 'read', 'read_file', { file_path: 'src/task-queue.mjs', limit: 120 }, 'completed', 7, 9),
+  tool(LIVE_TURN, 'grep', 'grep_search', { pattern: 'queue.add|test\\(', path: '.' }, 'completed', 9, 12),
+  todoMessage(LIVE_TURN, [
+    ['确认串行执行与失败恢复行为', 'completed'],
+    ['为任务队列补充 AbortSignal 支持', 'in_progress'],
+    ['验证取消行为与原有测试', 'pending']
+  ]),
+  tool(
+    LIVE_TURN,
+    'patch',
+    'apply_patch',
+    { patch: '*** Begin Patch\n*** Update File: src/task-queue.mjs\n@@\n-  add(task) {\n+  add(task, { signal } = {}) {' },
+    'completed',
+    30,
+    34
+  ),
+  tool(LIVE_TURN, 'test', 'run_shell', { command: 'node --test --test-reporter=tap' }, 'running', 78, null)
+]
+
+// ② 中断前那一轮：更早的轮次在停靠区里收成一行。
+const PAST_TURN = 'turn-past'
+const pastMessages = [
+  thinking(PAST_TURN, '先把串行队列与失败恢复的行为读一遍。', 2),
+  tool(PAST_TURN, 'read', 'read_file', { file_path: 'test/task-queue.test.mjs', limit: 160 }, 'completed', 3, 6),
+  tool(PAST_TURN, 'run', 'run_shell', { command: 'node --test' }, 'completed', 8, 14)
+]
+
+// ④ 正常完成：计划全部完成，日志按设计隐藏。
+const DONE_TURN = 'turn-done'
+const doneMessages = [
+  thinking(DONE_TURN, '三条取消测试已写入，跑一遍全量测试再收尾。', 4),
+  tool(DONE_TURN, 'test', 'run_shell', { command: 'node --test --test-reporter=tap' }, 'completed', 20, 26),
+  todoMessage(
+    DONE_TURN,
+    [
+      ['确认串行执行与失败恢复行为', 'completed'],
+      ['为任务队列补充 AbortSignal 支持', 'completed'],
+      ['验证取消行为与原有测试', 'completed']
+    ],
+    27
+  )
+]
+
+// 子代理：一行父任务（带两条活动行）+ 一行嵌套子任务。
+const SUBAGENT_TASKS = [
   {
-    tool: 'grep_search',
-    status: 'completed',
-    input: { pattern: 'todo_write', path: 'apps/desktop/src' },
-    startedAt: NOW - 900,
-    finishedAt: NOW - 120
-  },
-  {
-    tool: 'run_shell',
+    taskId: 'sub-1',
     status: 'running',
-    input: { command: 'bun run test apps/desktop/.probe' },
-    startedAt: NOW - 6000
+    subagentType: 'explore',
+    description: '找出所有还在自己写左边距的停靠区行',
+    startedAt: new Date(at(20)).toISOString(),
+    finishedAt: null,
+    activities: [
+      { id: 'a1', toolName: 'grep_search', summary: 'read apps/desktop/src/renderer/assets/app.css · 12 处命中' },
+      { id: 'a2', toolName: 'read_file', summary: 'read apps/desktop/src/renderer/src/ChatView.jsx · 2200-2260' }
+    ]
+  },
+  {
+    taskId: 'sub-2',
+    parentTaskId: 'sub-1',
+    status: 'running',
+    subagentType: 'review',
+    description: '核对这几行的左边距来自哪里',
+    startedAt: new Date(at(46)).toISOString(),
+    finishedAt: null,
+    activities: []
+  },
+]
+
+const BACKGROUND_TASKS = [
+  {
+    id: 'bg-3',
+    shell: '/bin/zsh',
+    status: 'running',
+    command: 'npx vite --config .probe/dock-rows/vite.config.mjs',
+    startedAt: new Date(at(52)).toISOString()
+  },
+  {
+    id: 'bg-4',
+    shell: '/bin/bash',
+    status: 'running',
+    command: 'tail -f /tmp/mica-demo.log',
+    startedAt: new Date(at(64)).toISOString()
+  },
+  {
+    // 结束的后台任务不进停靠区（`keepsBackgroundTaskRow`）：这里留着是为了说明这一点，
+    // 它不会渲染出来。
+    id: 'bg-1',
+    shell: '/bin/zsh',
+    status: 'completed',
+    command: 'git status --short',
+    startedAt: new Date(at(8)).toISOString(),
+    exitCode: 0
   }
 ]
 
-const TODO_ITEMS = [
-  { status: 'completed', label: '读 CodexGo 的 skill' },
-  { status: 'completed', label: '确认本机有没有对应命令行' },
-  { status: 'in_progress', label: '把停靠区的行高对齐到同一个数' },
-  { status: 'pending', label: '跑一遍针对性测试' }
+const WAIT_TASKS = [
+  {
+    id: 'wait-1',
+    kind: 'port',
+    reason: '等探针的 dev server 起来再截图',
+    label: '127.0.0.1:5237 可连接',
+    startedAt: new Date(at(70)).toISOString(),
+    polls: 24
+  }
 ]
 
-function TurnLogHead() {
+function ComposerRow({ running = true }) {
+  // 与 `BtwDrawer.jsx` 里那段只读行首标记同构：三个类名、同一个字形。
   return (
-    <header className="chat-turn-log-head" title="拖动调整日志高度，双击复位">
-      <ArcoAction
-        iconOnly
-        type="button"
-        className="chat-turn-log-toggle"
-        aria-expanded="true"
-        aria-label="收起回合日志"
-      >
-        <IconChevronDown size={12} />
-      </ArcoAction>
-      <span className="chat-turn-log-head-label">本轮</span>
-    </header>
-  )
-}
-
-function TodoDockFixture() {
-  return (
-    <section className="chat-task-dock chat-todo-dock" aria-label="当前运行计划">
-      <ArcoAction
-        type="button"
-        className="chat-task-summary-row chat-todo-toggle mica-arco-row"
-        aria-expanded="true"
-      >
-        <span className="chat-task-kind">
-          <IconChevronRight
-            size={12}
-            className="transition-transform rotate-90"
-            aria-hidden="true"
-          />
-          <span>📝(todo)</span>
+    <div className="chat-composer probe-composer">
+      <span className="chat-prompt-mark" aria-hidden="true">
+        <span className="chat-prompt-caret">›</span>
+      </span>
+      <div className="chat-composer-input">
+        <textarea
+          rows={1}
+          readOnly
+          aria-label="对话输入"
+          placeholder={
+            running ? '消息会在下一个工具调用迭代后发送' : 'Type something and press Enter...'
+          }
+        />
+      </div>
+      <div className="chat-composer-actions">
+        <span className="probe-composer-icon">+</span>
+        <span className={`probe-composer-icon${running ? ' is-stop' : ''}`}>
+          {running ? '■' : '↑'}
         </span>
-        <span className="chat-task-status chat-task-status-pending">pending</span>
-        <span className="chat-task-runtime">2/4</span>
-        <span className="chat-task-description">2 remaining</span>
-      </ArcoAction>
-      <div className="chat-task-children">
-        {TODO_ITEMS.map((item) => (
-          <div key={item.label} className={`chat-task-child chat-todo-${item.status}`}>
-            <span className="chat-task-child-prefix"> ⎿ </span>
-            <span className="chat-task-child-marker" aria-hidden="true">
-              {item.status === 'completed' ? '✓' : item.status === 'in_progress' ? '◐' : '○'}
-            </span>
-            <span className="chat-task-description">{item.label}</span>
-          </div>
-        ))}
       </div>
-    </section>
-  )
-}
-
-function SubagentDockFixture() {
-  return (
-    <section className="chat-task-dock chat-subagent-dock" aria-label="Subagent 任务">
-      <button
-        type="button"
-        className="chat-task-summary-row chat-task-openable"
-        title="查看 subagent 详情"
-      >
-        <span className="chat-task-kind">🤖(subagent)</span>
-        <span className="chat-task-status chat-task-status-running">running</span>
-        <span className="chat-task-runtime">1m 12s</span>
-        <span className="chat-task-type">Explore</span>
-        <span className="chat-task-description">找出所有还在自己写行高的停靠区</span>
-      </button>
-      <div className="chat-task-child">
-        <span className="chat-task-child-prefix"> ⎿ </span>
-        <span className="chat-task-description">read apps/desktop/src/renderer/assets/app.css</span>
-      </div>
-    </section>
-  )
-}
-
-function BackgroundDockFixture() {
-  return (
-    <section className="chat-task-dock chat-background-dock" aria-label="运行中的后台任务">
-      <div className="chat-task-row">
-        <button type="button" className="chat-task-summary-row chat-task-openable" title="查看输出">
-          <span className="chat-task-kind">$ (zsh)</span>
-          <span className="chat-task-status chat-task-status-running">running</span>
-          <span className="chat-task-runtime">46s</span>
-          <span className="chat-task-type">bg-3</span>
-          <span className="chat-task-description">
-            npx vite --config .probe/dock-rows/vite.config.mjs
-          </span>
-        </button>
-        <ArcoAction
-          iconOnly
-          type="button"
-          className="chat-task-action"
-          title="终止后台任务"
-          aria-label="终止后台任务 bg-3"
-        >
-          ✕
-        </ArcoAction>
-      </div>
-    </section>
+    </div>
   )
 }
 
 /**
- * 每种行都量一遍：高度、字号、行高。行首/行尾不参与判断，只看盒子。
- *
- * 思考块是折行的段落，不是单行：它只需要是行高的整数倍（每一行都落在同一条格子上），
- * 其余每种行都必须正好等于 `--chat-log-row-height`。
+ * 一块场景 = 停靠区 + 输入条，顺序与 `ChatView` 的 `.chat-bottom-scroll` 一致。
+ * 只收生产里真会出现的那几行：子代理与后台任务在 `ChatView` 里都先过一遍可见性
+ * 过滤（跑完的不占行），这里用同一对判断函数，示例数据不会摆出产品摆不出的样子。
+ */
+function DockStack({ rounds, panel, running = true, interrupted = false }) {
+  return (
+    <div className="probe-stack">
+      <TurnLogDock
+        rounds={rounds}
+        now={NOW}
+        running={running}
+        interrupted={interrupted}
+        onOpenActivity={() => {}}
+      />
+      {/* 与 `ChatView` 一致：四块任务行放进同一张表（`.chat-task-grid`），列宽共享。 */}
+      <div className="chat-task-grid">
+        <TodoDock panel={panel} />
+        {running || interrupted ? (
+          <>
+            <SubagentStatusDock
+              tasks={SUBAGENT_TASKS.filter(keepsSubagentTaskRow)}
+              now={NOW}
+              onOpen={() => {}}
+            />
+            <BackgroundTasksDock
+              tasks={BACKGROUND_TASKS.filter(keepsBackgroundTaskRow)}
+              now={NOW}
+              onOpen={() => {}}
+              onKill={() => {}}
+            />
+            <WaitTasksDock tasks={WAIT_TASKS} now={NOW} onOpen={() => {}} />
+          </>
+        ) : null}
+      </div>
+      <ComposerRow running={running} />
+    </div>
+  )
+}
+
+function Scenario({ title, note, children }) {
+  return (
+    <section className="probe-scene">
+      <header className="probe-scene-head">
+        <span className="probe-scene-title">{title}</span>
+        <span className="probe-scene-note">{note}</span>
+      </header>
+      <div className="probe-pane">{children}</div>
+    </section>
+  )
+}
+
+function Probe() {
+  const [report, setReport] = useState(null)
+  // 展开/收起是**全局**界面状态（产品里也是一份 `ui-state`）：一处点开，所有停靠区的
+  // 标题行都跟着摊开，所以整页只有这一种状态，用页面顶部这颗按钮翻。
+  const [logOpen, setLogOpen] = useState(false)
+  const liveRounds = useMemo(() => groupActivityRounds(liveMessages), [])
+  const livePanel = useMemo(
+    () => todoPanelForTurn(liveMessages, LIVE_TURN, true, false, false, null),
+    []
+  )
+  const interruptedRounds = useMemo(
+    () => groupActivityRounds([...pastMessages, ...liveMessages]),
+    []
+  )
+  const interruptedPanel = useMemo(
+    () => todoPanelForTurn(liveMessages, LIVE_TURN, false, false, true, null),
+    []
+  )
+  const doneRounds = useMemo(() => groupActivityRounds(doneMessages), [])
+  const donePanel = useMemo(
+    () => todoPanelForTurn(doneMessages, DONE_TURN, false, false, false, null),
+    []
+  )
+
+  const toggleLog = useCallback(() => {
+    const toggle = document.querySelector('.chat-turn-log-toggle')
+    toggle?.click()
+    setLogOpen((value) => !value)
+  }, [])
+
+  useEffect(() => {
+    let cancelled = false
+    const run = () => {
+      if (cancelled) return
+      const result = measure()
+      setReport(result)
+      window.__probe = { ready: true, measure, result }
+      const out = document.getElementById('probe-out')
+      if (out)
+        out.textContent = JSON.stringify(
+          { uniform: result.uniform, heights: result.heights, rail: result.rail },
+          null,
+          2
+        )
+    }
+    // 字体换上之后行高才稳定（等宽字体先后备，宽度会影响折行行数）
+    const fonts = document.fonts?.ready ?? Promise.resolve()
+    fonts.then(() => requestAnimationFrame(() => requestAnimationFrame(run)))
+    // 改样式（HMR）、拖窗口宽度都会让盒子重新排：量取跟着重排重跑。
+    const stage = document.querySelector('.probe-stage')
+    const observer =
+      stage && typeof ResizeObserver !== 'undefined' ? new ResizeObserver(() => run()) : null
+    if (observer && stage) observer.observe(stage)
+    return () => {
+      cancelled = true
+      observer?.disconnect()
+    }
+  }, [])
+
+  const rail = report?.rail
+  const railOk = Boolean(rail?.chevronsAligned && rail?.leadsAligned)
+  return (
+    <div className="probe-stage">
+      <div className={`probe-verdict${report?.uniform ? ' is-ok' : ' is-bad'}`}>
+        {report
+          ? report.uniform
+            ? `每行 ${report.unit}px · 每种行都落在同一条格子上`
+            : `行高对不上（应为 ${report.unit}px 的整数倍）：${report.heights.join(' / ')}px`
+          : '量取中…'}
+      </div>
+      <div className={`probe-verdict${railOk ? ' is-ok' : ' is-bad'}`}>
+        {rail
+          ? `收起箭头中心 x=${rail.railX} · 行首左缘 x=${rail.leadX} · ${
+              railOk ? '箭头共线、行首齐平' : `对不上：${rail.leads
+                .map((row) => `${row.name} ${row.x}`)
+                .join(' / ')}`
+            }`
+          : '量取中…'}
+      </div>
+      <div className={`probe-verdict${rail?.columnsAligned ? ' is-ok' : ' is-bad'}`}>
+        {rail
+          ? rail.columnsAligned
+            ? `状态 / 数值 / 标识 / 描述各成一列：${rail.columns.status} · ${rail.columns.runtime} · ${rail.columns.type} · ${rail.columns.description}`
+            : `表头列没对齐：${Object.entries(rail.columns)
+                .map(([name, values]) => `${name} ${values.join('、')}`)
+                .join(' / ')}`
+          : '量取中…'}
+      </div>
+      <button type="button" className="probe-toggle" onClick={toggleLog}>
+        {logOpen ? '收起回合日志' : '展开回合日志'}
+      </button>
+      <div className="probe-scenes">
+        <Scenario
+          title="① 运行中 · 停靠区收起"
+          note="模型思考中 + todo（含子项）+ 子代理（含嵌套与活动行）+ 两个后台任务 + 一个等待条件"
+        >
+          <DockStack rounds={liveRounds} panel={livePanel} running />
+        </Scenario>
+        <Scenario title="② 中断（可回看）" note="停在这一步：日志保留、上一轮收成一行、计划标成未完成">
+          <DockStack
+            rounds={interruptedRounds}
+            panel={interruptedPanel}
+            running={false}
+            interrupted
+          />
+        </Scenario>
+        <Scenario title="③ 正常完成" note="停靠区只剩计划：三条全完成收成一行，日志按设计隐藏">
+          <DockStack rounds={doneRounds} panel={donePanel} running={false} />
+        </Scenario>
+      </div>
+      <pre id="probe-out" className="probe-out" />
+    </div>
+  )
+}
+
+/**
+ * 每种行都量一遍：高度、字号、行高；另外量轨道——收起箭头（回合日志 / todo / 输入条
+ * 行首标记）的中心必须落在同一个 x 上，标签也必须从同一个 x 开始。
  */
 function measure() {
   const base = Number.parseFloat(
@@ -195,78 +418,72 @@ function measure() {
     ...pick('.chat-task-child')
   ]
   const heights = [...new Set(rows.map((row) => row.height))]
-  return { unit: base, uniform: rows.every((row) => row.onGrid), heights, rows }
+  return {
+    unit: base,
+    uniform: rows.every((row) => row.onGrid),
+    heights,
+    rows,
+    rail: measureRail()
+  }
 }
 
-function Probe() {
-  const [report, setReport] = useState(null)
-
-  useEffect(() => {
-    let cancelled = false
-    const run = () => {
-      if (cancelled) return
-      const result = measure()
-      setReport(result)
-      window.__probe = { ready: true, measure, result }
-      const out = document.getElementById('probe-out')
-      if (out)
-        out.textContent = JSON.stringify(
-          { uniform: result.uniform, heights: result.heights },
-          null,
-          2
-        )
-    }
-    // 字体换上之后行高才稳定（等宽字体先后备，宽度会影响折行行数）
-    const fonts = document.fonts?.ready ?? Promise.resolve()
-    fonts.then(() => requestAnimationFrame(() => requestAnimationFrame(run)))
-    return () => {
-      cancelled = true
-    }
-  }, [])
-
-  return (
-    <div className="probe-stage">
-      <div className={`probe-verdict${report?.uniform ? ' is-ok' : ' is-bad'}`}>
-        {report
-          ? report.uniform
-            ? `每行 ${report.unit}px · 每种行都落在同一条格子上`
-            : `行高对不上（应为 ${report.unit}px 的整数倍）：${report.heights.join(' / ')}px`
-          : '量取中…'}
-      </div>
-      <div className="probe-dock">
-        <section className="chat-turn-log" aria-label="当前回合的思考与工具日志">
-          <TurnLogHead />
-          <div className="chat-turn-log-scroll">
-            <div className="chat-turn-log-round is-current">
-              <div className="chat-turn-log-round-body">
-                <ReasoningRow text={THINKING_ONE_LINE} />
-                {TOOLS.map((tool, index) => (
-                  <ToolActivityRow key={index} tool={tool} now={NOW} />
-                ))}
-                <ReasoningRow text={THINKING_MULTI} />
-              </div>
-            </div>
-          </div>
-        </section>
-        <TodoDockFixture />
-        <SubagentDockFixture />
-        <BackgroundDockFixture />
-        {/* 另外两个消费者（subagent 详情弹窗的时间线、By The Way 抽屉）拿到的是同一套行，
-            放在这里是为了顺手核对它们没有把行高改回去。 */}
-        <div className="probe-elsewhere">
-          <div className="chat-activity-log">
-            <ReasoningRow text={THINKING_ONE_LINE} />
-            <ToolActivityRow tool={TOOLS[0]} now={NOW} />
-          </div>
-          <div className="chat-btw-activity">
-            <ReasoningRow text={THINKING_ONE_LINE} />
-            <ToolActivityRow tool={TOOLS[1]} now={NOW} />
-          </div>
-        </div>
-      </div>
-      <pre id="probe-out" className="probe-out" />
-    </div>
-  )
+function measureRail() {
+  const round = (value) => Math.round(value * 100) / 100
+  const scene = document.querySelector('.probe-pane')
+  if (!scene) return null
+  const left = scene.getBoundingClientRect().left
+  const centerOf = (selector) => {
+    const element = scene.querySelector(selector)
+    if (!element) return null
+    const rect = element.getBoundingClientRect()
+    return round(rect.left + rect.width / 2 - left)
+  }
+  const startOf = (selector) => {
+    const element = scene.querySelector(selector)
+    return element ? round(element.getBoundingClientRect().left - left) : null
+  }
+  // ① 收起箭头：有折叠图标的行，箭头中心必须在同一条竖线上。
+  const chevrons = [
+    { name: '回合日志标题', selector: '.chat-turn-log-head .chat-turn-log-toggle svg' },
+    { name: 'todo', selector: '.chat-todo-toggle .chat-task-lead svg' },
+    { name: '输入条行首标记', selector: '.probe-composer .chat-prompt-caret' }
+  ].map((row) => ({ ...row, x: centerOf(row.selector) }))
+  // ② 行首：每一行的第一个图形（箭头或种类图标）都贴在同一条左边缘上。
+  const leads = [
+    { name: '回合日志标题', selector: '.chat-turn-log-head .chat-turn-log-toggle' },
+    { name: 'todo 箭头', selector: '.chat-todo-toggle .chat-task-lead' },
+    { name: 'subagent 图标', selector: '.chat-subagent-dock > div > .chat-task-summary-row .chat-task-kind' },
+    { name: '后台任务图标', selector: '.chat-background-dock .chat-task-kind' },
+    { name: '等待条件图标', selector: '.chat-wait-dock .chat-task-kind' },
+    { name: '输入条行首标记', selector: '.probe-composer .chat-prompt-caret' }
+  ].map((row) => ({ ...row, x: startOf(row.selector) }))
+  // ③ 表头各列：状态 / 数值 / 标识 / 描述在每一行都必须落在同一个 x 上。
+  const columnOf = (selector) =>
+    [...scene.querySelectorAll(selector)]
+      .map((element) => round(element.getBoundingClientRect().left - left))
+      .filter((value, index, all) => all.indexOf(value) === index)
+  // 只比「顶层的行」：嵌套子代理与活动行本来就缩进，不在这几列上。
+  const topRow = ':not(.chat-task-summary-row-nested)'
+  const columns = {
+    status: columnOf(`.chat-task-summary-row${topRow} .chat-task-status`),
+    runtime: columnOf(`.chat-task-summary-row${topRow} .chat-task-runtime`),
+    type: columnOf(`.chat-task-summary-row${topRow} .chat-task-type`),
+    description: columnOf(`.chat-task-summary-row${topRow} .chat-task-description`)
+  }
+  const sameX = (rows) => {
+    const values = rows.map((row) => row.x).filter((value) => value != null)
+    return values.length > 0 && values.every((value) => Math.abs(value - values[0]) < 0.51)
+  }
+  return {
+    railX: chevrons[0]?.x ?? null,
+    leadX: leads[0]?.x ?? null,
+    chevrons,
+    leads,
+    columns,
+    chevronsAligned: sameX(chevrons),
+    leadsAligned: sameX(leads),
+    columnsAligned: Object.values(columns).every((values) => values.length <= 1)
+  }
 }
 
 createRoot(document.getElementById('root')).render(

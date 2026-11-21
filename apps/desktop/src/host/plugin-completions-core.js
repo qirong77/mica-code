@@ -29,8 +29,9 @@ function micaHome() {
 function sourceOf(pluginId, declaredId) {
   return {
     kind: 'plugin',
-    // 运行期 id 带 `user.` 前缀（用户插件与官方插件共用一套名字），标记上只留可读的那半
-    label: `插件 ${declaredId}`,
+    // 运行期 id 带 `user.` 前缀（用户插件与官方插件共用一套名字），标记上只留可读的那半。
+    // `mica-plugin:` 这层前缀由渲染层按 kind 拼（chat-completions.js），宿主只给实体名。
+    label: declaredId,
     detail: pluginId
   }
 }

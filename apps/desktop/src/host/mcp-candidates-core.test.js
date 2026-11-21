@@ -70,14 +70,14 @@ describe('composer MCP candidates', () => {
           name: 'mica-browser',
           type: 'http',
           tools: ['control'],
-          source: { kind: 'builtin', label: '内置' },
+          source: { kind: 'builtin', label: 'browser' },
           url: 'http://127.0.0.1:8787/mcp/browser'
         },
         {
           name: 'mica-terminal',
           type: 'http',
           tools: ['control'],
-          source: { kind: 'builtin', label: '内置' },
+          source: { kind: 'builtin', label: 'terminal' },
           url: 'http://127.0.0.1:8787/mcp/terminal'
         }
       ])

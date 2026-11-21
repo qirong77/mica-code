@@ -221,7 +221,13 @@ describe('manifest desktop launchers', () => {
     const inline = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3C/svg%3E"
     view.webContents.emit('page-favicon-updated', {}, ['data:text/html,<b>x</b>', inline])
     expect(await f.control('web.state')).toMatchObject({ faviconUrl: inline })
+    // 单页应用加载完会在自己内部再导航一次（same-document），Chromium 不会重发图标
+    // 事件：这次加载不能把已经拿到的图标抹掉，否则卡片永远只剩地球图标。
     view.webContents.emit('did-start-loading')
+    view.webContents.emit('did-navigate-in-page')
+    expect((await f.control('web.state')).faviconUrl).toBe(inline)
+    // 图标属于它被声明的那一页：换成别的地址后不能再挂上去。
+    await f.control('web.navigate', { url: 'https://other.example/' })
     expect((await f.control('web.state')).faviconUrl).toBeUndefined()
     for (const url of ['javascript:alert(1)', 'file:///tmp/a', ' http://example.com', 'http://x:bad', 'http://u:p@example.com']) {
       await expect(f.control('web.navigate', { url })).rejects.toThrow()

@@ -61,7 +61,7 @@ describe('plugin MCP session configuration', () => {
     process.env.MICA_DESKTOP_ORIGIN = 'http://127.0.0.1:9099'
     expect(listMcpCandidates().find((candidate) => candidate.name === 'mica-plugin-demo')).toEqual({
       name: 'mica-plugin-demo', type: 'http', url: 'http://127.0.0.1:9099/plugin/demo/mcp',
-      description: '示例插件', tools: [], source: { kind: 'plugin', label: '插件 demo', detail: 'demo' }
+      description: '示例插件', tools: [], source: { kind: 'plugin', label: 'demo', detail: 'demo' }
     })
     expect(listMcpCandidates().find((candidate) => candidate.name === 'mica-plugin-notes')).toBeUndefined()
     enabled = false

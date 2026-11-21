@@ -39,8 +39,9 @@ function micaHome() {
  * 扫描目录与它的来源标记。
  *
  * `label` 是浮层里那枚小标记的文字，取相对形态而不是绝对路径：项目级目录写成
- * `.mica/skills`，用户级写成 `$MICA_HOME/skills`——两者在列表里同时出现时，靠这几个字
- * 就能分清「项目里那份」和「家里的那份」。完整路径留在 `detail` 里给悬停用。
+ * `.mica/skills`，用户级写成 `~/.mica/skills`——两者在列表里同时出现时，靠这几个字就能
+ * 分清「项目里那份」和「家里的那份」，而且和 `~/.agents/skills` 是同一种写法（不出现
+ * 只有配置里才该有的 `$MICA_HOME`）。真实位置由候选上的 `path`（SKILL.md 绝对路径）说明。
  */
 export function skillDirEntries(cwd) {
   const entries = []
@@ -60,7 +61,7 @@ export function skillDirEntries(cwd) {
   }
   entries.push({
     dir: join(micaHome(), 'skills'),
-    source: { kind: 'user', label: '$MICA_HOME/skills' }
+    source: { kind: 'user', label: '~/.mica/skills' }
   })
   if (!process.env.MICA_HOME) {
     entries.push(
@@ -180,9 +181,11 @@ function publishedSkills(role) {
     path: skill.path,
     description: truncateDescription(skill.description),
     // 插件 id 带 `user.` 前缀（用户插件与官方插件共用一套索引），标记上只留可读的那半。
+    // `label` 只写实体名：`mica · plugin ·` 这两段由渲染层按 `kind` 拼
+    // （chat-completions.js），宿主不写给人看的修饰词，换说法时不用动扫描。
     source: {
       kind: 'plugin',
-      label: `插件 ${skill.pluginId.replace(/^user\./, '')}`,
+      label: skill.pluginId.replace(/^user\./, ''),
       detail: skill.pluginId
     }
   }))
@@ -229,7 +232,7 @@ function declaredSkills() {
         path: join(skill.baseDir, 'SKILL.md'),
         description: truncateDescription(skill.description),
         // 与索引那条用同一个写法，否则同一个 skill 在「跑过会话前后」会换一个标记
-        source: { kind: 'plugin', label: `插件 ${manifest.id}`, detail: pluginId }
+        source: { kind: 'plugin', label: manifest.id, detail: pluginId }
       })
     }
   }

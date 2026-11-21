@@ -29,6 +29,44 @@ export const FILE_COMPLETION_DEBOUNCE_MS = 100
 export const COMPLETION_SOURCE_KINDS = ['builtin', 'plugin', 'project', 'user', 'config']
 
 /**
+ * 来源标记的两段命名，按 `kind` 取：`<owner> · <category> · <实体名>`。
+ *
+ * 宿主只给实体名（插件 id、内置 server 名、配置文件名、目录），归属与类别由这一层补，
+ * 于是列表里每一枚标记都是同一个三段形状——不混中文、不混大小写、不出现 `mica-xxx` 与
+ * `$MICA_HOME` 这种只在配置里才该有的写法。owner 只有两个值：随包来的 `mica`、你自己的
+ * `you`；category 就是「它从哪来」：内置能力 / 插件 / 你的 config.json / 你的技能目录。
+ */
+const COMPLETION_SOURCE_LABELS = {
+  builtin: ['mica', 'builtin'],
+  plugin: ['mica', 'plugin'],
+  config: ['you', 'config'],
+  project: ['you', 'project'],
+  user: ['you', 'user']
+}
+
+/**
+ * 只参与搜索、不显示的中文别名。
+ *
+ * 标记改成英文之后，「按插件两个字找插件带来的条目」这个习惯不能跟着丢：排序用的
+ * `searchLabel` 把它们一起带上，匹配照旧，界面上不出现。
+ */
+const COMPLETION_SOURCE_KEYWORDS = {
+  builtin: '内置',
+  plugin: '插件',
+  config: '配置',
+  project: '项目',
+  user: '用户'
+}
+
+/** 来源标记的显示文字：`<owner> · <category> · <实体名>`，没有实体名时只留前两段。 */
+export function completionSourceText(source) {
+  const labels = COMPLETION_SOURCE_LABELS[source?.kind]
+  if (!labels) return ''
+  const label = String(source?.label ?? '').trim()
+  return [...labels, ...(label ? [label] : [])].join(' · ')
+}
+
+/**
  * 光标前是否正处在一个补全触发里；是则返回 `{ kind, start, query }`。
  *
  * `/`：**自己在词首**（文本开头或空白之后）且到光标之间没有空白/斜杠，所以 `/` 不必在
@@ -135,8 +173,8 @@ export function rankCompletions(items, query, limit = SKILL_COMPLETION_LIMIT) {
   list.forEach((item, index) => {
     const target = String(item?.name ?? '').toLowerCase()
     const description = String(item?.description ?? '').toLowerCase()
-    // 来源标记也参与匹配：用户会按「插件」两个字找插件带来的那些。
-    const source = String(item?.sourceLabel ?? '').toLowerCase()
+    // 来源也参与匹配：用户会按「插件」「mica」这类字找某一类带来的那些。
+    const source = String(item?.searchLabel ?? '').toLowerCase()
     let rank = -1
     if (target === q) rank = 0
     else if (target.startsWith(q)) rank = 1
@@ -172,21 +210,21 @@ export function slashCompletionOptions(
       item: skill,
       name: String(skill?.name ?? ''),
       description: skillDescription(skill),
-      sourceLabel: sourceOf(skill)?.label ?? ''
+      searchLabel: sourceSearchLabel(skill)
     })),
     ...(Array.isArray(mcpServers) ? mcpServers : []).map((server) => ({
       kind: 'mcp',
       item: server,
       name: String(server?.name ?? ''),
       description: mcpDescription(server),
-      sourceLabel: sourceOf(server)?.label ?? ''
+      searchLabel: sourceSearchLabel(server)
     })),
     ...(Array.isArray(completions) ? completions : []).map((completion) => ({
       kind: 'prompt',
       item: completion,
       name: String(completion?.name ?? ''),
       description: String(completion?.description ?? ''),
-      sourceLabel: sourceOf(completion)?.label ?? ''
+      searchLabel: sourceSearchLabel(completion)
     }))
   ]
   const ranked = rankCompletions(entries, query, limit)
@@ -207,7 +245,8 @@ export function filterSlashCompletionOptions(items, kind, limit = SKILL_COMPLETI
  *
  * 宿主给的是 `{ kind, label, detail? }`；`kind` 不在白名单里（宿主升级、字段写错）时整条
  * 丢掉，而不是在界面上画一个看不懂的标记。`detail` 是悬停时看的完整位置（SKILL.md 路径、
- * config.json 路径、插件 id）。
+ * config.json 路径、插件 id）。`label` 是实体名（插件 id、server 的可读名、配置文件名），
+ * 显示时由 `completionSourceText` 补上前两段（`mica · plugin ·`）。
  */
 function sourceOf(item) {
   const raw = item?.source
@@ -219,10 +258,34 @@ function sourceOf(item) {
   return { kind, label, ...(detail ? { detail } : {}) }
 }
 
+/**
+ * 参与排序的来源文本：显示文字 + 只在中文字面里才有的叫法。
+ *
+ * 标记写成 `mica · plugin · x` 之后，「插件」两个字从界面上消失了，但用户的搜索习惯还在
+ * ——别名只进这一个字段，不参与显示。
+ */
+function sourceSearchLabel(item) {
+  const source = sourceOf(item)
+  if (!source) return ''
+  const keyword = COMPLETION_SOURCE_KEYWORDS[source.kind] ?? ''
+  return `${completionSourceText(source)} ${keyword}`.trim()
+}
+
+/**
+ * 浮层选项上的来源字段。
+ *
+ * `source` 原样留着（悬停要它的 `detail`），`sourceText` 是行上那枚标记的文字。排序用的
+ * 别名不在这里——它在 `slashCompletionOptions` 交给 `rankCompletions` 的入口上。
+ */
+function sourceFields(item) {
+  const source = sourceOf(item)
+  if (!source) return {}
+  return { source, sourceText: completionSourceText(source) }
+}
+
 function skillOption(skill, query) {
   const name = String(skill?.name ?? '')
   const description = skillDescription(skill)
-  const source = sourceOf(skill)
   return {
     key: `skill:${name}`,
     kind: 'skill',
@@ -230,7 +293,7 @@ function skillOption(skill, query) {
     path: String(skill?.path ?? ''),
     label: `/${name}`,
     description,
-    ...(source ? { source, sourceLabel: source.label } : {}),
+    ...sourceFields(skill),
     // label 前面多了一个 `/`，名称里的下标整体右移一位
     highlights: matchIndexes(name, query).map((index) => index + 1),
     descriptionHighlights: matchIndexes(description, query)
@@ -271,7 +334,7 @@ function mcpOption(server, query) {
     tools,
     label,
     description,
-    ...(source ? { source, sourceLabel: source.label } : {}),
+    ...sourceFields(server),
     // label 前面多了 `mcp:` 四个字符，名称里的下标整体右移
     highlights: matchIndexes(name, query).map((index) => index + 'mcp:'.length),
     descriptionHighlights: matchIndexes(description, query)
@@ -286,7 +349,6 @@ function mcpOption(server, query) {
 function promptOption(completion, query) {
   const name = String(completion?.name ?? '')
   const description = String(completion?.description ?? '')
-  const source = sourceOf(completion)
   return {
     key: `prompt:${completion?.pluginId ?? ''}:${name}`,
     kind: 'prompt',
@@ -294,7 +356,7 @@ function promptOption(completion, query) {
     insert: String(completion?.insert ?? ''),
     label: `/${name}`,
     description,
-    ...(source ? { source, sourceLabel: source.label } : {}),
+    ...sourceFields(completion),
     // label 前面多了 `/`，名称里的下标整体右移一位
     highlights: matchIndexes(name, query).map((index) => index + 1),
     descriptionHighlights: matchIndexes(description, query)

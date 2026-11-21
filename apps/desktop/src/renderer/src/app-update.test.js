@@ -45,9 +45,10 @@ test('shows immediate checking and error states without inventing an empty actio
     label: '更新失败',
     tone: 'primary'
   })
+  // 不支持自动更新的环境不常驻底部入口，避免出现点不开任何更新的「更新说明」。
   assert.deepEqual(updateButtonState(null, { status: 'unsupported', reason: 'local-build' }), {
-    visible: true,
-    label: '更新说明',
+    visible: false,
+    label: '',
     tone: undefined
   })
 })
@@ -256,7 +257,7 @@ test('unsupported native capabilities retain their specific reason, message, rel
     assert.match(details.detail, /正式 Release 下载页/)
     assert.equal(nativeFailureMessage(result), details.detail)
     assert.equal(updateButtonState({ available: true }, outcome.status).label, '有新提交')
-    assert.equal(updateButtonState(null, outcome.status).label, '更新说明')
+    assert.equal(updateButtonState(null, outcome.status).visible, false)
     if (reason !== 'development') assert.notEqual(details.mode, '源码 / 开发模式')
   }
 })

@@ -63,7 +63,7 @@ describe('插件补全候选', () => {
     expect(entries[0]).toMatchObject({
       name: 'role',
       insert: '用 demand_role 写回：',
-      source: { kind: 'plugin', label: '插件 demand-dev', detail: 'user.demand-dev' }
+      source: { kind: 'plugin', label: 'demand-dev', detail: 'user.demand-dev' }
     })
   })
 

@@ -73,6 +73,18 @@ export function siteFavicon(favicons, url) {
   return (origin && favicons && favicons[origin]) || '';
 }
 
+/**
+ * The icon to store for an address. A push that carries one always wins; otherwise
+ * the icon this address announced earlier is used, because a page announces its icon
+ * once and later states for the same address may arrive without it (a single-page
+ * app navigating within itself, a reload that keeps the icon).
+ */
+export function iconToRemember(faviconUrl, url, seen) {
+  if (typeof faviconUrl === 'string' && faviconUrl) return faviconUrl;
+  const known = url && seen && typeof seen.get === 'function' ? seen.get(url) : '';
+  return typeof known === 'string' ? known : '';
+}
+
 function SiteEntry({ url, favicons, favorite, onOpen, onToggle, loadIcon }) {
   const faviconUrl = siteFavicon(favicons, url);
   return <div className="floatingwindow-site">
@@ -123,6 +135,7 @@ export function Launcher({ api }) {
   const version = useRef(0);
   const recentVersion = useRef(0);
   const iconCache = useRef(new Map());
+  const seenIcons = useRef(new Map());
 
   /**
    * Load one site's stored collections. Every path that shows the welcome page goes
@@ -204,6 +217,15 @@ export function Launcher({ api }) {
       if (!dirty.current) setAddress(url);
       if (!url) lastQueued.current = null;
       const faviconUrl = typeof next.faviconUrl === 'string' ? next.faviconUrl : '';
+      // The host announces a page's icon once. A later state for the same address may
+      // carry none (a single-page app navigating within itself, a reload that keeps
+      // the icon), and remembering then would store nothing — so keep the icon seen
+      // for this address and use it whenever that address is recorded.
+      if (url && faviconUrl) {
+        const seen = seenIcons.current;
+        if (seen.size >= 50) seen.clear();
+        seen.set(url, faviconUrl);
+      }
       const decided = seedAfterPush(opened.current, url, !!next.loading);
       opened.current = decided.seed;
       const replaces = decided.replaces;
@@ -212,7 +234,7 @@ export function Launcher({ api }) {
         clearTimeout(saveTimer.current);
         saveTimer.current = setTimeout(() => {
           if (!live) return;
-          void rememberSite(url, faviconUrl, replaces);
+          void rememberSite(url, iconToRemember(faviconUrl, url, seenIcons.current), replaces);
         }, 400);
       }
     };
@@ -278,8 +300,11 @@ export function Launcher({ api }) {
       // fail or ignore the load, and a missing/slow state push must not cost the
       // visit its place in 最近访问.
       opened.current = { url, from: latest.current };
-      lastQueued.current = { url, faviconUrl: '', replaces: '' };
-      void rememberSite(url);
+      // A page opened again already knows its icon from an earlier visit; reusing it
+      // keeps the card's icon even when this load never re-announces one.
+      const known = iconToRemember('', url, seenIcons.current);
+      lastQueued.current = { url, faviconUrl: known, replaces: '' };
+      void rememberSite(url, known);
       if (editVersion.current === submittedVersion) {
         if (mounted.current && version.current === startedVersion) setAddress(url);
       }

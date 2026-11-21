@@ -159,6 +159,7 @@ export function createPluginLaunchers({
       error: '',
       webError: '',
       webFavicon: '',
+      webFaviconFor: '',
       webIcons: null,
       settingsPath: null,
       onSettings: null
@@ -209,13 +210,20 @@ export function createPluginLaunchers({
   function webState(record) {
     const wc = record.view.webContents
     const url = wc.getURL()
+    const stateUrl = record.webHome || url === 'about:blank' ? '' : url
     return {
-      url: record.webHome || url === 'about:blank' ? '' : url,
+      url: stateUrl,
       home: record.webHome,
       canGoBack: wc.navigationHistory.canGoBack(),
       canGoForward: wc.navigationHistory.canGoForward(),
       loading: wc.isLoading(),
-      ...(record.webFavicon ? { faviconUrl: record.webFavicon } : {}),
+      // An icon belongs to the page it was reported for. Keyed by URL instead of
+      // cleared on every load, because a single-page app reports its icon once and
+      // then navigates within itself: clearing on the next `did-start-loading` threw
+      // the icon away for good, since Chromium only re-announces a *changed* icon.
+      ...(record.webFavicon && record.webFaviconFor && record.webFaviconFor === stateUrl
+        ? { faviconUrl: record.webFavicon }
+        : {}),
       ...(record.webError ? { error: record.webError } : {})
     }
   }
@@ -293,10 +301,7 @@ export function createPluginLaunchers({
     })
     for (const event of ['did-navigate', 'did-navigate-in-page', 'did-start-loading', 'did-stop-loading']) {
       wc.on(event, () => {
-        if (event === 'did-start-loading') {
-          record.webError = ''
-          record.webFavicon = ''
-        }
+        if (event === 'did-start-loading') record.webError = ''
         pushWebState(id, record)
       })
     }
@@ -308,6 +313,7 @@ export function createPluginLaunchers({
         return allowedWebUrl(value) || Boolean(inlineIconDataUrl(value))
       }) : ''
       record.webFavicon = candidate || ''
+      record.webFaviconFor = candidate ? wc.getURL() : ''
       pushWebState(id, record)
     })
     wc.on('did-fail-load', (_event, code, description, _url, mainFrame) => {
@@ -435,12 +441,12 @@ export function createPluginLaunchers({
         showWebContent(record)
         record.webHome = false
         record.webError = ''
-        record.webFavicon = ''
         void wc.loadURL(url).catch(() => {})
       } else if (action === 'web.home') {
         record.webHome = true
         record.webError = ''
         record.webFavicon = ''
+        record.webFaviconFor = ''
         hideWebContent(record)
         pushWebState(pluginId, record)
       } else if (action === 'web.back') {

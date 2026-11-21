@@ -5,7 +5,9 @@ import { IconCommand } from '@tabler/icons-react'
  * 输入框上方的补全候选浮层（`@` 文件 / `/` skill）。
  *
  * 只负责展示与选中回调，选中后怎么改写输入框由 ChatView 决定——这里不执行任何动作。
- * 能力补全以卡片展示名称、说明、类型和来源；文件补全仍保留紧凑列表。
+ * 两种补全都是紧凑的单行：`/` 的能力行在最前面多一枚类型图标（S / M / P），来源写成
+ * `mica · plugin · computer-use` 这种三段的一枚标记——一行放得下「叫什么、干什么、哪来的」，
+ * 一屏能扫十几条；说明被截成一行，全文在悬停提示里。
  * 名称与说明里命中查询的字符都会高亮（`highlights` / `descriptionHighlights` 是下标数组）。
  *
  * 滚动只发生在候选列表（`.chat-command-palette-body`）上：标题行与键位提示固定在顶部，
@@ -82,52 +84,22 @@ export default function ComposerCompletionPalette({
             onMouseDown={(event) => event.preventDefault()}
             onClick={() => onSelect(item)}
           >
-            {isCapabilities ? (
-              <>
-                <CompletionCardIcon kind={item.kind} />
-                <span className="chat-completion-card-content">
-                  <HighlightedLabel text={item.label} highlights={item.highlights} />
-                  <span className="chat-command-description">
-                    <HighlightedText
-                      text={item.description || ''}
-                      highlights={item.descriptionHighlights}
-                    />
-                  </span>
-                </span>
-                <span className="chat-completion-card-index">
-                  {String(index + 1).padStart(2, '0')}
-                </span>
-                <span className="chat-completion-card-meta">
-                  <CompletionKindTag kind={item.kind} />
-                  {item.source && (
-                    <span
-                      className={`chat-command-source is-${item.source.kind}`}
-                      title={item.source.detail || undefined}
-                    >
-                      {item.source.label}
-                    </span>
-                  )}
-                </span>
-              </>
-            ) : (
-              <>
-                <HighlightedLabel text={item.label} highlights={item.highlights} />
-                <span className="chat-command-description">
-                  <HighlightedText
-                    text={item.description || ''}
-                    highlights={item.descriptionHighlights}
-                  />
-                </span>
-                <CompletionKindTag kind={item.kind} />
-                {item.source && (
-                  <span
-                    className={`chat-command-source is-${item.source.kind}`}
-                    title={item.source.detail || undefined}
-                  >
-                    {item.source.label}
-                  </span>
-                )}
-              </>
+            {isCapabilities && <CompletionKindIcon kind={item.kind} />}
+            <HighlightedLabel text={item.label} highlights={item.highlights} />
+            <span className="chat-command-description">
+              <HighlightedText
+                text={item.description || ''}
+                highlights={item.descriptionHighlights}
+              />
+            </span>
+            <CompletionKindTag kind={item.kind} />
+            {item.sourceText && (
+              <span
+                className={`chat-command-source is-${item.source.kind}`}
+                title={item.source.detail || undefined}
+              >
+                {item.sourceText}
+              </span>
             )}
           </button>
         ))}
@@ -142,14 +114,17 @@ export default function ComposerCompletionPalette({
  * 只认 `/` 浮层里的三类：skill、MCP server 与插件声明的条目（`prompt`）。`@` 文件补全的
  * `file` 不画标记——那里一整屏都是文件，标一排「file」只是噪声。
  */
-const COMPLETION_KIND_LABELS = { skill: 'skill', mcp: 'MCP', prompt: 'plugins' }
+// 这三枚说明「这一条是什么」：skill、MCP server、插件声明的一段提示词。来源（`mica · plugin ·`
+// 那枚）已经在右边说清归属，这里不必再写一遍 `plugin`；顶部筛选按钮叫 `plugins`，它筛的是
+// 「清单声明的条目」这一整类。
+const COMPLETION_KIND_LABELS = { skill: 'skill', mcp: 'MCP', prompt: 'prompt' }
 
-const COMPLETION_CARD_MARKS = { skill: 'S', mcp: 'M', prompt: 'P' }
+const COMPLETION_KIND_MARKS = { skill: 'S', mcp: 'M', prompt: 'P' }
 
-function CompletionCardIcon({ kind }) {
-  const mark = COMPLETION_CARD_MARKS[kind] || '·'
+function CompletionKindIcon({ kind }) {
+  const mark = COMPLETION_KIND_MARKS[kind] || '·'
   return (
-    <span aria-hidden="true" className={`chat-completion-card-icon is-${kind || 'unknown'}`}>
+    <span aria-hidden="true" className={`chat-completion-row-icon is-${kind || 'unknown'}`}>
       {mark}
     </span>
   )
@@ -161,9 +136,15 @@ function CompletionKindTag({ kind }) {
   return <span className={`chat-command-kind is-${kind}`}>{label}</span>
 }
 
-/** 悬停提示：出处（插件 id / 配置文件）与「会插进去的东西」都摊开，不给原生 title 猜。 */
+/**
+ * 悬停提示：说明全文 + 出处（插件 id / 配置文件）+「会插进去的东西」。
+ *
+ * 行只放得下一行截断的说明，全文在这里补上；后两行与出处各自的 `detail` 相同，所以重复的
+ * 那一段不再写第二遍。
+ */
 function completionTitle(item) {
   const lines = []
+  if (item?.description) lines.push(String(item.description))
   if (item?.source?.detail && item.source.detail !== item.path) lines.push(item.source.detail)
   if (item?.path) lines.push(item.path)
   return lines.length > 0 ? lines.join('\n') : undefined

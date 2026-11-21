@@ -56,7 +56,9 @@ export function builtinMcpCandidates(env = process.env) {
         type: 'http',
         // 这两个 server 只有一个 tool，名字是契约的一部分（见 control-mcp.js），不必探测。
         tools: [CONTROL_TOOL_NAME],
-        source: { kind: 'builtin', label: '内置' },
+        // 只给实体名（`browser` / `terminal`，不带 server 名里的 `mica-`），归属与类别的
+        // `mica · builtin · ` 由渲染层按 kind 拼（见 chat-completions.js）
+        source: { kind: 'builtin', label: kind },
         ...(url ? { url } : {})
       }
     })

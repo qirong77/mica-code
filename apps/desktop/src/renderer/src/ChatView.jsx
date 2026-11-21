@@ -1136,7 +1136,8 @@ function SubagentTaskRowView({ task, childrenByParent, depth = 0, nowMs, onOpen 
   const childTasks = childrenByParent.get(task.taskId) || []
   const endMs = Date.parse(task.finishedAt) || nowMs
   const age = formatLogElapsed(Math.max(0, endMs - (Date.parse(task.startedAt) || endMs)))
-  const indent = Math.min(depth * 14, 42)
+  // 子层从轨道的标签列（`--chat-rail-label-x`）起画 `⎿`，每深一层再进 14px。
+  const indent = Math.min(Math.max(0, depth - 1) * 14, 42)
   // 与 CLI SubagentTaskRow 对齐：嵌套行（depth > 0）和活动行共用同一个
   // ` ⎿ ` 前缀（⎿ 列对齐），并随深度缩进；5 列 grid 放不下第 6 个前缀格，
   // 嵌套行改用 flex 布局。
@@ -1151,20 +1152,28 @@ function SubagentTaskRowView({ task, childrenByParent, depth = 0, nowMs, onOpen 
     </>
   )
   return (
-    <div>
+    <div className="chat-task-group">
       <button
         type="button"
         className={`chat-task-summary-row chat-task-openable ${
           depth > 0 ? 'chat-task-summary-row-nested' : ''
         }`}
-        style={depth > 0 ? { paddingLeft: indent } : undefined}
+        style={
+          depth > 0
+            ? { paddingLeft: `calc(var(--chat-rail-label-x) + ${indent}px)` }
+            : undefined
+        }
         title="查看 subagent 详情"
         onClick={() => onOpen?.(task)}
       >
         {summaryRow}
       </button>
       {activities.map((activity) => (
-        <div className="chat-task-child" key={activity.id} style={{ paddingLeft: indent }}>
+        <div
+          className="chat-task-child"
+          key={activity.id}
+          style={{ paddingLeft: `calc(var(--chat-rail-label-x) + ${indent}px)` }}
+        >
           <span className="chat-task-child-prefix"> ⎿ </span>
           <span className="chat-task-description">{compactLine(activity.summary, 180)}</span>
         </div>
@@ -1183,7 +1192,9 @@ function SubagentTaskRowView({ task, childrenByParent, depth = 0, nowMs, onOpen 
   )
 }
 
-function SubagentStatusDock({ tasks, now = Date.now(), onOpen }) {
+// 导出给界面探针用（`.probe/dock-rows`）：预览页要拿**真组件**配假数据看版式，
+// 手抄一份标记迟早和产品漂移。
+export function SubagentStatusDock({ tasks, now = Date.now(), onOpen }) {
   const { roots, childrenByParent } = useMemo(() => buildTaskForest(tasks), [tasks])
   if (!roots.length) return null
   return (
@@ -1201,7 +1212,7 @@ function SubagentStatusDock({ tasks, now = Date.now(), onOpen }) {
   )
 }
 
-function BackgroundTasksDock({ tasks, now = Date.now(), onOpen, onKill, killingId }) {
+export function BackgroundTasksDock({ tasks, now = Date.now(), onOpen, onKill, killingId }) {
   if (!tasks.length) return null
   return (
     <section className="chat-task-dock chat-background-dock" aria-label="运行中的后台任务">
@@ -1239,7 +1250,7 @@ function BackgroundTasksDock({ tasks, now = Date.now(), onOpen, onKill, killingI
   )
 }
 
-function WaitTasksDock({ tasks, now = Date.now(), onOpen }) {
+export function WaitTasksDock({ tasks, now = Date.now(), onOpen }) {
   if (!tasks.length) return null
   return (
     <section className="chat-task-dock chat-wait-dock" aria-label="等待中的条件">
@@ -2105,10 +2116,12 @@ export function TodoDock({ panel }) {
         aria-expanded={open}
         onClick={() => setExpanded(!open)}
       >
-        <span className="chat-task-kind">
+        {/* 箭头独占轨道列，标签从轨道标签列开始：与回合日志标题、subagent、后台任务
+            那几行的箭头与标签落在同一条竖线上。 */}
+        <span className="chat-task-lead">
           <IconChevronRight size={12} className={`transition-transform${open ? ' rotate-90' : ''}`} aria-hidden="true" />
-          <span>📝(todo)</span>
         </span>
+        <span className="chat-task-kind">📝(todo)</span>
         <span className={`chat-task-status chat-task-status-${status}`}>{status}</span>
         <span className="chat-task-runtime">
           {progress.completed}/{progress.total}
@@ -2266,7 +2279,7 @@ function TurnLogRound({ round, live, framed = true, expanded, onToggle, now, onO
   )
 }
 
-function TurnLogDock({
+export function TurnLogDock({
   rounds = [],
   now = Date.now(),
   running = false,
@@ -7758,24 +7771,29 @@ export function ChatView({
               onOpenActivity={openActivityDetail}
               interrupted={todoInterrupted}
             />
-          <TodoDock key={`${nodeId}:${activityTurnId}`} panel={todoPanel} />
-          <SubagentStatusDock
-            tasks={subagentTasks.filter((task) => keepsSubagentTaskRow(task))}
-            now={taskNow}
-            onOpen={(task) => openTaskDetail('subagent', task)}
-          />
-          <BackgroundTasksDock
-            tasks={backgroundTasks.filter(keepsBackgroundTaskRow)}
-            now={taskNow}
-            onOpen={(task) => openTaskDetail('background', task)}
-            onKill={killBackgroundTask}
-            killingId={killingTaskId}
-          />
-          <WaitTasksDock
-            tasks={waitTasks}
-            now={taskNow}
-            onOpen={(task) => openTaskDetail('wait', task)}
-          />
+          {/* 计划 / 子代理 / 后台任务 / 等待合成一张表：四块共用同一套列宽（`.chat-task-grid`
+              的 subgrid），否则每行的「状态 / 数值 / 标识 / 描述」各按自己那行的内容长短
+              排，竖着看是一排错开的文字。 */}
+          <div className="chat-task-grid">
+            <TodoDock key={`${nodeId}:${activityTurnId}`} panel={todoPanel} />
+            <SubagentStatusDock
+              tasks={subagentTasks.filter((task) => keepsSubagentTaskRow(task))}
+              now={taskNow}
+              onOpen={(task) => openTaskDetail('subagent', task)}
+            />
+            <BackgroundTasksDock
+              tasks={backgroundTasks.filter(keepsBackgroundTaskRow)}
+              now={taskNow}
+              onOpen={(task) => openTaskDetail('background', task)}
+              onKill={killBackgroundTask}
+              killingId={killingTaskId}
+            />
+            <WaitTasksDock
+              tasks={waitTasks}
+              now={taskNow}
+              onOpen={(task) => openTaskDetail('wait', task)}
+            />
+          </div>
           <QueueDock
             items={queuedDisplayItems}
             onRecall={recallQueued}

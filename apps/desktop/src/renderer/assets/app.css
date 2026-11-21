@@ -589,6 +589,16 @@ html[data-appearance='light'] .chat-ask-card {
     --chat-log-font-size: 11.5px;
     --chat-log-line-height: 1.45;
     --chat-log-row-height: 20px;
+    /* 停靠区的一条竖直轨道：输入条上方那几块（回合日志标题、todo、subagent、
+       后台任务、等待条件）都是「箭头 + 标签 + 数值 + 描述」的同一种行，收起时
+       几行箭头必须落在同一条 x 上——否则一眼就是没对齐。输入条的「›」行首标记
+       也在这条轨道的第一列里（`--chat-rail-label-x` 就是它们的文字起点）。
+       `--chat-rail-inset` 是轨道距容器左边，`--chat-rail-width` 是箭头列的宽度
+       （箭头在列里居中），`--chat-rail-gap` 是列与标签之间。 */
+    --chat-rail-inset: 10px;
+    --chat-rail-width: 14px;
+    --chat-rail-gap: 8px;
+    --chat-rail-label-x: calc(var(--chat-rail-inset) + var(--chat-rail-width) + var(--chat-rail-gap));
     /* 用户消息的行高：折叠阈值（chat-collapse.js 读 computed 值）与长消息浮层
        都按这一个数对齐，不在两处各写一份。 */
     --chat-message-line-height: 1.28;
@@ -2495,9 +2505,11 @@ html[data-appearance='light'] .chat-markdown code:not(pre code) {
   display: flex;
   height: var(--chat-log-row-height);
   align-items: center;
-  gap: 6px;
+  gap: var(--chat-rail-gap);
   border-top: 1px solid var(--color-line);
-  padding: 0 14px 0 3px;
+  /* 左边距与箭头列取轨道的值：这一行的箭头和下面 todo / subagent / 后台 /
+     等待那几行（以及输入条的行首标记）落在同一条竖线上。 */
+  padding: 0 14px 0 var(--chat-rail-inset);
   cursor: ns-resize;
   touch-action: none;
   user-select: none;
@@ -2513,7 +2525,7 @@ html[data-appearance='light'] .chat-markdown code:not(pre code) {
 
 .chat-turn-log-toggle {
   display: grid;
-  width: 16px;
+  width: var(--chat-rail-width);
   height: 100%;
   flex: 0 0 auto;
   place-items: center;
@@ -3513,7 +3525,7 @@ html[data-appearance='light'] .chat-markdown code:not(pre code) {
   color: color-mix(in srgb, var(--color-fg-max) 72%, transparent);
 }
 
-/* 输入框补全（@ 文件 / / skill）：卡片网格，名称与说明分层，类型 / 来源收进卡片脚注。 */
+/* 输入框补全（@ 文件 / / skill）：两种都是单行列表，能力行前面多一枚类型图标。 */
 .chat-completion-palette {
   /* skill 可能上百条：给到能看见八九行的高度，剩下的靠列表自己滚 */
   max-height: min(330px, 46vh);
@@ -3533,23 +3545,26 @@ html[data-appearance='light'] .chat-markdown code:not(pre code) {
   gap: 10px;
 }
 
+/* 能力补全：一行放下「图标 · 叫什么 · 干什么 · 什么类型 · 哪来的」。名称列定宽，说明的
+   起点因此每行对齐（按内容取宽会变成每行错开）；说明单行截断，全文在悬停提示里。 */
+.chat-completion-palette.is-capabilities .chat-command-palette-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px;
+}
+
 .chat-completion-palette.is-capabilities .chat-command-palette-body > button:not(.arco-btn) {
-  position: relative;
-  min-height: 92px;
-  grid-template-columns: 29px minmax(0, 1fr) auto;
-  grid-template-rows: auto 1fr auto;
-  align-items: start;
-  gap: 0 9px;
-  margin: 0;
-  padding: 11px 12px;
-  border: 1px solid color-mix(in srgb, var(--color-fg-max) 9%, transparent);
-  border-radius: 7px;
-  background: var(--color-panel-hi);
+  min-height: 30px;
+  grid-template-columns: 20px 160px minmax(0, 1fr) auto auto;
+  gap: 9px;
+  padding: 4px 9px;
+  border: 1px solid transparent;
+  border-radius: 5px;
   text-align: left;
   transition:
     border-color var(--motion-fast),
-    background var(--motion-fast),
-    box-shadow var(--motion-fast);
+    background var(--motion-fast);
 }
 
 .chat-completion-palette.is-capabilities .chat-command-palette-body > button:not(.arco-btn):hover,
@@ -3557,7 +3572,7 @@ html[data-appearance='light'] .chat-markdown code:not(pre code) {
   .chat-command-palette-body
   > button:not(.arco-btn).chat-command-active {
   border-color: color-mix(in srgb, var(--color-accent) 55%, transparent);
-  background: color-mix(in srgb, var(--color-accent-subtle) 70%, var(--color-panel-hi));
+  background: color-mix(in srgb, var(--color-accent-subtle) 55%, transparent);
 }
 
 .chat-completion-palette code {
@@ -3568,53 +3583,27 @@ html[data-appearance='light'] .chat-markdown code:not(pre code) {
   white-space: nowrap;
 }
 
-.chat-completion-palette.is-capabilities .chat-command-palette-body {
+/* 类型图标：S / M / P，一行只占 20px，颜色与类型标记同一套语义。 */
+.chat-completion-row-icon {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  align-content: start;
-  gap: 8px;
-  padding: 7px;
-}
-
-.chat-completion-palette.is-capabilities .chat-select-empty {
-  grid-column: 1 / -1;
-}
-
-.chat-completion-card-icon {
-  display: grid;
-  width: 29px;
-  height: 29px;
-  grid-row: 1 / span 2;
+  width: 20px;
+  height: 20px;
   place-items: center;
-  border-radius: 7px;
+  border-radius: 5px;
   background: var(--color-overlay-strong);
   color: var(--color-fg-soft);
-  font-size: 10px;
+  font-size: 9px;
   font-weight: 700;
 }
 
-.chat-completion-card-icon.is-mcp {
+.chat-completion-row-icon.is-mcp {
   background: color-mix(in srgb, var(--color-info) 17%, transparent);
   color: var(--color-info-soft);
 }
 
-.chat-completion-card-icon.is-prompt {
+.chat-completion-row-icon.is-prompt {
   background: var(--color-accent-subtle);
   color: var(--color-accent);
-}
-
-.chat-completion-card-content {
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 5px;
-}
-
-.chat-completion-card-content > code {
-  display: block;
-  max-width: 100%;
-  color: var(--color-fg-max);
 }
 
 .chat-completion-palette .chat-command-description {
@@ -3622,30 +3611,14 @@ html[data-appearance='light'] .chat-markdown code:not(pre code) {
 }
 
 .chat-completion-palette.is-capabilities .chat-command-description {
-  display: -webkit-box;
+  /* 单行截断：一行放不下就省略，全文在悬停提示里 */
   overflow: hidden;
-  white-space: normal;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.chat-completion-card-index {
-  color: var(--color-fg-faint);
-  font-size: 9px;
-  line-height: 1.4;
-}
-
-.chat-completion-card-meta {
-  display: flex;
-  min-width: 0;
-  grid-column: 2 / -1;
-  align-items: center;
-  gap: 5px;
-  margin-top: 9px;
-}
-
-.chat-completion-card-meta .chat-command-source {
-  max-width: 150px;
+.chat-completion-palette.is-capabilities .chat-command-source {
+  max-width: 220px;
 }
 
 /* 名称里命中查询的字符（CLI 的文件补全同样高亮这一段） */
@@ -3655,10 +3628,14 @@ html[data-appearance='light'] .chat-markdown code:not(pre code) {
   color: var(--color-fg-max);
 }
 
-/* 浮层较窄时卡片退回单列；文件补全不受影响。 */
-@container (max-width: 560px) {
-  .chat-completion-palette.is-capabilities .chat-command-palette-body {
-    grid-template-columns: minmax(0, 1fr);
+/* 浮层较窄时先丢掉说明列（名称与来源比截断的说明更该留），名称列也回到按内容取宽。 */
+@container (max-width: 640px) {
+  .chat-completion-palette.is-capabilities .chat-command-palette-body > button:not(.arco-btn) {
+    grid-template-columns: 20px minmax(0, auto) auto auto;
+  }
+
+  .chat-completion-palette.is-capabilities .chat-command-description {
+    display: none;
   }
 }
 
@@ -3699,13 +3676,20 @@ html[data-appearance='light'] .chat-markdown code:not(pre code) {
   color: color-mix(in srgb, var(--color-danger) 75%, transparent);
 }
 
+.chat-task-grid,
 .chat-task-dock {
-  width: 100%;
+  display: grid;
   min-width: 0;
   /* 这几块（todo / subagent / 后台 / 等待）是回合日志的续行，不是卡片：上下内边距
      会把一行撑成「一行 + 一道缝」，行高就和日志里的行对不上了。字号与行高同样取
-     日志那一份，两边看起来才是同一种行。 */
-  padding: 0 12px;
+     日志那一份，两边看起来才是同一种行。
+     列宽是**一张表**：轨道（收起箭头／行首图标）| 种类 | 状态 | 数值 | 标识 | 描述。
+     四块共用同一套列宽（`ChatView` 用 `.chat-task-grid` 把它们包起来，各自 subgrid
+     继承），否则每行的标识与描述各按自己那行的内容长短排，竖着看就是一排错开的字。 */
+  grid-template-columns:
+    var(--chat-rail-width) 12ch 8ch max-content max-content minmax(0, 1fr);
+  column-gap: var(--chat-rail-gap);
+  padding: 0 12px 0 var(--chat-rail-inset);
   background: var(--color-canvas);
   color: var(--color-fg-soft);
   font-family: var(--chat-font);
@@ -3713,16 +3697,54 @@ html[data-appearance='light'] .chat-markdown code:not(pre code) {
   line-height: var(--chat-log-line-height);
 }
 
+/* 进了那张表的块：列宽向表继承，自己不再排一遍 */
+.chat-task-grid > .chat-task-dock {
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
+  padding: 0;
+  background: none;
+}
+
+/* 块里的每一项（行按钮、包一层的 div、可滚动的列表）都横跨整张表 */
+.chat-task-grid > .chat-task-dock > *,
+.chat-task-dock > * {
+  min-width: 0;
+  grid-column: 1 / -1;
+}
+
+/* 子代理那块每棵任务树外面还包一层：这一层也是表的一行（横跨整张表），
+   里面的行/活动行才继续按同一套列宽排。 */
+.chat-task-group {
+  display: grid;
+  min-width: 0;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
+}
+
+.chat-task-group > * {
+  min-width: 0;
+  grid-column: 1 / -1;
+}
+
 .chat-task-summary-row {
   display: grid;
-  width: 100%;
   min-width: 0;
   min-height: var(--chat-log-row-height);
-  /* 固定字段不能用 `auto`：auto track 会被 grid 拉伸，导致描述列被推到行中间。
-     用 max-content 锁住 kind/status/runtime/type，描述才会紧跟在固定列后面对齐。 */
-  grid-template-columns: 12ch 8ch max-content max-content minmax(0, 1fr);
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
   align-items: center;
-  column-gap: 8px;
+}
+
+/* 没有收起箭头位的行（子代理 / 后台任务 / 等待）：种类从轨道列起占两格，图标贴左边缘，
+   状态 / 数值 / 标识 / 描述仍落在与其它行相同的列上。 */
+.chat-task-summary-row > .chat-task-kind:first-child {
+  grid-column: 1 / 3;
+}
+
+/* 计划行没有「标识」：描述仍然落在描述那一列（标识那格空着）。宁可留一格空白，
+   也不要让「描述」这一列在计划行上往左挪——竖着看那正是最显眼的一处错位。 */
+.chat-todo-dock .chat-task-summary-row > .chat-task-description {
+  grid-column: 6 / -1;
 }
 
 /* 嵌套 subagent 行：6 个格（⎿ + 5 列），5 列 grid 放不下，改用 flex；
@@ -3730,7 +3752,15 @@ html[data-appearance='light'] .chat-markdown code:not(pre code) {
 .chat-task-summary-row-nested {
   display: flex;
   align-items: center;
-  column-gap: 8px;
+  column-gap: var(--chat-rail-gap);
+}
+
+/* 轨道上的箭头列：能收起的行（todo）在里面放箭头，箭头在列里居中。 */
+.chat-task-lead {
+  display: grid;
+  width: var(--chat-rail-width);
+  place-items: center;
+  color: var(--color-fg-dim);
 }
 
 .chat-task-summary-row-nested .chat-task-child-prefix {
@@ -3753,17 +3783,15 @@ html[data-appearance='light'] .chat-markdown code:not(pre code) {
   min-width: 0;
 }
 
-.chat-todo-dock .chat-task-summary-row {
-  grid-template-columns: 12ch 8ch max-content minmax(0, 1fr);
-}
-
-.chat-todo-dock {
-  font-family: var(--chat-font);
-}
-
 .chat-todo-dock .chat-todo-toggle.arco-btn {
   display: grid;
   height: auto;
+  /* arco 按钮自带 1px 描边：留着会把这一行的内容整体推右 1px，箭头就和上面几行
+     差一个像素，看着就是没对齐。描边由整行的 hover 底色代替。 */
+  border: 0;
+  /* 同理：arco 按钮的内容默认居中，描述列（1fr）里那截文字会被甩到行中间，
+     和其它几块（左对齐的行按钮）不是同一种排版。 */
+  text-align: left;
   padding: 0;
   font: inherit;
   line-height: inherit;
@@ -3830,6 +3858,9 @@ html[data-appearance='light'] .chat-markdown code:not(pre code) {
   min-width: 0;
   min-height: var(--chat-log-row-height);
   align-items: center;
+  /* 子行（todo 条目、subagent 的活动）从轨道标签列开始画 `⎿`：再往右就是父行的
+     标签，树形关系一眼能读出来。 */
+  padding-left: var(--chat-rail-label-x);
   color: var(--color-fg-dim);
 }
 
@@ -3860,17 +3891,30 @@ html[data-appearance='light'] .chat-markdown code:not(pre code) {
 }
 
 /* 任务行：整行可点开详情弹窗，行尾单独一个终止按钮（终止不触发打开）。 */
+/* 行 + 行尾按钮（终止 / 打开）：行本身是一张表的续行，按钮浮在行尾——
+   它不属于任何一列，占一格会把描述挤到下一列去。 */
 .chat-task-row {
-  display: flex;
+  position: relative;
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
   align-items: center;
-  gap: 6px;
 }
 
-.chat-task-row .chat-task-summary-row {
-  flex: 1 1 auto;
-  min-width: 0;
-  /* grid 行的 width: 100% 会顶掉 flex-basis，让它按可用宽度收缩 */
-  width: auto;
+.chat-task-row > .chat-task-summary-row {
+  grid-column: 1 / -1;
+}
+
+.chat-task-row > .chat-task-action {
+  position: absolute;
+  top: 50%;
+  right: 2px;
+  transform: translateY(-50%);
+}
+
+/* 字不跑到浮起来的按钮底下 */
+.chat-task-row .chat-task-description {
+  padding-right: 22px;
 }
 
 .chat-task-openable {
@@ -4766,8 +4810,10 @@ html[data-appearance='light'] .chat-markdown code:not(pre code) {
 .chat-composer {
   position: relative;
   display: grid;
-  /* 第一列是角色切换入口：默认角色时只有 26px 的箭头，显示角色名时按内容变宽 */
-  grid-template-columns: minmax(26px, auto) minmax(0, 1fr) auto;
+  /* 第一列是角色切换入口：默认角色时只有轨道宽的箭头，显示角色名时按内容变宽。
+     列宽取轨道的标签列（`--chat-rail-label-x`），所以输入框里的字与上面停靠区的
+     标签从同一个 x 开始。 */
+  grid-template-columns: minmax(var(--chat-rail-label-x), auto) minmax(0, 1fr) auto;
   align-items: end;
   border: 0;
   border-top: 1px solid var(--color-line-strong);
@@ -4928,17 +4974,26 @@ html[data-appearance='light'] .chat-markdown code:not(pre code) {
 .chat-prompt-mark {
   display: flex;
   height: 30px;
-  min-width: 26px;
+  min-width: var(--chat-rail-label-x);
   max-width: 160px;
   align-items: center;
-  justify-content: center;
+  /* 行首标记贴左放在轨道的箭头列里，不居中：默认角色时它要正好落在上面几行
+     箭头的那条竖线上。 */
+  justify-content: flex-start;
   gap: 4px;
   align-self: end;
-  padding: 0 5px;
+  padding: 0 var(--chat-rail-gap) 0 var(--chat-rail-inset);
   font-size: 18px;
   line-height: 20px;
   text-align: center;
   user-select: none;
+}
+
+/* arco 按钮自带 1px 描边：这一列的总宽会从 32px 变成 34px，箭头跟着右移 1px、
+   输入框里的字右移 2px，和上面停靠区的箭头 / 标签差一两个像素——正是那种
+   「看着没对齐又说不出哪歪」的偏差。整列对齐比这圈描边重要。 */
+.chat-prompt-mark.arco-btn {
+  border: 0;
 }
 
 /* 与 CLI 的 loop prompt 同款：挂着定时任务时行首标记换成 ⏰ 并走提示色 */
@@ -4955,9 +5010,10 @@ html[data-appearance='light'] .chat-markdown code:not(pre code) {
 }
 
 .chat-prompt-caret {
-  display: flex;
-  align-items: center;
+  display: grid;
+  width: var(--chat-rail-width);
   flex: 0 0 auto;
+  place-items: center;
 }
 
 .chat-composer textarea {

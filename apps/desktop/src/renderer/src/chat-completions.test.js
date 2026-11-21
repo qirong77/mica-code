@@ -304,7 +304,7 @@ describe('composer completions', () => {
             name: 'computer-use',
             description: '操作 macOS 桌面',
             path: '/h/computer-use/SKILL.md',
-            source: { kind: 'plugin', label: '插件 computer-use', detail: 'computer-use' }
+            source: { kind: 'plugin', label: 'computer-use', detail: 'computer-use' }
           },
           {
             name: 'demand-verify',
@@ -318,7 +318,7 @@ describe('composer completions', () => {
             name: 'mica-browser',
             type: 'http',
             tools: ['control'],
-            source: { kind: 'builtin', label: '内置' }
+            source: { kind: 'builtin', label: 'browser' }
           }
         ]
       },
@@ -327,9 +327,15 @@ describe('composer completions', () => {
 
     // 名字排序：computer-use < demand-verify < mica-browser
     expect(options.map((option) => option.source)).toEqual([
-      { kind: 'plugin', label: '插件 computer-use', detail: 'computer-use' },
+      { kind: 'plugin', label: 'computer-use', detail: 'computer-use' },
       { kind: 'project', label: '.mica/skills' },
-      { kind: 'builtin', label: '内置' }
+      { kind: 'builtin', label: 'browser' }
+    ])
+    // 行上那枚标记：前缀说归属，实体名说具体是哪个
+    expect(options.map((option) => option.sourceText)).toEqual([
+      'mica · plugin · computer-use',
+      'you · project · .mica/skills',
+      'mica · builtin · browser'
     ])
     // 类型标记来自 kind：一行两枚标记，一枚说「这是什么」、一枚说「它从哪来」
     expect(options.map((option) => option.kind)).toEqual(['skill', 'skill', 'mcp'])
@@ -348,7 +354,7 @@ describe('composer completions', () => {
           {
             name: 'computer-use',
             description: '操作桌面',
-            source: { kind: 'plugin', label: '插件 computer-use' }
+            source: { kind: 'plugin', label: 'computer-use' }
           }
         ]
       },
@@ -356,7 +362,7 @@ describe('composer completions', () => {
     )
     expect(match.name).toBe('computer-use')
     expect(match.descriptionHighlights).toEqual([])
-    expect(match.sourceLabel).toBe('插件 computer-use')
+    expect(match.sourceText).toBe('mica · plugin · computer-use')
   })
 
   it('ignores a source the host spelled wrong instead of drawing a broken badge', () => {
@@ -387,7 +393,7 @@ describe('composer completions', () => {
             description: '记一条经验',
             insert,
             pluginId: 'user.demand-dev',
-            source: { kind: 'plugin', label: '插件 demand-dev', detail: 'user.demand-dev' }
+            source: { kind: 'plugin', label: 'demand-dev', detail: 'user.demand-dev' }
           }
         ]
       },
@@ -403,9 +409,10 @@ describe('composer completions', () => {
     // 类型标记是「指令」，来源仍是插件
     expect(options[0].source).toEqual({
       kind: 'plugin',
-      label: '插件 demand-dev',
+      label: 'demand-dev',
       detail: 'user.demand-dev'
     })
+    expect(options[0].sourceText).toBe('mica · plugin · demand-dev')
     expect(completionInsertText(options[0])).toBe(insert)
   })
 
@@ -420,7 +427,7 @@ describe('composer completions', () => {
             description: '',
             insert: 'x',
             pluginId: 'user.demo',
-            source: { kind: 'plugin', label: '插件 demo' }
+            source: { kind: 'plugin', label: 'demo' }
           }
         ]
       },
@@ -438,12 +445,12 @@ describe('composer completions', () => {
       description: '',
       insert: name,
       pluginId: 'user.demand-dev',
-      source: { kind: 'plugin', label: '插件 demand-dev', detail: 'user.demand-dev' }
+      source: { kind: 'plugin', label: 'demand-dev', detail: 'user.demand-dev' }
     }))
     const options = slashCompletionOptions({ completions: entries }, 'dema')
     expect(options.map((option) => option.name)).toEqual(['claim', 'desc', 'role'])
     // 只在来源里命中，匹配到的那条来源标记照常显示
-    expect(options[0].sourceLabel).toBe('插件 demand-dev')
+    expect(options[0].sourceText).toBe('mica · plugin · demand-dev')
   })
 
   it('matchIndexes finds every occurrence, ignoring case', () => {

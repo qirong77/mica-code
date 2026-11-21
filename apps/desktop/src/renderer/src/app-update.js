@@ -196,7 +196,8 @@ export function updateButtonState(remote, native) {
   // commit must not resurrect an update after the feed reports no package.
   if (native?.status === 'not-available') return { visible: false, label: '', tone: undefined }
   if (remote?.available) return { visible: true, label: '有新提交', tone: 'primary' }
-  if (native?.status === 'unsupported') return { visible: true, label: '更新说明', tone: undefined }
+  // 不支持自动更新的环境（源码 / 开发模式、本机 --dir 包、macOS 未发布等）不占底部常驻入口：
+  // 一个点不开任何更新的「更新说明」只会让人以为这里能更新。原因说明仍随点击反馈出现在弹窗里。
   return { visible: false, label: '', tone: undefined }
 }
 

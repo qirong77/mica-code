@@ -33,7 +33,8 @@ export function pluginMcpCandidates(origin) {
       ...config,
       description: manifest.description,
       tools: (readCachedMcpResult(name, config)?.tools ?? []).slice(0, 50).map((tool) => tool.name),
-      source: { kind: 'plugin', label: `插件 ${manifest.id}`, detail: manifest.id }
+      // `label` 只写实体名，`mica-plugin:` 前缀由渲染层按 kind 拼（见 chat-completions.js）
+      source: { kind: 'plugin', label: manifest.id, detail: manifest.id }
     }]
   })
 }

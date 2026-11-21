@@ -56,7 +56,7 @@ describe('host skill scanning', () => {
         name: 'plain',
         path: join(home, 'skills', 'plain', 'SKILL.md'),
         description: '',
-        source: { kind: 'user', label: '$MICA_HOME/skills' }
+        source: { kind: 'user', label: '~/.mica/skills' }
       }
     ])
   })
@@ -93,7 +93,7 @@ describe('host skill scanning', () => {
       name: 'computer-use',
       path: join(builtinDir, 'SKILL.md'),
       description: '操作 macOS 桌面',
-      source: { kind: 'plugin', label: '插件 computer-use', detail: 'computer-use' }
+      source: { kind: 'plugin', label: 'computer-use', detail: 'computer-use' }
     })
 
     // 用户装一份同名 skill：磁盘优先，插件不抢名字（与运行期注册表同一规则）
@@ -104,7 +104,7 @@ describe('host skill scanning', () => {
         name: 'computer-use',
         path: join(home, 'skills', 'computer-use', 'SKILL.md'),
         description: 'mine',
-        source: { kind: 'user', label: '$MICA_HOME/skills' }
+        source: { kind: 'user', label: '~/.mica/skills' }
       }
     ])
   })
@@ -173,7 +173,7 @@ describe('host skill scanning', () => {
         path: join(pluginRoot, 'skills', 'demand-verify', 'SKILL.md'),
         description: '联调验收',
         // 标记与索引那条同写法，跑过会话前后不会换一个
-        source: { kind: 'plugin', label: '插件 demand-dev', detail: 'user.demand-dev' }
+        source: { kind: 'plugin', label: 'demand-dev', detail: 'user.demand-dev' }
       }
     ])
   })

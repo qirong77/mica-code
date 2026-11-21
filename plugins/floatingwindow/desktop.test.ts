@@ -2,7 +2,7 @@ import * as React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { ArcoProvider } from '@mica-config-ui/web';
-import { Launcher, Welcome, faviconSources, resolveIcon, seedAfterPush, siteFavicon } from './desktop.jsx';
+import { Launcher, Welcome, faviconSources, iconToRemember, resolveIcon, seedAfterPush, siteFavicon } from './desktop.jsx';
 import manifest from './plugin.json';
 
 beforeEach(() => vi.stubGlobal('React', React));
@@ -90,6 +90,19 @@ it('keeps the first icon the host can materialize and skips the rest', async () 
   expect(asked).toEqual(['https://cdn.example/icon.svg', 'https://a.example/favicon.ico']);
   expect(await resolveIcon(['https://a.example/favicon.ico'], (async () => { throw new Error('离线'); }) as any)).toBe('');
   expect(await resolveIcon(['https://a.example/favicon.ico'], undefined as any)).toBe('');
+});
+
+it('keeps the icon an address announced when a later state carries none', () => {
+  const seen = new Map([['https://qirong77.com/zencode/?problem=playground', 'https://qirong77.com/zencode/favicon.svg?v=zencode-fold']]);
+  // 这一条推送没有图标（单页应用在自己内部导航），记账时要把此前看到的那张带上。
+  expect(iconToRemember('', 'https://qirong77.com/zencode/?problem=playground', seen))
+    .toBe('https://qirong77.com/zencode/favicon.svg?v=zencode-fold');
+  // 推送自己带图标时以它为准，换版本能立刻更新。
+  expect(iconToRemember('https://cdn.example/new.svg', 'https://qirong77.com/zencode/?problem=playground', seen))
+    .toBe('https://cdn.example/new.svg');
+  // 没见过的地址、没有记录时都只能是空，不能凭空造图标。
+  expect(iconToRemember('', 'https://other.example/', seen)).toBe('');
+  expect(iconToRemember(undefined as any, 'https://qirong77.com/zencode/?problem=playground', null as any)).toBe('');
 });
 
 it('renders a starred toolbar action for the current site', () => {
