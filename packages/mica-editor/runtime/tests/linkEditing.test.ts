@@ -38,6 +38,7 @@ import {
   $getSelectedLinkNode,
   $removeLink,
   $restoreLinkSelection,
+  browserTarget,
   type LinkEditSession,
   type LinkUrlStrategy,
   normalizeLinkUrl,
@@ -298,9 +299,28 @@ describe('Markdown link URL strategy', () => {
     expect(normalizeLinkUrl('docs/guide', 'markdown').ok).toBe(false);
     expect(normalizeLinkUrl('  ./README.md  ', 'markdown')).toEqual({ok: true, url: './README.md'});
     expect(normalizeLinkUrl('README.md')).toEqual({ok: true, url: 'https://readme.md/'});
-    for (const input of ['./README.md', '../README.md', 'docs/guide.md', '/docs/guide.md', '#anchor']) {
-      expect(normalizeLinkUrl(input).ok).toBe(false);
+    // A bare path without a prefix keeps the web policy; an explicitly prefixed
+    // target is an in-document link in the notebook as well.
+    expect(normalizeLinkUrl('docs/guide.md').ok).toBe(false);
+    for (const input of ['./README.md', '../README.md', '/docs/guide.md', '#anchor', '/']) {
+      expect(normalizeLinkUrl(input)).toEqual({ok: true, url: input});
     }
+  });
+
+  it('round-trips an in-document link the notebook already holds', () => {
+    const editor = makeEditor();
+    let linkKey = '';
+    update(editor, () => {
+      const text = $createTextNode('小节');
+      const link = $createLinkNode('#小节').append(text);
+      linkKey = link.getKey();
+      $getRoot().append($createParagraphNode().append(link));
+      text.select(0, 2);
+    });
+    const session = capture(editor);
+    expect(apply(session, '#小节')).toEqual({ok: true, url: '#小节'});
+    editor.read('latest', () => expect($link(linkKey).getURL()).toBe('#小节'));
+    expect(apply(capture(editor), './notes/另一篇.md')).toEqual({ok: true, url: './notes/另一篇.md'});
   });
 
   it('can explicitly apply Markdown strategy to a default rich-text draft', () => {
@@ -333,6 +353,15 @@ describe('Markdown link URL strategy', () => {
 });
 
 describe('link drafts and selection', () => {
+  it('opens web and contact targets but never an in-document link', () => {
+    expect(browserTarget('example.com')).toBe('https://example.com/');
+    expect(browserTarget('mailto:name@example.com')).toBe('mailto:name@example.com');
+    expect(browserTarget('#anchor')).toBeNull();
+    expect(browserTarget('/docs/guide.md')).toBeNull();
+    expect(browserTarget('./README.md', 'markdown')).toBeNull();
+    expect(browserTarget('javascript:alert(1)')).toBeNull();
+  });
+
   it('intercepts the existing toolbar insertion without writing a placeholder; cancelling restores the selected text', () => {
     const editor = makeEditor();
     update(editor, () => {

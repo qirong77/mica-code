@@ -7,8 +7,7 @@
 
 import './index.css';
 
-import { Button, Select } from '@arco-design/web-react';
-import { IconExport } from '@arco-design/web-react/icon';
+import { Select } from '@arco-design/web-react';
 import { $isCodeNode } from '@lexical/code';
 import { DEFAULT_CODE_LANGUAGE } from '@lexical/code-core';
 import { useLexicalComposerContext } from '@lexical/react/LexicalComposerContext';
@@ -25,7 +24,6 @@ import { type JSX, type ReactPortal, useCallback, useEffect, useRef, useState } 
 import { createPortal } from 'react-dom';
 
 import {
-  $exitCodeBlock,
   $getCodeBlock,
   $getSelectedCodeBlock,
   $setCodeBlockLanguage,
@@ -73,7 +71,7 @@ function CodeActionMenuContainer({ anchorElem }: { anchorElem: HTMLElement }): J
       const selected = root?.contains(doc.activeElement) ? $getSelectedCodeBlock() : null;
       const code = locked || hovered || selected;
       // Mermaid has its own source/preview controls; do not cover those with
-      // a second language/copy/exit menu when its CodeNode receives focus.
+      // a second language/copy menu when its CodeNode receives focus.
       return code && !isMermaidLanguage(code.getLanguage())
         ? { key: code.getKey(), language: code.getLanguage() || '' }
         : null;
@@ -292,24 +290,6 @@ function CodeActionMenuContainer({ anchorElem }: { anchorElem: HTMLElement }): J
             getFeedbackContainer={() => menuRef.current}
           />
         )}
-        <Button
-          type="text"
-          htmlType="button"
-          size="mini"
-          className="code-action-button"
-          disabled={!isEditable}
-          aria-label="退出代码块"
-          aria-keyshortcuts="Meta+Enter Control+Enter"
-          title="退出代码块（⌘/Ctrl + Enter）"
-          icon={<IconExport />}
-          onMouseDown={(event) => event.preventDefault()}
-          onClick={() => {
-            hoveredKeyRef.current = null;
-            editor.update(() => {
-              if ($exitCodeBlock(editor, active.key)) editor.getRootElement()?.focus({ preventScroll: true });
-            });
-          }}
-        />
       </div>
     </div>
   );

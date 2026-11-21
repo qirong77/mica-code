@@ -1,0 +1,39 @@
+/* Paint over cells, including opaque headers and custom cell fills. An inset
+   wrapper shadow paints underneath them and disappears from the header. */
+.table-scroll-fades {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.table-scroll-fade {
+  position: absolute;
+  pointer-events: none;
+}
+
+.table-scroll-fade::before,
+.table-scroll-fade::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: min(12px, 20%);
+  opacity: 0;
+}
+
+.table-scroll-fade::before {
+  left: 0;
+  background: linear-gradient(to right, var(--color-overlay-strong, #0000001f), transparent);
+}
+
+.table-scroll-fade::after {
+  right: 0;
+  background: linear-gradient(to left, var(--color-overlay-strong, #0000001f), transparent);
+}
+
+.table-scroll-fade.has-left::before,
+.table-scroll-fade.has-right::after { opacity: 1; }
+
+@media print { .table-scroll-fades { display: none; } }

@@ -1,0 +1,191 @@
+{
+  "sourcePage": "https://www.yuque.com/yuque/gpvawt/wbsu70",
+  "collectedAt": "2026-11-21",
+  "icons": [
+    {
+      "key": "bg-color",
+      "component": "EditorBgColor",
+      "url": "https://gw.alipayobjects.com/os/chair-script/skylark/c__Icons342.f97d3b4c.async.js"
+    },
+    {
+      "key": "bold",
+      "component": "EditorBold",
+      "url": "https://gw.alipayobjects.com/os/chair-script/skylark/c__Icons343.f1797dba.async.js"
+    },
+    {
+      "key": "bullet-list",
+      "component": "EditorUnorderedList",
+      "url": "https://gw.alipayobjects.com/os/chair-script/skylark/c__Icons496.5ebe1e25.async.js"
+    },
+    {
+      "key": "calendar",
+      "component": "Calendar",
+      "url": "https://gw.alipayobjects.com/os/chair-script/skylark/c__Icons170.7d48931f.async.js"
+    },
+    {
+      "key": "caret-right",
+      "component": "ArrowRight",
+      "url": "https://gw.alipayobjects.com/os/chair-script/skylark/c__Icons60.f9b92fd5.async.js"
+    },
+    {
+      "key": "center-align",
+      "component": "EditorAlignmentCenter",
+      "url": "https://gw.alipayobjects.com/os/chair-script/skylark/c__Icons339.b9138f1a.async.js"
+    },
+    {
+      "key": "check-list",
+      "component": "EditorTaskList",
+      "url": "https://gw.alipayobjects.com/os/chair-script/skylark/c__Icons492.1b11e6c8.async.js"
+    },
+    {
+      "key": "chevron-down",
+      "component": "DownMiniarrow",
+      "url": "https://gw.alipayobjects.com/os/chair-script/skylark/c__Icons316.89bde140.async.js"
+    },
+    {
+      "key": "clear",
+      "component": "EditorClearFormat",
+      "url": "https://gw.alipayobjects.com/os/chair-script/skylark/c__Icons346.91dc50ea.async.js"
+    },
+    {
+      "key": "code",
+      "component": "EditorInlinecode",
+      "url": "https://gw.alipayobjects.com/os/chair-script/skylark/c__Icons364.973e0a4b.async.js"
+    },
+    {
+      "key": "equation",
+      "component": "EditorMath",
+      "url": "https://gw.alipayobjects.com/os/chair-script/skylark/c__Icons470.c4585965.async.js"
+    },
+    {
+      "key": "font-color",
+      "component": "EditorColor",
+      "url": "https://gw.alipayobjects.com/os/chair-script/skylark/c__Icons349.5005e9e1.async.js"
+    },
+    {
+      "key": "h1",
+      "component": "EditorH1",
+      "url": "https://gw.alipayobjects.com/os/chair-script/skylark/c__Icons354.46c120dc.async.js"
+    },
+    {
+      "key": "h2",
+      "component": "EditorH2",
+      "url": "https://gw.alipayobjects.com/os/chair-script/skylark/c__Icons355.b0942bcd.async.js"
+    },
+    {
+      "key": "h3",
+      "component": "EditorH3",
+      "url": "https://gw.alipayobjects.com/os/chair-script/skylark/c__Icons356.06a7b483.async.js"
+    },
+    {
+      "key": "h4",
+      "component": "EditorH4",
+      "url": "https://gw.alipayobjects.com/os/chair-script/skylark/c__Icons357.47de1133.async.js"
+    },
+    {
+      "key": "h5",
+      "component": "EditorH5",
+      "url": "https://gw.alipayobjects.com/os/chair-script/skylark/c__Icons358.d014dcaf.async.js"
+    },
+    {
+      "key": "h6",
+      "component": "EditorH6",
+      "url": "https://gw.alipayobjects.com/os/chair-script/skylark/c__Icons359.b777d329.async.js"
+    },
+    {
+      "key": "horizontal-rule",
+      "component": "EditorHr",
+      "url": "https://gw.alipayobjects.com/os/chair-script/skylark/c__Icons360.42dcf1e6.async.js"
+    },
+    {
+      "key": "image",
+      "component": "EditorImage",
+      "url": "https://gw.alipayobjects.com/os/chair-script/skylark/c__Icons361.3af20f9f.async.js"
+    },
+    {
+      "key": "indent",
+      "component": "EditorIndent",
+      "url": "https://gw.alipayobjects.com/os/chair-script/skylark/c__Icons363.69358316.async.js"
+    },
+    {
+      "key": "italic",
+      "component": "EditorItalic",
+      "url": "https://gw.alipayobjects.com/os/chair-script/skylark/c__Icons365.356633b4.async.js"
+    },
+    {
+      "key": "left-align",
+      "component": "EditorAlignmentLeft",
+      "url": "https://gw.alipayobjects.com/os/chair-script/skylark/c__Icons340.11484096.async.js"
+    },
+    {
+      "key": "link",
+      "component": "EditorLink",
+      "url": "https://gw.alipayobjects.com/os/chair-script/skylark/c__Icons367.87a09d2e.async.js"
+    },
+    {
+      "key": "numbered-list",
+      "component": "EditorOrderedList",
+      "url": "https://gw.alipayobjects.com/os/chair-script/skylark/c__Icons477.5fce00ae.async.js"
+    },
+    {
+      "key": "outdent",
+      "component": "EditorOutdent",
+      "url": "https://gw.alipayobjects.com/os/chair-script/skylark/c__Icons478.91122ea8.async.js"
+    },
+    {
+      "key": "paragraph",
+      "component": "EditorParagraph",
+      "url": "https://gw.alipayobjects.com/os/chair-script/skylark/c__Icons479.23be9735.async.js"
+    },
+    {
+      "key": "plus",
+      "component": "Plus",
+      "url": "https://gw.alipayobjects.com/os/chair-script/skylark/c__Icons1138.d6d275d9.async.js"
+    },
+    {
+      "key": "quote",
+      "component": "EditorQuote",
+      "url": "https://gw.alipayobjects.com/os/chair-script/skylark/c__Icons484.4547f546.async.js"
+    },
+    {
+      "key": "redo",
+      "component": "EditorRedo",
+      "url": "https://gw.alipayobjects.com/os/chair-script/skylark/c__Icons485.63b74bfc.async.js"
+    },
+    {
+      "key": "right-align",
+      "component": "EditorAlignmentRight",
+      "url": "https://gw.alipayobjects.com/os/chair-script/skylark/c__Icons341.ee781089.async.js"
+    },
+    {
+      "key": "strikethrough",
+      "component": "EditorStrikethrough",
+      "url": "https://gw.alipayobjects.com/os/chair-script/skylark/c__Icons488.a489c13d.async.js"
+    },
+    {
+      "key": "subscript",
+      "component": "EditorSub",
+      "url": "https://gw.alipayobjects.com/os/chair-script/skylark/c__Icons489.3234aa15.async.js"
+    },
+    {
+      "key": "superscript",
+      "component": "EditorSup",
+      "url": "https://gw.alipayobjects.com/os/chair-script/skylark/c__Icons490.5ec5dede.async.js"
+    },
+    {
+      "key": "table",
+      "component": "EditorTable",
+      "url": "https://gw.alipayobjects.com/os/chair-script/skylark/c__Icons491.5e473375.async.js"
+    },
+    {
+      "key": "underline",
+      "component": "EditorUnderline",
+      "url": "https://gw.alipayobjects.com/os/chair-script/skylark/c__Icons494.1e29a649.async.js"
+    },
+    {
+      "key": "undo",
+      "component": "EditorUndo",
+      "url": "https://gw.alipayobjects.com/os/chair-script/skylark/c__Icons495.28f80cbb.async.js"
+    }
+  ]
+}

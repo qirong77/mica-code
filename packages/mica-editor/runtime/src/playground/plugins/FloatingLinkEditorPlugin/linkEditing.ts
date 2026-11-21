@@ -38,33 +38,13 @@ const STALE_SELECTION = '原来的选区已变化，请重新选择文字或链�
 const HOST_WITH_PORT = /^(?:localhost|[^/:?#]+\.[^/:?#]+):\d+(?:[/?#]|$)/i;
 const URI_SCHEME = /^[a-z][a-z\d+.-]*:/i;
 const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f-\u009f]/u;
+/** In-document targets written with an explicit anchor or path prefix. */
+const LOCAL_TARGET = /^(?:#|\.{1,2}\/|\/)/u;
 
-function normalizeMarkdownLinkUrl(value: string): LinkResult {
-  // Check before trimming: URL parsers silently discard tabs and line endings.
-  // Encoded spaces are useful in Markdown paths; encoded controls are not.
-  if (CONTROL_CHARACTERS.test(value) || /%(?:[01][\da-f]|7f|c2%[89][\da-f])/i.test(value)) {
-    return {ok: false, error: '链接地址不能包含换行或控制字符。'};
-  }
-  const input = value.trim();
-  if (URI_SCHEME.test(input) || HOST_WITH_PORT.test(input)) {
-    return normalizeLinkUrl(input);
-  }
-  if (!input || /\s/u.test(input)) {
-    return normalizeLinkUrl(input);
-  }
+/** Both strategies keep an explicit path or anchor exactly as it was written. */
+function normalizeLocalLinkUrl(input: string): LinkResult {
   if (input.includes('\\') || input.startsWith('//')) {
     return {ok: false, error: '请输入相对路径、以 / 开头的本地路径或完整网址。'};
-  }
-
-  const path = input.split(/[?#]/u, 1)[0];
-  const firstSegment = path.split('/', 1)[0];
-  const explicitPath = /^(?:\.{1,2}\/|\/|#)/u.test(input);
-  // Bare .md filenames are common document links. A dotted first directory is
-  // ambiguous with a hostname, so example.com/guide.md keeps the web policy;
-  // ./example.com/guide.md makes a local directory explicit.
-  const markdownFile = /\.md$/i.test(path) && (!path.includes('/') || !firstSegment.includes('.'));
-  if (!explicitPath && !markdownFile) {
-    return normalizeLinkUrl(input);
   }
 
   let decoded: string;
@@ -85,6 +65,32 @@ function normalizeMarkdownLinkUrl(value: string): LinkResult {
   return {ok: true, url: input};
 }
 
+function normalizeMarkdownLinkUrl(value: string): LinkResult {
+  // Check before trimming: URL parsers silently discard tabs and line endings.
+  // Encoded spaces are useful in Markdown paths; encoded controls are not.
+  if (CONTROL_CHARACTERS.test(value) || /%(?:[01][\da-f]|7f|c2%[89][\da-f])/i.test(value)) {
+    return {ok: false, error: '链接地址不能包含换行或控制字符。'};
+  }
+  const input = value.trim();
+  if (URI_SCHEME.test(input) || HOST_WITH_PORT.test(input)) {
+    return normalizeLinkUrl(input);
+  }
+  if (!input || /\s/u.test(input)) {
+    return normalizeLinkUrl(input);
+  }
+  const path = input.split(/[?#]/u, 1)[0];
+  const firstSegment = path.split('/', 1)[0];
+  const explicitPath = /^(?:\.{1,2}\/|\/|#)/u.test(input);
+  // Bare .md filenames are common document links. A dotted first directory is
+  // ambiguous with a hostname, so example.com/guide.md keeps the web policy;
+  // ./example.com/guide.md makes a local directory explicit.
+  const markdownFile = /\.md$/i.test(path) && (!path.includes('/') || !firstSegment.includes('.'));
+  if (!explicitPath && !markdownFile) {
+    return normalizeLinkUrl(input);
+  }
+  return normalizeLocalLinkUrl(input);
+}
+
 /** These stricter rules belong to the link dialog, not Markdown/paste parsing. */
 export function normalizeLinkUrl(value: string, strategy: LinkUrlStrategy = 'rich-text'): LinkResult {
   if (strategy === 'markdown') {
@@ -96,6 +102,14 @@ export function normalizeLinkUrl(value: string, strategy: LinkUrlStrategy = 'ric
   }
   if (/[\s\u0000-\u001f\u007f]/u.test(input)) {
     return {ok: false, error: '链接地址不能包含空格、换行或控制字符。'};
+  }
+
+  // 语雀把文档内跳转的 `#段落链接` 与路径目标当作普通链接目标；笔记里也已经有
+  // 这种链接（手写 Markdown 或 Markdown 导入都会生成），所以这里原样保留它们，
+  // 否则对话框连文档自己的链接都存不回去。裸 `name.md` 仍按网址处理：两个策略
+  // 在这一种写法上刻意不同。
+  if (LOCAL_TARGET.test(input)) {
+    return normalizeLocalLinkUrl(input);
   }
 
   // A host with a port is not a URI scheme. All other explicit schemes must
@@ -146,6 +160,12 @@ export function normalizeLinkUrl(value: string, strategy: LinkUrlStrategy = 'ric
   }
   const url = sanitizeUrl(parsed.href);
   return url === 'about:blank' ? {ok: false, error: INVALID_ADDRESS} : {ok: true, url};
+}
+
+/** Web and contact targets can be opened in a browser; in-document links cannot. */
+export function browserTarget(url: string, strategy: LinkUrlStrategy = 'rich-text'): string | null {
+  const result = normalizeLinkUrl(url, strategy);
+  return result.ok && /^(?:https?|mailto|tel):/i.test(result.url) ? result.url : null;
 }
 
 function $linkForNode(node: LexicalNode): LinkNode | null {

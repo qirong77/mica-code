@@ -64,7 +64,8 @@ type Layout = {
   railLeft: number;
   showColumns: boolean;
   showRows: boolean;
-  compact: boolean;
+  fadeLeft: boolean;
+  fadeRight: boolean;
   simple: boolean;
 };
 type SelectionDrag = {
@@ -215,7 +216,8 @@ function measureTable(structure: TableDOM, tableKey: string): Layout | null {
     railLeft,
     showColumns: railTop >= railClipTop && railTop + RAIL_SIZE <= railClipBottom,
     showRows: railLeft + RAIL_SIZE <= railClipRight,
-    compact: doc.documentElement.clientWidth <= 600,
+    fadeLeft: visible.left - rect.left > 1,
+    fadeRight: rect.right - visible.right > 1,
     simple: structure.simple,
   };
 }
@@ -223,7 +225,8 @@ function measureTable(structure: TableDOM, tableKey: string): Layout | null {
 function sameLayout(a: Layout | null, b: Layout | null) {
   if (!a || !b) return a === b;
   if (a.tableKey !== b.tableKey || a.ownerDocument !== b.ownerDocument || a.simple !== b.simple ||
-      a.compact !== b.compact || a.showColumns !== b.showColumns || a.showRows !== b.showRows ||
+      a.fadeLeft !== b.fadeLeft || a.fadeRight !== b.fadeRight ||
+      a.showColumns !== b.showColumns || a.showRows !== b.showRows ||
       a.columnEdges.length !== b.columnEdges.length || a.rowEdges.length !== b.rowEdges.length) return false;
   const aValues = [...Object.values(a.table), ...Object.values(a.visible), a.railTop, a.railLeft, ...a.columnEdges, ...a.rowEdges];
   const bValues = [...Object.values(b.table), ...Object.values(b.visible), b.railTop, b.railLeft, ...b.columnEdges, ...b.rowEdges];
@@ -710,14 +713,13 @@ export default function TableSelectionHandles({context, onSelect, onMenu, onMove
     const full = isColumn ? fullColumns : fullRows;
     const count = maximum - minimum + 1;
     const label = isColumn ? '列' : '行';
-    const compactIndex = selectionDrag?.axis === axis ? selectionDrag.origin : minimum;
     const bands = edges.slice(0, -1).map((start, index) => ({
       index, start: Math.max(start, clipStart), end: Math.min(edges[index + 1], clipEnd),
-    })).filter(band => band.end - band.start >= 4 && (!layout.compact || band.index === compactIndex));
+    })).filter(band => band.end - band.start >= 4);
     const railStyle: CSSProperties = isColumn
       ? {left: clipStart, top: layout.railTop, width: clipEnd - clipStart, height: RAIL_SIZE}
       : {left: layout.railLeft, top: clipStart, width: RAIL_SIZE, height: clipEnd - clipStart};
-    return <div className={`table-selection-rail is-${axis}`} style={railStyle} role="group" aria-label={`表格${label}选择`}>
+    return <div className={`table-selection-rail is-${axis}${isColumn && layout.fadeLeft ? ' has-left' : ''}${isColumn && layout.fadeRight ? ' has-right' : ''}`} style={railStyle} role="group" aria-label={`表格${label}选择`}>
       {bands.map(({index, start, end}) => {
         const active = full && index >= minimum && index <= maximum;
         const movable = layout.simple && context.simple && count === 1 && !selectionDrag &&

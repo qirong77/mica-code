@@ -1,5 +1,5 @@
 import {Button, Tooltip} from '@arco-design/web-react';
-import {IconAlignCenter, IconAlignLeft, IconAlignRight, IconApps, IconDown, IconMore, IconPlus} from '@arco-design/web-react/icon';
+import {IconAlignCenter, IconAlignLeft, IconAlignRight, IconApps, IconDown, IconPlus} from '@arco-design/web-react/icon';
 import {autoUpdate, flip, hide, offset, shift, useFloating} from '@floating-ui/react';
 import {useLexicalComposerContext} from '@lexical/react/LexicalComposerContext';
 import {useLexicalEditable} from '@lexical/react/useLexicalEditable';
@@ -318,7 +318,7 @@ export default function TableControlsPlugin({markdownOnly = false}: {markdownOnl
   const portalTarget = editor.getRootElement()?.ownerDocument.body || document.body;
   const chosen = context.selected > 1;
   const help = chosen ? `已选 ${context.selectionRows} 行 × ${context.selectionColumns} 列` : `${context.rows} 行 × ${context.columns} 列`;
-  const menuButton = (kind: TableMenuKind, label: string) => <Button type="text" size="small" icon={kind === 'more' ? <IconMore /> : <IconDown />}
+  const menuButton = (kind: TableMenuKind, label: string) => <Button type="text" size="small" icon={kind === 'more' ? <i className="table-context-more-icon" aria-hidden="true" /> : <IconDown />}
     aria-label={label} aria-haspopup="menu" aria-expanded={popup?.kind === kind} onClick={event => openPopup(kind, event)} />;
 
   return <>

@@ -14,9 +14,32 @@
   position: absolute;
   overflow: hidden;
   pointer-events: none;
-  border-radius: 6px;
-  background: var(--color-panel-hi, var(--color-fill-1, #f7f8fa));
+  border-radius: 2px;
+  background: transparent;
 }
+
+/* The column controls share the table's overflow edge, including after scroll. */
+.table-selection-rail.is-column::before,
+.table-selection-rail.is-column::after {
+  content: '';
+  position: absolute;
+  z-index: 2;
+  top: 0;
+  bottom: 0;
+  width: min(12px, 20%);
+  opacity: 0;
+  pointer-events: none;
+}
+.table-selection-rail.is-column::before {
+  left: 0;
+  background: linear-gradient(to right, var(--color-overlay-strong, #0000001f), transparent);
+}
+.table-selection-rail.is-column::after {
+  right: 0;
+  background: linear-gradient(to left, var(--color-overlay-strong, #0000001f), transparent);
+}
+.table-selection-rail.has-left::before,
+.table-selection-rail.has-right::after { opacity: 1; }
 
 .table-selection-handle-slot {
   position: absolute;
@@ -51,6 +74,9 @@
 
 .table-selection-handle {
   inset: 0;
+  border: 1px solid var(--color-line-soft, var(--color-border, #e5e6eb));
+  border-radius: 2px;
+  background: var(--color-panel-hi, var(--color-fill-1, #f7f8fa));
 }
 
 .table-selection-handle.is-column {
@@ -110,7 +136,9 @@
 }
 
 .table-selection-all {
-  background: transparent;
+  border: 1px solid var(--color-line-soft, var(--color-border, #e5e6eb));
+  border-radius: 2px;
+  background: var(--color-panel-hi, var(--color-fill-1, #f7f8fa));
   color: var(--color-fg-faint, var(--color-text-3, #86909c));
 }
 

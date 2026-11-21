@@ -13,11 +13,8 @@ import {
   FolderPlus,
   ListTree,
   LocateFixed,
-  MoreHorizontal,
   PanelLeftClose,
   PanelLeftOpen,
-  PanelRightClose,
-  PanelRightOpen,
   Pencil,
   Plug,
   Plus,
@@ -84,6 +81,47 @@ function nodePath(node, byId) {
   return path.reverse();
 }
 
+/**
+ * 目录宽度：桌面上可以拖，窄屏的抽屉保持自己的宽度。
+ *
+ * 边界由「绝对上下限」和「当前可用区域」一起决定：正文无论如何要留出
+ * `RAIL_MIN_MAIN_WIDTH`，目录最多占页面宽度的 `RAIL_MAX_SHARE`，两处取更紧的那个。
+ */
+export const RAIL_MIN_WIDTH = 200;
+export const RAIL_MAX_WIDTH = 460;
+export const RAIL_DEFAULT_WIDTH = 260;
+const RAIL_MIN_MAIN_WIDTH = 480;
+const RAIL_MAX_SHARE = 0.42;
+/** 键盘一次挪多少。 */
+export const RAIL_KEY_STEP = 16;
+/**
+ * 宽度存在插件自己的文档里（和正文同一个版本化文档通道，`documents/<key>.json`）。
+ * 界面偏好属于插件，不进宿主的 ui-state，也不与索引 CAS 抢同一次写。
+ */
+// A dot cannot occur in a note id, so preferences can never overwrite a note body.
+export const RAIL_LAYOUT_DOCUMENT = 'ui.layout';
+
+/** 目录能拖到的区间；没有可用宽度信息时只按绝对边界算。 */
+export function notebookRailLimits(available) {
+  const width = Number(available);
+  const max =
+    Number.isFinite(width) && width > 0
+      ? Math.min(
+          RAIL_MAX_WIDTH,
+          Math.round(width * RAIL_MAX_SHARE),
+          Math.round(width - RAIL_MIN_MAIN_WIDTH),
+        )
+      : RAIL_MAX_WIDTH;
+  return { min: RAIL_MIN_WIDTH, max: Math.max(RAIL_MIN_WIDTH, max) };
+}
+
+/** 归一化一个宽度：非法值（缺失、非数字）回默认宽度，其余夹进边界。 */
+export function clampRailWidth(width, available) {
+  const value = Number(width);
+  const { min, max } = notebookRailLimits(available);
+  return Math.min(Math.max(Number.isFinite(value) ? Math.round(value) : RAIL_DEFAULT_WIDTH, min), max);
+}
+
 function editorNodeText(value) {
   if (Array.isArray(value)) return value.map(editorNodeText).join('');
   if (!value || typeof value !== 'object') return '';
@@ -142,12 +180,20 @@ function MenuRow({ action, label, Icon, variant = 'ghost', onSelect, disabled = 
   );
 }
 
+function YuqueIcon({ name, size = 16 }) {
+  return <i className="notebook-yuque-icon" data-icon={name} style={{ width: size, height: size }} aria-hidden="true" />;
+}
+
 /**
  * 笔记的「更多」菜单：重命名 / 移动 / 删除。目录行与顶栏共用。
  *
  * ArcoPopover 负责定位与点外关闭；菜单行、键盘导航与 Esc 交给共享菜单。
+ *
+ * 默认 `bl`：菜单贴着触发按钮的左边往下展开，也就是「向右下」长出去——目录行的
+ * 「更多」本来就在目录右缘，这样菜单落在正文一侧而不是压回目录里。靠窗口右边界时
+ * Arco 的 `autoFitPosition` 会把它向左内收，不会跑出视口。
  */
-function PopoverMenu({ open, onOpen, onClose, label, position = 'br', trigger, children, form }) {
+function PopoverMenu({ open, onOpen, onClose, label, position = 'bl', trigger, children, form }) {
   const anchorId = useId();
   return (
     <ArcoPopover
@@ -209,7 +255,7 @@ function CreateMenu({ open, onOpen, onClose, onCreate, label, title = label, dis
   );
 }
 
-function NoteMenu({ node, open, onOpen, onClose, onAction, extraRows, trigger, position = 'br', form }) {
+function NoteMenu({ node, open, onOpen, onClose, onAction, extraRows, trigger, position = 'bl', form }) {
   return (
     <PopoverMenu
       open={open}
@@ -252,6 +298,9 @@ export default function NotebookPage({ api }) {
   const [layout, setLayout] = useState(() => ({
     mobile: window.innerWidth <= 760,
   }));
+  const [railWidth, setRailWidth] = useState(RAIL_DEFAULT_WIDTH);
+  const [railMaxWidth, setRailMaxWidth] = useState(RAIL_MAX_WIDTH);
+  const [railDragging, setRailDragging] = useState(false);
   const [focused, setFocused] = useState(false);
   const [outlineOpen, setOutlineOpen] = useState(() => !window.matchMedia('(max-width: 1100px)').matches);
   const [outlineCollapsed, setOutlineCollapsed] = useState(new Set());
@@ -266,6 +315,11 @@ export default function NotebookPage({ api }) {
   const iframe = useRef(null);
   const pageRoot = useRef(null);
   const rail = useRef(null);
+  // 拖动过程中只写样式变量（正文实时跟着变），松手才落到状态与存储。
+  const railWidthRef = useRef(RAIL_DEFAULT_WIDTH);
+  const appliedRailWidth = useRef(RAIL_DEFAULT_WIDTH);
+  const railResize = useRef(null);
+  const railSave = useRef({ timer: null, value: null, saving: null, touched: false });
   const outlineItemRefs = useRef(new Map());
   const barLead = useRef(null);
   const barActions = useRef(null);
@@ -364,6 +418,181 @@ export default function NotebookPage({ api }) {
   useEffect(() => () => clearFolderHover(), []);
   const railOverlay = layout.mobile && railOpen && !focused;
   const outlineAvailable = !focused && !!active;
+
+  /**
+   * 把宽度写到页面根节点的样式变量上。
+   *
+   * 目录宽度是纯 CSS 变量（`.notebook-rail` 的 `width`），所以拖动时只改这一个值，
+   * 正文、编辑器 iframe 都跟着布局走，不必为每个像素重画整棵目录树。
+   */
+  const applyRailWidth = useCallback((width) => {
+    const root = pageRoot.current;
+    const applied = clampRailWidth(width, root?.clientWidth);
+    appliedRailWidth.current = applied;
+    root?.style.setProperty('--notebook-rail-width', `${applied}px`);
+    return applied;
+  }, []);
+
+  /** 落盘当前宽度：读一次最新版本再写，别的窗口先写过就重取版本再写一次。 */
+  const flushRailWidth = useCallback(() => {
+    const documents = api.documents;
+    const pending = railSave.current;
+    if (pending.saving) return pending.saving;
+    if (pending.value == null || !documents?.read || !documents?.write) return;
+    pending.saving = (async () => {
+      while (pending.value != null) {
+        const width = pending.value;
+        pending.value = null;
+        try {
+          for (let attempt = 0; attempt < 2; attempt++) {
+            const stored = await documents.read(RAIL_LAYOUT_DOCUMENT);
+            if (stored?.ok === false) break;
+            const result = await documents.write(
+              RAIL_LAYOUT_DOCUMENT,
+              { version: 1, railWidth: width },
+              { expectedVersion: stored?.version ?? null },
+            );
+            if (result?.ok || !result?.conflict) break;
+          }
+        } catch {
+          // Layout failure must not interrupt writing. Newer drags still get saved.
+        }
+      }
+    })().finally(() => { pending.saving = null; });
+    return pending.saving;
+  }, [api.documents]);
+  const flushRailRef = useRef(flushRailWidth);
+  flushRailRef.current = flushRailWidth;
+
+  // 连续按方向键时合并成一次写盘。
+  const queueRailWidth = useCallback((width) => {
+    const pending = railSave.current;
+    pending.value = width;
+    if (pending.timer) clearTimeout(pending.timer);
+    pending.timer = setTimeout(() => {
+      pending.timer = null;
+      void flushRailRef.current();
+    }, 250);
+  }, []);
+
+  /** 一次明确的宽度变更（拖动结束、键盘、双击复位）：应用、记状态、排队保存。 */
+  const commitRailWidth = useCallback(
+    (width) => {
+      railSave.current.touched = true;
+      const applied = applyRailWidth(width);
+      railWidthRef.current = applied;
+      setRailWidth(applied);
+      queueRailWidth(applied);
+    },
+    [applyRailWidth, queueRailWidth],
+  );
+
+  const startRailResize = (event) => {
+    if (railResize.current || layoutRef.current.mobile) return;
+    if (event.pointerType === 'mouse' && event.button !== 0) return;
+    const handle = event.currentTarget;
+    if (!pageRoot.current) return;
+    event.preventDefault();
+    // 点一下也能接着用方向键挪，不必再按一次 Tab。
+    handle.focus?.({ preventScroll: true });
+    railResize.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startWidth: Math.round(rail.current?.offsetWidth || appliedRailWidth.current),
+    };
+    try {
+      handle.setPointerCapture?.(event.pointerId);
+    } catch {
+      // 指针已经抬起来（例如触屏手势被系统接管）：照旧按跟随指针的方式拖，松手即结束
+    }
+    pageRoot.current.classList.add('is-resizing');
+    railSave.current.touched = true;
+    setRailDragging(true);
+  };
+  const moveRailResize = (event) => {
+    const state = railResize.current;
+    if (!state || state.pointerId !== event.pointerId) return;
+    event.preventDefault();
+    const width = applyRailWidth(state.startWidth + (event.clientX - state.startX));
+    railWidthRef.current = width;
+    event.currentTarget.setAttribute('aria-valuenow', String(width));
+  };
+  const endRailResize = (event) => {
+    const state = railResize.current;
+    if (!state || (event && state.pointerId !== event.pointerId)) return;
+    railResize.current = null;
+    const handle = event?.currentTarget;
+    try {
+      if (handle?.hasPointerCapture?.(state.pointerId)) handle.releasePointerCapture(state.pointerId);
+    } catch {
+      // 捕获已经被系统收回（窗口失焦等），不必再释放
+    }
+    pageRoot.current?.classList.remove('is-resizing');
+    setRailDragging(false);
+    commitRailWidth(appliedRailWidth.current);
+  };
+  const resizeRailByKey = (event) => {
+    const { min, max } = notebookRailLimits(pageRoot.current?.clientWidth);
+    let next = null;
+    if (event.key === 'ArrowLeft') next = appliedRailWidth.current - RAIL_KEY_STEP;
+    else if (event.key === 'ArrowRight') next = appliedRailWidth.current + RAIL_KEY_STEP;
+    else if (event.key === 'Home') next = min;
+    else if (event.key === 'End') next = max;
+    if (next === null) return;
+    event.preventDefault();
+    commitRailWidth(next);
+  };
+
+  // 读回上一次的宽度：只认数字形态，坏数据回默认宽度。
+  useEffect(() => {
+    const documents = api.documents;
+    if (!documents?.read) return undefined;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const stored = await documents.read(RAIL_LAYOUT_DOCUMENT);
+        if (cancelled) return;
+        if (railSave.current.touched || stored?.value?.version !== 1 || typeof stored.value.railWidth !== 'number') return;
+        const width = clampRailWidth(stored.value.railWidth);
+        railWidthRef.current = width;
+        const applied = applyRailWidth(width);
+        if (mounted.current) setRailWidth(applied);
+      } catch {
+        // 读不到就用默认宽度
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [api.documents, applyRailWidth]);
+
+  // 宽度一变就重新落到变量上（`applyRailWidth` 会按当前可用区域再夹一次）。
+  useEffect(() => {
+    applyRailWidth(railWidth);
+  }, [railWidth, applyRailWidth]);
+
+  // 卸载时收尾：撤掉拖动期的光标状态，把还没写出去的宽度补写一次。
+  useEffect(() => {
+    const root = pageRoot.current;
+    return () => {
+      railResize.current = null;
+      root?.classList.remove('is-resizing');
+      const pending = railSave.current;
+      if (pending.timer) {
+        clearTimeout(pending.timer);
+        pending.timer = null;
+        void flushRailRef.current();
+      }
+    };
+  }, []);
+
+  // 拖到一半窗口缩成抽屉形态时命中区会被卸载，这里把拖动状态收干净（不留 cursor）。
+  useEffect(() => {
+    if (!layout.mobile || !railResize.current) return;
+    railResize.current = null;
+    pageRoot.current?.classList.remove('is-resizing');
+    setRailDragging(false);
+  }, [layout.mobile]);
 
   const commitTitle = useCallback(
     async ({ id, title, baseTitle }) => {
@@ -720,6 +949,10 @@ export default function NotebookPage({ api }) {
 
   useEffect(() => {
     const observer = new ResizeObserver(([entry]) => {
+      // 页面宽度变了：目录宽度按新的可用区域重算一次，窗口缩小时正文不会被挤没。
+      const applied = applyRailWidth(railWidthRef.current);
+      setRailWidth(applied);
+      setRailMaxWidth(notebookRailLimits(entry.contentRect.width).max);
       const next = { mobile: entry.contentRect.width <= 760 };
       const previous = layoutRef.current;
       if (previous.mobile === next.mobile) return;
@@ -729,7 +962,7 @@ export default function NotebookPage({ api }) {
     });
     if (pageRoot.current) observer.observe(pageRoot.current);
     return () => observer.disconnect();
-  }, []);
+  }, [applyRailWidth]);
 
   // 顶栏与编辑器工具栏是同一行：把两侧实际占的宽度告诉 iframe，让它给工具栏空出同样的位置，
   // 只靠 CSS 猜宽度会在标题变长或增删按钮时互相压住。
@@ -1486,7 +1719,7 @@ export default function NotebookPage({ api }) {
                           <span className="notebook-menu-anchor">
                             <Button
                               variant="ghost"
-                              icon={<MoreHorizontal size={15} />}
+                              icon={<YuqueIcon name="more" size={15} />}
                               title={`更多操作：${node.title}`}
                               tabIndex={node.id === tabStop ? 0 : -1}
                               aria-haspopup="menu"
@@ -1537,6 +1770,28 @@ export default function NotebookPage({ api }) {
             </div>
           </div>
         </aside>
+        {/* 目录右缘的拖动命中区：桌面才有，窄屏的抽屉保持自己的宽度。 */}
+        {!layout.mobile && railOpen && !focused && (
+          <div
+            className="notebook-rail-resizer"
+            role="separator"
+            aria-orientation="vertical"
+            aria-label="调整目录宽度"
+            aria-valuemin={RAIL_MIN_WIDTH}
+            aria-valuemax={railMaxWidth}
+            aria-valuenow={railWidth}
+            title="拖动调整目录宽度，双击恢复默认"
+            tabIndex={0}
+            data-resizing={railDragging ? 'true' : undefined}
+            onPointerDown={startRailResize}
+            onPointerMove={moveRailResize}
+            onPointerUp={endRailResize}
+            onPointerCancel={endRailResize}
+            onLostPointerCapture={endRailResize}
+            onKeyDown={resizeRailByKey}
+            onDoubleClick={() => commitRailWidth(RAIL_DEFAULT_WIDTH)}
+          />
+        )}
         {railOpen && (
           <button
             type="button"
@@ -1686,7 +1941,7 @@ export default function NotebookPage({ api }) {
                           <span className="notebook-menu-anchor">
                             <Button
                               variant="ghost"
-                              icon={<MoreHorizontal size={16} />}
+                              icon={<YuqueIcon name="more" />}
                               title="笔记操作"
                               aria-label="笔记操作"
                               pressed={menu?.id === active.id && menu.source === 'header'}
@@ -1765,7 +2020,7 @@ export default function NotebookPage({ api }) {
                     <strong>文档大纲</strong>
                     <Button
                       variant="ghost"
-                      icon={<PanelRightClose size={16} />}
+                      icon={<YuqueIcon name="outline" />}
                       title="隐藏文档大纲"
                       aria-label="隐藏文档大纲"
                       onClick={() => setOutlineOpen(false)}
@@ -1804,7 +2059,7 @@ export default function NotebookPage({ api }) {
                     )}
                   </span>
                   <span className="notebook-outline-rail-icon">
-                    <PanelRightOpen size={13} />
+                    <YuqueIcon name="outline" size={13} />
                   </span>
                 </button>
               ))}

@@ -10,6 +10,7 @@ const root = fileURLToPath(new URL('.', import.meta.url))
 const repo = resolve(root, '../../../..')
 const output = resolve(repo, 'temp/notebook-workbench-runtime')
 const runtimeRoot = resolve(repo, 'packages/mica-editor/runtime')
+const iconRoot = resolve(repo, 'packages/mica-editor/web/assets/yuque')
 const sharedControls = resolve(repo, 'packages/mica-config-ui/web/components')
 const arcoStyles = resolve(repo, 'packages/mica-config-ui/web/arco-settings.css')
 const types = {
@@ -56,11 +57,11 @@ function isolatedEditorRuntime() {
       const invalidate = (_event, file) => {
         const path = resolve(file)
         const parts = relative(runtimeRoot, path).split(sep)
-        if (path !== arcoStyles && !path.startsWith(sharedControls + sep) &&
+        if (path !== arcoStyles && !path.startsWith(sharedControls + sep) && !path.startsWith(iconRoot + sep) &&
           (!path.startsWith(runtimeRoot + sep) || parts.some((part) => ['node_modules', 'dist', 'coverage', '.vite'].includes(part)))) return
         revision += 1
       }
-      server.watcher.add([runtimeRoot, sharedControls, arcoStyles])
+      server.watcher.add([runtimeRoot, iconRoot, sharedControls, arcoStyles])
       server.watcher.on('all', invalidate)
       server.httpServer?.once('close', () => server.watcher.off('all', invalidate))
 

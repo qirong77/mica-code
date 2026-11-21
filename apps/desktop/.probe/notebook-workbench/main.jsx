@@ -2,7 +2,7 @@ import '@arco-design/web-react/es/_util/react-19-adapter'
 import { useEffect, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { ArcoProvider, SelectMenu } from '@mica-config-ui/web'
-import NotebookPage from '../../../../plugins/notebook/desktop.jsx'
+import NotebookPage, { RAIL_LAYOUT_DOCUMENT } from '../../../../plugins/notebook/desktop.jsx'
 import {
   parseNotebookDocument,
   validateNodeId,
@@ -61,6 +61,7 @@ function createMemoryHost() {
   let closing = null
   let indexSaveCount = 0
   let documentSaveCount = 0
+  let layoutSaveCount = 0
 
   function readRecord(key) {
     const record = records.get(key)
@@ -87,15 +88,18 @@ function createMemoryHost() {
     if (options.expectedVersion !== previousVersion) return reject('内存资源版本已变更', true)
     if (failWrites) return reject('探针模拟写入失败；当前草稿仍由 Notebook 页面保留')
     try {
-      if (scope === 'document') validateNodeId(id)
-      const snapshot = scope === 'index' ? validateNotebookIndex(value) : parseNotebookDocument(value)
+      const isLayout = scope === 'document' && id === RAIL_LAYOUT_DOCUMENT
+      if (scope === 'document' && !isLayout) validateNodeId(id)
+      if (isLayout && (value?.version !== 1 || !Number.isFinite(value.railWidth))) throw new Error('Invalid layout preference')
+      const snapshot = scope === 'index' ? validateNotebookIndex(value) : isLayout ? clone(value) : parseNotebookDocument(value)
       const version = crypto.randomUUID()
       // No await between comparing and replacing: concurrent calls obey CAS as one operation.
       records.set(key, { value: snapshot, version })
       attempt.result = 'saved'
       attempt.version = version
       if (scope === 'index') indexSaveCount += 1
-      else documentSaveCount += 1
+      else if (!isLayout) documentSaveCount += 1
+      else layoutSaveCount += 1
       return { ok: true, version }
     } catch (error) {
       return reject(error instanceof Error ? error.message : String(error))
@@ -107,8 +111,10 @@ function createMemoryHost() {
     writeData: async (value, options) => writeRecord('index', null, value, options),
     documents: {
       async read(id) {
-        validateNodeId(id)
-        lastDocumentId = id
+        if (id !== RAIL_LAYOUT_DOCUMENT) {
+          validateNodeId(id)
+          lastDocumentId = id
+        }
         return readRecord(`document:${id}`)
       },
       write: async (id, value, options) => writeRecord('document', id, value, options)
@@ -134,7 +140,7 @@ function createMemoryHost() {
     readIndex: api.readData,
     get documents() { return documents() },
     get writes() { return clone(writes) },
-    get saveCount() { return indexSaveCount + documentSaveCount },
+    get saveCount() { return indexSaveCount + documentSaveCount + layoutSaveCount },
     get state() {
       return {
         index: readRecord('index').value,
@@ -144,8 +150,8 @@ function createMemoryHost() {
           [...records].filter(([key]) => key.startsWith('document:'))
             .map(([key, record]) => [key.slice('document:'.length), record.version])
         ),
-        lastDocumentId, failWrites, saveCount: indexSaveCount + documentSaveCount,
-        indexSaveCount, documentSaveCount, writes: clone(writes),
+        lastDocumentId, failWrites, saveCount: indexSaveCount + documentSaveCount + layoutSaveCount,
+        indexSaveCount, documentSaveCount, layoutSaveCount, writes: clone(writes),
         beforeCloseHandlers: beforeClose.size, closeAttempts: clone(closeAttempts)
       }
     },
@@ -182,6 +188,11 @@ window.__notebookWorkbench = host.debug
 
 function NotebookWorkbenchProbe() {
   const [theme, setTheme] = useState(initialTheme)
+  const [pageKey, setPageKey] = useState(0)
+  useEffect(() => {
+    host.debug.remount = () => setPageKey((key) => key + 1)
+    return () => { delete host.debug.remount }
+  }, [])
   useEffect(() => {
     applyResolvedTheme(theme)
     const url = new URL(location.href)
@@ -207,7 +218,7 @@ function NotebookWorkbenchProbe() {
         </header>
         <div className="notebook-workbench-probe-content">
           <div className="mica-config-ui is-embed is-fill min-h-0 flex-1 overflow-hidden">
-            <NotebookPage api={host.api} />
+            <NotebookPage key={pageKey} api={host.api} />
           </div>
         </div>
       </div>

@@ -1,144 +1,90 @@
 /**
  * Copyright (c) Meta Platforms, Inc. and affiliates.
- *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
- *
  */
-
+import {autoUpdate} from '@floating-ui/react';
 import {useLexicalComposerContext} from '@lexical/react/LexicalComposerContext';
-import {isHTMLElement} from 'lexical';
-import {useEffect} from 'react';
+import {useEffect, useState} from 'react';
+import {createPortal} from 'react-dom';
 
-const SCROLLABLE_WRAPPER_CLASS =
-  'PlaygroundEditorTheme__tableScrollableWrapper';
-const HAS_SCROLL_RIGHT_CLASS = 'PlaygroundEditorTheme__tableScrollRight';
-const HAS_SCROLL_LEFT_CLASS = 'PlaygroundEditorTheme__tableScrollLeft';
-const HAS_SCROLL_MIDDLE_CLASS = 'PlaygroundEditorTheme__tableScrollMiddle';
+import {tableScrollEdges, type TableScrollEdges, type TableViewport, visibleTableViewport} from './scrollGeometry';
+import './index.css';
 
-function updateTableScrollState(element: HTMLElement): void {
-  const hasScroll = element.scrollWidth > element.clientWidth;
-  // Adding and removing 1 and -1 for floating point precision
-  const isScrolledToRight =
-    element.scrollLeft + element.clientWidth >= element.scrollWidth - 1;
-  const isScrolledToLeft = element.scrollLeft <= 1;
+const WRAPPER = '.PlaygroundEditorTheme__tableScrollableWrapper';
+type Fade = TableViewport & TableScrollEdges & {element: HTMLElement};
 
-  // Remove all scroll classes first
-  element.classList.remove(HAS_SCROLL_RIGHT_CLASS);
-  element.classList.remove(HAS_SCROLL_LEFT_CLASS);
-  element.classList.remove(HAS_SCROLL_MIDDLE_CLASS);
-
-  if (hasScroll) {
-    // Middle state: not at either edge
-    if (!isScrolledToLeft && !isScrolledToRight) {
-      element.classList.add(HAS_SCROLL_MIDDLE_CLASS);
-    }
-    // Right edge
-    else if (isScrolledToLeft && !isScrolledToRight) {
-      element.classList.add(HAS_SCROLL_RIGHT_CLASS);
-    }
-    // Left edge
-    else if (!isScrolledToLeft && isScrolledToRight) {
-      element.classList.add(HAS_SCROLL_LEFT_CLASS);
-    }
-  }
-}
-
-export default function TableScrollShadowPlugin(): null {
+export default function TableScrollShadowPlugin() {
   const [editor] = useLexicalComposerContext();
+  const [fades, setFades] = useState<Fade[]>([]);
 
   useEffect(() => {
-    const editorElement = editor.getRootElement();
-    if (!editorElement) {
-      return;
-    }
-
-    const updateAllTableScrollStates = () => {
-      const wrappers = editorElement.querySelectorAll<HTMLElement>(
-        `.${SCROLLABLE_WRAPPER_CLASS}`,
-      );
-      wrappers.forEach(updateTableScrollState);
-    };
-
-    // Initial check
-    updateAllTableScrollStates();
-
-    // Watch for new table wrappers being added
-    const observer = new MutationObserver(() => {
-      updateAllTableScrollStates();
-    });
-
-    observer.observe(editorElement, {
-      childList: true,
-      subtree: true,
-    });
-
-    // Also watch for resize events on the wrappers themselves
-    const resizeObserver = new ResizeObserver(() => {
-      updateAllTableScrollStates();
-    });
-
-    const scrollHandlers = new Map<HTMLElement, () => void>();
-
-    const addScrollListener = (wrapper: HTMLElement) => {
-      if (scrollHandlers.has(wrapper)) {
-        return; // Already has a listener
+    const root = editor.getRootElement();
+    const doc = root?.ownerDocument;
+    const win = doc?.defaultView;
+    if (!root || !doc || !win) return;
+    const tracked = new Map<HTMLElement, () => void>();
+    let frame: number | null = null;
+    const measure = () => {
+      frame = null;
+      const next: Fade[] = [];
+      for (const element of tracked.keys()) {
+        const edges = tableScrollEdges(element);
+        if (!edges.hasLeft && !edges.hasRight) continue;
+        const visible = visibleTableViewport(element);
+        if (visible) next.push({...visible, ...edges, element});
       }
-      const handler = () => {
-        updateTableScrollState(wrapper);
-      };
-      wrapper.addEventListener('scroll', handler, {passive: true});
-      scrollHandlers.set(wrapper, handler);
+      setFades(previous => previous.length === next.length && previous.every((fade, index) => {
+        const other = next[index];
+        return fade.element === other.element && fade.hasLeft === other.hasLeft && fade.hasRight === other.hasRight &&
+          Math.abs(fade.top - other.top) < 0.25 && Math.abs(fade.bottom - other.bottom) < 0.25 &&
+          Math.abs(fade.left - other.left) < 0.25 && Math.abs(fade.right - other.right) < 0.25;
+      }) ? previous : next);
     };
-
-    const wrappers = editorElement.querySelectorAll<HTMLElement>(
-      `.${SCROLLABLE_WRAPPER_CLASS}`,
-    );
-    wrappers.forEach(wrapper => {
-      resizeObserver.observe(wrapper);
-      addScrollListener(wrapper);
-    });
-
-    // Watch for new wrappers to observe
-    const wrapperObserver = new MutationObserver(mutations => {
-      mutations.forEach(mutation => {
-        mutation.addedNodes.forEach(node => {
-          if (isHTMLElement(node)) {
-            if (node.classList.contains(SCROLLABLE_WRAPPER_CLASS)) {
-              resizeObserver.observe(node);
-              addScrollListener(node);
-              updateTableScrollState(node);
-            }
-
-            const childWrappers = node.querySelectorAll<HTMLElement>(
-              `.${SCROLLABLE_WRAPPER_CLASS}`,
-            );
-            childWrappers.forEach(wrapper => {
-              resizeObserver.observe(wrapper);
-              addScrollListener(wrapper);
-              updateTableScrollState(wrapper);
-            });
-          }
+    const schedule = () => {if (frame === null) frame = win.requestAnimationFrame(measure);};
+    const observer = new ResizeObserver(schedule);
+    const sync = () => {
+      const wrappers = new Set(root.querySelectorAll<HTMLElement>(WRAPPER));
+      for (const [element, dispose] of tracked) {
+        if (!wrappers.has(element)) {dispose(); tracked.delete(element);}
+      }
+      for (const element of wrappers) {
+        if (tracked.has(element)) continue;
+        const table = element.querySelector('table');
+        observer.observe(element);
+        if (table) observer.observe(table);
+        const cleanupPosition = autoUpdate(element, null, schedule, {
+          ancestorScroll: false, ancestorResize: false, elementResize: false, layoutShift: true,
         });
-      });
-    });
-
-    wrapperObserver.observe(editorElement, {
-      childList: true,
-      subtree: true,
-    });
-
+        tracked.set(element, () => {
+          observer.unobserve(element);
+          if (table) observer.unobserve(table);
+          cleanupPosition();
+        });
+      }
+      schedule();
+    };
+    const mutations = new MutationObserver(sync);
+    mutations.observe(root, {childList: true, subtree: true});
+    doc.addEventListener('scroll', schedule, {capture: true, passive: true});
+    win.addEventListener('resize', schedule);
+    win.visualViewport?.addEventListener('resize', schedule);
+    sync();
     return () => {
+      if (frame !== null) win.cancelAnimationFrame(frame);
+      mutations.disconnect();
       observer.disconnect();
-      resizeObserver.disconnect();
-      wrapperObserver.disconnect();
-
-      scrollHandlers.forEach((handler, wrapper) => {
-        wrapper.removeEventListener('scroll', handler);
-      });
-      scrollHandlers.clear();
+      tracked.forEach(dispose => dispose());
+      doc.removeEventListener('scroll', schedule, true);
+      win.removeEventListener('resize', schedule);
+      win.visualViewport?.removeEventListener('resize', schedule);
     };
   }, [editor]);
 
-  return null;
+  const doc = editor.getRootElement()?.ownerDocument;
+  if (!doc || !fades.length) return null;
+  return createPortal(<div className="table-scroll-fades" aria-hidden="true">
+    {fades.map((fade, index) => <div key={index} className={`table-scroll-fade${fade.hasLeft ? ' has-left' : ''}${fade.hasRight ? ' has-right' : ''}`}
+      style={{left: fade.left, top: fade.top, width: fade.right - fade.left, height: fade.bottom - fade.top}} />)}
+  </div>, doc.body);
 }

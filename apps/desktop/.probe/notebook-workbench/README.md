@@ -11,7 +11,7 @@ npx vite --config .probe/notebook-workbench/vite.config.mjs
 
 访问 `http://127.0.0.1:5287/`，默认浅色。辅助条可即时切换项目注册表中的六套主题，也可以用 `/?theme=dark`、`/?theme=mocha`、`/?theme=latte`、`/?theme=tokyo-night`、`/?theme=tokyo-night-light` 指定主题。主题只更新本页 DOM 和 URL，不写用户偏好。
 
-需要已安装桌面端与 `packages/mica-editor/runtime` 的开发依赖。第一次请求 `/editor/` 时调用共享 `packages/mica-editor/build.mjs`，输出到仓库的 `temp/notebook-workbench-runtime/`；后续运行时源码、共享菜单等控件或共享 Arco CSS 改动会使这份隔离产物失效，并在下次请求时重建。不会覆盖安装产物，也不会触发桌面端、CLI 或配置页的正式构建。第三方编辑器依赖沿用生产运行时的 CDN 加载方式。
+需要已安装桌面端与 `packages/mica-editor/runtime` 的开发依赖。第一次请求 `/editor/` 时调用共享 `packages/mica-editor/build.mjs`，输出到仓库的 `temp/notebook-workbench-runtime/`；后续运行时源码、`packages/mica-editor/web/assets/yuque/` 图标、共享菜单等控件或共享 Arco CSS 改动会使这份隔离产物失效，并在下次请求时重建。不会覆盖安装产物，也不会触发桌面端、CLI 或配置页的正式构建。第三方编辑器依赖沿用生产运行时的 CDN 加载方式。
 
 ## 数据与边界
 
@@ -33,6 +33,7 @@ probe.state
 probe.documents
 probe.saveCount
 probe.writes
+probe.remount() // 重挂正式 NotebookPage，保留内存宿主，可验证目录宽度的读取恢复
 
 // 默认使用正式页面最近读取的笔记；也可显式指定 fixture 中的 id。
 probe.snapshot() // 已保存的 NotebookDocument；不主动 flush 编辑器
@@ -49,6 +50,8 @@ probe.failWrites = false
 await probe.close()
 ```
 
-`close()` 只验证生产页面的关闭守卫，保留页面供继续检查，不导航或卸载页面。`state.saveCount` / `saveCount` 统计成功的索引与文档写入总数，`state.documentSaveCount` 只统计成功的正文写入；`writes` 记录每次尝试的资源、文档 id、期望版本、原版本、结果、新版本和请求正文，包含失败与冲突。
+`close()` 只验证生产页面的关闭守卫，保留页面供继续检查，不导航或卸载页面。`state.saveCount` / `saveCount` 统计成功的索引、正文与布局写入总数，`state.documentSaveCount` 只统计成功的正文写入，`state.layoutSaveCount` 统计目录宽度偏好；布局资源 `ui.layout` 不参与默认正文 id 的选择。`writes` 记录每次尝试的资源、文档 id、期望版本、原版本、结果、新版本和请求正文，包含失败与冲突。
+
+目录验证：拖到目标宽度或聚焦分隔条后按方向键，等待 `documents['ui.layout'].railWidth` 更新；调用 `remount()`，页面应恢复该宽度。双击分隔条回到 260px；父容器收窄到 700px 后目录改为 260px 抽屉且没有拖动条，恢复桌面宽度后沿用桌面偏好。目录行「更多操作」菜单应贴触发按钮左缘向右下展开。
 
 可复核：编辑后等待正式页面自动保存并读取 `snapshot(id)`；切换笔记后核对上一份正文；开启 `failWrites` 后继续编辑并调用 `close()`，应保留草稿并拒绝离开，关闭失败开关后重试。`snapshot()` 只反映宿主已接收的保存内容，待保存草稿仍由正式页面管理。

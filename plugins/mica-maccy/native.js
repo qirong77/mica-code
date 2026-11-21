@@ -133,6 +133,11 @@ export function createNativeBridge({ directory, onActivate = () => {}, onError =
             pending.delete(message.id);
             clearTimeout(request.timer);
             if (message.ok && request.action === 'status') capabilities = { ...capabilities, ...message.result };
+            // Permissions can change while the helper stays alive, even with an unchanged clipboard.
+            // Keep only the capability here: poll results can also contain private clipboard payloads.
+            if (message.ok && request.action === 'poll' && typeof message.result?.accessibility === 'boolean') {
+              capabilities = { ...capabilities, accessibility: message.result.accessibility };
+            }
             if (message.ok) request.resolve(message.result);
             else request.reject(new Error(message.error || '原生剪贴板操作未完成'));
           }

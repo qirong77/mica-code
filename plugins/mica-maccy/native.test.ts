@@ -9,7 +9,7 @@ afterEach(async () => {
   vi.useRealTimers();
 });
 
-function fixture() {
+function fixture(accessibility = true) {
   const processes: any[] = [];
   const messages: any[] = [];
   const onActivate = vi.fn();
@@ -37,7 +37,7 @@ function fixture() {
       });
       processes.push(child);
       queueMicrotask(() =>
-        child.stdout.write(`${JSON.stringify({ event: 'ready', changeCount: 3, accessibility: true })}\n`),
+        child.stdout.write(`${JSON.stringify({ event: 'ready', changeCount: 3, accessibility })}\n`),
       );
       return child;
     },
@@ -51,6 +51,40 @@ async function flushed() {
 }
 
 describe('native clipboard transport', () => {
+  it('refreshes granted and revoked permissions during polling even when the clipboard is unchanged', async () => {
+    const value = fixture(false);
+    await value.bridge.start();
+    expect(value.bridge.capabilities()?.accessibility).toBe(false);
+
+    for (const accessibility of [true, false]) {
+      const operation = value.bridge.request('poll', { since: 3 });
+      await flushed();
+      const response = { changed: false, changeCount: 3, accessibility };
+      value.processes[0].stdout.write(
+        `${JSON.stringify({ id: value.messages.at(-1).id, ok: true, result: response })}\n`,
+      );
+      await operation;
+      expect(value.bridge.capabilities()).toEqual({ supported: true, changeCount: 3, accessibility });
+      // start() reuses its initial promise; the UI must read the refreshed capabilities instead.
+      expect((await value.bridge.start()).accessibility).toBe(false);
+    }
+  });
+
+  it('does not retain clipboard payloads in cached capabilities', async () => {
+    const value = fixture(false);
+    const operation = value.bridge.request('poll', { since: 3 });
+    await flushed();
+    value.processes[0].stdout.write(
+      `${JSON.stringify({
+        id: value.messages[0].id,
+        ok: true,
+        result: { changed: true, changeCount: 4, accessibility: true, snapshot: { text: 'private clipboard' } },
+      })}\n`,
+    );
+    await operation;
+    expect(value.bridge.capabilities()).toEqual({ supported: true, changeCount: 3, accessibility: true });
+  });
+
   it('shares initialization and correlates responses without exposing clipboard data to logs', async () => {
     const value = fixture();
     await Promise.all([value.bridge.start(), value.bridge.start()]);

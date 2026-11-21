@@ -24,6 +24,9 @@ static void emit(NSDictionary *value) {
 }
 
 static NSDictionary *failure(NSString *message) { return @{@"error":message ?: @"原生剪贴板操作失败"}; }
+// AXIsProcessTrusted returns a C Boolean (unsigned char). Boxing it directly
+// serializes as JSON 0/1, which the bridge's strict boolean checks reject.
+static NSNumber *accessibilityPermission(void) { return AXIsProcessTrusted() ? @YES : @NO; }
 static NSDictionary *frontmost(void) {
   NSRunningApplication *app = NSWorkspace.sharedWorkspace.frontmostApplication;
   return @{@"pid":@(app.processIdentifier), @"name":app.localizedName ?: @"", @"bundleId":app.bundleIdentifier ?: @""};
@@ -226,12 +229,16 @@ static void updateTray(NSDictionary *input) {
 }
 
 static NSDictionary *handle(NSString *action, NSDictionary *input) {
-  if ([action isEqual:@"poll"]) return poll(input);
+  if ([action isEqual:@"poll"]) {
+    NSMutableDictionary *result = [poll(input) mutableCopy];
+    result[@"accessibility"] = accessibilityPermission();
+    return result;
+  }
   if ([action isEqual:@"write"]) return writeClipboard(input);
   if ([action isEqual:@"preview"]) return preview(input);
   if ([action isEqual:@"frontmost"]) return frontmost();
   if ([action isEqual:@"paste"]) return paste(input);
-  if ([action isEqual:@"status"]) return @{@"accessibility":@(AXIsProcessTrusted()), @"supported":@YES, @"changeCount":@(board.changeCount)};
+  if ([action isEqual:@"status"]) return @{@"accessibility":accessibilityPermission(), @"supported":@YES, @"changeCount":@(board.changeCount)};
   if ([action isEqual:@"tray"]) { updateTray(input); return @{}; }
   return failure(@"未知原生剪贴板操作");
 }
@@ -306,14 +313,20 @@ int main(int argc, const char *argv[]) {
       NSDictionary *imagePoll = poll(@{@"since":@(-1), @"maxItemBytes":@(5242880)});
       BOOL imageOK = [preview(@{@"snapshot":imagePoll[@"snapshot"]})[@"previewImage"] hasPrefix:@"data:image/png;base64,"];
       imageOK = imageOK && !writeClipboard(@{@"snapshot":imagePoll[@"snapshot"]})[@"error"] && [[board dataForType:NSPasteboardTypePNG] isEqual:png];
-      ok = ok && richOK && privateOK && filesOK && imageOK;
-      NSMutableDictionary *testResult = [@{@"ok":@(ok), @"isolatedPasteboard":@YES, @"selfCopyIgnored":@(!ignored[@"snapshot"]), @"richText":@(richOK), @"confidentialIgnored":@(privateOK), @"multipleFiles":@(filesOK), @"imagePreviewAndRestore":@(imageOK)} mutableCopy];
+      // Exercise the real native values used by ready, status and both poll paths.
+      // Equality with @YES would also accept @1, so verify the CFBoolean type.
+      NSArray *permissions = @[accessibilityPermission(), handle(@"status", @{})[@"accessibility"], handle(@"poll", @{@"since":@(board.changeCount), @"capture":@NO})[@"accessibility"], handle(@"poll", @{@"since":@(-1), @"capture":@NO})[@"accessibility"]];
+      BOOL permissionBooleans = YES;
+      for (NSNumber *permission in permissions)
+        permissionBooleans = permissionBooleans && CFGetTypeID((__bridge CFTypeRef)permission) == CFBooleanGetTypeID();
+      ok = ok && richOK && privateOK && filesOK && imageOK && permissionBooleans;
+      NSMutableDictionary *testResult = [@{@"ok":@(ok), @"isolatedPasteboard":@YES, @"selfCopyIgnored":@(!ignored[@"snapshot"]), @"richText":@(richOK), @"confidentialIgnored":@(privateOK), @"multipleFiles":@(filesOK), @"imagePreviewAndRestore":@(imageOK), @"permissionBooleans":@(permissionBooleans)} mutableCopy];
       if (argc > 2 && strcmp(argv[2], "--snapshot") == 0) testResult[@"imageSnapshot"] = imagePoll[@"snapshot"];
       emit(testResult);
       [board releaseGlobally];
       return ok ? 0 : 1;
     }
-    emit(@{@"event":@"ready", @"changeCount":@(board.changeCount), @"accessibility":@(AXIsProcessTrusted())});
+    emit(@{@"event":@"ready", @"changeCount":@(board.changeCount), @"accessibility":accessibilityPermission()});
     pid_t parent = getppid();
     parentWatch = dispatch_source_create(DISPATCH_SOURCE_TYPE_PROC, parent, DISPATCH_PROC_EXIT, dispatch_get_main_queue());
     dispatch_source_set_event_handler(parentWatch, ^{ exit(0); });

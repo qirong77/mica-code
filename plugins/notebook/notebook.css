@@ -1,5 +1,7 @@
 .notebook-page {
   --notebook-rail-width: 260px;
+  /* 窄屏抽屉保持自己的宽度：桌面上拖出来的宽度不该把手机抽屉一起拉宽。 */
+  --notebook-rail-drawer-width: 260px;
   --notebook-bar-height: 44px;
   display: flex;
   width: 100%;
@@ -25,6 +27,14 @@
 .notebook-page :is(button, input) {
   font-family: inherit;
 }
+.notebook-yuque-icon {
+  display: inline-block;
+  flex: none;
+  background: currentColor;
+  mask: var(--notebook-yuque-icon) center / contain no-repeat;
+}
+.notebook-yuque-icon[data-icon='more'] { --notebook-yuque-icon: url('../../packages/mica-editor/web/assets/yuque/more.svg'); }
+.notebook-yuque-icon[data-icon='outline'] { --notebook-yuque-icon: url('../../packages/mica-editor/web/assets/yuque/outline.svg'); }
 .notebook-page button:focus-visible {
   outline: 2px solid var(--color-accent);
   outline-offset: -2px;
@@ -54,6 +64,49 @@
 }
 .notebook-page.is-rail-open:not(.is-focused) .notebook-rail {
   display: flex;
+}
+/* 目录右缘的拖动命中区：细条、跨在分隔线上，悬停/聚焦/拖动时才显出一条线。 */
+.notebook-rail-resizer {
+  position: absolute;
+  inset-block: 0;
+  left: var(--notebook-rail-width);
+  z-index: 6;
+  width: 9px;
+  transform: translateX(-50%);
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: col-resize;
+  touch-action: none;
+}
+.notebook-rail-resizer::after {
+  content: '';
+  position: absolute;
+  inset-block: 0;
+  inset-inline-start: 50%;
+  width: 1px;
+  transform: translateX(-50%);
+  background: transparent;
+  transition: background-color var(--motion-fast, 90ms) ease;
+}
+.notebook-rail-resizer:is(:hover, :focus-visible)::after {
+  background: var(--color-line-strong);
+}
+.notebook-rail-resizer:is(:focus-visible, [data-resizing='true']) {
+  outline: none;
+}
+.notebook-rail-resizer:is(:focus-visible, [data-resizing='true'])::after {
+  background: var(--color-accent);
+}
+/* 拖动期间光标与选区统一交给这条命中区，正文里的按钮不再抢指针。 */
+.notebook-page.is-resizing,
+.notebook-page.is-resizing :is(.notebook-rail, .notebook-main),
+.notebook-page.is-resizing :is(.notebook-rail, .notebook-main) * {
+  cursor: col-resize;
+  user-select: none;
+}
+.notebook-page.is-resizing .notebook-editor-frame {
+  pointer-events: none;
 }
 .notebook-rail-title {
   min-height: 84px;
@@ -868,7 +921,7 @@
   .notebook-rail {
     position: absolute;
     inset: 0 auto 0 0;
-    width: min(var(--notebook-rail-width), calc(100% - 40px));
+    width: min(var(--notebook-rail-drawer-width), calc(100% - 40px));
     z-index: 21;
   }
   .notebook-page.is-rail-open:not(.is-focused) .notebook-mobile-mask {

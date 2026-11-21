@@ -1,22 +1,17 @@
 import {$isCodeNode, type CodeNode} from '@lexical/code';
 import {
   $addUpdateTag,
-  $createParagraphNode,
   $getNodeByKey,
   $getSelection,
   $isNodeSelection,
-  $isParagraphNode,
   $isRangeSelection,
   $isTextNode,
   $setSelection,
-  COMMAND_PRIORITY_HIGH,
   COMMAND_PRIORITY_LOW,
   HISTORY_PUSH_TAG,
   KEY_DOWN_COMMAND,
-  KEY_ENTER_COMMAND,
   type LexicalEditor,
   type LexicalNode,
-  mergeRegister,
   type NodeKey,
   type PointType,
 } from 'lexical';
@@ -61,20 +56,6 @@ export function $setCodeBlockLanguage(
   }
   $addUpdateTag(HISTORY_PUSH_TAG);
   code.setLanguage(language || undefined);
-  return true;
-}
-
-/** Reuse a following paragraph, including its content, without consuming code. */
-export function $exitCodeBlock(editor: LexicalEditor, key: NodeKey): boolean {
-  const code = $getCodeBlock(key);
-  if (!editor.isEditable() || !code) return false;
-  const next = code.getNextSibling();
-  if ($isParagraphNode(next)) {
-    next.selectStart();
-  } else {
-    $addUpdateTag(HISTORY_PUSH_TAG);
-    code.insertAfter($createParagraphNode()).selectStart();
-  }
   return true;
 }
 
@@ -159,27 +140,15 @@ export function registerCodeWritingCommands(
   editor: LexicalEditor,
   focusTools: (key: NodeKey) => void,
 ): () => void {
-  return mergeRegister(
-    editor.registerCommand(KEY_ENTER_COMMAND, (event, activeEditor) => {
-      if (
-        activeEditor !== editor || !editor.isEditable() || !event ||
-        !(event.metaKey || event.ctrlKey) || event.altKey || event.shiftKey || event.isComposing
-      ) return false;
-      const code = $getSelectedCodeBlock();
-      if (!code || !$exitCodeBlock(editor, code.getKey())) return false;
-      event.preventDefault();
-      return true;
-    }, COMMAND_PRIORITY_HIGH),
-    editor.registerCommand(KEY_DOWN_COMMAND, (event, activeEditor) => {
-      if (
-        activeEditor !== editor || event.key !== 'F10' || !event.altKey ||
-        event.metaKey || event.ctrlKey || event.shiftKey || event.isComposing
-      ) return false;
-      const code = $getSelectedCodeBlock();
-      if (!code) return false;
-      event.preventDefault();
-      focusTools(code.getKey());
-      return true;
-    }, COMMAND_PRIORITY_LOW),
-  );
+  return editor.registerCommand(KEY_DOWN_COMMAND, (event, activeEditor) => {
+    if (
+      activeEditor !== editor || event.key !== 'F10' || !event.altKey ||
+      event.metaKey || event.ctrlKey || event.shiftKey || event.isComposing
+    ) return false;
+    const code = $getSelectedCodeBlock();
+    if (!code) return false;
+    event.preventDefault();
+    focusTools(code.getKey());
+    return true;
+  }, COMMAND_PRIORITY_LOW);
 }

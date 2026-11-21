@@ -37,6 +37,10 @@
 
 复制与记录不需要辅助功能权限；**自动粘贴需要为 Mica Code 授予辅助功能权限**。插件设置的「运行条件」提供系统权限检测与授权入口。缺少权限时内容仍会复制到剪贴板，窗口保留清楚的提示。
 
+权限状态随剪贴板轮询更新，即使没有新复制的内容也会重新检测；授权或撤销后，历史窗口的提示会在下一次列表刷新时同步，无需重启插件。窗口里的「重新检测」也会立即重查原生组件的权限。
+
+原生协议的权限字段统一输出 JSON 布尔值 `true/false`；macOS 的 `AXIsProcessTrusted()` 返回 C `Boolean`，直接装箱会变成数字 `1/0`，使前端严格布尔判断误报缺少权限。
+
 首次启用需要 Xcode Command Line Tools，用于在插件自己的数据目录准备一次原生组件。未安装时按提示执行 `xcode-select --install`，然后点击「重新检测」。原生组件不依赖其它剪贴板软件或 `computer-use` 插件。
 
 ## 设置
@@ -82,6 +86,6 @@ bun run typecheck
 cd apps/desktop && npx vite --config .probe/maccy/vite.config.mjs   # http://127.0.0.1:5240/?theme=light
 ```
 
-原生读写使用 `--self-test` 验证独立的临时 pasteboard，不修改用户正在使用的系统剪贴板。应用构建与重启按仓库 `agent/build.md` 执行，由用户决定时机。
+原生读写使用 `--self-test` 验证独立的临时 pasteboard，不修改用户正在使用的系统剪贴板；同时检查启动、状态与两种轮询路径的权限值确实是布尔类型（`permissionBooleans`），防止模拟响应漏掉原生序列化问题。应用构建与重启按仓库 `agent/build.md` 执行，由用户决定时机。
 
 本插件参考 Maccy 的功能与交互，使用 Mica 的组件和插件机制重新实现；未引入 Maccy 可执行文件或数据格式。Maccy 项目采用 [MIT 许可证](https://github.com/p0deje/Maccy/blob/master/LICENSE)。

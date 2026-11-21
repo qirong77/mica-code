@@ -3,13 +3,9 @@ import {createHeadlessEditor} from '@lexical/headless';
 import {createEmptyHistoryState, registerHistory} from '@lexical/history';
 import {
   $createNodeSelection,
-  $createParagraphNode,
   $createRangeSelection,
-  $createTextNode,
-  $getNodeByKey,
   $getRoot,
   $getSelection,
-  $isParagraphNode,
   $isRangeSelection,
   $setSelection,
   COMMAND_PRIORITY_EDITOR,
@@ -24,7 +20,6 @@ import {afterEach, describe, expect, it, vi} from 'vitest';
 
 import {
   $applyFormattedCode,
-  $exitCodeBlock,
   $getCodeBlock,
   $getSelectedCodeBlock,
   $readCodeSnapshot,
@@ -134,62 +129,8 @@ describe('code target and language', () => {
   });
 });
 
-describe('exit code', () => {
-  it('creates a following paragraph at the end, keeps code intact, and supports undo/redo', () => {
-    const {editor, key} = fixture();
-    const before = readCode(editor, key).content;
-    update(editor, () => expect($exitCodeBlock(editor, key)).toBe(true));
-    editor.read('latest', () => {
-      const next = $getCodeBlock(key)!.getNextSibling();
-      expect($isParagraphNode(next)).toBe(true);
-      const selection = $getSelection();
-      expect($isRangeSelection(selection) && selection.anchor.key).toBe(next!.getKey());
-      expect($isRangeSelection(selection) && selection.isCollapsed()).toBe(true);
-    });
-    expect(readCode(editor, key).content).toBe(before);
-    undo(editor);
-    editor.read('latest', () => {
-      expect($getCodeBlock(key)!.getNextSibling()).toBeNull();
-      expect($getSelectedCodeBlock()?.getKey()).toBe(key);
-    });
-    redo(editor);
-    editor.read('latest', () => expect($isParagraphNode($getCodeBlock(key)!.getNextSibling())).toBe(true));
-  });
-
-  it.each(['', '已有正文'])('enters an existing following paragraph (%s) without inserting or deleting content', content => {
-    const {editor, key, history} = fixture();
-    let paragraphKey = '';
-    update(editor, () => {
-      const paragraph = $createParagraphNode();
-      if (content) paragraph.append($createTextNode(content));
-      paragraphKey = paragraph.getKey();
-      $getRoot().append(paragraph);
-    });
-    const before = editor.getEditorState().toJSON();
-    const depth = history.undoStack.length;
-    update(editor, () => $exitCodeBlock(editor, key));
-    expect(editor.getEditorState().toJSON()).toEqual(before);
-    expect(history.undoStack.length).toBe(depth);
-    editor.read('latest', () => {
-      const selection = $getSelection();
-      expect($isRangeSelection(selection) && selection.anchor.offset).toBe(0);
-      expect($isRangeSelection(selection) && [selection.anchor.key, selection.anchor.getNode().getParent()?.getKey()]).toContain(paragraphKey);
-      expect($getNodeByKey(paragraphKey)!.getTextContent()).toBe(content);
-    });
-  });
-
-  it('inserts between adjacent code blocks and ignores the currently selected different block', () => {
-    const {editor, key, otherKey} = fixture();
-    update(editor, () => $exitCodeBlock(editor, otherKey));
-    editor.read('latest', () => {
-      const inserted = $getCodeBlock(otherKey)!.getNextSibling();
-      expect($isParagraphNode(inserted)).toBe(true);
-      expect(inserted!.getNextSibling()?.getKey()).toBe(key);
-      expect($getCodeBlock(key)!.getNextSibling()).toBeNull();
-    });
-  });
-
-  it('supports modified Enter and Alt+F10 without intercepting ordinary Enter, Tab or IME input', () => {
+describe('code tools keyboard access', () => {
+  it('focuses tools with Alt+F10 and leaves Enter, modified Enter, Tab and IME input to the editor', () => {
     const {editor, key} = fixture();
     const focusTools = vi.fn();
     cleanups.push(registerCodeWritingCommands(editor, focusTools));
@@ -199,17 +140,14 @@ describe('exit code', () => {
     update(editor, () => expect(editor.dispatchCommand(KEY_DOWN_COMMAND, focus)).toBe(true));
     expect(focusTools).toHaveBeenCalledWith(key);
     expect(focus.preventDefault).toHaveBeenCalled();
-    for (const event of [keyEvent('Enter'), keyEvent('Enter', {ctrlKey: true, isComposing: true})]) {
+    for (const event of [keyEvent('Enter'), keyEvent('Enter', {metaKey: true}), keyEvent('Enter', {ctrlKey: true}), keyEvent('Enter', {ctrlKey: true, isComposing: true})]) {
       update(editor, () => expect(editor.dispatchCommand(KEY_ENTER_COMMAND, event)).toBe(false));
     }
     const tab = keyEvent('Tab');
     update(editor, () => editor.dispatchCommand(KEY_DOWN_COMMAND, tab));
     expect(upstreamTab).toHaveBeenCalledWith(tab, editor);
     expect(tab.preventDefault).not.toHaveBeenCalled();
-    const exit = keyEvent('Enter', {metaKey: true});
-    update(editor, () => expect(editor.dispatchCommand(KEY_ENTER_COMMAND, exit)).toBe(true));
-    expect(exit.preventDefault).toHaveBeenCalled();
-    editor.read('latest', () => expect($isParagraphNode($getCodeBlock(key)!.getNextSibling())).toBe(true));
+    editor.read('latest', () => expect($getCodeBlock(key)!.getNextSibling()).toBeNull());
   });
 });
 
@@ -279,13 +217,11 @@ describe('formatting and stale actions', () => {
     editor.setEditable(false);
     const before = editor.getEditorState().toJSON();
     update(editor, () => {
-      expect($exitCodeBlock(editor, key)).toBe(false);
       expect($setCodeBlockLanguage(editor, key, 'plain')).toBe(false);
     });
     expect(editor.getEditorState().toJSON()).toEqual(before);
     editor.setEditable(true);
     update(editor, () => {
-      expect($exitCodeBlock(editor, 'removed-key')).toBe(false);
       expect($setCodeBlockLanguage(editor, 'removed-key', 'plain')).toBe(false);
     });
   });

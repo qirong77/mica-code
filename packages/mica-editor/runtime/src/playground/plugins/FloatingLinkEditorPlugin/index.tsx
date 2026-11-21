@@ -45,9 +45,9 @@ import {
   $createLinkEditSession,
   $removeLink,
   $restoreLinkSelection,
+  browserTarget,
   type LinkEditSession,
   type LinkUrlStrategy,
-  normalizeLinkUrl,
   registerLinkDraftRequests,
 } from './linkEditing';
 
@@ -244,10 +244,12 @@ function FloatingLinkEditor({
             // shortcut for opening, and follows the same validation as the dialog.
             event.preventDefault();
             if (event.metaKey || event.ctrlKey) {
-              const result = normalizeLinkUrl(clickedLink.url, urlStrategy);
-              if (result.ok) {
+              // Only web and contact targets can be opened; an in-document link
+              // (`#heading`, `./note.md`) stays in the document.
+              const address = browserTarget(clickedLink.url, urlStrategy);
+              if (address) {
                 getRootOwnerDocument(originatingEditor.getRootElement()).defaultView?.open(
-                  result.url,
+                  address,
                   '_blank',
                   'noopener,noreferrer',
                 );
@@ -383,12 +385,9 @@ function FloatingLinkEditor({
 
   const openLink = () => {
     if (!target) return;
-    const result = normalizeLinkUrl(target.url, urlStrategy);
-    if (!result.ok) {
-      setError(result.error);
-      return;
-    }
-    getRootOwnerDocument(target.editor.getRootElement()).defaultView?.open(result.url, '_blank', 'noopener,noreferrer');
+    const address = browserTarget(target.url, urlStrategy);
+    if (!address) return;
+    getRootOwnerDocument(target.editor.getRootElement()).defaultView?.open(address, '_blank', 'noopener,noreferrer');
   };
 
   return createPortal(
@@ -451,7 +450,7 @@ function FloatingLinkEditor({
               role={error ? 'alert' : undefined}>
               {error ?? (markdownOnly
                 ? '支持网址、邮箱、电话、本地路径和 #锚点；空格请写为 %20。Enter 保存，Esc 取消。'
-                : '支持网址、邮箱和电话；Enter 保存，Esc 取消。')}
+                : '支持网址、邮箱、电话，以及 # 锚点与 ./、../、/ 开头的路径；Enter 保存，Esc 取消。')}
             </p>
             <div className="mica-link-editor__actions">
               {target.linkKey && (
@@ -482,9 +481,11 @@ function FloatingLinkEditor({
               <Button variant="ghost" size="compact" onClick={() => beginEditing(target)}>
                 编辑链接
               </Button>
-              <Button variant="ghost" size="compact" aria-label="在新窗口打开链接" onClick={openLink}>
-                打开链接
-              </Button>
+              {browserTarget(target.url, urlStrategy) && (
+                <Button variant="ghost" size="compact" aria-label="在新窗口打开链接" onClick={openLink}>
+                  打开链接
+                </Button>
+              )}
               <Button variant="danger-ghost" size="compact" onClick={remove}>
                 移除链接
               </Button>

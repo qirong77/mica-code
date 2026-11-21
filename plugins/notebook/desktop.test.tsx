@@ -1,6 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
-import NotebookPage, { createDefaultNote } from './desktop.jsx';
+import NotebookPage, {
+  RAIL_DEFAULT_WIDTH,
+  clampRailWidth,
+  createDefaultNote,
+  notebookRailLimits,
+} from './desktop.jsx';
 import { createNotebookController } from './controller';
 import { createNode, emptyIndex, flattenVisibleTree, placeNode, trashNode } from './model';
 import type { NotebookIndex } from './model';
@@ -29,10 +34,31 @@ describe('Notebook navigation', () => {
       // The subtitle reserves its space without briefly showing a false zero count.
       expect(html).not.toContain('0 篇笔记');
       expect(html).not.toContain('AI 对话');
+      // 目录宽度只在停靠（桌面）时可以拖；窄屏抽屉保持自己的宽度，不出现命中区。
+      expect(html.includes('notebook-rail-resizer')).toBe(width > 760);
+      if (width > 760) {
+        expect(html).toContain('role="separator"');
+        expect(html).toContain('aria-label="调整目录宽度"');
+      }
       expect(Conversation).not.toHaveBeenCalled();
     } finally {
       vi.unstubAllGlobals();
     }
+  });
+});
+
+describe('Notebook rail width', () => {
+  it('clamps the width to absolute bounds and to the room the document needs', () => {
+    expect(clampRailWidth(120)).toBe(200);
+    expect(clampRailWidth(9999)).toBe(460);
+    expect(clampRailWidth(Number.NaN)).toBe(RAIL_DEFAULT_WIDTH);
+    // 900px 的页面：目录最多 378px（42%），正文至少留 480px，两处取更紧的那个。
+    expect(notebookRailLimits(900)).toEqual({ min: 200, max: 378 });
+    expect(clampRailWidth(460, 900)).toBe(378);
+    expect(notebookRailLimits(1440)).toEqual({ min: 200, max: 460 });
+    // 刚过移动端断点时目录仍有可拖动区间，不会把正文挤没。
+    expect(notebookRailLimits(761)).toEqual({ min: 200, max: 281 });
+    expect(clampRailWidth(RAIL_DEFAULT_WIDTH, 761)).toBe(RAIL_DEFAULT_WIDTH);
   });
 });
 

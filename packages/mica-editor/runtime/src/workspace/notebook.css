@@ -44,7 +44,7 @@ body :is(input, textarea)::placeholder { color: var(--color-fg-faint); }
 .notebook-editor .toolbar .toolbar-item .text { font-size: 12px; color: inherit; padding: 0; line-height: 18px; white-space: nowrap; }
 .notebook-editor .toolbar .toolbar-item :is(.icon, i.format) { width: 16px; height: 16px; margin: 0; opacity: 1; }
 .format-icon { display: block; flex: none; color: inherit; }
-.notebook-editor .toolbar .toolbar-item i.chevron-down { width: 10px; height: 10px; margin: 0 0 0 3px; opacity: .55; }
+.notebook-editor .toolbar .toolbar-item i.chevron-down { width: 10px; height: 10px; margin: 0 0 0 3px; opacity: .55; mask-image: url('../../../web/assets/yuque/chevron-down.svg'); }
 .notebook-editor .toolbar .block-controls { min-width: 64px; }
 .notebook-editor .toolbar .block-controls .icon { display: none; }
 .notebook-editor .toolbar .block-controls .dropdown-button-text { width: auto; min-width: 44px; }
@@ -65,13 +65,13 @@ body :is(input, textarea)::placeholder { color: var(--color-fg-faint); }
 .notebook-editor .toolbar .insert-menu { width: 28px; color: var(--color-accent); }
 .notebook-editor .toolbar .insert-menu .icon { width: 18px; height: 18px; }
 .notebook-editor .toolbar .toolbar-more button { width: 28px; }
-.notebook-editor .toolbar .toolbar-ellipsis { background: currentColor; mask: url('data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"%3E%3Ccircle cx="3" cy="8" r="1.25"/%3E%3Ccircle cx="8" cy="8" r="1.25"/%3E%3Ccircle cx="13" cy="8" r="1.25"/%3E%3C/svg%3E') center / contain no-repeat; }
 .notebook-editor .toolbar .color-picker .icon { position: relative; background: currentColor; mask: none; background-image: none; }
-.notebook-editor .toolbar .color-picker .font-color { mask: url('../playground/images/icons/font-color.svg') center / contain no-repeat; }
-.notebook-editor .toolbar .color-picker .bg-color { mask: url('../playground/images/icons/bg-color.svg') center / contain no-repeat; }
+.notebook-editor .toolbar .color-picker .font-color { mask: url('../../../web/assets/yuque/font-color.svg') center / contain no-repeat; }
+.notebook-editor .toolbar .color-picker .bg-color { mask: url('../../../web/assets/yuque/bg-color.svg') center / contain no-repeat; }
 .notebook-editor .toolbar .color-picker { position: relative; }
 .notebook-editor .toolbar .color-picker i.chevron-down { display: none; }
-.notebook-editor .toolbar .color-picker::after { content: ''; position: absolute; width: 13px; height: 2px; bottom: 3px; left: 7px; border-radius: 1px; background: var(--toolbar-swatch); box-shadow: 0 0 0 .5px var(--color-line-strong); }
+/* Recolor the glyph's own bottom stripe, preserving its original geometry. */
+.notebook-editor .toolbar .color-picker .icon::after { content: ''; position: absolute; inset: 84% 0 0; background: var(--toolbar-swatch); }
 .notebook-editor .toolbar button.toolbar-item:hover:not(:disabled) { background: var(--color-active); }
 .notebook-editor .toolbar button.toolbar-item[aria-expanded='true'] { background: var(--color-active); color: var(--color-fg-strong); }
 .notebook-editor .toolbar button.toolbar-item:focus:not(:focus-visible):not(:hover):not(.active):not([aria-expanded='true']) { background: transparent; }
@@ -130,9 +130,6 @@ body :is(input, textarea)::placeholder { color: var(--color-fg-faint); }
 .notebook-editor [contenteditable]:focus-within .PlaygroundEditorTheme__tableSelected { outline-color: var(--color-accent); }
 .notebook-editor .PlaygroundEditorTheme__tableStickyScrollbar::-webkit-scrollbar-thumb { background: var(--color-line-strong); }
 .notebook-editor .PlaygroundEditorTheme__tableStickyScrollbar::-webkit-scrollbar-track { background: var(--color-overlay); }
-.notebook-editor .PlaygroundEditorTheme__tableScrollRight { box-shadow: inset -10px 0 10px var(--color-overlay-strong); }
-.notebook-editor .PlaygroundEditorTheme__tableScrollLeft { box-shadow: inset 10px 0 10px var(--color-overlay-strong); }
-.notebook-editor .PlaygroundEditorTheme__tableScrollMiddle { box-shadow: inset 10px 0 10px var(--color-overlay-strong), inset -10px 0 10px var(--color-overlay-strong); }
 .notebook-editor :is(.PlaygroundEditorTheme__tableAddRows, .PlaygroundEditorTheme__tableAddColumns, .PlaygroundEditorTheme__tableCellActionButton) { background-color: var(--color-panel-hi); color: var(--color-fg-soft); }
 .notebook-editor :is(.PlaygroundEditorTheme__tableAddRows, .PlaygroundEditorTheme__tableAddColumns, .PlaygroundEditorTheme__tableCellActionButton):hover { background-color: var(--color-primary-light-2); }
 .notebook-editor .PlaygroundEditorTheme__tableCellResizeRuler, .draggable-block-target-line { background: var(--color-accent); }
@@ -152,8 +149,8 @@ body.mica-arco-theme {
 .table-context-label .arco-icon { color: inherit; }
 .table-context-toolbar .arco-btn[aria-expanded='true'], .table-context-label.has-selection { color: var(--color-accent); background: var(--color-primary-light-1); }
 .table-format-alignment .arco-btn { width: 28px; height: 28px; }
-/* 语雀式行列把手：平时不画按钮，悬停出浅蓝条，选中是实色蓝条。 */
-.table-selection-handle, .table-selection-all { background: transparent; border: 0; color: var(--color-fg-faint); }
+/* Every neutral band remains distinct; hover and selection keep those boundaries. */
+.table-selection-handle, .table-selection-all { color: var(--color-fg-faint); }
 .table-selection-handle:hover, .table-selection-all:hover { background: var(--color-primary-light-2); color: var(--color-accent); }
 .table-selection-handle.is-active, .table-selection-all.is-active { background: var(--color-accent); color: var(--color-canvas); }
 .table-selection-handle-grip { background: transparent; color: var(--color-accent); }
@@ -224,6 +221,7 @@ body[arco-theme='dark'] :is(.link-edit, .link-trash, .link-cancel, .link-confirm
 /* Arco controls get palette + primary channel mapping from the virtual import;
    only notebook-specific density/layout belongs here. */
 body.mica-arco-theme :is(.arco-btn, .arco-input, .arco-textarea, .arco-select-view, .arco-picker input, .arco-menu, .arco-tooltip-content) { font-size: 12px; }
+body.mica-arco-theme .arco-tooltip-content { color: var(--color-fg-strong); }
 /* Neutral actions stay neutral even in body portals; accent and danger remain semantic. */
 body.mica-arco-theme :is(.image-settings-popover, .image-preview-footer, .image-crop-footer, .table-format-popup, .color-picker-wrapper) .arco-btn-text:not(:is(.arco-btn-status-danger, .arco-btn-disabled)):not([aria-pressed='true']):not([aria-expanded='true']) { color: var(--color-fg-soft); }
 body.mica-arco-theme :is(.image-settings-popover, .image-preview-footer, .image-crop-footer, .table-format-popup, .color-picker-wrapper) .arco-btn-text:not(:is(.arco-btn-status-danger, .arco-btn-disabled)):not([aria-pressed='true']):not([aria-expanded='true']):hover { color: var(--color-fg-strong); background: var(--color-active); }
