@@ -10,7 +10,7 @@ import {
   type LexicalCommand,
   type LexicalEditor,
 } from 'lexical';
-import {type JSX, useState} from 'react';
+import {type JSX, useId, useState} from 'react';
 
 import {$createHtmlNode, type HtmlBlockRuntime} from '../../nodes/HtmlNode';
 import Button from '../../ui/Button';
@@ -49,13 +49,23 @@ function escapeAttribute(value: string): string {
   return value.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
-function pageEmbed(url: string): string | null {
+export function pageEmbed(url: string): string | null {
   try {
     const parsed = new URL(url.trim());
     if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null;
     const href = escapeAttribute(parsed.href);
-    return `<div style="width:100%;min-height:520px;overflow:hidden;border:1px solid #d9d9d9;border-radius:10px;">
-  <iframe src="${href}" title="嵌入网页" referrerpolicy="no-referrer" sandbox="allow-forms allow-modals allow-popups allow-scripts" style="display:block;width:100%;height:520px;border:0;background:#fff;"></iframe>
+    const host = escapeAttribute(parsed.host);
+    // Deliberately no fixed colors: the card sits in the note and inherits its
+    // foreground, so light and dark appearance both stay readable. Sites are
+    // free to refuse framing (X-Frame-Options / frame-ancestors), which leaves
+    // the frame blank — the bar keeps the address reachable in that case.
+    return `<div style="width:100%;overflow:hidden;border:1px solid color-mix(in srgb, currentColor 16%, transparent);border-radius:10px;">
+  <div style="display:flex;align-items:center;gap:10px;padding:6px 10px;font-size:12px;line-height:1.6;border-bottom:1px solid color-mix(in srgb, currentColor 12%, transparent);background:color-mix(in srgb, currentColor 4%, transparent);">
+    <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;opacity:.66;">${host}</span>
+    <a href="${href}" target="_blank" rel="noopener noreferrer" style="flex:none;color:inherit;font-weight:500;text-decoration:none;">打开原网页 ↗</a>
+  </div>
+  <iframe src="${href}" title="${host}" referrerpolicy="no-referrer" sandbox="allow-forms allow-modals allow-popups allow-scripts" style="display:block;width:100%;height:520px;border:0;background:#fff;"></iframe>
+  <p style="margin:0;padding:6px 10px;font-size:11px;line-height:1.6;opacity:.56;border-top:1px solid color-mix(in srgb, currentColor 12%, transparent);">此处空白说明该站点不允许被嵌入，请用上面的「打开原网页」查看。</p>
 </div>`;
   } catch {
     return null;
@@ -118,6 +128,8 @@ function InsertHtmlDialog({
   const [view, setView] = useState<'source' | 'preview'>('source');
   const [url, setUrl] = useState('');
   const [error, setError] = useState('');
+  const sourceId = useId();
+  const runtimeId = useId();
 
   const insert = () => {
     const html = kind === 'url' ? pageEmbed(url) : source.trim();
@@ -182,19 +194,23 @@ function InsertHtmlDialog({
         ))}
       </div>
       {kind === 'url' ? (
-        <TextInput
-          autoFocus
-          label="网页地址"
-          placeholder="https://example.com/page"
-          value={url}
-          onChange={setUrl}
-        />
+        <>
+          <TextInput
+            autoFocus
+            label="网页地址"
+            placeholder="https://example.com/page"
+            value={url}
+            onChange={setUrl}
+          />
+          <p className="html-insert-hint">网页以受限 iframe 显示。站点禁止被嵌入时（GitHub 一类很常见）块内会是空白，用块顶的「打开原网页」查看。</p>
+        </>
       ) : (
         <>
           <div className="html-insert-runtime">
-            <label htmlFor="html-insert-runtime">渲染方式</label>
+            <label htmlFor={runtimeId}>渲染方式</label>
             <Select
-              id="html-insert-runtime"
+              id={runtimeId}
+              size="small"
               value={runtime}
               onChange={value => setRuntime(value as HtmlBlockRuntime)}
               options={[
@@ -209,34 +225,37 @@ function InsertHtmlDialog({
             accept=".html,.htm,text/html"
             onChange={readFile}
           />
-          {runtime === 'html' && (
-            <div className="html-insert-view-tabs" role="tablist" aria-label="HTML 查看方式">
-              {(['source', 'preview'] as const).map((nextView) => (
-                <button
-                  type="button"
-                  key={nextView}
-                  className={view === nextView ? 'html-insert-view-tab is-active' : 'html-insert-view-tab'}
-                  role="tab"
-                  aria-selected={view === nextView}
-                  onClick={() => setView(nextView)}
-                >
-                  {nextView === 'source' ? '源码' : '预览'}
-                </button>
-              ))}
+          <div className="html-insert-source">
+            <div className="html-insert-source-head">
+              <label htmlFor={sourceId}>{runtime === 'react' ? 'React 代码' : 'HTML 代码'}</label>
+              {runtime === 'html' && (
+                <div className="html-insert-view-tabs" role="tablist" aria-label="HTML 查看方式">
+                  {(['source', 'preview'] as const).map((nextView) => (
+                    <button
+                      type="button"
+                      key={nextView}
+                      className={view === nextView ? 'html-insert-view-tab is-active' : 'html-insert-view-tab'}
+                      role="tab"
+                      aria-selected={view === nextView}
+                      onClick={() => setView(nextView)}
+                    >
+                      {nextView === 'source' ? '源码' : '预览'}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
-          )}
-          {runtime === 'html' && view === 'preview' ? (
-            <iframe
-              className="html-insert-preview"
-              title="HTML 预览"
-              srcDoc={buildHtmlPreviewDocument(source)}
-              sandbox=""
-              referrerPolicy="no-referrer"
-            />
-          ) : (
-            <label className="html-insert-source">
-              {runtime === 'react' ? 'React 代码' : 'HTML 代码'}
+            {runtime === 'html' && view === 'preview' ? (
+              <iframe
+                className="html-insert-preview"
+                title="HTML 预览"
+                srcDoc={buildHtmlPreviewDocument(source)}
+                sandbox=""
+                referrerPolicy="no-referrer"
+              />
+            ) : (
               <textarea
+                id={sourceId}
                 autoFocus
                 value={source}
                 spellCheck={false}
@@ -244,14 +263,14 @@ function InsertHtmlDialog({
                 onChange={event => setSource(event.target.value)}
                 placeholder={runtime === 'react' ? DEFAULT_REACT_BLOCK : DEFAULT_HTML_BLOCK}
               />
-            </label>
-          )}
+            )}
+          </div>
           <p className="html-insert-hint">本地文件会把源码复制进笔记正文；原文件删除后，已插入的内容仍可打开。相对路径资源不会自动猜测。</p>
         </>
       )}
       {error && <p className="html-insert-error" role="alert">{error}</p>}
       <DialogActions>
-        <Button small onClick={onClose}>取消</Button>
+        <Button small secondary onClick={onClose}>取消</Button>
         <Button small onClick={insert}>插入 HTML 块</Button>
       </DialogActions>
     </div>

@@ -21,6 +21,8 @@
 
 [Subagent](subagent/README.md) 的文件租约限定文件工具的写入路径；shell 可从工作区内包含租约的目录执行，文件租约也能运行测试。外部 checkout 的祖先以最近 `.git` 为界，独立外部路径只放行到直接父目录；cwd 检查不是 shell 沙箱，命令仍须遵守写策略。
 
+[Sidecar](sidecar/README.md) 派一个独立的 mica 会话去干活并观测它：子会话是常驻的 `mica app-server` 进程，工具面按成本分层（`sidecar_turns` → `sidecar_grep` → `sidecar_transcript`），一个 `sidecar_collect` 收齐全部结论。它还**反向汇报**：轮次结束、进程退出、停滞、超出 token 预算都记成一条动态，父会话下一轮开工时由 prompt 段落注入一次、读后即清；`sidecar_wait` 超时会把条件登记成后台提醒，所以长任务不必把父会话钉在阻塞等待上。桌面端右侧面板与输入框上方的状态行让用户能直接看住、打断、收掉这些进程；空闲回收与 `sidecar_attach`（`thread/resume` 接管已有会话，历史从会话文件补）负责让它们既不常驻烧内存，也不至于丢了线索。
+
 面板视图可返回 `cards`（每插件最多 3 张）：`{ id, title, summary?, detail?, tone?, revision, actions?, impressionAction? }`。卡片动作 `{ id, label, key?, tone? }` 复用面板动作通道；`key` 应携带版本并由插件校验，拒绝旧界面执行新内容。`impressionAction` 仅用于记录实际展示，不应产生用户可见操作。清单声明 `desktop.panel.dynamicShortcuts: true` 让快捷区获取卡片视图。卡片里显示摘要，详细清单仍放 `sections`。
 
 ## Notebook 本地笔记本
@@ -1115,9 +1117,25 @@ const child = spawn(micaExecutable, ['app-server', '--dir', cwd, '--parent', thi
 `plugins/sidecar` 是完整示例：`sidecarProcess.ts` 负责协议与进程，`transcript.ts` 把事件投影
 成轮次（纯函数，可单测），`tools.ts` 把它包成 `sidecar_*` 工具。
 
+**反向汇报同样是插件的事**。子会话跑完不会有人来问，父会话也可能正忙：`registry.ts` 在
+每个子进程的变化上挂一个观察者，把轮次终态、进程退出、停滞、超预算记成一条事件，父会话
+下一轮开工时由 `ctx.prompt.section()` 注入一次、读后即清（没有事件时渲染空串，prompt 前缀
+不变）。`sidecar_wait` 超时也走同一条通路：条件登记成后台提醒，成立时变成事件，所以长任务
+不必把父会话钉在阻塞等待上。停滞/空闲回收/预算这些要有钟的判断交给 `ctx.background`，
+注册的循环随插件 `dispose` 一起停，不留后台残留。
+
+**接管已有会话用 `thread/resume`，不要用启动参数 `--resume`**：后者在会话不存在时会静默
+退回新建一条，而 attach 的意义是「接的就是那一条」，接不到必须报错。resume 不发通知，
+历史要自己从 `$MICA_HOME/sessions/<id>.json` 的 `snapshot.conversationMessages` 补进投影。
+
 **读对话要分层，不要一步到位**。`sidecar_turns`（每轮一行）→ `sidecar_grep`（命中行）→
 `sidecar_transcript`（正文，按字符预算截断）成本差一个数量级。`sidecar_transcript` 只给用户与助手的
 正文、不含工具与思考；预算不够时丢最早轮次并写明丢了几轮。
+
+`sidecar_grep` 默认只搜对话正文，命令输出与测试报错在工具输出里，需要 `scope: "tools"`
+（或 `"all"`）；默认档下若工具输出里有命中，结果会明确告诉你「那边有几处」并指向这个参数。
+收尾别写一串 wait + transcript：`sidecar_collect` 一次给出每个子会话的状态、结论、失败的工具
+与用量，`close: true` 顺手收掉已经跑完的。
 
 **用户消息只能本地记，但它落在哪一轮要等宿主消费才能定**。`turn/steer` 在宿主里是
 `queueMode: 'after_iteration'`：同一条消息可能被吞进当前轮的下一迭代，也可能因为这一轮已经结束

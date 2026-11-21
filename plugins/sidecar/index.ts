@@ -4,10 +4,14 @@ import { resolveMicaHome } from '@packages/mica-config/brand.js';
 import type { MicaPlugin, PluginContext } from '@packages/mica-plugin/index.js';
 import { micaSkills } from '@packages/mica-skills/index.js';
 import SKILL_MD from './skill/SKILL.md' with { type: 'text' };
+import { renderSidecarEvents, type SidecarEvent } from './events.js';
+import { createPanelHandler } from './panel.js';
 import { SidecarRegistry } from './registry.js';
 import {
   SidecarAbortTool,
+  SidecarAttachTool,
   SidecarCloseTool,
+  SidecarCollectTool,
   SidecarGrepTool,
   SidecarSendTool,
   SidecarSpawnTool,
@@ -57,6 +61,23 @@ export function materializeSkill(dir: string, content: string): 'written' | 'unc
   mkdirSync(dirname(target), { recursive: true });
   writeFileSync(target, content, 'utf-8');
   return 'written';
+}
+
+/** 分钟 → 毫秒，容错：设置项里填了空、填了 0 或负数都按「不启用」处理。 */
+function minutesToMs(value: unknown, fallbackMinutes: number): number {
+  const number = Number(value);
+  const minutes = Number.isFinite(number) ? number : fallbackMinutes;
+  return Math.max(0, Math.round(minutes * 60_000));
+}
+
+/**
+ * 事件是否值得在会话里留一条 notice。
+ *
+ * prompt 段落只给模型看；用户需要的是「它跑完了」「它卡住了」这种能扫一眼就知道的事。
+ * 每一轮都发一条会把对话淹掉，所以只留真正改变结论的那几种。
+ */
+function shouldNotify(event: SidecarEvent): boolean {
+  return event.kind === 'exit' || event.kind === 'stalled' || event.kind === 'budget';
 }
 
 const plugin: MicaPlugin = {
@@ -114,13 +135,38 @@ const plugin: MicaPlugin = {
       });
     }
 
-    const registry = new SidecarRegistry(ctx, parentSessionId, defaultCwd, currentRole);
+    // 插件设置：阈值与预算都从设置里读，改完立刻生效（不走重启）。
+    const readSettings = () => (ctx.settings?.get?.() ?? {}) as Record<string, unknown>;
+    const registry = new SidecarRegistry(ctx, parentSessionId, defaultCwd, currentRole, {
+      limits: () => {
+        const values = readSettings();
+        return {
+          stallMs: minutesToMs(values.stallMinutes, 5),
+          recycleMs: minutesToMs(values.recycleMinutes, 15),
+          defaultMaxTokens: Math.max(0, Number(values.defaultMaxTokens) || 0),
+        };
+      },
+      onEvent: (event) => {
+        // 用户看的那一条：只在「结果变了」的时候发，每一轮都发会把对话淹掉。
+        if (readSettings().notify === 'false') return;
+        if (!shouldNotify(event)) return;
+        ctx.ui?.notice(
+          [
+            `子会话「${event.title}」${event.kind === 'exit' ? '进程已退出' : event.kind === 'budget' ? '超出 token 预算，已打断' : '可能卡住了'}：${event.summary}`,
+            event.detail ? `\n${event.detail}` : '',
+          ].join(''),
+          { command: 'sidecar', status: event.kind === 'stalled' ? 'warning' : 'info', surface: 'conversation' },
+        );
+      },
+    });
     // primaryAgentOnly：子代理不该再派生会话，否则会变成没人收的进程树。
     const options = { primaryAgentOnly: true } as const;
     const tools = [
       ctx.tools.register(new SidecarSpawnTool(registry), options),
+      ctx.tools.register(new SidecarAttachTool(registry), options),
       ctx.tools.register(new SidecarSendTool(registry), options),
       ctx.tools.register(new SidecarStatusTool(registry), options),
+      ctx.tools.register(new SidecarCollectTool(registry), options),
       ctx.tools.register(new SidecarTurnsTool(registry), options),
       ctx.tools.register(new SidecarGrepTool(registry), options),
       ctx.tools.register(new SidecarTranscriptTool(registry), options),
@@ -128,8 +174,31 @@ const plugin: MicaPlugin = {
       ctx.tools.register(new SidecarAbortTool(registry), options),
       ctx.tools.register(new SidecarCloseTool(registry), options),
     ];
+    // 推送：子会话自己发生的事（跑完、退出、卡住、超预算）下一轮直接出现在 prompt 里。
+    //
+    // 放在其他插件段落之后（base prompt 的末尾），没有事件时渲染空串——整段消失，
+    // 前缀不变，prompt cache 不白断。
+    const section = ctx.prompt?.section({
+      id: 'sidecar-events',
+      label: '子会话动态',
+      order: 90,
+      render: () => renderSidecarEvents(registry.takeEventsForPrompt()),
+    });
+    // 看门狗：预算、停滞、空闲回收都需要一个钟——一个彻底卡住的子会话再也不会通知我们。
+    const guard = ctx.background?.register({
+      id: 'sidecar-watch',
+      every: 15_000,
+      run: () => {
+        registry.tick();
+      },
+    });
+    // 面板：看得见也按得动（打断 / 收掉 / 看详情）。CLI 宿主没有桌面能力面，这里自然为空。
+    const panel = ctx.desktop?.panel?.(createPanelHandler({ registry }));
     ctx.onDispose(async () => {
       for (const tool of tools) tool.dispose();
+      section?.dispose();
+      guard?.dispose();
+      panel?.dispose();
       // 子进程必须跟着插件一起走：父会话关掉还在跑的 sidecar 会一直烧 token，
       // 而用户已经看不到它了（它挂在一条已经结束的会话名下）。
       //
@@ -143,8 +212,8 @@ const plugin: MicaPlugin = {
     if (!registration.skipped.length) {
       ctx.health.report({
         level: 'ok',
-        message: '可以派生并观测子会话',
-        hint: '用法见 skill「sidecar」；子会话会挂在当前会话下面出现在侧栏。',
+        message: '可以派生并观测子会话（跑完/卡住/超预算会自动报到）',
+        hint: '用法见 skill「sidecar」；子会话会挂在当前会话下面出现在侧栏，桌面端右侧面板可直接打断或收掉。',
       });
     }
   },

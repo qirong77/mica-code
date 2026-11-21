@@ -21,6 +21,7 @@ export default function Button({
   className,
   onClick,
   disabled,
+  secondary,
   small,
   title,
 }: {
@@ -30,13 +31,15 @@ export default function Button({
   className?: string;
   disabled?: boolean;
   onClick: () => void;
+  /** A dialog's dismiss action: same height and rhythm, without the primary weight. */
+  secondary?: boolean;
   small?: boolean;
   title?: string;
 }): JSX.Element {
   return (
     <ArcoButton
       htmlType="button"
-      type="primary"
+      type={secondary ? 'secondary' : 'primary'}
       size={small ? 'small' : 'default'}
       disabled={disabled}
       className={joinClasses(

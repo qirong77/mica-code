@@ -1,7 +1,7 @@
 ---
 name: sidecar
-description: 派一个独立的 mica 会话（子会话）去干活，并观测它的进度 —— 开一个、投一句、看它说到哪、等它跑完、打断或收掉。子会话有自己的上下文和进程，会挂在当前会话下面出现在会话列表里。
-when_to_use: Use when a piece of work is self-contained enough to hand off and would otherwise flood this conversation — e.g. "开个子会话去把这批测试跑一遍", "派一个去查清楚这个报错的所有调用点", "让另一个会话独立改这个模块，改完汇报", "开个新会话盯着这条构建", "并行开两个会话分别验证两个方案". Also use when the user asks to spawn / watch / drive a separate Mica session.
+description: 派一个独立的 mica 会话（子会话）去干活，并观测它的进度 —— 开一个、投一句、看它说到哪、等它跑完、打断、收掉、接管已有会话。子会话有自己的上下文和进程，会挂在当前会话下面出现在会话列表里；跑完/卡住/超预算会自己报到。
+when_to_use: Use when a piece of work is self-contained enough to hand off and would otherwise flood this conversation — e.g. "开个子会话去把这批测试跑一遍", "派一个去查清楚这个报错的所有调用点", "让另一个会话独立改这个模块，改完汇报", "开个新会话盯着这条构建", "并行开两个会话分别验证两个方案". Also use when the user asks to spawn / watch / drive / resume a separate Mica session.
 argument_hint: [要交给子会话做的事]
 ---
 
@@ -46,26 +46,50 @@ sidecar_wait({ session_id: "<id>" })      // 默认等这一轮跑完
 sidecar_close({ session_id: "<id>" })     // 拿到结论就收掉
 ```
 
+并行派三个之后不必一个个等：
+
+```text
+sidecar_wait({ session_ids: ["<a>", "<b>", "<c>"] })        // 等全部跑完
+sidecar_wait({ session_ids: ["<a>", "<b>"], any: true })    // 任意一个先跑完就返回
+sidecar_collect({ close: true })                             // 一次收齐结论，顺手收掉空闲的
+```
+
+## 它会自己说话（不用轮询）
+
+子会话**每一轮结束、进程退出、卡住、超出 token 预算**都会记一条动态，你下一轮开工时
+会在系统提示里自动看到（"子会话动态"一段），读一次就清空。所以：
+
+- 派完可以**先干别的**，不要为了"看着它"反复 `sidecar_status`；
+- `sidecar_wait` 超时也不是白等——它会把条件登记成后台提醒，条件成立时同样跟着下一轮到达；
+- 真要现在就要结果，才用 `sidecar_wait` / `sidecar_status`。
+
 ## 工具
 
-| 工具                 | 做什么                                                            |
-| -------------------- | ----------------------------------------------------------------- |
-| `sidecar_spawn`      | 开一个子会话并投第一句话，返回会话 id（可只记唯一前缀）           |
-| `sidecar_send`       | 追加一句话：它在跑时排到下一迭代边界，空闲时开新一轮              |
-| `sidecar_status`     | 看进度：在不在跑、说到哪、调了哪些工具；不带 id 列出全部（只读）  |
-| `sidecar_turns`      | 轮次索引：每轮一行（时间/终态/耗时/问答摘要），用来定位「第几轮」 |
-| `sidecar_grep`       | 在对话里搜关键词，只回命中那几行（带轮次与说话人）                |
-| `sidecar_transcript` | 读对话正文（用户 + 助手，**不含工具与思考**），按字符预算截断     |
-| `sidecar_wait`       | 等条件：`idle`（默认）/ `text`（正文匹配）/ `turn`（新一轮结束）  |
-| `sidecar_abort`      | 打断当前这一轮，进程与会话都还在                                  |
-| `sidecar_close`      | 收掉进程；会话历史仍在会话列表里                                  |
+| 工具                 | 做什么                                                                     |
+| -------------------- | -------------------------------------------------------------------------- |
+| `sidecar_spawn`      | 开一个子会话并投第一句话，返回会话 id（可只记唯一前缀）                    |
+| `sidecar_attach`     | 接管一条**已有**会话（用户别的会话、或之前收掉的），接着用 send 驱动它      |
+| `sidecar_send`       | 追加一句话：它在跑时排到下一迭代边界，空闲时开新一轮                       |
+| `sidecar_status`     | 看进度：在不在跑、最近动静多久前、当前工具跑了多久、调了哪些工具；不带 id 列出全部（只读） |
+| `sidecar_collect`    | 一次收齐所有子会话的终态（状态/轮数/结论/失败的工具）；`close: true` 顺手收空闲的 |
+| `sidecar_turns`      | 轮次索引：每轮一行（时间/终态/耗时/问答摘要），用来定位「第几轮」          |
+| `sidecar_grep`       | 搜关键词，只回命中那几行；`scope: "tools"` 搜命令输出与测试报错            |
+| `sidecar_transcript` | 读对话正文（用户 + 助手，**不含工具与思考**），按字符预算截断              |
+| `sidecar_wait`       | 等条件：`idle`（默认）/ `text`（正文匹配）/ `turn`（新一轮结束）；可等多个 |
+| `sidecar_abort`      | 打断当前这一轮（`all: true` 打断全部），进程与会话都还在                   |
+| `sidecar_close`      | 收掉进程（`all` / `idle` / `session_ids`）；会话历史仍在，可 attach 接回   |
 
-同时最多 **4 个**子会话。跑完就 `sidecar_close`——收掉的不只是进程，还有并发名额。
+同时最多 **4 个**子会话。跑完就收——收掉的不只是进程，还有并发名额；`sidecar_collect({ close: true })`
+或 `sidecar_close({ idle: true })` 是一步到位的收尾。
 
 **它有多贵**：每个子会话是一个完整的 mica 进程（空闲时 RSS ≈ 200 MB，启动 2–3s），
 每一轮请求都带着它自己的完整 system prompt 与工具定义（实测约 4 万 input token，
 `sidecar_send` 追加的那一句同样如此）。所以「一两步能做完的事」派出去是纯亏：
 4 个挂着不关的子会话就是接近 1 GB 常驻内存。
+
+**钱也有上限**：`sidecar_spawn({ max_tokens })` 给累计 token 预算（输入+输出），超了自动打断
+并报一条动态；不传就按插件设置里的默认预算（0 表示不限）。`max_turns` 兜的是迭代次数，
+预算兜的是花钱——一个跑飞的子会话通常先撞预算。
 
 ## 怎么读结果
 
@@ -76,13 +100,19 @@ sidecar_close({ session_id: "<id>" })     // 拿到结论就收掉
 （只有失败的才带输出片段）。所以查进度很便宜——而且自上次查看后没有新输出时，
 `sidecar_status` 只回一行。**不要为了保险多查几次**：真没进展时它也只会告诉你没进展。
 
-### 要读对话时，按成本从低到高走
+### 收尾：先 collect，再按需读正文
 
-三个读的工具差一个数量级，**不要跳级**：
+```text
+sidecar_collect({})                  // 一屏：每个子会话的状态、结论、失败的工具、用量
+sidecar_collect({ close: true })     // 同上，顺手收掉已经跑完的进程
+```
+
+结论不够清楚时再往下读，**按成本从低到高走**，不要跳级：
 
 ```text
 sidecar_turns({ session_id })                       // 几行：它一共几轮、每轮问了什么答了什么
 sidecar_grep({ session_id, pattern: "Cannot find" }) // 几行：这句话在哪一轮说过
+sidecar_grep({ session_id, pattern: "FAIL", scope: "tools" })  // 命令输出/测试报错里有没有
 sidecar_transcript({ session_id, last_turns: 2 })    // 正文：默认只读最近 1 轮
 ```
 
@@ -100,6 +130,16 @@ sidecar_send({ session_id, text: "把刚才那条命令的实际输出贴出来�
 sidecar_wait({ session_id })
 ```
 
+## 接管一条已有会话
+
+```text
+sidecar_attach({ session_id: "<会话 id>" })
+→ 历史从会话文件补进来（工具调用只有名字），之后 sidecar_send / sidecar_wait 照常用
+```
+
+三种场合用它：**收掉的子会话想接着干**、**父会话重启后接回之前的子会话**、**把用户另一条
+会话拉进来当执行体**。它不新建会话、不产生空壳；会话文件不存在（第一轮还没落盘）时直接报错。
+
 ## 边界
 
 - **子会话看不到你的对话**。目标、约束、相关路径、验收方式必须写在 `prompt` 里；它不会自己猜你的意图。
@@ -112,9 +152,13 @@ sidecar_wait({ session_id })
   这是父任务的委派，不是另建授权或独立控制空间；并行子会话使用同一控制资源时要协调。
   子进程仍是纯 headless 宿主，不继承 `MICA_PLUGIN_DESKTOP_HOST`，也不会因此获得桌面插件宿主能力。
 - **它会出现在会话列表**。子会话自动跟随父会话所在的置顶、项目分组或最近会话，父会话可折叠展开它；子会话不能独立拖动或移动分组。会话文件要等第一轮结束才落盘，所以刚 spawn 完还看不到；父会话不存在时子会话仍可单独查看。
-- **不要用 `sidecar_send` 轮询进度**。看进度是 `sidecar_status`，等结果是 `sidecar_wait`。
+- **不要用 `sidecar_send` 轮询进度**。看进度是 `sidecar_status`，等结果是 `sidecar_wait`，长期盯着交给自动动态。
 - **最多套两层**（深度由 `MICA_SIDECAR_DEPTH` 记）。子会话里还能再派一个，第三层会被直接拒绝：每层都是完整的 mica 进程（各自加载 MCP 与插件），再深就是指数级的进程树，足以拖死机器。
-- **子进程跟着父会话走**：父会话关掉、app 退出、父进程被强杀，它们都会一起收掉。不要指望跨会话复用，也不要试图让它们活过父进程。
+- **子进程跟着父会话走**：父会话关掉、app 退出、父进程被强杀，它们都会一起收掉。不要指望跨会话复用，也不要试图让它们活过父进程；想"以后接着干"就在会话列表里找它并 `sidecar_attach`。
+- **空闲会被自动回收**：跑完、结果也已经被读过、空闲超过阈值（默认 15 分钟）的进程会被收掉，
+  并记一条"已回收"动态。会话历史不丢，`sidecar_attach` 接回来即可。阈值在插件设置里。
+- **卡住会被告知**：在跑但长时间没有新输出（默认 5 分钟）记一条"可能卡住"，并指出当前那条
+  工具已经跑了多久。这时先 `sidecar_status` 看，必要时 `sidecar_abort`。
 - **进程自己退出后条目还在**：`sidecar_status` 会显示 `已退出` 与退出原因，最后一轮仍能读；不再需要时用 `sidecar_close` 清掉，别让它一直挂在列表里。
 - **`full: true` 会让投影大好几倍**（正文、工具输出、思考、更早几轮一起给）。只在确实要读
   原文时用一次，别把它当默认值。
@@ -127,3 +171,6 @@ sidecar_wait({ session_id })
   `sidecar_wait` 取消时立即释放等待资源；`until` 只接受 `idle`、`text`、`turn`，
   非法条件或非正数 `timeout_ms` 会直接说明参数问题。
   父会话切换时已经开始退出的子进程仍由插件追踪，插件卸载会等它们真正退出后再完成。
+- **界面上也能操作**：桌面端对话右侧的 Sidecar 面板列出每个子会话（状态、最近动静、用量），
+  可以打断、收掉、看详情；在跑的时候输入框上方有一条"N 个在跑"。用户手动按下这些按钮时，
+  你会看到对应的状态变化（子会话不再属于你，但结论仍在）。

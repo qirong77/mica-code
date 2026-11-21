@@ -23,6 +23,8 @@ function harness(options: { session?: { id: string; cwd: string } | null } = {})
   const tools: MicaTool[] = [];
   const health: { level: string; message: string; hint?: string }[] = [];
   const disposers: (() => void)[] = [];
+  const sections: { id: string; render: () => string }[] = [];
+  const background: { id: string; every: number }[] = [];
   const home = tempHome();
   const ctx = {
     pluginId: 'sidecar',
@@ -42,11 +44,23 @@ function harness(options: { session?: { id: string; cwd: string } | null } = {})
     session: {
       describe: vi.fn(() => options.session ?? null),
     },
+    prompt: {
+      section: (section: { id: string; render: () => string }) => {
+        sections.push(section);
+        return { dispose() {} };
+      },
+    },
+    background: {
+      register: (task: { id: string; every: number }) => {
+        background.push(task);
+        return { dispose() {} };
+      },
+    },
     health: { report: (report: { level: string; message: string; hint?: string }) => health.push(report) },
     logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
     onDispose: (disposer: () => void) => disposers.push(disposer),
   } as unknown as PluginContext;
-  return { ctx, home, skills, tools, health, disposers };
+  return { ctx, home, skills, tools, health, disposers, sections, background };
 }
 
 describe('materializeSkill', () => {
@@ -87,7 +101,9 @@ describe('setup', () => {
 
     expect(tools.map((tool) => tool.name).sort()).toEqual([
       'sidecar_abort',
+      'sidecar_attach',
       'sidecar_close',
+      'sidecar_collect',
       'sidecar_grep',
       'sidecar_send',
       'sidecar_spawn',
@@ -111,5 +127,23 @@ describe('setup', () => {
     setup(ctx);
     expect(disposers).toHaveLength(1);
     expect(() => disposers[0]!()).not.toThrow();
+  });
+
+  it('stays silent in the prompt until a child actually does something', () => {
+    const { ctx, sections } = harness({ session: { id: 'parent-1', cwd: '/tmp' } });
+    setup(ctx);
+    const section = sections.find((entry) => entry.id === 'sidecar-events');
+    expect(section).toBeDefined();
+    // 没有事件时渲染空串：整段从 prompt 里消失，前缀不变、cache 不白断。
+    expect(section!.render()).toBe('');
+    // 读一次也要清干净：连读两次都不该冒出内容。
+    expect(section!.render()).toBe('');
+  });
+
+  it('runs a watchdog on the host scheduler instead of its own timer', () => {
+    const { ctx, background } = harness({ session: { id: 'parent-1', cwd: '/tmp' } });
+    setup(ctx);
+    // 停滞/回收/预算都要一个钟；交给宿主调度才随插件生命周期一起停。
+    expect(background.map((task) => task.id)).toContain('sidecar-watch');
   });
 });

@@ -41,15 +41,28 @@ function clampInt(value: number, min: number, max: number): number {
 }
 
 function clock(timestamp: number): string {
+  // 0 表示「这次接管之前发生的事」：不编一个假时刻出来。
+  if (!timestamp) return '—';
   const date = new Date(timestamp);
   const pad = (value: number) => String(value).padStart(2, '0');
   return `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
 }
 
 function duration(turn: SidecarTurn): string {
+  if (!turn.startedAt) return '—';
   if (!turn.finishedAt) return '进行中';
   const seconds = Math.max(0, Math.round((turn.finishedAt - turn.startedAt) / 1000));
   return seconds >= 60 ? `${Math.floor(seconds / 60)}m${seconds % 60}s` : `${seconds}s`;
+}
+
+/** 「多久以前」：状态行用它区分「在干活」和「卡住了」。 */
+export function sinceLabel(timestamp: number, now = Date.now()): string {
+  if (!timestamp) return '—';
+  const seconds = Math.max(0, Math.round((now - timestamp) / 1000));
+  if (seconds < 60) return `${seconds}s 前`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m 前`;
+  return `${Math.floor(minutes / 60)}h 前`;
 }
 
 /**
@@ -79,12 +92,20 @@ export function renderSidecar(
     return `会话 ${entry.id} · ${busy ? '运行中' : '空闲'} · 自上次查看后没有新输出。`;
   }
   const elapsed = Math.round((Date.now() - entry.createdAt) / 1000);
+  const idleLabel = sinceLabel(transcript.lastActivityAt);
   const lines = [
     `会话 ${entry.id}`,
-    `状态：${busy ? '运行中' : '空闲'} · ${transcript.totalTurnCount} 轮 · 已存在 ${elapsed}s`,
+    `状态：${busy ? '运行中' : '空闲'} · ${transcript.totalTurnCount} 轮 · 已存在 ${elapsed}s · 最近动静 ${idleLabel}`,
     `标题：${entry.title}`,
     `目录：${entry.cwd}`,
   ];
+  if (entry.attached) lines.push('来源：接管已有会话（历史来自会话文件，工具调用只有名字）');
+  // 在跑但很久没输出，是「卡住」与「在干活」唯一能看出来的差别。
+  const runningTool = transcript.runningTool;
+  if (busy && runningTool) {
+    const toolSeconds = runningTool.startedAt ? Math.round((Date.now() - runningTool.startedAt) / 1000) : 0;
+    lines.push(`当前工具：「${clip(runningTool.title, 100)}」已跑 ${toolSeconds}s`);
+  }
   if (process.closed) lines.push(`进程已退出：${process.describeFailure()}`);
   if (warning) lines.push(`警告：${warning}`);
 
@@ -119,7 +140,8 @@ export function renderSidecar(
 
   const usage = transcript.usage;
   if (usage.total > 0) {
-    lines.push('', `用量：输入 ${usage.input} · 输出 ${usage.output} · 累计 ${usage.total}`);
+    const budget = entry.maxTokens ? ` · 预算 ${entry.maxTokens}` : '';
+    lines.push('', `用量：输入 ${usage.input} · 输出 ${usage.output} · 累计 ${usage.total}${budget}`);
   }
   return lines.join('\n');
 }
@@ -244,34 +266,58 @@ function fitText(text: string, capacity: number): string {
  * 存在的理由就是省上下文：想知道「它在哪说过这个报错」，用 `renderTranscript` 得先把
  * 整段对话读进来自己找，而这里只回几行。
  */
-export function grepTranscript(entry: SidecarEntry, options: { pattern: RegExp; maxMatches?: number }): string {
+export function grepTranscript(
+  entry: SidecarEntry,
+  options: { pattern: RegExp; maxMatches?: number; scope?: 'text' | 'tools' | 'all' },
+): string {
   // 带 g / y 的正则在 test() 上是有状态的（lastIndex），逐行匹配会漏行。
   const pattern = new RegExp(options.pattern.source, options.pattern.flags.replace(/[gy]/g, ''));
   const maxMatches = clampInt(options.maxMatches ?? 8, 1, 30);
+  const scope = options.scope ?? 'text';
   const transcript = entry.process.transcript;
   const turns = transcript.allTurns();
   const hits: string[] = [];
   let total = 0;
+  let toolHits = 0;
   turns.forEach((turn, index) => {
+    const number = transcript.omittedTurnCount + index + 1;
     const sources = [
       ...turn.userInputs.map((input) => ({ role: '用户', text: input.text })),
       { role: '助手', text: turn.text },
+      // 工具输出总是扫一遍：默认 scope 只回对话命中，但要能告诉调用方「那边有几处」。
+      ...turn.tools.map((tool) => ({ role: '工具', text: `${tool.title}\n${tool.output ?? ''}` })),
     ];
     for (const source of sources) {
       if (!source.text) continue;
       for (const line of source.text.split('\n')) {
         if (!pattern.test(line)) continue;
+        // 工具输出里的命中单独计数：默认只搜对话时，用它给一句「工具输出里也有」。
+        if (source.role === '工具') {
+          toolHits += 1;
+          if (scope === 'text') continue;
+        }
         total += 1;
         if (hits.length < maxMatches) {
-          hits.push(`  [第${transcript.omittedTurnCount + index + 1}轮 · ${source.role}] ${excerpt(line, pattern)}`);
+          hits.push(`  [第${number}轮 · ${source.role}] ${excerpt(line, pattern)}`);
         }
       }
     }
   });
-  if (!total) return `在 ${entry.id} 的对话里没有命中 /${pattern.source}/。`;
+  if (!total) {
+    if (toolHits > 0) {
+      return (
+        `在 ${entry.id} 的对话里没有命中 /${pattern.source}/，但**工具输出里有 ${toolHits} 处**。\n` +
+        `用 sidecar_grep({ session_id, pattern, scope: 'tools' }) 看那几行（命令输出、测试报错通常在这里）。`
+      );
+    }
+    return `在 ${entry.id} 的${scope === 'text' ? '对话' : '对话与工具输出'}里没有命中 /${pattern.source}/。`;
+  }
   const lines = [`会话 ${entry.id} · 命中 ${total} 处：`, ...hits];
   if (total > hits.length) {
     lines.push(`（另有 ${total - hits.length} 处未列出：收窄 pattern 或提高 max_matches）`);
+  }
+  if (scope === 'text' && toolHits > 0) {
+    lines.push(`（工具输出里另有 ${toolHits} 处命中：需要时传 scope: 'tools'）`);
   }
   return lines.join('\n');
 }
@@ -291,4 +337,54 @@ function indent(text: string, prefix: string): string {
     .split('\n')
     .map((line) => `${prefix}${line}`)
     .join('\n');
+}
+
+/**
+ * 一次收掉全部子会话的固定形状摘要（`sidecar_collect`）。
+ *
+ * 存在的理由：任务收尾时父会话要回答的是「都干完了没有、结论是什么、有没有翻车」。
+ * 没有它就只能 `sidecar_turns` + `sidecar_transcript` 一个个读过去——那是几次往返和
+ * 几万字符，而这里是一屏。
+ */
+export function renderCollect(entries: readonly SidecarEntry[], options: { now?: number } = {}): string {
+  if (!entries.length) return '当前没有子会话。需要时用 sidecar_spawn 开一个。';
+  const now = options.now ?? Date.now();
+  const running = entries.filter((entry) => entry.process.transcript.busy).length;
+  const lines = [`${entries.length} 个子会话（${running} 个在跑 / ${entries.length - running} 个空闲）`];
+  for (const entry of entries) {
+    const transcript = entry.process.transcript;
+    const latest = transcript.latestTurn;
+    const state = entry.process.closed ? '已退出' : transcript.busy ? '运行中' : '空闲';
+    const usage = transcript.usage.total > 0 ? ` · ${transcript.usage.total} token` : '';
+    lines.push(
+      '',
+      `—— ${entry.id}「${clip(entry.title, 40)}」· ${state} · ${transcript.totalTurnCount} 轮${usage} ——`,
+    );
+    lines.push(`目录：${entry.cwd}`);
+    if (entry.process.closed) lines.push(`进程已退出：${clip(entry.process.describeFailure().replace(/\s+/g, ' '), 200)}`);
+    if (!latest) {
+      lines.push('还没有任何一轮对话。');
+      continue;
+    }
+    lines.push(
+      `最后一轮：${latest.status} · ${duration(latest)} · 结束于 ${sinceLabel(latest.finishedAt ?? 0, now)}`,
+    );
+    const conclusion = latest.text
+      .split('\n')
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .slice(-4)
+      .join(' ');
+    if (conclusion) lines.push(`结论：${clip(conclusion, 400)}`);
+    if (latest.error) lines.push(`错误：${clip(latest.error, 300)}`);
+    const failed = latest.tools.filter((tool) => tool.status === 'error');
+    if (failed.length) {
+      lines.push(`失败的工具（${failed.length}）：${failed.slice(-3).map((tool) => clip(tool.title, 60)).join('；')}`);
+    }
+    const pending = transcript.activeTurnId ? '（这一轮还在跑，结论只是当前进度）' : '';
+    if (pending) lines.push(pending);
+    // 时间戳为 0 才是接管来的历史；一轮正在跑的时候 `finishedAt` 也没有值。
+    if (!latest.startedAt) lines.push('（接管来的历史：这些轮次的时间未知）');
+  }
+  return lines.join('\n');
 }

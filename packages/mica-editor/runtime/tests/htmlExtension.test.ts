@@ -9,6 +9,7 @@ import {
   buildHtmlPreviewDocument,
   insertHtmlBlock,
   normalizeLocalHtml,
+  pageEmbed,
 } from '../src/playground/plugins/HtmlExtension';
 import {HtmlNode} from '../src/playground/nodes/HtmlNode';
 
@@ -61,6 +62,24 @@ describe('Notebook HTML blocks', () => {
 
     const document = '<!doctype html><html><body><main>完整文档</main></body></html>';
     expect(buildHtmlPreviewDocument(document)).toBe(document);
+  });
+
+  it('keeps a framed page reachable when the site refuses to be embedded', () => {
+    const html = pageEmbed('https://github.com/zexadev/gemini-web2api-go');
+    // The bar keeps the address clickable: X-Frame-Options / frame-ancestors
+    // leave the iframe blank and there is no way to detect that from the host.
+    expect(html).toContain('<span style="flex:1');
+    expect(html).toContain('github.com</span>');
+    expect(html).toContain('href="https://github.com/zexadev/gemini-web2api-go"');
+    expect(html).toContain('target="_blank" rel="noopener noreferrer"');
+    expect(html).toContain('src="https://github.com/zexadev/gemini-web2api-go"');
+    expect(html).toContain('不允许被嵌入');
+  });
+
+  it('rejects addresses a frame cannot load', () => {
+    expect(pageEmbed('javascript:alert(1)')).toBeNull();
+    expect(pageEmbed('not a url')).toBeNull();
+    expect(pageEmbed('http://example.com/a?b=1&c=2')).toContain('src="http://example.com/a?b=1&amp;c=2"');
   });
 });
 

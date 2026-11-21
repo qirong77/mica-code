@@ -17,6 +17,8 @@ export type SidecarToolCall = {
    */
   status: 'running' | 'completed' | 'error' | 'interrupted';
   output?: string;
+  /** 开始时刻：用来回答「当前这条命令已经跑了多久」，卡死与慢命令靠它区分。 */
+  startedAt?: number;
 };
 
 export type SidecarTurnStatus = 'running' | 'completed' | 'interrupted' | 'failed';
@@ -103,6 +105,13 @@ function asNumber(value: unknown): number {
 export class SidecarTranscript {
   readonly turns: SidecarTurn[] = [];
   usage: SidecarUsage = { input: 0, output: 0, total: 0, contextTokens: 0 };
+  /**
+   * 最后一次可见变化的时刻。
+   *
+   * 「在跑」与「卡住」在投影里长得一模一样（都是 busy），唯一的区别是多久没有新东西了。
+   * 停滞检测与状态行都读它，所以每次 `revision` 前进时一起更新。
+   */
+  lastActivityAt = Date.now();
   /** 最近一条 host 警告（provider 重试、MCP 初始化失败等），读的时候清空。 */
   lastWarning = '';
   /**
@@ -144,6 +153,7 @@ export class SidecarTranscript {
     const input: SidecarUserInput = { id, text: clamp(String(text ?? ''), MAX_INPUT_TEXT) };
     this.pendingInputs.push(input);
     if (this.pendingInputs.length > MAX_PENDING_INPUTS) this.pendingInputs.shift();
+    this.lastActivityAt = Date.now();
     this.revision += 1;
     return id;
   }
@@ -235,6 +245,16 @@ export class SidecarTranscript {
     return this.current?.status === 'running' ? this.current.id : null;
   }
 
+  /** 当前这一轮里还在跑的最后一条工具：状态行用它说「命令已经跑了 40s」。 */
+  get runningTool(): SidecarToolCall | null {
+    const tools = this.current?.tools;
+    if (!tools?.length) return null;
+    for (let index = tools.length - 1; index >= 0; index--) {
+      if (tools[index]!.status === 'running') return tools[index]!;
+    }
+    return null;
+  }
+
   /** 已完成的轮次 + 正在跑的那一轮（未完成的排在最后）。 */
   allTurns(): SidecarTurn[] {
     return this.current ? [...this.turns, this.current] : [...this.turns];
@@ -246,10 +266,29 @@ export class SidecarTranscript {
     return warning;
   }
 
+  /**
+   * 接管一条已有会话时，把落盘的历史填进投影。
+   *
+   * resume 之后子进程有自己的完整上下文，但它**不会把历史重发一遍通知**。不填的话
+   * `sidecar_turns` 会说「还没有任何一轮对话」，而它显然已经干过活。
+   *
+   * `totalTurns` 用文件里的真实轮数（可以大于这里留下的条数）：`omittedTurnCount`
+   * 会因此如实说出「更早的 N 轮没保留」。
+   */
+  seed(turns: SidecarTurn[], totalTurns = turns.length): void {
+    this.turns.splice(0, this.turns.length, ...turns);
+    this.finishedTurns = Math.max(totalTurns, turns.length);
+    this.revision += 1;
+    this.lastActivityAt = Date.now();
+  }
+
   /** 收到一条通知。返回 true 表示有可见变化（等待类工具据此提前返回）。 */
   apply(notification: Notification): boolean {
     const changed = this.applyNotification(notification);
-    if (changed) this.revision += 1;
+    if (changed) {
+      this.revision += 1;
+      this.lastActivityAt = Date.now();
+    }
     return changed;
   }
 
@@ -278,7 +317,7 @@ export class SidecarTranscript {
         if (item.type !== 'commandExecution') return false;
         const id = asString(item.id) || `tool-${Date.now()}`;
         const title = asString(item.displayText) || asString(item.command) || 'tool';
-        this.current!.tools.push({ id, title, status: 'running' });
+        this.current!.tools.push({ id, title, status: 'running', startedAt: Date.now() });
         trimTools(this.current!.tools);
         return true;
       }

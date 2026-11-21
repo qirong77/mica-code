@@ -1,4 +1,8 @@
 import type { PluginContext } from '@packages/mica-plugin/index.js';
+import { join } from 'node:path';
+import { resolveMicaHome } from '@packages/mica-config/brand.js';
+import { SidecarEventLog, summarizeTurn, turnStatusLabel, type SidecarEvent, type SidecarEventKind } from './events.js';
+import { readSessionHistory } from './history.js';
 import {
   currentSidecarDepth,
   MAX_SIDECAR_DEPTH,
@@ -23,6 +27,19 @@ export const MIN_MAX_TURNS = 200;
  */
 export const MAX_DEAD_ENTRIES = 4;
 
+/** 等条件的后台登记多久之后作废：没人会等一个两小时前的结论。 */
+const WATCHER_TTL_MS = 30 * 60_000;
+
+/** 停滞判定的缺省值：5 分钟没有任何新输出，而这一轮还在跑。 */
+export const DEFAULT_STALL_MS = 5 * 60_000;
+/**
+ * 空闲自动回收的缺省值：15 分钟没动静、结果也已经被读过，就把进程收掉。
+ *
+ * 收的是进程不是会话：`sidecar_attach` 还能把它接回来，而 4 个挂着不关的子会话是
+ * 接近 1GB 的常驻内存。
+ */
+export const DEFAULT_RECYCLE_MS = 15 * 60_000;
+
 export type SidecarEntry = {
   /** 会话 id（`thread/start` 返回）。第一轮结束前会话文件还不存在。 */
   id: string;
@@ -32,9 +49,51 @@ export type SidecarEntry = {
   process: SidecarProcess;
   /** 上一次整份渲染时的 `transcript.revision`；用来认出「什么都没发生」的重复查询。 */
   seenRevision?: number;
+  /** 已经上报过事件的轮次数：事件是「发生一次记一条」，不能每次变化都重记。 */
+  seenFinishedTurns: number;
+  /** token 预算（0 / undefined 表示不限）。 */
+  maxTokens?: number;
+  /** 已经因超预算打断过一次，别每轮都打。 */
+  budgetTripped?: boolean;
+  /** 停滞提示是针对哪一轮发的：同一轮只提示一次，有新输出就重新计。 */
+  stallTurnId?: string;
+  /** 是否已上报进程退出。 */
+  exitReported?: boolean;
+  /** 最近一次被工具读取的时刻：空闲回收只在「结果已经有人读过」之后才动手。 */
+  lastReadAt?: number;
+  /** 接管来的会话（历史来自会话文件，而不是通知流）。 */
+  attached?: boolean;
 };
 
 export type SpawnResult = { ok: true; entry: SidecarEntry } | { ok: false; error: string };
+
+export type SidecarRegistryOptions = {
+  /** 后台事件（轮次结束、退出、停滞、超预算…）的去处：注入 prompt + 落一条 notice。 */
+  onEvent?: (event: SidecarEvent) => void;
+  /** 停滞判定阈值（毫秒）。 */
+  stallMs?: number;
+  /** 空闲回收阈值（毫秒），0 表示不回收。 */
+  recycleMs?: number;
+  /** spawn 没给 `max_tokens` 时的缺省预算，0 表示不限。 */
+  defaultMaxTokens?: number;
+  /**
+   * 运行期重新读取的三项阈值（插件设置改完立刻生效）。
+   *
+   * 装配时读一次会让「把空闲回收从 15 分钟改成 0」必须重启宿主，而这几项恰好是用户
+   * 调完想马上看到效果的东西。
+   */
+  limits?: () => Partial<Pick<SidecarRegistryOptions, 'stallMs' | 'recycleMs' | 'defaultMaxTokens'>>;
+  now?: () => number;
+};
+
+/** 后台等待的登记：`sidecar_wait` 超时之后仍然盯着，条件成立时变成一条事件。 */
+type Watcher = {
+  entryId: string;
+  until: 'idle' | 'text' | 'turn';
+  pattern: RegExp | null;
+  baseline: WaitBaseline;
+  expiresAt: number;
+};
 
 /**
  * 子会话用哪个角色。
@@ -55,6 +114,10 @@ export function resolveSidecarRole(inputRole: string | undefined, parentRole: st
  */
 export class SidecarRegistry {
   private readonly entries = new Map<string, SidecarEntry>();
+  /** 未读的后台事件：prompt 段落每轮取走一次（见 index.ts）。 */
+  private readonly eventLog = new SidecarEventLog();
+  /** 父会话登记的「后台等」：`sidecar_wait` 超时后继续盯着，条件成立时变成一条事件。 */
+  private readonly watchers = new Map<string, Watcher>();
   /**
    * 正在握手、还没进登记表的启动数。
    *
@@ -70,6 +133,7 @@ export class SidecarRegistry {
   private boundParentId: string | null;
   /** 已被回收：还在握手的启动要自己收尾，回收之后也不许再派生。 */
   private disposed = false;
+  private readonly now: () => number;
 
   constructor(
     private readonly ctx: PluginContext,
@@ -80,8 +144,10 @@ export class SidecarRegistry {
      * 用函数而不是值——会话里切过角色之后再派，跟的要是切完的那个。
      */
     private readonly currentRole: () => string | undefined,
+    private readonly options: SidecarRegistryOptions = {},
   ) {
     this.boundParentId = parentSessionId;
+    this.now = options.now ?? (() => Date.now());
   }
 
   list(): SidecarEntry[] {
@@ -120,7 +186,176 @@ export class SidecarRegistry {
     this.boundParentId = current;
     const stale = [...this.entries.values()];
     this.entries.clear();
+    this.watchers.clear();
+    this.eventLog.clear();
     for (const entry of stale) void this.trackClose(entry.process, 0);
+  }
+
+  /** 未读事件数：面板与状态行用它说「有几条新动态」。 */
+  get pendingEventCount(): number {
+    return this.eventLog.size;
+  }
+
+  /**
+   * 取走未读事件并渲染成 prompt 段落。
+   *
+   * 读一次就清：同一件事在每一轮里重复进 prompt，既撑上下文、又让这一段之后的
+   * prompt cache 每轮都失效。空串表示这一轮没有任何新动态——整段消失，前缀不变。
+   */
+  takeEventsForPrompt(): SidecarEvent[] {
+    return this.eventLog.take();
+  }
+
+  /** 工具刚读过某个子会话：空闲回收据此判断「结果已经有人看过」。 */
+  markRead(id: string): void {
+    const entry = this.get(id);
+    if (entry) entry.lastReadAt = this.now();
+  }
+
+  private emit(kind: SidecarEventKind, entry: SidecarEntry, summary: string, detail?: string): SidecarEvent {
+    const event = this.eventLog.add({
+      sessionId: entry.id,
+      title: entry.title,
+      kind,
+      summary,
+      ...(detail ? { detail } : {}),
+    });
+    try {
+      this.options.onEvent?.(event);
+    } catch (error) {
+      this.ctx.logger.warn('sidecar:event-handler-failed', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+    return event;
+  }
+
+  /**
+   * 订阅一个子进程的可见变化，把「它自己发生的事」翻译成事件。
+   *
+   * 为什么不做定时轮询：事件要在**发生的那一刻**记下来（父会话这一刻可能正忙），
+   * 而 `SidecarProcess` 每次有变化都会通知等待者，这里只是多挂一个观察者。
+   */
+  private watchEntry(entry: SidecarEntry): void {
+    entry.seenFinishedTurns = entry.process.transcript?.finishedTurnCount ?? 0;
+    // 测试里的假进程没有订阅口：事件是附加能力，缺了也不能影响派生本身。
+    entry.process.subscribe?.(() => this.observe(entry));
+  }
+
+  private observe(entry: SidecarEntry): void {
+    const transcript = entry.process.transcript;
+    const finished = transcript.finishedTurnCount;
+    if (finished > entry.seenFinishedTurns) {
+      entry.seenFinishedTurns = finished;
+      // `turns` 里最后一条就是刚结束的那一轮（进程退出时也会把在跑的那轮收尾）。
+      const turn = transcript.turns.at(-1);
+      if (turn) {
+        entry.stallTurnId = undefined;
+        const seconds = turn.finishedAt ? Math.max(0, Math.round((turn.finishedAt - turn.startedAt) / 1000)) : 0;
+        this.emit('turn', entry, `${turnStatusLabel(turn.status)} · ${seconds}s · ${summarizeTurn(turn)}`);
+        this.satisfyWatchers(entry);
+      }
+    }
+    if (entry.process.closed && !entry.exitReported) {
+      entry.exitReported = true;
+      this.emit('exit', entry, '子会话进程已退出', clip(entry.process.describeFailure().replace(/\s+/g, ' '), 200));
+      this.watchers.delete(entry.id);
+    }
+    this.checkBudget(entry);
+  }
+
+  /** token 预算：超了立刻打断，而且只打一次。 */
+  private checkBudget(entry: SidecarEntry): void {
+    const budget = entry.maxTokens ?? 0;
+    if (budget <= 0 || entry.budgetTripped || entry.process.closed) return;
+    const usage = entry.process.transcript.usage;
+    if (usage.total < budget) return;
+    entry.budgetTripped = true;
+    void entry.process.abort().catch(() => undefined);
+    this.emit('budget', entry, `已用 ${usage.total} token，超出预算 ${budget}，已自动打断这一轮`);
+  }
+
+  /**
+   * 登记一次后台等待。
+   *
+   * `sidecar_wait` 阻塞到超时之后用它接棒：父会话不必为了「它还跑着」再查一次——
+   * 条件成立时那条事件会跟着下一轮 prompt 一起到达。
+   */
+  registerWatcher(entry: SidecarEntry, until: 'idle' | 'text' | 'turn', pattern: RegExp | null): void {
+    this.watchers.set(entry.id, {
+      entryId: entry.id,
+      until,
+      pattern,
+      baseline: waitBaseline(entry.process.transcript),
+      expiresAt: this.now() + WATCHER_TTL_MS,
+    });
+  }
+
+  hasWatcher(id: string): boolean {
+    return this.watchers.has(id);
+  }
+
+  private satisfyWatchers(entry: SidecarEntry): void {
+    const watcher = this.watchers.get(entry.id);
+    if (!watcher) return;
+    const verdict = waitSatisfied(entry.process.transcript, watcher.until, watcher.pattern, watcher.baseline);
+    if (!verdict.done) return;
+    this.watchers.delete(entry.id);
+    this.emit('watch', entry, verdict.detail ?? '你等的条件已经成立');
+  }
+
+  /**
+   * 看门狗的一轮：预算、停滞、空闲回收。
+   *
+   * 这三件事都要一个钟，而进程只在「有变化」时通知我们——一个彻底卡死的子会话
+   * 永远不会再通知第二声。
+   */
+  tick(): { stalled: string[]; recycled: string[] } {
+    const now = this.now();
+    const stalled: string[] = [];
+    const recycled: string[] = [];
+    for (const [id, watcher] of [...this.watchers]) {
+      if (watcher.expiresAt <= now) this.watchers.delete(id);
+    }
+    this.sweep();
+    for (const entry of this.list()) {
+      const transcript = entry.process.transcript;
+      const id = entry.id;
+      if (entry.process.closed) continue;
+      this.checkBudget(entry);
+      const idleMs = now - transcript.lastActivityAt;
+      if (transcript.busy) {
+        const turnId = transcript.activeTurnId ?? '';
+        if (idleMs >= this.limits().stallMs && entry.stallTurnId !== turnId) {
+          entry.stallTurnId = turnId;
+          const tool = transcript.runningTool;
+          stalled.push(id);
+          this.emit(
+            'stalled',
+            entry,
+            `${Math.round(idleMs / 60_000)} 分钟没有新输出` +
+              (tool ? `，当前工具「${clip(tool.title, 80)}」还在跑` : ''),
+            '可能卡在一条命令或等一个外部服务，可以 sidecar_status 看一眼，必要时 sidecar_abort',
+          );
+        }
+        continue;
+      }
+      entry.stallTurnId = undefined;
+      const recycleMs = this.limits().recycleMs;
+      if (recycleMs <= 0 || idleMs < recycleMs) continue;
+      // 只回收「结果已经有人读过」的：刚跑完还没人看就收掉，等于把结论删了。
+      const read = entry.lastReadAt !== undefined && entry.lastReadAt >= transcript.lastActivityAt;
+      if (!read) continue;
+      recycled.push(id);
+      void this.close(id).catch(() => undefined);
+      this.eventLog.add({
+        sessionId: entry.id,
+        title: entry.title,
+        kind: 'recycled',
+        summary: `空闲 ${Math.round(idleMs / 60_000)} 分钟，进程已收掉（会话历史仍在，需要时 sidecar_attach 接回来）`,
+      });
+    }
+    return { stalled, recycled };
   }
 
   async spawn(input: {
@@ -131,6 +366,7 @@ export class SidecarRegistry {
     model?: string;
     effort?: string;
     maxTurns?: number;
+    maxTokens?: number;
     signal?: AbortSignal;
   }): Promise<SpawnResult> {
     // 回收之后还派：这个进程马上要退出，派出来的孩子没人管。
@@ -139,22 +375,15 @@ export class SidecarRegistry {
     if (input.maxTurns !== undefined && (!Number.isInteger(input.maxTurns) || input.maxTurns < MIN_MAX_TURNS)) {
       return { ok: false, error: `max_turns 必须为不小于 ${MIN_MAX_TURNS} 的整数。` };
     }
+    if (input.maxTokens !== undefined && (!Number.isInteger(input.maxTokens) || input.maxTokens < 0)) {
+      return { ok: false, error: 'max_tokens 必须为不小于 0 的整数（0 表示不限）。' };
+    }
     this.sweep();
     // 名额算的是「还活着」的：退了但还没清掉的死条目不该占着并发名额，否则
     // 一个都没跑的时候 spawn 会被拒绝，而列表里其实只有空壳。
-    if (this.liveEntries().length + this.starting >= MAX_SIDECARS) {
-      return {
-        ok: false,
-        error: `已经有 ${MAX_SIDECARS} 个子会话在跑，先 sidecar_close 掉不再需要的再开新的。`,
-      };
-    }
-    // 深度上限：每层子会话都是完整的 mica 进程，不限深就是指数级的进程树。
-    if (currentSidecarDepth() >= MAX_SIDECAR_DEPTH) {
-      return {
-        ok: false,
-        error: `已经套了 ${MAX_SIDECAR_DEPTH} 层子会话，不再往下派生：每层都是完整进程，再深会拖死机器。这一层请直接自己做完。`,
-      };
-    }
+    // 深度上限（每层都是完整 mica 进程，不限深就是指数级进程树）也在同一个判断里。
+    const blocked = this.capacityError();
+    if (blocked) return { ok: false, error: blocked };
     // 工作目录的规范化（绝对路径、~ 展开、存在性）统一在 SidecarProcess.start 里做：
     // 那里才知道这个值会同时被当作子进程 cwd 和 --dir。
     const parent = this.currentSession();
@@ -210,8 +439,11 @@ export class SidecarRegistry {
       cwd: process_.cwd,
       createdAt: Date.now(),
       process: process_,
+      seenFinishedTurns: 0,
+      maxTokens: input.maxTokens ?? this.limits().defaultMaxTokens,
     };
     this.entries.set(id, entry);
+    this.watchEntry(entry);
     this.ctx.logger.info('sidecar:spawned', { sessionId: id, cwd: entry.cwd });
 
     const cancelSend = () => {
@@ -238,9 +470,133 @@ export class SidecarRegistry {
     const entry = this.get(id);
     if (!entry) return false;
     this.entries.delete(entry.id);
+    this.watchers.delete(entry.id);
+    // 主动收掉的会话不该再报一条「进程退出了」：那是给意外退出准备的。
+    entry.exitReported = true;
+    // 进程都没了，再把这个会话的事件留着只会让人去找一个已经不在的条目。
+    this.eventLog.dropSession(entry.id);
     await this.trackClose(entry.process);
     this.ctx.logger.info('sidecar:closed', { sessionId: entry.id });
     return true;
+  }
+
+  /** 落盘会话目录：接管已有会话时要读它（历史不在通知流里）。 */
+  private sessionsDir(): string {
+    return join(this.ctx.paths?.home ?? resolveMicaHome(), 'sessions');
+  }
+
+  /** 当前生效的三项阈值：静态配置打底，插件设置运行期覆盖。 */
+  private limits(): { stallMs: number; recycleMs: number; defaultMaxTokens: number } {
+    const live = this.options.limits?.() ?? {};
+    return {
+      stallMs: live.stallMs ?? this.options.stallMs ?? DEFAULT_STALL_MS,
+      recycleMs: live.recycleMs ?? this.options.recycleMs ?? DEFAULT_RECYCLE_MS,
+      defaultMaxTokens: live.defaultMaxTokens ?? this.options.defaultMaxTokens ?? 0,
+    };
+  }
+
+  /** 并发名额：与 `spawn` 共用一套判断，别让 attach 从侧门绕过上限。 */
+  private capacityError(): string | null {
+    if (this.liveEntries().length + this.starting >= MAX_SIDECARS) {
+      return `已经有 ${MAX_SIDECARS} 个子会话在跑，先 sidecar_close 掉不再需要的再开新的。`;
+    }
+    if (currentSidecarDepth() >= MAX_SIDECAR_DEPTH) {
+      return `已经套了 ${MAX_SIDECAR_DEPTH} 层子会话，不再往下派生：每层都是完整进程，再深会拖死机器。这一层请直接自己做完。`;
+    }
+    return null;
+  }
+
+  /**
+   * 接管一条已经存在的会话（`sidecar_attach`）。
+   *
+   * 与 `spawn` 的区别只有两处：会话是**已有的**（历史从会话文件补，不新建一条空会话），
+   * 以及不投第一句话——接管「接着干」的语义是父会话随后自己 `sidecar_send`。
+   */
+  async attach(input: {
+    sessionId: string;
+    cwd?: string;
+    title?: string;
+    maxTokens?: number;
+    signal?: AbortSignal;
+  }): Promise<SpawnResult> {
+    if (this.disposed) return { ok: false, error: '会话已经关闭，不再接管子会话。' };
+    if (input.signal?.aborted) return { ok: false, error: '接管子会话已取消。' };
+    const sessionId = input.sessionId.trim();
+    if (!sessionId) return { ok: false, error: 'session_id 不能为空。' };
+    this.sweep();
+    const existing = this.get(sessionId);
+    if (existing) return { ok: true, entry: existing };
+    const blocked = this.capacityError();
+    if (blocked) return { ok: false, error: blocked };
+    const history = readSessionHistory(sessionId, this.sessionsDir());
+    if (!history) {
+      return {
+        ok: false,
+        error: `找不到会话 ${sessionId} 的落盘文件（${this.sessionsDir()}）：接管要求这条会话至少跑完过一轮。`,
+      };
+    }
+    // 接管默认回到那条会话自己的目录：接着干的活要落在它原来的工作区里。
+    const cwd = resolveSessionCwd(input.cwd?.trim() || history.cwd || this.currentSession().cwd, this.defaultCwd);
+    let process_: SidecarProcess;
+    try {
+      process_ = await this.startProcess({
+        cwd,
+        resumeSessionId: sessionId,
+        ...(input.signal ? { signal: input.signal } : {}),
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.ctx.logger.error('sidecar:attach-failed', { error: message, sessionId });
+      return { ok: false, error: `接管失败：${message}` };
+    }
+    if (this.disposed) {
+      await process_.close(0);
+      return { ok: false, error: '会话在接管过程中关闭了，子会话没有启动。' };
+    }
+    const entry: SidecarEntry = {
+      id: process_.sessionId ?? sessionId,
+      title: input.title?.trim() || history.title,
+      cwd: process_.cwd,
+      createdAt: Date.now(),
+      process: process_,
+      seenFinishedTurns: 0,
+      attached: true,
+      maxTokens: input.maxTokens ?? this.limits().defaultMaxTokens,
+    };
+    // 历史先进投影再进登记表：`watchEntry` 会把基线设成「当前已完成的轮数」，
+    // 顺序反了就会把刚补齐的历史当成新事件再报一遍。
+    process_.transcript.seed(history.turns, history.totalTurns);
+    this.entries.set(entry.id, entry);
+    this.watchEntry(entry);
+    this.emit('attach', entry, `已接管这条会话（历史 ${history.totalTurns} 轮，工具调用只保留名字）`);
+    this.ctx.logger.info('sidecar:attached', { sessionId: entry.id, turns: history.totalTurns });
+    return { ok: true, entry };
+  }
+
+  /**
+   * 批量收：`all` 收全部，`idle` 收空闲的（还在跑的不动）。
+   *
+   * 返回真正收掉的 id。收不掉的（找不到）不报错——批量操作里一条过期 id 不该让
+   * 其余几条都不生效。
+   */
+  async closeMany(scope: 'all' | 'idle' | string[]): Promise<string[]> {
+    const targets =
+      scope === 'all'
+        ? this.list()
+        : scope === 'idle'
+          ? this.list().filter((entry) => !entry.process.transcript.busy && entry.process.transcript.settled)
+          : scope.map((id) => this.get(id)).filter((entry): entry is SidecarEntry => Boolean(entry));
+    const closed: string[] = [];
+    // 串行：每个都想走到 grace 落盘，并行收会让 4 个进程同时抢 CPU。
+    for (const entry of targets) {
+      if (await this.close(entry.id)) closed.push(entry.id);
+    }
+    return closed;
+  }
+
+  /** 活着的子会话数：面板状态行与 `sidecar_collect` 的收尾建议都用它。 */
+  get liveCount(): number {
+    return this.liveEntries().length;
   }
 
   private trackClose(process_: SidecarProcess, graceMs?: number): Promise<void> {

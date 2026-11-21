@@ -6,9 +6,11 @@ import {
   MAX_TRANSCRIPT_CHARS,
   clip,
   grepTranscript,
+  renderCollect,
   renderSidecar,
   renderTranscript,
   renderTurnIndex,
+  sinceLabel,
 } from './views.js';
 
 /**
@@ -57,6 +59,11 @@ export class SidecarSpawnTool extends MicaTool {
             minimum: MIN_MAX_TURNS,
             description: `最多几轮模型往返，最小为 ${MIN_MAX_TURNS}，用来兜住跑飞的任务。`,
           },
+          max_tokens: {
+            type: 'integer',
+            minimum: 0,
+            description: '累计 token 预算（输入+输出）；超过就自动打断这一轮并通知你。0 表示不限。',
+          },
         },
         required: ['prompt'],
       },
@@ -72,6 +79,7 @@ export class SidecarSpawnTool extends MicaTool {
       model?: string;
       effort?: string;
       max_turns?: number;
+      max_tokens?: number;
     },
     callbacks?: ToolExecuteCallbacks,
   ): Promise<string> {
@@ -83,6 +91,7 @@ export class SidecarSpawnTool extends MicaTool {
       ...(input.model ? { model: input.model } : {}),
       ...(input.effort ? { effort: input.effort } : {}),
       ...(input.max_turns !== undefined ? { maxTurns: input.max_turns } : {}),
+      ...(input.max_tokens !== undefined ? { maxTokens: input.max_tokens } : {}),
       ...(callbacks?.signal ? { signal: callbacks.signal } : {}),
     });
     if (!result.ok) return result.error;
@@ -97,6 +106,7 @@ export class SidecarSpawnTool extends MicaTool {
       '· `sidecar_status` 看它现在说到哪了、调了哪些工具',
       `· 最多同时 ${MAX_SIDECARS} 个子会话；跑完用 \`sidecar_close\` 收掉进程`,
       '',
+      '它每一轮结束、卡住、超预算、进程退出都会记成一条动态，你下一轮开工时自动看到——不必反复轮询。',
       '注意：会话文件要等它这一轮结束才会落盘，在那之前侧栏还看不到它。',
     ].join('\n');
   }
@@ -129,6 +139,13 @@ export class SidecarSendTool extends MicaTool {
     if (!entry) return `找不到子会话：${input.session_id}。用 sidecar_status 列出当前有哪些。`;
     const text = String(input.text ?? '').trim();
     if (!text) return '消息内容为空。';
+    if (entry.budgetTripped) {
+      // 预算已经撞过一次：再投一句等于让同一个跑飞的会话接着烧钱。
+      return (
+        `${entry.id} 已经超出 token 预算，不再接受新的指令。\n` +
+        '换个任务请 sidecar_spawn 新开一个；确实要继续就 attach 时给一个更大的 max_tokens。'
+      );
+    }
     try {
       const { queued } = await entry.process.send(text);
       return queued ? `已排进 ${entry.id} 的当前这一轮（下一迭代边界注入）。` : `已发送，${entry.id} 开始新的一轮。`;
@@ -168,6 +185,7 @@ export class SidecarStatusTool extends MicaTool {
     if (input.session_id) {
       const entry = this.registry.get(String(input.session_id));
       if (!entry) return `找不到子会话：${input.session_id}`;
+      this.registry.markRead(entry.id);
       // 查进度是高频动作：转录没变时只回一行，别让每次 poll 都重投一份全文。
       return renderSidecar(entry, { full: input.full === true, quietWhenUnchanged: true });
     }
@@ -179,7 +197,10 @@ export class SidecarStatusTool extends MicaTool {
       const transcript = entry.process.transcript;
       const latest = transcript.latestTurn;
       const state = entry.process.closed ? '已退出' : transcript.busy ? '运行中' : '空闲';
-      const head = `${entry.id} · ${state} · ${transcript.totalTurnCount} 轮 · ${clip(entry.title, 40)}`;
+      // 「最近动静」是这一行里唯一能区分「在跑」和「卡住」的信息。
+      const head =
+        `${entry.id} · ${state} · ${transcript.totalTurnCount} 轮 · 最近动静 ${sinceLabel(transcript.lastActivityAt)}` +
+        ` · ${clip(entry.title, 40)}`;
       const tail = latest ? clip((latest.text || '').replace(/\s+/g, ' '), 160) : '（还没有内容）';
       return `${head}\n  ${tail}`;
     });
@@ -222,6 +243,7 @@ export class SidecarTurnsTool extends MicaTool {
     this.registry.sweep();
     const entry = this.registry.get(String(input.session_id ?? ''));
     if (!entry) return `找不到子会话：${input.session_id}。用 sidecar_status 列出当前有哪些。`;
+    this.registry.markRead(entry.id);
     return renderTurnIndex(entry, input.limit ? { limit: Number(input.limit) } : {});
   }
 
@@ -234,15 +256,21 @@ export class SidecarGrepTool extends MicaTool {
   constructor(private readonly registry: SidecarRegistry) {
     super(
       'sidecar_grep',
-      '在子会话的对话里搜关键词，只回命中所在的那些行（带轮次与说话人）。' +
+      '在子会话里搜关键词，只回命中所在的那些行（带轮次与说话人）。' +
         '想知道「它在哪说过这个报错 / 有没有提到这个文件」时用它，不要为此读整段对话。' +
-        '搜的是对话正文（用户 + 助手），不含工具输出——工具行在 sidecar_status 里。只读。',
+        '默认搜对话正文（用户 + 助手）；命令输出与测试报错在工具输出里，用 scope: "tools" 或 "all" 才搜得到。只读。',
       {
         type: 'object' as const,
         properties: {
           session_id: { type: 'string', description: '会话 id 或唯一前缀。' },
           pattern: { type: 'string', description: '正则（区分大小写）。搜普通文本时注意转义 . * ( ) 之类。' },
           max_matches: { type: 'number', description: '最多列出几处，默认 8，最多 30。' },
+          scope: {
+            type: 'string',
+            enum: ['text', 'tools', 'all'],
+            description:
+              '搜哪里：text = 只搜对话正文（默认），tools = 只搜工具输出（命令结果、测试报错），all = 两边都搜。只搜对话时若工具输出里有命中会提示你。',
+          },
         },
         required: ['session_id', 'pattern'],
       },
@@ -250,7 +278,12 @@ export class SidecarGrepTool extends MicaTool {
     );
   }
 
-  async execute(input: { session_id: string; pattern: string; max_matches?: number }): Promise<string> {
+  async execute(input: {
+    session_id: string;
+    pattern: string;
+    max_matches?: number;
+    scope?: 'text' | 'tools' | 'all';
+  }): Promise<string> {
     this.registry.sweep();
     const entry = this.registry.get(String(input.session_id ?? ''));
     if (!entry) return `找不到子会话：${input.session_id}`;
@@ -261,9 +294,11 @@ export class SidecarGrepTool extends MicaTool {
     } catch (error) {
       return `pattern 不是合法正则：${error instanceof Error ? error.message : String(error)}`;
     }
+    this.registry.markRead(entry.id);
     return grepTranscript(entry, {
       pattern,
       ...(input.max_matches ? { maxMatches: Number(input.max_matches) } : {}),
+      ...(input.scope ? { scope: input.scope } : {}),
     });
   }
 
@@ -309,6 +344,7 @@ export class SidecarTranscriptTool extends MicaTool {
     this.registry.sweep();
     const entry = this.registry.get(String(input.session_id ?? ''));
     if (!entry) return `找不到子会话：${input.session_id}`;
+    this.registry.markRead(entry.id);
     return renderTranscript(entry, {
       ...(input.last_turns ? { lastTurns: Number(input.last_turns) } : {}),
       ...(input.include_user === false ? { includeUser: false } : {}),
@@ -326,11 +362,19 @@ export class SidecarWaitTool extends MicaTool {
     super(
       'sidecar_wait',
       '等子会话满足一个条件，然后返回它的状态。默认等「这一轮跑完」。' +
-        '这是阻塞等待（可以与同一条消息里的其它工具并行），不要在它后面再补 sleep。',
+        '这是阻塞等待（可以与同一条消息里的其它工具并行），不要在它后面再补 sleep。' +
+        '并行开了几个就传 session_ids（默认等全部满足；any: true 表示任意一个满足就返回）。' +
+        '超时不会白等：它会转成后台提醒，条件成立时你下一轮会自动收到，不必再查。',
       {
         type: 'object' as const,
         properties: {
           session_id: { type: 'string', description: '会话 id 或唯一前缀。' },
+          session_ids: {
+            type: 'array',
+            items: { type: 'string' },
+            description: '一次等多个：默认等全部满足，配 any: true 表示任意一个满足就返回。',
+          },
+          any: { type: 'boolean', description: 'true 时任意一个满足就返回（配合 session_ids）。' },
           until: {
             type: 'string',
             enum: ['idle', 'text', 'turn'],
@@ -340,14 +384,20 @@ export class SidecarWaitTool extends MicaTool {
           pattern: { type: 'string', description: 'until=text 时的正则（区分大小写），在最近一轮正文里匹配。' },
           timeout_ms: { type: 'number', description: `等待上限，默认 ${DEFAULT_WAIT_TIMEOUT_MS}ms，最大 900000。` },
         },
-        required: ['session_id'],
       },
       { overlappable: true },
     );
   }
 
   async execute(
-    input: { session_id: string; until?: string; pattern?: string; timeout_ms?: number },
+    input: {
+      session_id?: string;
+      session_ids?: string[];
+      any?: boolean;
+      until?: string;
+      pattern?: string;
+      timeout_ms?: number;
+    },
     callbacks?: ToolExecuteCallbacks,
   ): Promise<string> {
     if (input.until !== undefined && input.until !== 'idle' && input.until !== 'text' && input.until !== 'turn') {
@@ -356,8 +406,13 @@ export class SidecarWaitTool extends MicaTool {
     if (input.timeout_ms !== undefined && (!Number.isFinite(input.timeout_ms) || input.timeout_ms <= 0)) {
       return 'timeout_ms 必须为正数。';
     }
-    const entry = this.registry.get(String(input.session_id ?? ''));
-    if (!entry) return `找不到子会话：${input.session_id}`;
+    const ids = [...new Set([...(input.session_ids ?? []), ...(input.session_id ? [input.session_id] : [])])];
+    if (!ids.length) return '看不出要等哪一条：给 session_id，或者给 session_ids 数组。';
+    const entries = ids.map((id) => this.registry.get(String(id)));
+    const missing = ids.filter((_, index) => !entries[index]);
+    if (missing.length) return `找不到子会话：${missing.join('、')}`;
+    const targets = entries.map((entry) => entry!);
+    const any = input.any === true;
     const until = input.until === 'text' || input.until === 'turn' ? input.until : 'idle';
     let pattern: RegExp | null = null;
     if (until === 'text') {
@@ -369,32 +424,170 @@ export class SidecarWaitTool extends MicaTool {
       }
     }
 
-    const transcript = entry.process.transcript;
-    const baseline = waitBaseline(transcript);
+    // 基线在等待开始时取一次：`turn` 的语义是「调用之后至少一轮结束」。
+    const baselines = new Map(targets.map((entry) => [entry.id, waitBaseline(entry.process.transcript)]));
     const deadline = Date.now() + parseTimeout(input.timeout_ms);
+    const describe = (): string =>
+      targets
+        .map((entry) => {
+          const transcript = entry.process.transcript;
+          const verdict = waitSatisfied(transcript, until, pattern, baselines.get(entry.id)!);
+          return `· ${entry.id}「${clip(entry.title, 30)}」：${verdict.done ? '✓ ' + (verdict.detail ?? '成立') : '还在等'}`;
+        })
+        .join('\n');
+    const satisfiedCount = (): number =>
+      targets.filter((entry) => {
+        if (entry.process.closed) return true;
+        return waitSatisfied(entry.process.transcript, until, pattern, baselines.get(entry.id)!).done;
+      }).length;
 
     while (true) {
-      if (callbacks?.signal?.aborted) return `已取消等待（${entry.id} 仍在跑）。`;
-      if (entry.process.closed) {
-        return `子会话进程已退出。\n\n${renderSidecar(entry)}`;
+      if (callbacks?.signal?.aborted) {
+        return `已取消等待（${targets.map((entry) => entry.id).join('、')} 仍在跑）。`;
       }
-      const verdict = waitSatisfied(transcript, until, pattern, baseline);
-      if (verdict.done) {
-        // 条件成立时一定要给全量投影：模型等的就是这份结果。
-        return `${verdict.detail ?? '条件成立'}\n\n${renderSidecar(entry)}`;
+      if (targets.length === 1) {
+        const entry = targets[0]!;
+        if (entry.process.closed) return `子会话进程已退出。\n\n${renderSidecar(entry)}`;
+        const verdict = waitSatisfied(entry.process.transcript, until, pattern, baselines.get(entry.id)!);
+        if (verdict.done) {
+          // 条件成立时一定要给全量投影：模型等的就是这份结果。
+          return `${verdict.detail ?? '条件成立'}\n\n${renderSidecar(entry)}`;
+        }
+      } else {
+        const satisfied = satisfiedCount();
+        const done = any ? satisfied > 0 : satisfied === targets.length;
+        if (done) {
+          // 多个的时候给一份齐平的摘要（每个全长投影会一次吃掉几万字符）。
+          const header = any
+            ? '有一个子会话已经满足条件：'
+            : `${targets.length} 个子会话都满足了条件：`;
+          return `${header}\n${describe()}\n\n${renderCollect(targets)}\n\n需要某一个的全文时用 sidecar_status <id>。`;
+        }
       }
       const remaining = deadline - Date.now();
       if (remaining <= 0) {
-        // 超时往往紧接着又一次超时，这段文字会重复进上下文；没新输出时就只回状态行。
-        return `等待超时（${parseTimeout(input.timeout_ms)}ms）。它可能还在跑，用 sidecar_status 继续看。\n\n${renderSidecar(entry, { quietWhenUnchanged: true })}`;
+        // 超时之后不撒手：登记成后台等待，条件成立时跟着下一轮 prompt 一起到达。
+        for (const entry of targets) {
+          if (entry.process.closed) continue;
+          if (waitSatisfied(entry.process.transcript, until, pattern, baselines.get(entry.id)!).done) continue;
+          this.registry.registerWatcher(entry, until, pattern);
+        }
+        const projection = targets.length === 1 && targets[0]
+          ? renderSidecar(targets[0], { quietWhenUnchanged: true })
+          : renderCollect(targets);
+        return (
+          `等待超时（${parseTimeout(input.timeout_ms)}ms）。已经登记后台提醒：条件成立时你下一轮会自动收到，` +
+          `不用再查、也不要 sleep 忙等。\n\n${projection}`
+        );
       }
       // 有变化就重新判断，没变化就等到下一次通知或 500ms 兜底——不忙轮询。
-      await entry.process.waitForChange(Math.min(remaining, 500), callbacks?.signal);
+      await Promise.race(
+        targets.map((entry) => entry.process.waitForChange(Math.min(remaining, 500), callbacks?.signal)),
+      );
     }
   }
 
   onToolUseDisplayText(input: Record<string, unknown>): string {
-    return `sidecar wait ${clip(String(input.session_id ?? ''), 10)} · ${String(input.until ?? 'idle')}`;
+    const ids = Array.isArray(input.session_ids) ? input.session_ids : [];
+    if (ids.length > 1) return `sidecar wait ${ids.length} 个 · ${String(input.until ?? 'idle')}`;
+    return `sidecar wait ${clip(String(input.session_id ?? ids[0] ?? ''), 10)} · ${String(input.until ?? 'idle')}`;
+  }
+}
+
+export class SidecarCollectTool extends MicaTool {
+  constructor(private readonly registry: SidecarRegistry) {
+    super(
+      'sidecar_collect',
+      '一次收齐所有子会话的终态：状态、轮数、最后一轮结论、失败的工具、用量。' +
+        '收尾时先调它（一屏替代 wait×N + transcript×N）；close: true 顺带把已经跑完的进程收掉。只读（除非传 close）。',
+      {
+        type: 'object' as const,
+        properties: {
+          session_ids: {
+            type: 'array',
+            items: { type: 'string' },
+            description: '只看这几条；省略表示全部。',
+          },
+          close: {
+            type: 'boolean',
+            description: 'true 时把汇总里已经空闲（这一轮跑完、没有排队消息）的进程一并收掉。',
+          },
+        },
+      },
+    );
+  }
+
+  async execute(input: { session_ids?: string[]; close?: boolean }): Promise<string> {
+    this.registry.sweep();
+    const ids = (input.session_ids ?? []).map(String);
+    const entries = ids.length
+      ? ids.map((id) => this.registry.get(id)).filter((entry): entry is NonNullable<typeof entry> => Boolean(entry))
+      : this.registry.list();
+    if (ids.length && entries.length !== ids.length) {
+      const found = new Set(entries.map((entry) => entry.id));
+      const missing = ids.filter((id) => !found.has(id) && !this.registry.get(id));
+      if (missing.length) return `找不到子会话：${missing.join('、')}`;
+    }
+    for (const entry of entries) this.registry.markRead(entry.id);
+    const report = renderCollect(entries);
+    if (input.close !== true) return report;
+    const closed = await this.registry.closeMany('idle');
+    if (!closed.length) return `${report}\n\n（没有可收的：都还在跑，等它们跑完或用 sidecar_close 强制收）`;
+    return `${report}\n\n已收掉空闲的：${closed.join('、')}（历史与会话仍在，可 sidecar_attach 接回来）`;
+  }
+
+  onToolUseDisplayText(input: Record<string, unknown>): string {
+    const ids = Array.isArray(input.session_ids) ? input.session_ids.length : 0;
+    return ids ? `sidecar collect ${ids} 个` : 'sidecar collect';
+  }
+}
+
+export class SidecarAttachTool extends MicaTool {
+  constructor(private readonly registry: SidecarRegistry) {
+    super(
+      'sidecar_attach',
+      '接管一条**已经存在**的会话（用户的其它会话、或之前收掉/失联的子会话），之后用 sidecar_send / sidecar_wait 接着驱动它。' +
+        '不新建会话、不产生新的空会话；历史从会话文件补进来（工具调用只有名字）。' +
+        '收掉的子会话想接着干、或要把用户另一条会话拉进来当执行体时用它。',
+      {
+        type: 'object' as const,
+        properties: {
+          session_id: { type: 'string', description: '要接管的会话 id（完整 id，会话列表里那条）。' },
+          cwd: { type: 'string', description: '接管后用它自己的工作目录；缺省用会话文件里记的目录。' },
+          title: { type: 'string', description: '在 sidecar_status 里显示的名字，缺省取会话标题。' },
+          max_tokens: { type: 'integer', minimum: 0, description: '累计 token 预算，0 表示不限。' },
+        },
+        required: ['session_id'],
+      },
+    );
+  }
+
+  async execute(
+    input: { session_id: string; cwd?: string; title?: string; max_tokens?: number },
+    callbacks?: ToolExecuteCallbacks,
+  ): Promise<string> {
+    const result = await this.registry.attach({
+      sessionId: String(input.session_id ?? ''),
+      ...(input.cwd ? { cwd: input.cwd } : {}),
+      ...(input.title ? { title: input.title } : {}),
+      ...(input.max_tokens !== undefined ? { maxTokens: input.max_tokens } : {}),
+      ...(callbacks?.signal ? { signal: callbacks.signal } : {}),
+    });
+    if (!result.ok) return result.error;
+    const { entry } = result;
+    return [
+      `已接管会话：${entry.id}`,
+      `标题：${entry.title}`,
+      `目录：${entry.cwd}`,
+      '',
+      '它现在空闲，接着干的下一步：',
+      '· `sidecar_send` 交给它下一句',
+      '· `sidecar_turns` / `sidecar_transcript` 看它之前做到哪了（历史来自会话文件）',
+    ].join('\n');
+  }
+
+  onToolUseDisplayText(input: Record<string, unknown>): string {
+    return `sidecar attach ${clip(String(input.session_id ?? ''), 10)}`;
   }
 }
 
@@ -408,25 +601,37 @@ export class SidecarAbortTool extends MicaTool {
         type: 'object' as const,
         properties: {
           session_id: { type: 'string', description: '会话 id 或唯一前缀。' },
+          session_ids: { type: 'array', items: { type: 'string' }, description: '一次打断多个。' },
+          all: { type: 'boolean', description: 'true 时打断全部在跑的子会话。' },
         },
-        required: ['session_id'],
       },
     );
   }
 
-  async execute(input: { session_id: string }): Promise<string> {
-    const entry = this.registry.get(String(input.session_id ?? ''));
-    if (!entry) return `找不到子会话：${input.session_id}`;
-    try {
-      const stopped = await entry.process.abort();
-      return stopped ? `已打断 ${entry.id} 当前这一轮。` : `${entry.id} 当前没有在跑的一轮。`;
-    } catch (error) {
-      return `打断失败：${error instanceof Error ? error.message : String(error)}`;
+  async execute(input: { session_id?: string; session_ids?: string[]; all?: boolean }): Promise<string> {
+    const ids = [...new Set([...(input.session_ids ?? []), ...(input.session_id ? [input.session_id] : [])])];
+    const targets = input.all === true
+      ? this.registry.list().filter((entry) => entry.process.transcript.busy)
+      : ids.map((id) => this.registry.get(String(id))).filter((entry): entry is NonNullable<typeof entry> => Boolean(entry));
+    if (!targets.length) {
+      return input.all === true ? '当前没有在跑的子会话。' : `找不到子会话：${ids.join('、') || '（没给 id）'}`;
     }
+    const lines: string[] = [];
+    for (const entry of targets) {
+      try {
+        const stopped = await entry.process.abort();
+        lines.push(stopped ? `已打断 ${entry.id} 当前这一轮。` : `${entry.id} 当前没有在跑的一轮。`);
+      } catch (error) {
+        lines.push(`打断 ${entry.id} 失败：${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+    return lines.join('\n');
   }
 
   onToolUseDisplayText(input: Record<string, unknown>): string {
-    return `sidecar abort ${clip(String(input.session_id ?? ''), 10)}`;
+    if (input.all === true) return 'sidecar abort all';
+    const ids = Array.isArray(input.session_ids) ? input.session_ids : [];
+    return `sidecar abort ${clip(String(input.session_id ?? ids[0] ?? ''), 10)}`;
   }
 }
 
@@ -435,26 +640,44 @@ export class SidecarCloseTool extends MicaTool {
     super(
       'sidecar_close',
       '收掉子会话的进程。会话本身留在会话列表里（历史不丢），只是不再占着进程与并发名额。' +
-        '已经拿到需要的结论就关掉它，别让一堆跑完的子会话一直挂着。',
+        '已经拿到需要的结论就关掉它，别让一堆跑完的子会话一直挂着。' +
+        '收尾时用 all: true 一次收全部，idle: true 只收跑完的（还在跑的不动）。',
       {
         type: 'object' as const,
         properties: {
           session_id: { type: 'string', description: '会话 id 或唯一前缀。' },
+          session_ids: { type: 'array', items: { type: 'string' }, description: '一次收多个。' },
+          all: { type: 'boolean', description: 'true 时收掉全部子会话。' },
+          idle: { type: 'boolean', description: 'true 时只收空闲的（这一轮已经跑完、没有排队消息）。' },
         },
-        required: ['session_id'],
       },
     );
   }
 
-  async execute(input: { session_id: string }): Promise<string> {
-    const entry = this.registry.get(String(input.session_id ?? ''));
-    if (!entry) return `找不到子会话：${input.session_id}`;
-    const id = entry.id;
-    await this.registry.close(id);
-    return `已关闭 ${id}。会话历史仍在会话列表里，随时可以重新打开。`;
+  async execute(input: { session_id?: string; session_ids?: string[]; all?: boolean; idle?: boolean }): Promise<string> {
+    const ids = [...new Set([...(input.session_ids ?? []), ...(input.session_id ? [input.session_id] : [])])];
+    if (!ids.length && input.all !== true && input.idle !== true) {
+      return '看不出要收哪一条：给 session_id、session_ids，或者 all: true / idle: true。';
+    }
+    const scope = input.all === true ? 'all' : input.idle === true ? 'idle' : ids;
+    const closed = await this.registry.closeMany(scope);
+    if (!closed.length) {
+      if (input.all === true) return '当前没有子会话。';
+      if (input.idle === true) return '没有空闲的子会话可收（还在跑的不动）。';
+      return `找不到子会话：${ids.join('、')}`;
+    }
+    const missing = Array.isArray(scope) ? scope.filter((id) => !closed.includes(id)) : [];
+    return [
+      `已关闭：${closed.join('、')}`,
+      ...(missing.length ? [`没有找到或已关闭：${missing.join('、')}`] : []),
+      '会话历史仍在会话列表里，需要时可以用 `sidecar_attach` 接回来接着干。',
+    ].join('\n');
   }
 
   onToolUseDisplayText(input: Record<string, unknown>): string {
-    return `sidecar close ${clip(String(input.session_id ?? ''), 10)}`;
+    if (input.all === true) return 'sidecar close all';
+    if (input.idle === true) return 'sidecar close idle';
+    const ids = Array.isArray(input.session_ids) ? input.session_ids : [];
+    return `sidecar close ${clip(String(input.session_id ?? ids[0] ?? ''), 10)}`;
   }
 }

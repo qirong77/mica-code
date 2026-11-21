@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { SidecarEntry } from './registry.js';
 import { SidecarTranscript } from './transcript.js';
-import { grepTranscript, renderTranscript, renderTurnIndex } from './views.js';
+import { grepTranscript, renderCollect, renderTranscript, renderTurnIndex, sinceLabel } from './views.js';
 
 const turnStarted = (id = 't1') => ({ method: 'turn/started', params: { turn: { id } } });
 const turnCompleted = (status = 'completed') => ({
@@ -232,5 +232,63 @@ describe('grepTranscript', () => {
     const transcript = new SidecarTranscript();
     completeTurn(transcript, 'q', 'x'.repeat(24_000));
     expect(grepTranscript(entryFor(transcript), { pattern: /.*/ }).length).toBeLessThan(500);
+  });
+
+  it('searches tool output when asked, and points at it when not', () => {
+    const transcript = new SidecarTranscript();
+    transcript.apply(turnStarted('t1'));
+    transcript.apply(toolStarted('c1', 'run_shell bun run test'));
+    transcript.apply({
+      method: 'item/commandExecution/outputDelta',
+      params: { itemId: 'c1', delta: 'error: Cannot find module a\n1 test failed' },
+    });
+    transcript.apply(turnCompleted());
+
+    // 默认只搜对话：错误串在工具输出里，这次搜不到——但要说清它在哪。
+    const textOnly = grepTranscript(entryFor(transcript), { pattern: /Cannot find/ });
+    expect(textOnly).toContain('工具输出里有 1 处');
+    expect(textOnly).toContain("scope: 'tools'");
+
+    const tools = grepTranscript(entryFor(transcript), { pattern: /Cannot find/, scope: 'tools' });
+    expect(tools).toContain('[第1轮 · 工具]');
+    expect(tools).toContain('Cannot find module a');
+  });
+});
+
+describe('sinceLabel', () => {
+  it('reads as seconds, minutes and hours ago', () => {
+    const now = 1_000_000;
+    expect(sinceLabel(now - 8_000, now)).toBe('8s 前');
+    expect(sinceLabel(now - 5 * 60_000, now)).toBe('5m 前');
+    expect(sinceLabel(now - 3 * 3_600_000, now)).toBe('3h 前');
+  });
+
+  it('says nothing rather than inventing a time for seeded history', () => {
+    expect(sinceLabel(0)).toBe('—');
+  });
+});
+
+describe('renderCollect', () => {
+  it('gives one block per child with its conclusion and failed tools', () => {
+    const first = new SidecarTranscript();
+    first.recordUserInput('跑测试');
+    first.apply(turnStarted('t1'));
+    first.apply(toolStarted('c1', 'bun run test'));
+    first.apply({ method: 'item/completed', params: { item: { id: 'c1', type: 'commandExecution', status: 'error' } } });
+    first.apply({ method: 'item/agentMessage/delta', params: { delta: '三个用例失败：module-a' } });
+    first.apply(turnCompleted());
+    const second = new SidecarTranscript();
+    const text = renderCollect([entryFor(first), { ...entryFor(second), id: 'child-2' } as SidecarEntry]);
+
+    expect(text).toContain('2 个子会话');
+    expect(text).toContain('child-1');
+    expect(text).toContain('结论：');
+    expect(text).toContain('三个用例失败');
+    // 空的那个不能因为「没有轮次」就整块消失：用户要知道它还没开始干。
+    expect(text).toContain('还没有任何一轮对话');
+  });
+
+  it('says how to get started when nothing is running', () => {
+    expect(renderCollect([])).toContain('sidecar_spawn');
   });
 });

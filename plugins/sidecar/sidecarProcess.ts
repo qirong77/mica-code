@@ -101,6 +101,13 @@ export type SidecarProcessOptions = {
   /** 父会话 id：写进会话文件，侧栏据此把子会话嵌套在父会话下面。 */
   parentSessionId?: string;
   maxTurns?: number;
+  /**
+   * 接管一个已经存在的会话（`sidecar_attach`）。
+   *
+   * 与 `parentSessionId` 互斥：resume 的来历以会话文件里记的为准，用启动参数覆盖它
+   * 会把一条老会话的父会话悄悄改掉。
+   */
+  resumeSessionId?: string;
   /** 显式指定启动命令（测试与探针用）；缺省按当前进程重建 CLI 命令。 */
   launch?: SidecarCliCommand;
   /** 协议请求的等待上限；缺省 30s。测试用它把「握手超时」压到几百毫秒。 */
@@ -163,6 +170,8 @@ export class SidecarProcess {
   private stderrTail = '';
   private exitReason = '';
   private waiters = new Set<() => void>();
+  /** 变化观察者：登记表用它们把「它自己的事」记成事件，不依赖有人正在等。 */
+  private readonly listeners = new Set<() => void>();
   private exitWaiters = new Set<() => void>();
   private closing: Promise<void> | null = null;
 
@@ -196,7 +205,7 @@ export class SidecarProcess {
     if (options.model) args.push('--model', options.model);
     if (options.effort) args.push('--variant', options.effort);
     if (options.role) args.push('--role', options.role);
-    if (options.parentSessionId) args.push('--parent', options.parentSessionId);
+    if (options.parentSessionId && !options.resumeSessionId) args.push('--parent', options.parentSessionId);
     if (typeof options.maxTurns === 'number' && options.maxTurns > 0)
       args.push('--max-turns', String(options.maxTurns));
 
@@ -266,6 +275,23 @@ export class SidecarProcess {
   private async handshake(): Promise<void> {
     await this.request('initialize', { clientInfo: { name: 'sidecar', version: '1.0.0' } });
     this.write({ method: 'initialized', params: {} });
+    // 接管已有会话：走 `thread/resume` 而不是 `thread/start`。
+    //
+    // 不用启动参数 `--resume`：那条路在会话不存在时会**静默退回新建一条**（见
+    // runAppServer 的启动分支），而 attach 的全部意义是「接的就是那一条」，接不到
+    // 必须报错。`thread/resume` 找不到会话时明确回一个错误。
+    if (this.options.resumeSessionId) {
+      const result = await this.request('thread/resume', {
+        threadId: this.options.resumeSessionId,
+        ...(this.options.cwd ? { cwd: this.options.cwd } : {}),
+        ...(this.options.model ? { model: this.options.model } : {}),
+        ...(this.options.effort ? { effort: this.options.effort } : {}),
+      });
+      const thread = result.thread;
+      const id = thread && typeof thread === 'object' ? (thread as { id?: unknown }).id : undefined;
+      this.sessionId = typeof id === 'string' && id ? id : this.options.resumeSessionId;
+      return;
+    }
     const result = await this.request('thread/start', {
       cwd: this.options.cwd,
       ...(this.options.model ? { model: this.options.model } : {}),
@@ -407,6 +433,20 @@ export class SidecarProcess {
     });
   }
 
+  /**
+   * 订阅可见变化，返回取消订阅的函数。
+   *
+   * 与 `waitForChange` 的分工：那个是「我在等一件事」，只醒一次；这个是「我要一直
+   * 知道它发生了什么」，用来记后台事件（轮次结束、进程退出）。观察者抛错不能影响
+   * 协议解析，所以下面逐个 try 掉。
+   */
+  subscribe(listener: () => void): () => void {
+    this.listeners.add(listener);
+    return () => {
+      this.listeners.delete(listener);
+    };
+  }
+
   private request(method: string, params: Record<string, unknown>): Promise<Record<string, unknown>> {
     if (this.closed) return Promise.reject(new Error(this.exitReason || '子会话已关闭'));
     const id = this.nextRequestId++;
@@ -472,6 +512,13 @@ export class SidecarProcess {
 
   private notify(): void {
     for (const waiter of [...this.waiters]) waiter();
+    for (const listener of [...this.listeners]) {
+      try {
+        listener();
+      } catch {
+        // 观察者自己的问题：不该让协议解析或别的观察者跟着失败。
+      }
+    }
   }
 
   private onExit(reason: string): void {

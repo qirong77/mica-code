@@ -59,6 +59,7 @@ const MARKDOWN_MODES: Record<'set_markdown' | 'append_markdown' | 'prepend_markd
 const DESCRIPTION = [
   '读写本机 Mica Notebook 的 HTTP 接口（/plugin/notebook/api）：目录（文件夹 / 笔记）、笔记正文、搜索与最近删除。',
   '数据与 Notebook 页面同一份。正文是 Lexical JSON，接口把它投影成可读纯文本，写入走 Markdown / 纯文本 / 完整 Lexical JSON 三条通道。',
+  '正文还内置 HTML 块：用 ```react 围栏写几行 React + Arco 组件代码，就能在笔记里渲染出可点、可算的交互模块（原型、表单、图表），不需要装依赖或构建。',
   '先 GET 根地址（不含子路径）读取完整端点文档，再按端点调用。',
 ].join(' ');
 
@@ -73,6 +74,10 @@ const GUIDE = [
   '7. 不要直接修改 $MICA_HOME/plugin-data/notebook/ 下的 JSON。所有读写都走本接口：它沿用页面的 CAS 版本校验、跨进程锁、原子写入与正文大小限制。',
   '8. 本接口只在运行中的 Mica 应用里存在（桌面 / Web 宿主）。GET /plugin/notebook/api（不含子路径）即完整端点文档，包含参数、返回形状与 curl 示例。',
   '9. Markdown 写法建议：先写短摘要，再用 H2 分节与要点列表；表格只用于对比且单元格保持短句；代码围栏标注语言；不要用空段落或空格手工排版；不要编造事实。',
+  '10. 内置交互模块（这是笔记自带的能力，值得主动用）：需要可点、可算、可切换的小模块时——原型、表单预览、图表、对比切换、计算器、演示用的数据面板——直接写 ```react 代码围栏，不要只用文字描述或贴截图。块内必须定义 function App({React, Arco, html}) 并 return html`...`；Arco 是内置的完整组件库（Button / Card / Table / Input / Select / Form / Grid / Statistic / Progress 等），解构出来就能用：const {Card, Button, Tag} = Arco，模板里以 <${Card}> 这种写法插入组件。不需要 JSX 编译、npm 安装或构建，几行代码即可成型。',
+  '11. HTML 块的两种形态：```react 围栏 → React + Arco 交互块；一个结构闭合的 HTML 元素（div / section / table / svg 等）整块出现 → 静态 HTML 块。块在独立 sandbox iframe 里渲染并按内容自适应高度：拿不到宿主权限、不能 fetch（只放行 https 的脚本 / 样式 / 图片），状态只活在块内；与正文文字混排或标签未闭合的 HTML 会退化成纯文本。',
+  '12. 读回 HTML 块：text 投影给的是块里的可见文字，源码请用 GET /notes/:id?format=lexical 取 html 节点的 html 字段（runtime 区分 react / html）；改写时追加新的 ```react 围栏最省事。',
+  '13. 嵌入外站网页会失败：iframe 嵌套受目标站点 X-Frame-Options / frame-ancestors 限制（GitHub 等常见站点一律拒绝），块内只能是空白。遇到这类页面就写链接并说明「需在浏览器打开」，不要承诺笔记里能渲染出网页。',
 ].join('\n');
 
 const ENDPOINTS: readonly PluginApiEndpoint[] = [
@@ -251,7 +256,7 @@ const ENDPOINTS: readonly PluginApiEndpoint[] = [
         in: 'body',
         type: 'string',
         description:
-          'set_markdown / append_markdown / prepend_markdown 的 Markdown（必需，可以是空字符串）。set_markdown 替换整篇正文；append / prepend 保留已有节点、图片、表格与文档样式。',
+          'set_markdown / append_markdown / prepend_markdown 的 Markdown（必需，可以是空字符串）。set_markdown 替换整篇正文；append / prepend 保留已有节点、图片、表格与文档样式。```react 围栏会变成可交互的 React + Arco 块，单个结构闭合的 HTML 元素会变成静态 HTML 块（其余 HTML 按纯文本插入）。',
       },
       {
         name: 'text',

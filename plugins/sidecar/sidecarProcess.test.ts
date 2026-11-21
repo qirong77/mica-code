@@ -231,4 +231,51 @@ describe('SidecarProcess.start', () => {
     // 还不占 MAX_SIDECARS 名额，重试几次就是一份进程堆积。
     expect(await waitUntilGone(pid, 5_000)).toBe(true);
   }, 20_000);
+
+  it('attaches to an existing thread with thread/resume instead of starting a new one', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mica-sidecar-resume-'));
+    const captureFile = join(dir, 'resume.json');
+    const parentCwd = process.cwd();
+    const originalArgv = process.argv;
+    const script = `
+        const { writeFileSync } = require('node:fs');
+        const { createInterface } = require('node:readline');
+        const seen = { argv: process.argv.slice(2), methods: [] };
+        writeFileSync(process.argv[1], JSON.stringify(seen));
+        const input = createInterface({ input: process.stdin });
+        input.on('line', (line) => {
+          const request = JSON.parse(line);
+          if (request.id === undefined) return;
+          seen.methods.push(request.method);
+          writeFileSync(process.argv[1], JSON.stringify(seen));
+          const result = request.method === 'thread/resume' ? { thread: { id: 'sess-1' } } : {};
+          process.stdout.write(JSON.stringify({ id: request.id, result }) + '\\n');
+        });
+        input.on('close', () => process.exit(0));
+      `;
+    let child: SidecarProcess | undefined;
+    try {
+      process.argv = [...originalArgv.slice(0, 2), 'app-server', '--dir', parentCwd];
+      process.chdir(dir);
+      child = await SidecarProcess.start({
+        cwd: dir,
+        resumeSessionId: 'sess-1',
+        // resume 的来历以会话文件为准：覆盖 `--parent` 会把老会话的从属关系悄悄改掉。
+        parentSessionId: 'parent-1',
+        launch: { command: process.execPath, prefixArgs: ['-e', script, '--', captureFile] },
+        requestTimeoutMs: 5_000,
+      });
+
+      expect(child.sessionId).toBe('sess-1');
+      const seen = JSON.parse(readFileSync(captureFile, 'utf8')) as { argv: string[]; methods: string[] };
+      expect(seen.argv).not.toContain('--parent');
+      expect(seen.methods).toContain('thread/resume');
+      expect(seen.methods).not.toContain('thread/start');
+    } finally {
+      process.chdir(parentCwd);
+      process.argv = originalArgv;
+      await child?.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });
