@@ -27,15 +27,25 @@ export function resolveImageSource(source) {
   return expanded
 }
 
-export function ComposerImageStrip({ text, onPreview, pending = false }) {
+export function ComposerImageStrip({ text, onPreview, pending = false, uploads = [] }) {
   const images = findImageReferences(text)
-  if (!images.length && !pending) return null
+  if (!images.length && !pending && !uploads.length) return null
   return (
     <div
       className="chat-composer-images"
       aria-label="输入中的图片"
-      aria-busy={pending || undefined}
+      aria-busy={pending || uploads.length > 0 || undefined}
     >
+      {uploads.map((upload, index) => (
+        <div key={index} className="chat-composer-image-pending" role="status" title={upload.name}>
+          <IconLoader2 className="chat-composer-image-pending-icon" size={15} aria-hidden="true" />
+          <span>
+            {upload.phase === 'saving' || upload.phase === 'done'
+              ? '正在保存附件…'
+              : `正在上传附件… ${Math.floor((upload.loaded / upload.total) * 100)}%`}
+          </span>
+        </div>
+      ))}
       {pending ? (
         <div className="chat-composer-image-pending" role="status" aria-label="正在处理图片">
           <IconLoader2 className="chat-composer-image-pending-icon" size={15} aria-hidden="true" />

@@ -72,9 +72,9 @@ export function readCachedTranscript(nodeId) {
 }
 
 /** 同一节点因目录等参数重新恢复时，组件已是历史的所有者，清空状态前先交接它的候选。 */
-export function readRestoreTranscript(nodeId, previousNodeId, messages, meta) {
+export function readRestoreTranscript(nodeId, previousNodeId, messages, meta, historyPage) {
   if (nodeId === previousNodeId && Array.isArray(messages) && messages.length) {
-    return { messages, meta }
+    return { messages, meta, ...(historyPage ? { historyPage } : {}) }
   }
   return readCachedTranscript(nodeId)
 }
@@ -87,12 +87,12 @@ export function takeCachedTranscript(nodeId) {
   return entry
 }
 
-export function writeCachedTranscript(nodeId, messages, meta) {
+export function writeCachedTranscript(nodeId, messages, meta, historyPage) {
   if (!nodeId || !Array.isArray(messages) || messages.length === 0) return
   const previous = transcriptCache.get(nodeId)
   if (previous) transcriptRows -= previous.messages.length
   transcriptCache.delete(nodeId)
-  transcriptCache.set(nodeId, { messages, meta })
+  transcriptCache.set(nodeId, { messages, meta, ...(historyPage ? { historyPage } : {}) })
   transcriptRows += messages.length
   while (transcriptCache.size > TRANSCRIPT_CACHE_LIMIT || transcriptRows > TRANSCRIPT_ROW_BUDGET) {
     const oldest = transcriptCache.keys().next().value

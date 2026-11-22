@@ -43,6 +43,7 @@
 - `tablerIconDeepImports()` 只影响 build，新增图标无需同步清单。
 - 更新入口在 `AppUpdateAction`，安装状态机在 `main/app-update.js`；窗口集合是 `Set`，授权复用 `isClientSenderAllowed`（主框架 / origin）并额外限制本机页面。可安装能力不仅看 `app.isPackaged`，还看发布架构、`Resources/app-update.yml` 与 Linux AppImage 环境；本机 `--dir` 包不当正式安装器，新提交提示不等于有平台包。**桌面发布目标只有 Linux x64 AppImage**，`darwin` 直接返回「暂未发布」（系统安装器只认 Developer ID，自签 / adhoc 都不可分发），Windows、Linux arm64 也要明确说明原因而不是等到 404。`status` 与定时检查不能覆盖已下载 / 下载中状态。安装前由主进程读 `/api/update/activity` 和原生窗口、页面未保存状态，空闲后确认、确认后再检查；忙或未知时拒绝，不强杀、不预约自动重启。活动判据复用 `chat-idle.js` 的 `isBusy`，涵盖队列、BTW 和后台任务，不能只用 `countBusyChatHosts()`。源码 / 远程页面不直接安装；桌面包不更新外置 CLI，完整边界见 `docs/desktop-auto-update.md`。
 - 页面根节点必须套 `renderer/src/ErrorBoundary.jsx`。按需视图统一用 `renderer/src/lazy-view.jsx` 的 `lazyView(loader, name)`：校验导出、局部捕获失败，重试时重建 lazy 实例；外层仍由 `Suspense` 提供加载占位，单个视图失败不能卸掉整个对话页面。
+- 统计页与文件视图都是首次打开才挂载、之后隐藏保留：只有动态 import 但首屏无条件渲染 lazy 组件仍会下载其依赖，不算按需加载。整页插件入口先按清单显示，`plugin-entries.js` 只在页面实际渲染时加载其模块；卡片所需的 summary/width 仍读插件模块，但逐个到位即发布，不等所有入口一起完成。
 - 运行时启动即 `stripContainerEnv()`；受控浏览器与终端 socket 只在 `will-quit` 关闭。
 - 同一时刻只起一个 Electron 实例；验证时串行。
 
@@ -81,6 +82,8 @@
 - `mica/queue/hold` 冻结待撤回条目，结果由 `chat-recall.js.resolveQueueRecall` 判定为回输入框 / 已发送 / 保留。
 - `run.events` / `run.prompt` 每轮重置；恢复先用 `historyBeforeRunReplay` 裁掉本轮已保存回答再重放。
 - 每次模型请求后立即转发 usage；实时 usage 不改 turnState / updatedAt。
+- 正常恢复用 `chat:history-page`（`transport.historyPage`），默认最近约 80 条并按用户轮次边界扩展；宿主用当前 run 的原始 prompt 覆盖同轮多次 steer 的情况。响应包含 rows/start/end/total/noticeOffset/startCursor/nextBefore/reset，游标校验历史前缀哈希，追加兼容、改写失效。顶部按页前插并补偿高度，实时尾部不替换；缓存只额外交接范围元信息。重连/结束补读刷新已加载范围，`session_history_replaced` 事件也只携带 `historyPage`；全文查找显式补齐缺失历史后才显示结果。全量 `chat:history` 留给确实需要完整内容的调用，不作为分页失败回退。底层仍复用 session reader 的完整 JSON 解析与缓存，没有改存储格式。
+- 部分页中收到带 command 的 notice 替换时主动合并一次 resync：删除可能发生在未加载前缀，必须从持久化重建全局 noticeIndex。等待重读期间的同槽位更新也不能覆盖另一个 command 的通知。
 - 会话读取只消费 pi-ai `toolCall` / `toolResult` 历史，所有协议的思考 checkpoint 都可恢复；未知退出后的补读不再只限 Responses。
 - 阶段文案与计时读 `statusLinePhase`；`mica/turn/retrying` 让状态行显示 `retrying n/5`。
 - 文件补全 CLI / desktop 共用 `mica-file-mentions`；`@` 与 `/` skill 补全只在词首触发，选中只插文本（文件插 `@路径`，skill 插 `[skill:name](SKILL.md 绝对路径)`）。
@@ -96,11 +99,15 @@
 - 输入框内容变化会节流 2s 发一次 `chat:input-activity` → `mica/input/activity`（空输入不发）：它只服务「这个人回来了」这类提前量，当前没有插件消费（会话压缩只在右键时动手），没有常驻进程时直接丢弃，不回包也不影响输入。
 - 输入框获得焦点发一次 `chat:input-focus` → `mica/input/focus`（只在会话没在跑时发）：同样是提前量。两条都只在已有常驻 host 时转发，不为一次焦点去 spawn。
 - 粘贴共用 `composer-paste.js`：图片转 `[Image](路径)`，文件插绝对路径。
+- 浏览器图片与附件共用 `renderer/src/attachment-upload.js` → `/api/uploads`：先 POST `{ name, type, size, kind }`，再 PUT `/<id>?offset=<字节偏移>` 上传 512 KiB 原始二进制块（最多三路并行），最后 POST `/<id>/complete` 返回图片 ref 或附件 path。分块与完成请求幂等，瞬时网络失败最多重试两次；失败 DELETE 清理，服务端闲置十分钟清理未完成素材。单文件上限 64 MiB，临时状态只在进程内、不改变现有图片/附件引用及持久化形态。旧 `/api/paste-image`、`/api/attachment` JSON 上传不再支持；升级后刷新旧页面。输入框显示附件进度，粘贴失败必须通知用户。
+- `server/json-response.js` 统一发送 JSON：客户端接受 gzip 时，≥2 KiB 的响应异步低级别压缩，压后更小才采用，并按实际字节填写 Content-Length、带 Vary。SSE 独立发送，不经过 JSON 压缩；这减少远程会话列表/历史等大响应的传输量，不降低跨境基础 RTT。
 - 主对话与 By The Way 共用 `ChatComposer`：文字与选区由原生 textarea 显示，`composer-cursor.js` 只测量插入点并叠加 1.8px 竖线（CSS 闪烁，无定时器或文字显示层）；选区、失焦与组合输入时恢复原生光标。组合输入期间不分发发送与补全快捷键。
 - 插件也能往输入框动作区放控件（`renderer/src/PluginComposerControls.jsx`，清单 `desktop.composer` + 插件目录 `desktop.jsx` 的 `Composer` 导出，排在「+」之前）：宿主只给 `isMobile` / `appendText` / `onOpenSettings` 与插件 api，`appendText` 走 `ChatView.appendComposerText`——以 textarea 当前值为准追加、保留已输入草稿、不发送。插件就是这么往输入区加控件的，宿主里不出现具体插件名词。
 - 角色入口在输入条左侧箭头，选择浮层靠左显示在输入条上方（模型与推理强度选择仍靠右），随下一次发送/编辑的 role 参数持久化。
 - 对话右键菜单里的「耗时分析」（`TurnTimingDialog`，入口**不在**「+」里：它是一份只读报告，不是往对话里加东西的动作）：一轮按「等模型 / 输出 / 跑工具」首尾相接切成区间，界面先给三类合计条 + 图例（占比、次数、累计耗时）与工具耗时排行，明细默认按发生时间排列，可切换「按耗时」从长到短排序（同耗时按发生时间）；两种排序均保留原始开始偏移、内容、耗时与最慢标记，耗时排序不画时间线连线。切分、聚合与落盘形态的唯一实现在 `packages/mica-common/turnTiming.ts`；`AppRuntime` 每轮跑完把记录写进会话快照（`snapshot.turnTimings`，最近 50 轮，新的在后；fork / 新会话清空），所以重开应用、换进程也看得到历史轮次。桌面端的弹窗读这份记录 + 正在跑的那一轮（它还没落盘，由 `ChatView` 现场传进来，`renderer/src/turn-timing.js` 只做 Codex 事件 → 通用事件的适配），视图本身（`@mica-config-ui/web` 的 `TurnTimingView`）与会话详情的「耗时」页签共用一份。没有记录时如实说「还没有记录」，不要用当前事件流空跑一份冒充。
 - 输入条齿轮与时钟打开 `SessionSettingsDialog`：会话能力（Tools / Skills / MCP 三页签）/ 定时任务 / 插件。声明了 `perSession` 的插件是左侧导航「插件」下面的子项，内容区只画选中的那一个；按会话可调的项就在这里，默认值仍在配置页 Plugins。插件声明 `llm` 的字段由 `LlmSettingsSection` 按会话渲染（与配置页同一组件，摘要写会话当前模型、逐字段可「跟随默认」），不要在会话设置里另写一套模型表单。
+- 会话设置、耗时分析与上下文详情模块通过 `lazyView` 延迟到实际打开时导入；上下文详情的共享 `SessionDetailView` 只在 `ContextDetailDialog.jsx` 中引入，避免把整套详情面板带进聊天首屏。Suspense 占位仍可关闭，失败/重试由共享边界处理。
+- 能力目录仅在进入「会话能力」分类时读取，同一目标的分类切换复用在途/已加载结果；`nodeId/sessionId/cwd/role` 变化时重建内容实例，避免旧目标的目录、选择和异步回包进入新目标。插件设置仍只在插件分类读取。
 - 顶栏的「会话笔记」入口由官方插件 `session-notes` 声明（清单 `desktop.entry.placement: "header"` + 插件目录的 `desktop.jsx`），内核没有笔记专属界面：停用插件后图标与编辑器一起消失，工具与 prompt 段落也一起撤下。卡片经 `api.session.state` 读写会话快照，700ms 防抖、无保存按钮。
 - 插件入口是**输入框正上方那排胶囊按钮**（`PluginQuickBar`，清单 `desktop.panel.shortcuts` + 视图在运行期给的 `shortcuts`）：`action` 类按钮点一下直接调插件动作（立即返回，不在页面里跑外部命令或等模型），`section` 类按钮打开盖在对话区右侧的抽屉并展开那一块（`PluginPanels`，宽 340、不挤窄对话），`items` / `menu` 类按钮悬停（停 140ms 才展开，划过不算）或点击展开一层子项。`menu` 的子项是本地事实、由插件现算（这个会话涉及哪些分支），所以**不能等悬停才去要**：页面挂载后先预热一次视图，条目按会话缓存在 `renderer/src/plugin-panels.js`（60s TTL、过期也先画旧的再后台刷新），抽屉复用同一份整块视图（30s）开局——点开看到的必须是内容而不是一句「正在读取」，只有真没有缓存时才画骨架（不写「正在读取」这种像在等网络的字）。请求失败重试一次再放弃；缓存键里带着 `nodeId + sessionId + cwd + role`，换会话自然不会命中上一条的条目，容量上限（24 条菜单 / 16 份视图）负责回收。这一排是横向滚动容器，子项菜单因此画在 body 上（`createPortal` + 按钮矩形定位），不要塞回按钮里；抽屉折叠状态与 ChatView 的 `pluginPanelOpen` / `pluginPanelSection` 共用。哪些插件有面板、`roles` 门槛、是否停用都从 `readPluginsDetails` 拿（用户插件也在里面），规则在 `renderer/src/plugin-panels.js`；RPC 走 `window.mica.chat.pluginPanels.view|action` → `chat:plugin-panel-view|action`。host 侧返回的载荷在 `hostTaskRequest` 的信封里，必须过 `unwrapHostResult`，否则页面只看到 `{ok:true}`、视图全 undefined。
 
@@ -247,7 +254,7 @@
 - 后台 shell、子代理与 wait 的最新快照在页面关闭后仍需跟踪；`starting/running/waiting` 状态阻止宿主回收，已结束的任务行不阻止。已完成轮次重放最多留 40 份、总文本预算 `16 * 1024 * 1024` 字符；超预算回落到磁盘历史，不截断会话内容。
 - 顶栏 Git 徽标（`git:change-counts`）是整棵工作区扫描，自己一层 20s 缓存 + **先回旧值、后台重算**；`worktreeSignature`（HEAD）变了或 `worktreeEpochOf` 变了（stage / discard / 保存文件）时不许回旧值。
 - Git 自动刷新（`git:changed` / turn 结束）传 `invalidate: true`：跳过旧值但共享同代在途扫描；用户手动 `refresh: true` 仍强制独立读取。完成时复核起读的 HEAD/epoch 与请求身份，过时代不能回填或清掉替代请求。仓库根使用 realpath，支持 worktree/submodule 的 `.git` 文件、`commondir` 与 packed refs。
-- 会话列表整份返回，但内容没变时按字段指纹（`session-state.js` 的 `sameSessionSnapshot`）跳过 setState，空闲轮询不触发重渲染。 `stats:list-sessions` 默认先给磁盘索引/已知元数据、合并后台增量刷新，不等待所有变更会话的用量解析；后台通过同一 `stats:changed` 发布，`refresh: true` 仍等新结果，正文搜索/统计计算保持原有新鲜读取。插件清单成功刷新内容不变时保留数组引用，重新挂载先用上一份已知清单。
+- `stats:list-sessions` 首次返回完整轻量索引；侧栏之后带 `{since, delta:true}`，未变只回 unchanged，小范围变化回变更行、删除 ID 和顺序 ID。`host/session-list-versions.js` 只留四份进程内版本，大范围变化、基线过期或重启时发完整索引；`renderer/session-list-update.js` 验证基线与顺序完整性，失配时重读，不能把增量当作完整列表。页面单独保存传输基线，渲染仍按 `sameSessionSnapshot` 跳过不影响侧栏的变化。全局搜索、项目分组与快速打开仍保留完整索引。`stats:list-sessions` 默认先给磁盘索引/已知元数据、合并后台增量刷新，不等待所有变更会话的用量解析；后台通过同一 `stats:changed` 发布，`refresh: true` 仍等新结果，正文搜索/统计计算保持原有新鲜读取。插件清单成功刷新内容不变时保留数组引用，重新挂载先用上一份已知清单。
 - `stats:changed` 只在**真有变化**时让页面重读：收尾那一帧由扫描器带上 `parsedFiles` / `added`，两者都是 0（这一轮没读任何文件、没有新会话）就不广播；索引补齐过程中的进度帧带 `partial: true`，侧栏（`App.jsx`）直接忽略它，统计页只在可见时跟。之前每批进度都推、页面每批都重读千人列表，一天能攒出上千次多余的全量序列化。
 - 会话统计走磁盘索引：`host/stats-scanner.js` 按文件签名把每个会话的投影缓存在 `$MICA_HOME/desktop-stats-index.json`（与 `sessions/` 同级，不是会话文件），进程重启只解析变过的文件。首次构建（升级后第一次）分批让出事件循环，并经 `stats:changed` 推送进度，界面「逐渐填充」而不是空白几秒。**改 `parseSessionMeta` 的投影字段必须同一步提升 `INDEX_VERSION`**：版本没变时旧缓存行会一直缺这个字段，表现为「界面功能突然失效」。
 - 统计扫描、详情与正文搜索共用 `session-usage-reader.js`：小文件异步读取，≥4MB 的读取/解析/字段投影在 worker 内完成，只把用量或文本投影交回；同文件同身份去重、最多 2 个并行读取，worker 失败或超时先终止再降级。扫描器传入期望身份，排队及读取前后均复核；版本变化或瞬时 IO 失败跳过并重试，只缓存稳定版本的坏 JSON。统计口径和 usage 身份计算只在 `stats-core.js`。

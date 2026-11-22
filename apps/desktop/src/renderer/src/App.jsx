@@ -28,6 +28,7 @@ import {
   pruneCachedTranscripts
 } from './chat-cache'
 import { createReadQueue } from './read-queue'
+import { applySessionListUpdate } from './session-list-update'
 import { setConfigWebFileOpener } from './config-web'
 import { PluginEntries, PluginHeaderEntries } from './PluginEntries'
 import { loadPluginPageEntry } from './plugin-entries'
@@ -617,6 +618,7 @@ export default function App() {
   // 文件视图按需挂载：打开过一次后保持挂载（切回对话再切回来不丢已打开/未保存的文件），
   // 但没被打开过时它的 chunk（文件树、图标清单）不进启动路径。
   const [filesMounted, setFilesMounted] = useState(view === 'files')
+  const [statsMounted, setStatsMounted] = useState(view === 'stats')
   // 插件点开的一条 PR：主区整块切到编辑器并停在这份 `base...head` 对比上。
   const [reviewTarget, setReviewTarget] = useState(null)
   const [desktopFileOpen, setDesktopFileOpen] = useState(null)
@@ -626,6 +628,7 @@ export default function App() {
   }, [activeId])
   useEffect(() => {
     if (view === 'files') setFilesMounted(true)
+    if (view === 'stats') setStatsMounted(true)
   }, [view])
   // FilesView 第一次挂上来（filesReady 变真）时补开刚才排队的那次「打开文件」。
   useEffect(() => {
@@ -842,16 +845,25 @@ export default function App() {
   // 上一次拿到的会话列表版本号：轮询时带上它，宿主在列表没变时只回一个标记，
   // 省掉「1273 条 × 每 10 秒 × 每个窗口」的序列化与 IPC。
   const sessionsEtag = useRef('')
+  const sessionIndexRef = useRef([])
   useEffect(() => {
     const reads = createReadQueue(async (isCurrent) => {
       await Promise.all([
         window.mica.stats
-          .listSessions({ since: sessionsEtag.current })
-          .then((result) => {
+          .listSessions({ since: sessionsEtag.current, delta: true })
+          .then(async (result) => {
             if (!isCurrent()) return
             if (result?.unchanged) return
+            let next = applySessionListUpdate(sessionIndexRef.current, result, sessionsEtag.current)
+            if (!next) {
+              result = await window.mica.stats.listSessions()
+              if (!isCurrent()) return
+              next = applySessionListUpdate(sessionIndexRef.current, result, '')
+            }
+            if (!next) throw new Error('会话索引响应无效')
+            sessionIndexRef.current = next
+            applySessions(next)
             if (typeof result?.etag === 'string') sessionsEtag.current = result.etag
-            applySessions(result?.sessions)
           })
           .catch((error) => console.error('load sessions failed', error))
           // 失败也算「加载过了」：地址栏里的会话照旧按 id 打开，比一直等着强。
@@ -3063,9 +3075,11 @@ export default function App() {
                 }}
               />
             )}
-            <Suspense fallback={null}>
-              <StatsView visible={view === 'stats'} />
-            </Suspense>
+            {statsMounted && (
+              <Suspense fallback={null}>
+                <StatsView visible={view === 'stats'} />
+              </Suspense>
+            )}
             {filesMounted && (
               <Suspense fallback={null}>
                 <FilesView

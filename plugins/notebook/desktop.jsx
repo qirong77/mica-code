@@ -43,6 +43,7 @@ import { Modal } from '../../packages/mica-config-ui/web/components/Modal';
 import { pluginApiBasePath } from '../../packages/mica-plugin/PluginApi';
 import { createNotebookController, NotebookConflictError } from './controller';
 import { createNotebookExternalUpdateCheck } from './external-updates';
+import { createNotebookPageRefresh } from './web/page-refresh';
 import {
   createNode,
   createNodeId,
@@ -404,6 +405,7 @@ export default function NotebookPage({ api }) {
   const byId = useMemo(() => nodesById(index), [index]);
   const activeNode = byId.get(activeId);
   const active = activeNode?.trashedAt ? null : activeNode;
+  const hasActiveNote = !!active;
   const selected = byId.get(selectedId);
   const overlay = editorOverlayMode({
     frameState,
@@ -856,28 +858,23 @@ export default function NotebookPage({ api }) {
   useEffect(() => {
     if (!loaded) return undefined;
     const observer = createNotebookExternalUpdateCheck({
-      available: () => !lifecycle.closing && !lifecycle.switching,
+      available: () => document.visibilityState === 'visible' && !lifecycle.closing && !lifecycle.switching,
       waitForWrites: () => writer.idle(),
       refreshIndex: () => (controller.getPendingIndexCount() ? Promise.resolve() : controller.loadIndex()),
       current: () => current.current,
-      readVersion: async (id) => (await controller.readDocument(id)).version,
+      readVersion: async (id) => (await api.documents.version(id)).version,
       changed: setExternalUpdate,
-      error: (cause) => setError(`检查笔记更新失败：${message(cause)}`),
+      error: (cause) => {
+        if (document.visibilityState === 'visible' && !lifecycle.closing)
+          setError(`检查笔记更新失败：${message(cause)}`);
+      },
     });
-    const check = () => {
-      if (document.visibilityState === 'visible') void observer.check();
-    };
-    const unsubscribe = api.sessions?.onExit?.(() => void observer.check());
-    window.addEventListener('mica:transport-resync', check);
-    document.addEventListener('visibilitychange', check);
-    const timer = window.setInterval(check, 30_000);
-    void observer.check();
+    const refresh = createNotebookPageRefresh({ page: document, window, check: () => observer.check() });
+    const unsubscribe = api.sessions?.onExit?.(refresh.request);
     return () => {
+      refresh.dispose();
       observer.dispose();
       unsubscribe?.();
-      window.removeEventListener('mica:transport-resync', check);
-      document.removeEventListener('visibilitychange', check);
-      window.clearInterval(timer);
     };
   }, [api.sessions, controller, lifecycle, loaded, writer]);
 
@@ -924,19 +921,20 @@ export default function NotebookPage({ api }) {
 
   // 骨架要「等一小会儿再出现」：热缓存下编辑器通常在这段留白里就已经起来了。
   useEffect(() => {
-    if (frameState !== 'loading' || frameBooted) {
+    if (!hasActiveNote || frameState !== 'loading' || frameBooted) {
       setSkeletonDelayElapsed(false);
       return undefined;
     }
     const timer = setTimeout(() => setSkeletonDelayElapsed(true), EDITOR_SKELETON_DELAY_MS);
     return () => clearTimeout(timer);
-  }, [frameState, frameBooted]);
+  }, [hasActiveNote, frameState, frameBooted]);
 
   useEffect(() => {
     ready.current = false;
     loadedNote.current = null;
     setFrameBooted(false);
     setFrameState('loading');
+    if (!hasActiveNote) return undefined;
     const instance = createEditorBridge({
       token,
       target: () => iframe.current?.contentWindow ?? null,
@@ -1007,8 +1005,13 @@ export default function NotebookPage({ api }) {
       observer.disconnect();
       window.removeEventListener('message', instance.receive);
       instance.dispose();
+      if (bridge.current === instance) {
+        bridge.current = null;
+        ready.current = false;
+        loadedNote.current = null;
+      }
     };
-  }, [token, lifecycle]);
+  }, [token, lifecycle, hasActiveNote]);
 
   useEffect(() => {
     const beforeUnload = (event) => {

@@ -10,6 +10,7 @@
  */
 
 import { isSharePath } from '@packages/mica-web-shared'
+import { uploadAttachment } from './attachment-upload'
 
 const EVENT_CHANNELS = [
   'terminal:data',
@@ -164,15 +165,6 @@ function connectEvents() {
   open()
 }
 
-function readFileAsDataUrl(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onload = () => resolve(String(reader.result || ''))
-    reader.onerror = () => reject(reader.error || new Error('读取图片失败'))
-    reader.readAsDataURL(file)
-  })
-}
-
 function createWebApi(env) {
   const appState = { focused: typeof document === 'undefined' || !document.hidden, visible: true }
 
@@ -289,6 +281,7 @@ function createWebApi(env) {
       btwCompact: (id, threadId, { sessionId, cwd } = {}) =>
         invoke('chat:btw-compact', { id, threadId, sessionId, cwd }),
       history: (sessionId) => invoke('chat:history', { sessionId }),
+      historyPage: (sessionId, options = {}) => invoke('chat:history-page', { sessionId, ...options }),
       inputHistory: {
         read: () => invoke('chat:input-history:read'),
         append: (text) => invoke('chat:input-history:append', { text })
@@ -398,27 +391,13 @@ function createWebApi(env) {
       setCwd: (payload) => invoke('chat:set-cwd', payload),
       fork: (sessionId) => invoke('chat:fork', { sessionId }),
       // 浏览器里图片来自粘贴事件（服务端读不到用户的剪贴板），bytes 由页面自己读
-      savePastedImage: async ({ file, dataUrl } = {}) => {
-        const payload = dataUrl || (file ? await readFileAsDataUrl(file) : '')
-        if (!payload) return { ok: false }
-        const response = await fetch('/api/paste-image', {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ dataUrl: payload })
-        })
-        return response.json()
+      savePastedImage: async ({ file, onProgress, signal } = {}) => {
+        if (!file) return { ok: false, error: '缺少图片数据' }
+        return uploadAttachment(file, { kind: 'image', onProgress, signal })
       },
       // 附件与图片走两条路：图片要落成 `[Image](...)` 引用，其它文件插的是路径。
-      saveAttachment: async ({ file } = {}) => {
-        const payload = file ? await readFileAsDataUrl(file) : ''
-        if (!payload) return { ok: false, error: '缺少文件数据' }
-        const response = await fetch('/api/attachment', {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ dataUrl: payload, name: file?.name || 'file' })
-        })
-        return response.json()
-      },
+      saveAttachment: ({ file, onProgress, signal } = {}) =>
+        uploadAttachment(file, { onProgress, signal }),
       dispose: (id) => invoke('chat:dispose', { id }),
       isRunning: (id, sessionId) => invoke('chat:is-running', { id, sessionId }),
       onEvent: (callback) => subscribe('chat:event', callback),
@@ -485,6 +464,7 @@ function createWebApi(env) {
       launcherControl: (pluginId, action, path, url) => invoke('plugin-host:launcher-control', { pluginId, action, path, url }),
       probe: (address) => invoke('plugin-host:probe', { address }),
       readData: (pluginId, options) => invoke('plugin-host:read-data', { pluginId, ...options }),
+      dataVersion: (pluginId, options) => invoke('plugin-host:data-version', { pluginId, ...options }),
       writeData: (pluginId, value, options) =>
         invoke('plugin-host:write-data', { pluginId, value, ...options }),
       runAction: (pluginId, action) => invoke('plugin-host:run-action', { pluginId, action }),

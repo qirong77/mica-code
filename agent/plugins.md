@@ -152,11 +152,13 @@ macOS 浮窗只取键盘焦点、不连带唤起主应用；原生窗口策略�
 
 同一个 `desktop.jsx` 若在清单里另外声明 `desktop.page`（`{ "page": { "title": "排期" } }`），点这一行不进浮层而是打开整页：宿主把它渲染在 `renderer/src/PluginPage.jsx` 里（盖住整窗、顶部一条 `← 返回对话` + 标题，内容是插件模块自己的组件，props 同样是 `{ api }`），`App.jsx` 用 `pluginPage` 状态承接、清掉浮层的悬停展开——时间轴、看板这类要整屏宽高的界面走这条，浮层的 320px 放不下。
 
+整页入口的 label/icon/placement/page 均来自清单，不提前 import 插件模块；宿主用 `lazyView` 包住 `Page`（或 default），打开页面才加载并局部处理失败/重试。卡片仍要读取模块的同步 summary/card.width，但各入口独立到位即显示，不因其它插件的慢请求阻塞。
+
 整页是一个**真地址**：缺省 `/plugins/pages/<插件 id>`，清单可用 `desktop.page.route` 注册 `/plugins/<插件 id>/<route>`（非保留单段，路径生成与候选解析唯一在 `mica-web-shared` 的 `pluginPagePath` / `readPluginPageId`）。声明 route 后只认该 canonical 地址，不另留默认别名。运行时按随包清单、模块和启停精确核对后回同一份渲染层产物；`server/plugin-page-route.js` 补 `<base href="/">`，避免深路径下的相对资源 404。`main.jsx` 按 pathname 选 `pluginPage` 视图（`PluginPageWindow.jsx` 再核对清单并按 id 取模块），`PluginPage` 在桌面顶栏将可复制的地址与返回按钮、页面标题排在同一行。页面内切换内容时用 `api.page.setSearch(values)` 更新地址，从应用里打开时只更新顶栏显示，独立打开时连 `history.replaceState` 一起改，刷新与分享都落在同一处；`api.page.search()` 读回深链参数。插件不自己拼这段路径，也不在 `desktop.jsx` 里读 `location`。
 
 `entry` 是**可选**的：只声明 `desktop.page`、不写 `entry` 的插件不占侧栏 / 顶栏位置，整页从配置页插件详情里那枚「打开…」按钮进（`PluginsPage` 的 `onOpenPluginPage`，由宿主按 id 现取模块并打开——`renderer/src/plugin-entries.js` 的 `loadPluginPageEntry`，所以同样只对随包插件有效）。`session-tags` 走这条：打标签在会话行右键与 `/tags`，重编标签表才需要那张页面，不必常驻侧栏。
 
-**输入框控件**由清单 `desktop.composer: true` + 同一个 `desktop.jsx` 的 `Composer` 命名导出组成：宿主在 `renderer/src/PluginComposerControls.jsx` 里按插件 id 挂到输入框动作区（「+」之前），props 是 `{ api, isMobile, appendText, onOpenSettings }`。`appendText` 只追加进**当前草稿**（不覆盖已输入内容、不发送），实现在 `ChatView.appendComposerText`；控件拿到的 `api.panelAction(action, values)` 与 `desktop.panel` 的动作是同一条会话级通路（`chat:plugin-panel-action`），所以插件只写一份 `ctx.desktop.panel(...)` 就能同时服务面板与输入框；`api.uploadAttachment(file)` 走 `/api/attachment`（与「添加附件」同一目录），只把临时素材落盘、**不**插路径。与 `entry` / `page` 一样只对随包插件生效，理由相同：页面是构建期打的包。
+**输入框控件**由清单 `desktop.composer: true` + 同一个 `desktop.jsx` 的 `Composer` 命名导出组成：宿主在 `renderer/src/PluginComposerControls.jsx` 里按插件 id 挂到输入框动作区（「+」之前），props 是 `{ api, isMobile, appendText, onOpenSettings }`。`appendText` 只追加进**当前草稿**（不覆盖已输入内容、不发送），实现在 `ChatView.appendComposerText`；控件拿到的 `api.panelAction(action, values)` 与 `desktop.panel` 的动作是同一条会话级通路（`chat:plugin-panel-action`），所以插件只写一份 `ctx.desktop.panel(...)` 就能同时服务面板与输入框；`api.uploadAttachment(file)` 复用 `/api/uploads` 二进制分块上传（与「添加附件」同一目录），只把临时素材落盘、**不**插路径。与 `entry` / `page` 一样只对随包插件生效，理由相同：页面是构建期打的包。
 
 **面板**由清单 `desktop.panel`（`{ "panel": { "label": "需求开发", "roles": ["需求开发"], "display": "modal", "shortcuts": [...] } }`）+ `ctx.desktop.panel({ view, action })` 组成：**插件给数据、宿主画出来**，所以用户插件也有。视图是纯数据（`title` / `status` / `statusBar` / `sections〔title, subtitle, text, markdown, editor, rows, items, table, fields, commit, actions〕`），宿主统一归一化（长度、条目数与字段类型）后渲染，畸形视图不会让页面崩掉。几种内容各管一种事：
 
@@ -271,6 +273,8 @@ macOS 浮窗只取键盘焦点、不连带唤起主应用；原生窗口策略�
 随包插件可声明 `web: true` 并提供 `web.ts` 的 `default createWeb(context)`；契约在 `mica-plugin/PluginWeb.ts`。上下文仅含身份/版本、数据与配置根、只读设置及随包清单元数据，返回固定 `queries` 目录与可选 `dispose`。应用运行时懒载、合并初始化并按启停/退出释放，固定托管 `GET /plugins/<id>/api/<query>`；前端只通过 `api.web.read(query, params, { signal })` 访问，不另开 `/api/invoke` 别名。读取前后复核授权，参数/并发/时间/序列化后字节预算受限，超时/断连传取消；查询须配合中止并自行缓存有界投影，GET 不做维护写入。命名空间在 remoteGate 后过 Host/Origin，未知路径 404、不作 SPA 回退，不开放 share-cookie/CORS；该接口不是 Node 代码沙箱，也不自动穿透 Mobile Relay。Harness Review 控制台是首个使用方，复用只读聚合，不回收僵尸运行或导出报告。冷读优先安全持久派生快照、过期先回旧值再后台刷新，缓存仅由既有状态发布写入；Web 不返回健康原文、真实 cwd 或非固定任务名，工作区与非固定任务仅暴露稳定摘要。
 
 前端 `api.documents.read(key)` / `write(key,value,{expectedVersion})` 使用现有 plugin-host 数据通道的可选 `key`，落在插件 `documents/<key>.json`（6 MiB，严格损坏检查、路径标识校验、CAS 与原子写）；无 `key` 的 `data.json` 保持 256 KiB。整页 `api.page.beforeClose(handler)` 可在返回前等待保存，`false` 保持页面。
+
+`api.documents.version(key)` 经 `plugin-host:data-version` 只返回 `{version}`，与 read/write 的内容哈希一致，缺失为 null，损坏与读取错误显式上报；用于跨窗口更新检查，不能为取版本反复向页面传输全文。存储层仍需读取字节核验内容版本，不能把这个接口称为纯 stat 查询。headless 的 `ctx.data.documents.version(key)` 使用同一实现。
 
 ### 独立 HTTP 接口
 

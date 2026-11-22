@@ -72,12 +72,32 @@ describe('pasteIntoComposer image feedback', () => {
     }
     const { event } = imagePasteEvent()
     const events = []
+    const errors = []
 
     await pasteIntoComposer(event, {
+      notify: (...args) => errors.push(args),
       onImagePasteStart: () => events.push('start'),
       onImagePasteEnd: () => events.push('end')
     })
 
     expect(events).toEqual(['start', 'end'])
+    expect(errors).toEqual([['disk full', 'error']])
+  })
+
+  it('reports a rejected image without inserting an invalid reference', async () => {
+    globalThis.window = {
+      mica: {
+        isWeb: true,
+        chat: { savePastedImage: async () => ({ ok: false, error: '图片格式不支持' }) }
+      }
+    }
+    const inserted = []
+    const errors = []
+    await pasteIntoComposer(imagePasteEvent().event, {
+      insertText: (text) => inserted.push(text),
+      notify: (...args) => errors.push(args)
+    })
+    expect(inserted).toEqual([])
+    expect(errors).toEqual([['图片格式不支持', 'error']])
   })
 })

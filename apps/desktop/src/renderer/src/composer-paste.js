@@ -38,15 +38,19 @@ async function clipboardPaths(files) {
   }
 }
 
-async function insertClipboardImage(event, data, imageItems, insertText) {
+async function insertClipboardImage(data, imageItems, insertText, notify) {
   // Electron 主进程直接读系统剪贴板；浏览器只能拿到粘贴事件里的文件
   const file = imageItems[0]?.getAsFile?.() || null
   const fallback = data.getData?.('text/plain') ?? ''
   try {
     const result = await window.mica.chat.savePastedImage(window.mica.isWeb ? { file } : undefined)
-    insertText(result?.ok ? `[Image](${result.ref})` : fallback)
-  } catch {
-    // 存不下来就不插半截引用，草稿保持原样
+    if (result?.ok && result.ref) insertText?.(`[Image](${result.ref})`)
+    else {
+      if (fallback) insertText?.(fallback)
+      notify?.(result?.error || '图片上传失败，请重试', 'error')
+    }
+  } catch (error) {
+    notify?.(error?.message || '图片上传失败，请重试', 'error')
   }
 }
 
@@ -79,7 +83,7 @@ export async function pasteIntoComposer(
       }
     }
 
-    if (imageItems.length) await insertClipboardImage(event, data, imageItems, insertText)
+    if (imageItems.length) await insertClipboardImage(data, imageItems, insertText, notify)
     return true
   } finally {
     if (isImagePaste) onImagePasteEnd?.()

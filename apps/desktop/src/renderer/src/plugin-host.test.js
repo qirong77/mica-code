@@ -19,6 +19,10 @@ beforeEach(() => {
           calls.push(['read', ...args])
           return snapshot
         },
+        dataVersion: async (...args) => {
+          calls.push(['version', ...args])
+          return snapshot
+        },
         writeData: async (...args) => {
           calls.push(['write', ...args])
           return result
@@ -151,6 +155,29 @@ describe('plugin host read-only web API', () => {
 })
 
 describe('plugin host local data API', () => {
+  test('binds version requests to the plugin and document key, returning only the version', async () => {
+    const api = createPluginHostApi('sample')
+    expect(await api.documents.version('page')).toEqual({ version: 'current-version' })
+    snapshot = { version: null, value: 'must not leak' }
+    expect(await api.documents.version('missing')).toEqual({ version: null })
+    expect(calls).toEqual([
+      ['version', 'sample', { key: 'page' }],
+      ['version', 'sample', { key: 'missing' }]
+    ])
+  })
+
+  test('propagates version query errors and rejects malformed responses instead of assuming unchanged', async () => {
+    const api = createPluginHostApi('sample')
+    for (const invalid of [null, {}, { version: undefined }, { version: 42 }, { ok: false, error: 'read failed' }]) {
+      snapshot = invalid
+      await expect(api.documents.version('page')).rejects.toThrow('版本响应无效')
+    }
+    window.mica.pluginHost.dataVersion = async () => {
+      throw new Error('插件文档 JSON 损坏')
+    }
+    await expect(api.documents.version('page')).rejects.toThrow('JSON 损坏')
+  })
+
   test('preserves config reads and writes without a document key', async () => {
     const api = createPluginHostApi('sample')
     const value = { tree: [] }
@@ -198,6 +225,7 @@ describe('plugin host local data API', () => {
     const api = createPluginHostApi('sample')
     for (const key of ['', undefined, null, 42, () => {}]) {
       await expect(api.documents.read(key)).rejects.toThrow('key')
+      await expect(api.documents.version(key)).rejects.toThrow('key')
       await expect(api.documents.write(key, 'body')).rejects.toThrow('key')
     }
     expect(calls).toEqual([])

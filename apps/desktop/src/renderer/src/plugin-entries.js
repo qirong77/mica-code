@@ -1,5 +1,20 @@
 import { useEffect, useState } from 'react'
 import { readPluginsDetails, usePluginsDetails } from './plugins-details'
+import { lazyView } from './lazy-view'
+
+const pageModules = new Map()
+
+/** 整页的入口文案来自清单；只有实际渲染页面时才解析插件代码。 */
+export function deferredPluginPage(pluginId, load) {
+  if (!pageModules.has(pluginId)) {
+    const Page = lazyView(async () => {
+      const module = await load()
+      return { Page: module?.Page ?? module?.default }
+    }, 'Page')
+    pageModules.set(pluginId, { Page })
+  }
+  return pageModules.get(pluginId)
+}
 
 /**
  * 插件在桌面端的入口（侧栏一行，或者顶栏的一枚图标按钮）。
@@ -38,8 +53,8 @@ export function pluginEntryLoader(pluginId) {
 /**
  * 当前该画出来的入口。
  *
- * 只看两件事：插件是启用的、并且它真有一个 `desktop.jsx` 模块。入口模块很小，读取插件
- * 列表时一次全部加载完，`summary` 这类同步信息因此不会晚一步出现。
+ * 整页入口只读清单；卡片需要自己的 summary / width，逐个到位即发布，
+ * 不让某个插件的慢加载挡住其它入口。整页正文留到打开页面时才加载。
  */
 export function usePluginEntries() {
   const [entries, setEntries] = useState([])
@@ -48,19 +63,25 @@ export function usePluginEntries() {
 
   useEffect(() => {
     let alive = true
+    const loaded = new Map()
+    const candidates = plugins.filter(
+      (plugin) => plugin?.state === 'enabled' && plugin?.desktopEntry
+    )
+    setEntries((previous) =>
+      previous.filter((entry) => candidates.some((plugin) => plugin.id === entry.id))
+    )
     void (async () => {
-      const loaded = await Promise.all(
-        plugins.map(async (plugin) => {
-          if (plugin?.state !== 'enabled' || !plugin?.desktopEntry) return null
+      await Promise.all(
+        candidates.map(async (plugin) => {
           const load = pluginEntryLoader(plugin.id)
           if (!load) return null
           try {
-            const module = await load()
-            // 整页入口只要求模块有 `Page`（可以是 default），卡片入口要求有 default
             const page = plugin.desktopPage ?? null
+            const module = page ? deferredPluginPage(plugin.id, load) : await load()
+            // 整页入口只要求模块有 `Page`（可以是 default），卡片入口要求有 default
             const component = page ? (module?.Page ?? module?.default) : module?.default
             if (!component) return null
-            return {
+            const entry = {
               id: plugin.id,
               label: plugin.desktopEntry.label,
               // 位置是清单说了算的呈现选择：`header` 走顶栏，其余一律按侧栏一行画
@@ -72,12 +93,16 @@ export function usePluginEntries() {
               module,
               page
             }
+            loaded.set(plugin.id, entry)
+            if (alive)
+              setEntries(candidates.map((candidate) => loaded.get(candidate.id)).filter(Boolean))
+            return entry
           } catch {
             return null
           }
         })
       )
-      if (alive) setEntries(loaded.filter(Boolean))
+      if (alive) setEntries(candidates.map((candidate) => loaded.get(candidate.id)).filter(Boolean))
     })()
     return () => {
       alive = false

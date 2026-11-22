@@ -200,6 +200,7 @@ if (!saved.ok) {
 }
 
 const document = data.documents.read<{ text: string }>('page-1');
+const latest = data.documents.version('page-1'); // 仅 { version }，供外部更新检查使用，不传正文。
 const result = data.documents.write('page-1', { text: '正文' }, {
   expectedVersion: document.version,
 });
@@ -217,7 +218,12 @@ const result = data.documents.write('page-1', { text: '正文' }, {
   文档路径及锁目录的已有符号链接被拒绝（用户选择的 MICA_HOME 本身可为符号链接）。
 - 损坏文档读取会抛错，即使无 CAS 也拒绝覆盖；有效 JSON `null` 与缺文件由 version 区分。
   普通 data.json 保持原有「损坏时 value 为 null，但保留版本」约定，未改变持久化格式。
-- 非插件宿主可从公共入口导入 `createPluginDataApi`、`readPluginData`、`writePluginData`，
+- `documents.version(key)` 仅返回 `{ version: string | null }`，与 read/write 的原始内容哈希一致，
+  缺文件为 null；损坏 JSON、非法路径和 IO 错误仍抛错。宿主当前完整读取并就地校验 JSON，
+  不缓存正文，桌面前端使用 `plugin-host:data-version`，网络响应不含正文。
+- 底层 `readPluginDataVersion(home, pluginId, { key? })` 省略 key 查询 data.json 的版本，
+  该查询同样严格校验 JSON。
+- 非插件宿主可从公共入口导入 `createPluginDataApi`、`readPluginData`、`readPluginDataVersion`、`writePluginData`，
   或使用 `pluginDataPath`、encode/decode、校验函数与大小常量；底层函数的可选 `key` 供传输层使用。
 
 ### System prompt 扩展

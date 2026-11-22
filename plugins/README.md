@@ -688,6 +688,7 @@ export function summary(api) { return api.currentHost() } // 可选：入口行�
   （`apps/desktop/src/renderer/src/PluginEntries.jsx`）负责。
 - 宿主按插件 id 用 `import.meta.glob('@plugins/*/desktop.jsx')` 找模块，所以**不需要在宿主里
   登记**——加一个桌面入口只改插件目录。
+- 同时声明 `page` 的入口先从清单展示，实际打开时才加载 `desktop.jsx` 的页面组件；卡片入口需要模块中的 `summary` 与 `card.width`，各自加载到位即显示，单个慢插件不阻塞其它入口。页面加载失败由宿主局部展示重试，不卸载整个应用。
 - 模块拿到的 `api` 包括插件数据、当前会话及原生客户端能力。
 - 客户端能力：`currentTarget()` 保留完整页面入口（含中转机令牌），`client` 在普通浏览器为 null；
   原生桌面提供 `client.context()` → `{ localHost }`、`client.probe(address)`、`client.open(url)`
@@ -783,7 +784,7 @@ export function Composer({ api, isMobile, appendText, onOpenSettings }) { … }
 - 控件能用 `api.panelAction(action, values)`：它和 `desktop.panel` 的 `action` 是同一条会话级通路
   （`<pluginId>` + 动作名 + 值），所以插件只需要在 `index.ts` 里写一次 `ctx.desktop.panel(...)`，
   面板按钮与输入框控件共用同一批动作。`api.uploadAttachment(file)` 把页面里的 `File` 交给运行时的
-  `/api/attachment`（与「添加附件」同一条通道、同一个目录），**不**往草稿里插路径——上传的是临时
+  `/api/uploads` 二进制分块接口（与「添加附件」同一条通道、同一个目录），**不**往草稿里插路径——上传的是临时
   素材而不是用户想引用的文件，用哪个由插件自己决定。
 - 控件只在**启用期间**存在：停用插件后按钮立刻消失，不需要它的 `dispose` 去补界面。
 
@@ -1239,6 +1240,8 @@ const Conversation = api.ui.Conversation;
 安全标识符，不接受目录、`..` 或符号链接。现有 `readData/writeData` 仍是 256 KiB 的
 `data.json`，不改变其语义。读取缺失文档返回 `{ value: null, version: null }`，正文损坏显式报错。
 写入使用同一份跨进程锁、CAS 与原子替换，成功返回 `{ ok: true, version }`（该次实际写入内容的版本），无需重读整篇文档确认版本。冲突后插件保留草稿；宿主不解析文档业务结构。
+
+只检查文档是否变化时用 `api.documents.version(key)`，返回 `{ version: string | null }`，不传输正文。版本与全文读取和 CAS 写入一致，缺失文档的版本为 null；非法 key、符号链接、损坏 JSON 和读取错误仍明确报错。headless 插件也可用 `ctx.data.documents.version(key)`。服务端仍会读取内容计算版本，这项能力减少的是网络与客户端解析开销。
 
 整页可以注册 `api.page.beforeClose(async () => boolean)`，返回 `false` 阻止宿主返回按钮关闭，
 返回的取消函数用于卸载。保存失败不应通过关闭页面静默丢弃内容。

@@ -119,8 +119,8 @@ import {
 import { registerSharedSessionIpc } from '../host/shared-sessions.js'
 import { initializeDesktopProcessPath, stripContainerEnv } from '../host/desktop-process-env.js'
 import { warmShellEnv } from '../host/shell-env.js'
-import { saveImageDataUrl } from '../host/chat-images.js'
-import { decodeDataUrl, saveAttachmentBytes } from '../host/attachments.js'
+import { createAttachmentUploads } from './attachment-uploads.js'
+import { sendJson } from './json-response.js'
 import { defaultUpdateChecker, UPDATE_BUILD_TIME, UPDATE_COMMIT } from './update-check.js'
 
 // host 通道统一计时：一次调用超过阈值就记 slow，并累计到 slowReport。
@@ -209,16 +209,6 @@ function parseArgs(argv) {
     else if (arg === '--allow-missing-renderer') options.requireRenderer = false
   }
   return options
-}
-
-function sendJson(res, status, body) {
-  const payload = JSON.stringify(body)
-  res.writeHead(status, {
-    'content-type': 'application/json; charset=utf-8',
-    'content-length': Buffer.byteLength(payload),
-    'cache-control': 'no-store'
-  })
-  res.end(payload)
 }
 
 /**
@@ -658,30 +648,6 @@ async function handleInvoke(req, res) {
   }
 }
 
-async function handlePasteImage(req, res) {
-  try {
-    const body = JSON.parse((await readBody(req)) || '{}')
-    const dataUrl = typeof body?.dataUrl === 'string' ? body.dataUrl : ''
-    sendJson(res, 200, saveImageDataUrl(dataUrl))
-  } catch (error) {
-    sendJson(res, 200, { ok: false, error: errorMessage(error) })
-  }
-}
-
-async function handleAttachment(req, res) {
-  try {
-    const body = JSON.parse((await readBody(req)) || '{}')
-    const bytes = decodeDataUrl(body?.dataUrl)
-    if (!bytes) {
-      sendJson(res, 200, { ok: false, error: '缺少文件数据' })
-      return
-    }
-    sendJson(res, 200, saveAttachmentBytes(bytes, body?.name))
-  } catch (error) {
-    sendJson(res, 200, { ok: false, error: errorMessage(error) })
-  }
-}
-
 async function handleImage(res, url) {
   const file = url.searchParams.get('path')
   if (!file) {
@@ -930,8 +896,9 @@ export async function startDesktopServer(options = {}) {
   })
 
   const sharing = options.sharing !== false
+  const attachmentUploads = createAttachmentUploads({ sendJson })
   const server = createServer(
-    createRequestHandler({ rendererRoot, sharing, browserProxy, terminalProxy, controlMcp, pluginMcpRoute, pluginWebRoute, pluginApiRoute })
+    createRequestHandler({ rendererRoot, sharing, browserProxy, terminalProxy, controlMcp, pluginMcpRoute, pluginWebRoute, pluginApiRoute, attachmentUploads })
   )
   const host = options.host || '0.0.0.0'
   const port = await listenWithFallback(server, host, options.port || DEFAULT_RUNTIME_PORT, {
@@ -976,6 +943,7 @@ export async function startDesktopServer(options = {}) {
       }
     }
     sseClients.clear()
+    await attachmentUploads.dispose()
     disposeAllTerminals()
     disposeAllChatRuns()
     disposeLoops()
@@ -1059,7 +1027,8 @@ function createRequestHandler({
   controlMcp = {},
   pluginMcpRoute = null,
   pluginApiRoute = null,
-  pluginWebRoute = null
+  pluginWebRoute = null,
+  attachmentUploads = null
 }) {
   return (req, res) => {
     void (async () => {
@@ -1191,10 +1160,9 @@ function createRequestHandler({
           }
           if (req.method === 'POST' && url.pathname === '/api/invoke')
             return await handleInvoke(req, res)
-          if (req.method === 'POST' && url.pathname === '/api/paste-image')
-            return await handlePasteImage(req, res)
-          if (req.method === 'POST' && url.pathname === '/api/attachment')
-            return await handleAttachment(req, res)
+          if (attachmentUploads && await attachmentUploads.handle(req, res, url)) return
+          if (url.pathname === '/api/paste-image' || url.pathname === '/api/attachment')
+            return sendJson(res, 410, { ok: false, error: '旧版 JSON 上传不再支持，请刷新页面' })
           if (req.method === 'GET' && url.pathname === '/api/events') return handleEvents(req, res)
           if (req.method === 'GET' && url.pathname === '/api/image')
             return await handleImage(res, url)

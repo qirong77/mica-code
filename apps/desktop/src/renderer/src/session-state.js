@@ -171,6 +171,8 @@ export function sameSessionSnapshot(previous, next) {
       a.parentSessionId !== b.parentSessionId ||
       a.updatedAtMs !== b.updatedAtMs ||
       a.turnState !== b.turnState ||
+      a.interrupted !== b.interrupted ||
+      a.remoteRunning !== b.remoteRunning ||
       // 会话文件里只是多了一句「正在等你选」时 turnState 不会变，比较不到这个字段
       // 侧栏就会整棵跳过重渲染，行上永远看不到那个提醒。
       a.awaiting !== b.awaiting

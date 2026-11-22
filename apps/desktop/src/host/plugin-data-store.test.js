@@ -13,7 +13,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { acquireProcessLock } from '@packages/mica-common/processLock.js'
 import { pluginDataPath, PLUGIN_DATA_MAX_BYTES, PLUGIN_DOCUMENT_MAX_BYTES } from './plugin-data-core.js'
-import { readPluginData, writePluginData } from './plugin-data-store.js'
+import { readPluginData, readPluginDataVersion, writePluginData } from './plugin-data-store.js'
 
 let home
 beforeEach(() => {
@@ -24,6 +24,58 @@ afterEach(() => {
 })
 
 describe('plugin data versioned persistence', () => {
+  test('queries only the content version for config and documents, usable directly for CAS', () => {
+    for (const options of [{}, { key: 'page' }]) {
+      expect(readPluginDataVersion(home, 'sample', options)).toEqual({ version: null })
+      const first = writePluginData(home, 'sample', { text: 'first' }, options)
+      const version = readPluginDataVersion(home, 'sample', options)
+      expect(version).toEqual({ version: first.version })
+      expect(version).toEqual({ version: readPluginData(home, 'sample', options).version })
+      expect(Object.keys(version)).toEqual(['version'])
+      expect(writePluginData(home, 'sample', { text: 'second' }, {
+        ...options, expectedVersion: version.version
+      }).ok).toBe(true)
+      expect(readPluginDataVersion(home, 'sample', options).version).not.toBe(version.version)
+    }
+  })
+
+  test('keeps version responses bounded for large documents and detects external changes and deletion', () => {
+    const options = { key: 'large-page' }
+    const first = writePluginData(home, 'sample', { text: '界'.repeat(PLUGIN_DATA_MAX_BYTES) }, options)
+    const version = readPluginDataVersion(home, 'sample', options)
+    expect(version).toEqual({ version: first.version })
+    expect(Buffer.byteLength(JSON.stringify(version))).toBe(78)
+    const file = pluginDataPath(home, 'sample', options)
+    writeFileSync(file, 'null\n')
+    const changed = readPluginDataVersion(home, 'sample', options)
+    expect(changed.version).toBeTypeOf('string')
+    expect(changed.version).not.toBe(version.version)
+    expect(changed).toEqual({ version: readPluginData(home, 'sample', options).version })
+    rmSync(file)
+    expect(readPluginDataVersion(home, 'sample', options)).toEqual({ version: null })
+  })
+
+  test('reports corrupt JSON, invalid identity/key, symlinks and IO failures from version queries', () => {
+    const options = { key: 'page' }
+    writePluginData(home, 'sample', 'original', options)
+    const file = pluginDataPath(home, 'sample', options)
+    for (const raw of ['', '{', '{"truncated":']) {
+      writeFileSync(file, raw)
+      expect(() => readPluginDataVersion(home, 'sample', options)).toThrow('JSON 损坏')
+    }
+    for (const key of [undefined, null, '', '../escape', 'a..b', 42])
+      expect(() => readPluginDataVersion(home, 'sample', { key })).toThrow('key 非法')
+    expect(() => readPluginDataVersion(home, '../escape', options)).toThrow('id 非法')
+    rmSync(file)
+    const source = join(home, 'source.json')
+    writeFileSync(source, '{}')
+    symlinkSync(source, file)
+    expect(() => readPluginDataVersion(home, 'sample', options)).toThrow('符号链接')
+    rmSync(file)
+    mkdirSync(file)
+    expect(() => readPluginDataVersion(home, 'sample', options)).toThrow('读取插件数据失败')
+  })
+
   test('allows the first write and rejects stale edits without overwriting a newer value', () => {
     expect(readPluginData(home, 'connections')).toEqual({ value: null, version: null })
     expect(

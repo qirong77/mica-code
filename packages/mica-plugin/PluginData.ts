@@ -10,6 +10,7 @@ export const PLUGIN_DOCUMENT_MAX_BYTES = 6 * 1024 * 1024;
 export const PLUGIN_DATA_FILE = 'data.json';
 
 export type PluginDataReadResult<T = unknown> = { value: T | null; version: string | null };
+export type PluginDataVersionResult = { version: string | null };
 export type PluginDataWriteOptions = { expectedVersion?: string | null };
 export type PluginDataWriteResult =
   | { ok: true; version: string }
@@ -22,6 +23,7 @@ export type PluginDataApi = {
   write(value: unknown, options?: PluginDataWriteOptions): PluginDataWriteResult;
   documents: {
     read<T = unknown>(key: string): PluginDataReadResult<T>;
+    version(key: string): PluginDataVersionResult;
     write(key: string, value: unknown, options?: PluginDataWriteOptions): PluginDataWriteResult;
   };
 };
@@ -137,6 +139,22 @@ export function readPluginData<T = unknown>(
   return file ? readFile<T>(file, options) : { value: null, version: null };
 }
 
+/** Only the content hash crosses the host boundary; corrupt JSON still fails explicitly. */
+export function readPluginDataVersion(
+  home: unknown, pluginId: unknown, options: PluginDataOptions = {},
+): PluginDataVersionResult {
+  const file = dataPath(home, pluginId, options);
+  try {
+    const raw = readFileSync(file, 'utf8');
+    // Validate locally and discard the value. A corrupt document is not an unchanged one.
+    decodePluginData(raw, { strict: true });
+    return { version: createHash('sha256').update(raw).digest('hex') };
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException)?.code === 'ENOENT') return { version: null };
+    throw new Error(`读取插件数据失败：${errorMessage(error)}`);
+  }
+}
+
 /** Optional CAS and atomic rename share the same cross-process lock in every host. */
 export function writePluginData(
   home: unknown, pluginId: unknown, value: unknown, options: PluginDataOptions = {},
@@ -180,6 +198,7 @@ export function createPluginDataApi(home: string, pluginId: string): PluginDataA
     write: (value, options) => writePluginData(home, pluginId, value, writeOptions(options)),
     documents: {
       read: <T = unknown>(key: string) => readPluginData<T>(home, pluginId, { key }),
+      version: (key) => readPluginDataVersion(home, pluginId, { key }),
       write: (key, value, options) => writePluginData(home, pluginId, value, { ...writeOptions(options), key }),
     },
   };

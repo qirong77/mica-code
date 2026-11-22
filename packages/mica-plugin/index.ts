@@ -1,6 +1,6 @@
 import { Plugin } from './Plugin.js';
 import { PluginManager } from './PluginManager.js';
-import { createPluginDataApi, readPluginData, writePluginData } from './PluginData.js';
+import { createPluginDataApi, readPluginData, readPluginDataVersion, writePluginData } from './PluginData.js';
 import { HookRegistry } from './HookRegistry.js';
 import { ServiceContainer } from './ServiceContainer.js';
 import { createServiceToken } from './ServiceToken.js';
@@ -91,6 +91,7 @@ export const micaPlugin = {
   Plugin,
   createPluginDataApi,
   readPluginData,
+  readPluginDataVersion,
   writePluginData,
   PLUGIN_DATA_DIR,
   SESSION_ANNOTATIONS_FILE,
@@ -184,12 +185,14 @@ export {
   decodePluginData,
   createPluginDataApi,
   readPluginData,
+  readPluginDataVersion,
   writePluginData,
 } from './PluginData.js';
 export type {
   PluginDataApi,
   PluginDataOptions,
   PluginDataReadResult,
+  PluginDataVersionResult,
   PluginDataWriteOptions,
   PluginDataWriteResult,
 } from './PluginData.js';

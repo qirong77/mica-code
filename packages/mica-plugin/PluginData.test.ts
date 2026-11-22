@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -15,6 +15,7 @@ import {
   isValidPluginDocumentKey,
   pluginDataPath,
   readPluginData,
+  readPluginDataVersion,
   writePluginData,
 } from './PluginData.js';
 import { HookRegistry } from './HookRegistry.js';
@@ -40,6 +41,7 @@ describe('shared plugin data', () => {
     const data = createPluginDataApi(home, 'sample');
     expect(data.read()).toEqual({ value: null, version: null });
     expect(data.documents.read('page')).toEqual({ value: null, version: null });
+    expect(data.documents.version('page')).toEqual({ version: null });
     const saved = data.write({ pages: ['page'] }, { expectedVersion: null });
     expect(saved.ok).toBe(true);
     const first = data.documents.write('page', { text: '正文' }, { expectedVersion: null });
@@ -53,6 +55,8 @@ describe('shared plugin data', () => {
     const raw = readFileSync(file, 'utf8');
     expect(raw).toBe('{"text":"正文"}\n');
     expect(first).toEqual({ ok: true, version: createHash('sha256').update(raw).digest('hex') });
+    expect(data.documents.version('page')).toEqual({ version: first.ok ? first.version : '' });
+    expect(readPluginDataVersion(home, 'sample')).toEqual({ version: saved.ok ? saved.version : '' });
     expect(statSync(file).mode & 0o777).toBe(0o600);
   });
 
@@ -84,6 +88,7 @@ describe('shared plugin data', () => {
     for (const raw of ['', '{', '{"text":"truncated"']) {
       writeFileSync(file, raw);
       expect(() => data.documents.read('page')).toThrow('JSON 损坏');
+      expect(() => data.documents.version('page')).toThrow('JSON 损坏');
       expect(() => data.documents.write('page', 'replacement')).toThrow('JSON 损坏');
       expect(() => data.documents.write('page', 'replacement', { expectedVersion: null })).toThrow('JSON 损坏');
       expect(readFileSync(file, 'utf8')).toBe(raw);
@@ -94,6 +99,7 @@ describe('shared plugin data', () => {
     const empty = data.documents.read('page');
     expect(empty.value).toBeNull();
     expect(typeof empty.version).toBe('string');
+    expect(data.documents.version('page')).toEqual({ version: empty.version });
     expect(data.documents.write('page', 'restored', { expectedVersion: empty.version }).ok).toBe(true);
   });
 
@@ -136,6 +142,7 @@ describe('shared plugin data', () => {
     for (const key of ['', '../escape', 'a..b', 'a/b', 'a\\b', '.hidden', 'a\n', 'a'.repeat(129), null, undefined, 42]) {
       expect(isValidPluginDocumentKey(key)).toBe(false);
       expect(() => readPluginData(home, 'sample', { key })).toThrow('key 非法');
+      expect(() => readPluginDataVersion(home, 'sample', { key })).toThrow('key 非法');
       expect(() => writePluginData(home, 'sample', {}, { key })).toThrow('key 非法');
     }
     expect(pluginDataPath('', 'sample')).toBeNull();
@@ -155,11 +162,12 @@ describe('shared plugin data', () => {
       symlinkSync(path === file ? source : elsewhere, path);
       try {
         expect(() => readPluginData(home, 'sample', { key: 'page' })).toThrow('符号链接');
+        expect(() => readPluginDataVersion(home, 'sample', { key: 'page' })).toThrow('符号链接');
         expect(() => writePluginData(home, 'sample', 'replacement', { key: 'page' })).toThrow('符号链接');
         expect(readdirSync(elsewhere)).toEqual(['original.json']);
         expect(readFileSync(source, 'utf8')).toBe('"untouched"');
       } finally {
-        rmSync(path);
+        unlinkSync(path);
       }
     }
   });

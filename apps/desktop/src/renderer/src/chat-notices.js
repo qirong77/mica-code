@@ -31,7 +31,10 @@ export function upsertChatNotice(messages, notice, { replace = false } = {}) {
   }
   if (Number.isInteger(notice.noticeIndex) && notice.noticeIndex >= 0) {
     const slot = messages.findIndex(
-      (row) => row.kind === 'notice' && row.noticeIndex === notice.noticeIndex
+      (row) =>
+        row.kind === 'notice' &&
+        row.noticeIndex === notice.noticeIndex &&
+        (!command || !row.command || row.command === command)
     )
     if (slot >= 0) {
       return messages.map((row, i) => (i === slot ? { ...row, ...notice, id: row.id } : row))

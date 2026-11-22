@@ -3,7 +3,7 @@ import { resolveMicaHome } from '@packages/mica-config/index.js'
 import { runPluginAction } from '@mica-config-ui/plugin-action'
 import { probeRuntime } from './runtime-probe-core'
 import { isValidPluginId } from './plugin-data-core'
-import { readPluginData, writePluginData } from './plugin-data-store.js'
+import { readPluginData, readPluginDataVersion, writePluginData } from './plugin-data-store.js'
 import { applyRemoteAccessPatch, describeRemoteAccess } from './remote-access.js'
 import { resolveMicaExecutable } from './mica-cli'
 import { readAnnotationOptions, replaceAnnotationOptions } from './session-annotations.js'
@@ -107,6 +107,12 @@ export function registerPluginHostIpc() {
     const options = Object.hasOwn(payload ?? {}, 'key') ? { key: payload.key } : {}
     return observePluginOperation({ plugin: isValidPluginId(payload?.pluginId) ? payload.pluginId : 'unknown', pluginVersion: officialPluginManifests.find((item) => item.id === payload?.pluginId)?.version, operation: 'data.read', surface: 'page' },
       () => readPluginData(micaHome(), payload?.pluginId, options))
+  })
+
+  ipcMain.handle('plugin-host:data-version', (_event, payload) => {
+    const options = Object.hasOwn(payload ?? {}, 'key') ? { key: payload.key } : {}
+    return observePluginOperation({ plugin: isValidPluginId(payload?.pluginId) ? payload.pluginId : 'unknown', pluginVersion: officialPluginManifests.find((item) => item.id === payload?.pluginId)?.version, operation: 'data.read', surface: 'page' },
+      () => readPluginDataVersion(micaHome(), payload?.pluginId, options))
   })
 
   // 失败直接抛：`POST /api/invoke` 会把 Error 的 message 变成 `{ ok: false, error }`。

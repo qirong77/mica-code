@@ -3204,7 +3204,8 @@ html[data-appearance='light'] .chat-markdown code:not(pre code) {
 .chat-composer-image-pending {
   display: inline-flex;
   flex: 0 0 auto;
-  width: 104px;
+  min-width: 104px;
+  padding: 0 8px;
   height: 40px;
   align-items: center;
   justify-content: center;

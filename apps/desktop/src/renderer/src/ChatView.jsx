@@ -33,6 +33,7 @@ import {
   IconClock,
   IconMessageChatbot,
   IconPaperclip,
+  IconPhoto,
   IconPlus,
   IconPuzzle,
   IconQuote,
@@ -57,12 +58,13 @@ import {
   summarizeTodoProgress,
   todoItemLabel
 } from '@packages/mica-common/todoState.js'
-import { ArcoAction, Button, Checkbox, Input, PluginIcon, QrCode, SessionDetailView, resolvePluginIcon } from '@mica-config-ui/web'
+import { ArcoAction, Button, Checkbox, Input, PluginIcon, QrCode, resolvePluginIcon } from '@mica-config-ui/web'
 import { ChatLink, ChatPathContext, PathText, PathToken } from './PathToken'
 import { ChatFind } from './ChatFind'
 import { readRestoreTranscript, takeCachedTranscript, writeCachedTranscript } from './chat-cache'
 import { createReadQueue } from './read-queue'
 import { createChatResyncQueue } from './chat-resync'
+import { historyPageRequestStatus, historyPageState, noticeNeedsHistoryResync, prependedScrollTop } from './chat-history-pages'
 import { usePageVisible } from './use-page-visible'
 import { transcriptMessagesForDisplay, updateStreamMessage } from './chat-stream'
 export { resetTranscriptCache } from './chat-cache'
@@ -92,8 +94,17 @@ import {
 } from './chat-turn-activity'
 import { ModalMeta, ModalSection, ModalShell } from './chat-modal'
 import { ToolDetailDialog } from './chat-tool-detail'
-import { TurnTimingDialog } from './TurnTimingDialog'
 import { lazyView } from './lazy-view'
+
+const TurnTimingDialog = lazyView(() => import('./TurnTimingDialog'), 'TurnTimingDialog', {
+  overlay: true
+})
+const SessionSettingsDialog = lazyView(() => import('./SessionSettingsDialog'), 'SessionSettingsDialog', {
+  overlay: true
+})
+const ContextDetailDialog = lazyView(() => import('./ContextDetailDialog'), 'ContextDetailDialog', {
+  overlay: true
+})
 
 // 会话详情弹窗与侧栏会话行的「查看详情」是同一个组件（含用量页签），按需加载——
 // stats 目录的代码不进对话框的启动路径。
@@ -164,7 +175,6 @@ import { PluginPanels, PluginQuickBar } from './PluginPanels'
 import { applyPanelResult, usePluginPanels } from './plugin-panels'
 import { queuePluginLaunch, subscribePluginLaunch, takePluginLaunch } from './plugin-launch'
 import { LoopBadge } from './LoopBadge'
-import { SessionSettingsDialog } from './SessionSettingsDialog'
 import { Popover } from './Popover'
 import { formatLoopInterval, loopForNode } from './loop-command'
 import {
@@ -899,22 +909,11 @@ function ImagePreviewModal({ source, alt, onClose, onReveal, onOpenFile }) {
   )
 }
 
-/**
- * 上下文弹窗：与统计页的会话详情、配置页的 Sessions 页是同一个组件，只是落在
- * 「Context 分析」页签上。以前这里单独实现了一套占用分解，同一个会话在两处会给出
- * 两个口径的数字。
- * 弹窗壳不画标题栏：会话身份（标题、路径、事实）由详情自己的头部给出，两处各画一遍只会重复。
- */
-function ContextDetailPopover({ sessionId, onClose }) {
+/** 按需弹窗的可关闭占位；慢线路下无需等代码下载完才能返回。 */
+function DialogLoading({ onClose }) {
   return (
-    <ModalShell bare onClose={onClose} className="chat-modal-session-detail">
-      {sessionId ? (
-        <div className="mica-config-ui is-embed session-detail-embed">
-          <SessionDetailView sessionId={sessionId} defaultTab="context" />
-        </div>
-      ) : (
-        <div className="chat-modal-empty">No active session</div>
-      )}
+    <ModalShell onClose={onClose} title="正在加载…">
+      <div className="chat-modal-empty" role="status">正在加载…</div>
     </ModalShell>
   )
 }
@@ -3147,8 +3146,8 @@ export function mergeReplayEvents(buffered = [], pending = []) {
   return events
 }
 
-export function historyMessages(rows, key) {
-  let noticeIndex = 0
+export function historyMessages(rows, key, noticeOffset = 0) {
+  let noticeIndex = noticeOffset
   // 压缩留下的 boundary（内部 JSON）与 checkpoint（摘要长文）先合成一块，压缩折叠
   // 出来的那串工具调用说明再并成一行「已清理 N 轮工具调用」。
   return collapseCompactToolNotes(mergeCompactCheckpoints(Array.isArray(rows) ? rows : []).map((row, index) => ({
@@ -3176,6 +3175,10 @@ export function historyMessages(rows, key) {
     usage: row.usage ?? null,
     done: true
   })), key)
+}
+
+export function historyPageMessages(page, key) {
+  return historyMessages(page?.rows, `${key}-page-${page?.start ?? 0}`, page?.noticeOffset ?? 0)
 }
 
 // 模型名本身可以包含斜杠，不能通过任意后缀匹配推断 provider。
@@ -3542,6 +3545,18 @@ export function ChatView({
   const turnStartedAtRef = useRef(0)
   const restoringRef = useRef(false)
   const restoreGenerationRef = useRef(0)
+  const historyPageRef = useRef(null)
+  const [loadedHistoryPage, setLoadedHistoryPage] = useState(null)
+  const [loadingEarlier, setLoadingEarlier] = useState(false)
+  const [historyPageError, setHistoryPageError] = useState('')
+  const olderReadRef = useRef(null)
+  const historyMutationRef = useRef(0)
+  const prependScrollRef = useRef(null)
+  const updateHistoryPage = useCallback((page) => {
+    const state = historyPageState(page)
+    historyPageRef.current = state
+    setLoadedHistoryPage(state)
+  }, [])
   const pendingEventsRef = useRef([])
   const liveStateVersionRef = useRef({ ask: 0, queue: 0 })
   const requestChatResyncRef = useRef(null)
@@ -3586,6 +3601,7 @@ export function ChatView({
   const inputRef = useLatest(input)
   const imagePasteCountRef = useRef(0)
   const [imagePastePending, setImagePastePending] = useState(false)
+  const [attachmentUploads, setAttachmentUploads] = useState({})
   const [running, setRunning] = useState(false)
   const runningRef = useLatest(running)
   // 这个会话正被**另一个进程**跑着（终端里的 TUI / mica exec / 另一个运行时实例持着它的
@@ -3824,6 +3840,7 @@ export function ChatView({
   const bottomScrollRef = useRef(null)
   const textareaRef = useRef(null)
   const attachInputRef = useRef(null)
+  const photoInputRef = useRef(null)
   // 动作区合并成一个「+」：悬停展开、点击也能开（触屏没有 hover）。
   const [moreOpen, setMoreOpen] = useState(false)
   // 悬停开菜单要等一会儿：立刻开会和原生点击打架——「先移入、再 click」会先被
@@ -3892,6 +3909,58 @@ export function ChatView({
     messagesRef.current = next
     setMessages(next)
   }, [])
+
+  const loadEarlierHistory = useCallback(async (all = false) => {
+    const current = historyPageRef.current
+    const sessionId = sessionIdRef.current
+    if (!current?.nextBefore || !sessionId || restoringRef.current || olderReadRef.current) return
+    const request = {
+      page: current, sessionId,
+      generation: restoreGenerationRef.current, mutation: historyMutationRef.current
+    }
+    olderReadRef.current = request
+    setLoadingEarlier(true)
+    setHistoryPageError('')
+    try {
+      const older = await window.mica.chat.historyPage(sessionId, { before: current.nextBefore, all })
+      const status = historyPageRequestStatus(request, {
+        page: historyPageRef.current, sessionId: sessionIdRef.current,
+        generation: restoreGenerationRef.current, mutation: historyMutationRef.current,
+        restoring: restoringRef.current, visible: visibleRef.current
+      }, older)
+      if (status === 'stale') return
+      if (status === 'resync') {
+        setHistoryPageError('历史已更新，正在重新同步…')
+        requestChatResyncRef.current?.()
+        return
+      }
+      const list = listRef.current
+      if (list) {
+        prependScrollRef.current = { nodeId: nodeIdRef.current, top: list.scrollTop, height: list.scrollHeight }
+        stickToBottomRef.current = false
+      }
+      updateHistoryPage({ ...older, end: current.end, total: Math.max(current.total, older.total) })
+      // Only prepend: replies/tools received while this request was in flight
+      // remain the live tail, with their existing identities and stream refs.
+      updateMessages((previous) => [...historyPageMessages(older, sessionId), ...previous])
+    } catch {
+      if (restoreGenerationRef.current === request.generation && historyPageRef.current === current) {
+        setHistoryPageError('更早的记录加载失败，请重试')
+      }
+    } finally {
+      if (olderReadRef.current === request) {
+        olderReadRef.current = null
+        setLoadingEarlier(false)
+      }
+    }
+  }, [nodeIdRef, updateHistoryPage, updateMessages, visibleRef])
+
+  // Find scans the rendered transcript. Explicitly opening it loads the missing
+  // prefix, so search still covers the entire conversation rather than one page.
+  useEffect(() => {
+    if (findOpen && visible && historyLoaded && loadedHistoryPage?.nextBefore &&
+        !loadingEarlier && !historyPageError) void loadEarlierHistory(true)
+  }, [findOpen, visible, historyLoaded, loadedHistoryPage, loadingEarlier, historyPageError, loadEarlierHistory])
 
   useEffect(() => {
     sessionIdRef.current = node?.sessionId || null
@@ -4669,25 +4738,36 @@ export function ChatView({
    * 拿不到原始路径，副本路径是模型唯一能读到的入口。
    */
   const attachFiles = useCallback(
-    async (files) => {
+    async (files, { imagesOnly = false } = {}) => {
       const list = Array.from(files || [])
       if (!list.length) return
       const images = []
       const paths = []
       for (const file of list) {
-        const isImage = /^image\/(png|jpeg|webp|gif)$/i.test(file.type || '')
+        const isImage = imagesOnly || /^image\/(png|jpeg|webp|gif)$/i.test(file.type || '') ||
+          (!file.type && /\.(png|jpe?g|webp|gif)$/i.test(file.name || ''))
+        const uploadId = uid('upload')
+        const onProgress = (progress) => setAttachmentUploads((previous) => ({
+          ...previous, [uploadId]: { ...progress, name: file.name || '文件' }
+        }))
         try {
           if (isImage) {
-            const result = await window.mica.chat.savePastedImage({ file })
+            const result = await window.mica.chat.savePastedImage({ file, onProgress })
             if (result?.ok && result.ref) images.push(`[Image](${result.ref})`)
             else appendNotice(result?.error || `上传 ${file.name || '图片'} 失败`, 'error')
           } else {
-            const result = await window.mica.chat.saveAttachment({ file })
+            const result = await window.mica.chat.saveAttachment({ file, onProgress })
             if (result?.ok && result.path) paths.push(result.path)
             else appendNotice(result?.error || `上传 ${file.name || '文件'} 失败`, 'error')
           }
         } catch (error) {
           appendNotice(`上传 ${file.name || '文件'} 失败：${error?.message || error}`, 'error')
+        } finally {
+          setAttachmentUploads((previous) => {
+            const next = { ...previous }
+            delete next[uploadId]
+            return next
+          })
         }
       }
       const parts = [...images, ...paths]
@@ -4857,6 +4937,7 @@ export function ChatView({
   const applyEvent = useCallback(
     (event) => {
       if (!event) return
+      if (event.type === 'notice' || event.type === 'session_history_replaced') historyMutationRef.current += 1
       const timestamp = Number(event.timestamp) || Date.now()
       // 耗时分解跟着同一份事件流走：段结构变化（新一轮、新工具、本轮结束）才触发
       // 重渲染，流式 delta 只延长当前段——否则每个 token 都要重算一次弹窗。
@@ -5089,10 +5170,8 @@ export function ChatView({
           // 会话重开。流式行随替换一并丢弃（turn 已完成，紧随其后的
           // step_finish 只做收尾）。
           finishStream(timestamp)
-          const rows = historyMessages(
-            Array.isArray(event.history) ? event.history : [],
-            event.sessionID || nodeIdRef.current
-          )
+          updateHistoryPage(event.historyPage)
+          const rows = historyPageMessages(event.historyPage, event.sessionID || nodeIdRef.current)
           updateMessages((previous) => {
             // 排队中的乐观行和菜单动作的进度通知在 `messages` 里还要留着：
             // 输入框上方的 dock 靠这些行补出「确认通知还没回来」的待发送项
@@ -5118,6 +5197,7 @@ export function ChatView({
       applyLiveUsageMeta,
       applyStreamingUsageMeta,
       refreshMetaSoon,
+      updateHistoryPage,
       updateMessages,
       setBackgroundTasks,
       setSubagentTasks,
@@ -5145,9 +5225,9 @@ export function ChatView({
         if (metaRef.current?.protocol) {
           const exitNodeId = nodeIdRef.current
           const exitTurnId = turnRef.current
-          void window.mica.chat.history(exitNodeId).then((rows) => {
+          void window.mica.chat.historyPage(sessionIdRef.current || exitNodeId).then((page) => {
             if (nodeIdRef.current !== exitNodeId || turnRef.current !== exitTurnId || !finishedRef.current) return
-            const persisted = historyMessages(rows, exitNodeId)
+            const persisted = historyPageMessages(page, exitNodeId)
             updateMessages((previous) => thinkingAfterUnexpectedExit(previous, persisted, exitTurnId))
           }).catch(() => {})
         }
@@ -5175,6 +5255,12 @@ export function ChatView({
     const currentRunKey = () => nodeIdRef.current
     const offEvent = window.mica.chat.onEvent(({ id, sequence, event }) => {
       if (id !== currentRunKey()) return
+      // 被删除的 notice 可能不在当前窗口内；从磁盘重新取得槽位，不能用旧序号猜。
+      // 队列在首次 await 之前即打开 restoring，随后到达的事件由现有缓冲接管。
+      if (noticeNeedsHistoryResync(historyPageRef.current, event)) {
+        historyMutationRef.current += 1
+        requestChatResyncRef.current?.()
+      }
       if (restoringRef.current) pendingEventsRef.current.push({ sequence, event })
       else applyEventRef.current(event)
     })
@@ -5266,7 +5352,7 @@ export function ChatView({
   useEffect(() => {
     if (!nodeId) return undefined
     return () => {
-      writeCachedTranscript(nodeId, messagesRef.current, metaRef.current)
+      writeCachedTranscript(nodeId, messagesRef.current, metaRef.current, historyPageRef.current)
     }
   }, [nodeId])
 
@@ -5326,7 +5412,7 @@ export function ChatView({
     const previousNodeId = loadedNodeRef.current
     if (previousNodeId && previousNodeId !== nodeId && messagesRef.current.length > 0) {
       // 这一份渲染结果（含只存在于事件流里的思考/工具/TODO）留给下次回到这个会话时用
-      writeCachedTranscript(previousNodeId, messagesRef.current, metaRef.current)
+      writeCachedTranscript(previousNodeId, messagesRef.current, metaRef.current, historyPageRef.current)
     }
     if (previousNodeId && previousNodeId !== nodeId) {
       // 旧节点此刻已经隐藏，scrollTop 读出来是 0，只能用滚动时记下的那份
@@ -5335,8 +5421,13 @@ export function ChatView({
     const nextInput = switchChatDraft(draftsRef.current, previousNodeId, nodeId, inputRef.current)
     draftReportRef.current = { nodeId, text: nextInput || '' }
     loadedNodeRef.current = nodeId
-    let cachedEntry = readRestoreTranscript(nodeId, previousNodeId, messagesRef.current, metaRef.current)
+    let cachedEntry = readRestoreTranscript(nodeId, previousNodeId, messagesRef.current, metaRef.current, historyPageRef.current)
     let cachedTranscript = cachedEntry?.messages ?? null
+    updateHistoryPage(cachedEntry?.historyPage ?? null)
+    setHistoryPageError('')
+    setLoadingEarlier(false)
+    olderReadRef.current = null
+    prependScrollRef.current = null
     const generation = ++restoreGenerationRef.current
     restoringRef.current = true
     pendingEventsRef.current = []
@@ -5381,19 +5472,20 @@ export function ChatView({
     finishedRef.current = true
     historyCursorRef.current = -1
     let restoreQueueVersion = liveStateVersionRef.current.queue
-    const restoreFinalSession = async (finalSessionId, fallbackRows) => {
+    const restoreFinalSession = async (finalSessionId, fallbackPage) => {
       if (!sessionIdRef.current) {
         sessionIdRef.current = finalSessionId
         onSessionBoundRef.current?.(nodeId, finalSessionId)
       }
-      const [finalRows, finalMeta] = await Promise.all([
-        window.mica.chat.history(finalSessionId).catch(() => fallbackRows),
+      const [finalPage, finalMeta] = await Promise.all([
+        window.mica.chat.historyPage(finalSessionId, { id: nodeId, from: historyPageRef.current?.startCursor }).catch(() => fallbackPage),
         window.mica.chat.meta(finalSessionId).catch(() => null)
       ])
       if (generation !== restoreGenerationRef.current || nodeIdRef.current !== nodeId) return false
+      updateHistoryPage(finalPage)
       const selectedModel = overridesRef.current.get(nodeId)?.model
       const finalMessages = thinkingForSelectedModel(
-        historyMessages(finalRows, finalSessionId), selectedModel, finalMeta?.model, finalMeta?.providerId
+        historyPageMessages(finalPage, finalSessionId), selectedModel, finalMeta?.model, finalMeta?.providerId
       )
       const liveTranscript = thinkingForSelectedModel(messagesRef.current, selectedModel, finalMeta?.model, finalMeta?.providerId)
       cachedTranscript = thinkingForSelectedModel(cachedTranscript, selectedModel, finalMeta?.model, finalMeta?.providerId)
@@ -5436,8 +5528,11 @@ export function ChatView({
       const sessionId = sessionIdRef.current
       const liveStateVersion = { ...liveStateVersionRef.current }
       restoreQueueVersion = liveStateVersion.queue
-      const [rows, sessionMeta] = await Promise.all([
-        sessionId ? (resync ? window.mica.chat.history(sessionId) : window.mica.chat.history(sessionId).catch(() => [])) : [],
+      const pageRequest = sessionId
+        ? window.mica.chat.historyPage(sessionId, { id: nodeId, from: historyPageRef.current?.startCursor })
+        : Promise.resolve(null)
+      const [page, sessionMeta] = await Promise.all([
+        resync ? pageRequest : pageRequest.catch(() => null),
         sessionId
           ? window.mica.chat.meta(sessionId).catch(() => null)
           : window.mica.chat.meta(null).catch(() => null)
@@ -5448,8 +5543,10 @@ export function ChatView({
       if (generation !== restoreGenerationRef.current || nodeIdRef.current !== nodeId) return
       if (resync && !state) throw new Error('Chat state unavailable during resync')
       const selectedModel = overridesRef.current.get(nodeId)?.model
+      updateHistoryPage(page)
+      setHistoryPageError('')
       const restored = thinkingForSelectedModel(
-        historyMessages(rows, sessionId || nodeId), selectedModel, sessionMeta?.model, sessionMeta?.providerId
+        historyPageMessages(page, sessionId || nodeId), selectedModel, sessionMeta?.model, sessionMeta?.providerId
       )
       cachedTranscript = thinkingForSelectedModel(cachedTranscript, selectedModel, sessionMeta?.model, sessionMeta?.providerId)
       updateMessages(restored)
@@ -5490,7 +5587,7 @@ export function ChatView({
             applyEventRef.current(event)
           }
           pendingEventsRef.current = []
-          await restoreFinalSession(stateSessionId, rows)
+          await restoreFinalSession(stateSessionId, page)
           return
         }
       }
@@ -5510,7 +5607,7 @@ export function ChatView({
         }
         pendingEventsRef.current = []
         const finalSessionId = state.sessionId || sessionIdRef.current || pendingSessionId
-        if (finalSessionId) await restoreFinalSession(finalSessionId, rows)
+        if (finalSessionId) await restoreFinalSession(finalSessionId, page)
         else {
           restoringRef.current = false
           setRunning(false)
@@ -5531,7 +5628,7 @@ export function ChatView({
           applyEventRef.current(event)
         }
         pendingEventsRef.current = []
-        await restoreFinalSession(finalSessionId, rows)
+        await restoreFinalSession(finalSessionId, page)
         return
       }
       const replayEvents = replayEventsOf(state?.events, pendingEventsRef.current)
@@ -5605,7 +5702,7 @@ export function ChatView({
       const resync = !initialRestore
       initialRestore = false
       if (resync) {
-        cachedEntry = { messages: messagesRef.current, meta: metaRef.current }
+        cachedEntry = { messages: messagesRef.current, meta: metaRef.current, historyPage: historyPageRef.current }
         cachedTranscript = cachedEntry.messages
         restoringRef.current = true
         pendingEventsRef.current = []
@@ -5648,6 +5745,7 @@ export function ChatView({
     cwd,
     onSessionBoundRef,
     processExitRef,
+    updateHistoryPage,
     updateMessages
   ])
 
@@ -5668,17 +5766,23 @@ export function ChatView({
         setRemoteRunning(false)
         return
       }
-      const [rows, finalMeta] = await Promise.all([
-        window.mica.chat.history(finalSessionId).catch(() => null),
+      const requestedRange = historyPageRef.current
+      const [page, finalMeta] = await Promise.all([
+        window.mica.chat.historyPage(finalSessionId, { from: requestedRange?.startCursor }).catch(() => null),
         window.mica.chat.meta(finalSessionId).catch(() => null)
       ])
       if (!isCurrent()) return
       if (nodeIdRef.current !== nodeId || sessionIdRef.current !== finalSessionId) return
+      if (historyPageRef.current !== requestedRange) {
+        requestChatResyncRef.current?.()
+        return
+      }
       setRemoteRunning(false)
-      if (!Array.isArray(rows)) return
+      if (!page) return
+      updateHistoryPage(page)
       updateMessages(
         thinkingForSelectedModel(
-          historyMessages(rows, finalSessionId), overridesRef.current.get(nodeId)?.model, finalMeta?.model, finalMeta?.providerId
+          historyPageMessages(page, finalSessionId), overridesRef.current.get(nodeId)?.model, finalMeta?.model, finalMeta?.providerId
         )
       )
       if (finalMeta) {
@@ -5694,7 +5798,7 @@ export function ChatView({
       reads.dispose()
       remoteReadsRef.current = null
     }
-  }, [remoteRunning, nodeId, nodeIdRef, refreshMetaSoon, updateMessages, visibleRef])
+  }, [remoteRunning, nodeId, nodeIdRef, refreshMetaSoon, updateHistoryPage, updateMessages, visibleRef])
 
   useEffect(() => {
     if (!remoteRunning || !pageVisible) return undefined
@@ -5707,6 +5811,14 @@ export function ChatView({
   useLayoutEffect(() => {
     const list = listRef.current
     if (!list) return undefined
+    const prepended = prependScrollRef.current
+    if (prepended && prepended.nodeId === nodeId) {
+      prependScrollRef.current = null
+      list.scrollTop = prependedScrollTop(prepended, list.scrollHeight)
+      scrollStateRef.current = { top: list.scrollTop, stick: false }
+      setShowJump(true)
+      return undefined
+    }
     if (stickToBottomRef.current) {
       list.scrollTop = list.scrollHeight
       return undefined
@@ -6330,10 +6442,11 @@ export function ChatView({
             ].join('\n')
             applyCompactMeta(result)
             refreshMetaSoon(targetSessionId, { keepLiveUsage: true })
-            const rows = await window.mica.chat.history(targetSessionId).catch(() => [])
+            const page = await window.mica.chat.historyPage(targetSessionId).catch(() => null)
             if (isCurrentNode() && sessionIdRef.current === targetSessionId) {
+              updateHistoryPage(page)
               updateMessages([
-                ...historyMessages(rows, targetSessionId),
+                ...historyPageMessages(page, targetSessionId),
                 {
                   id: compactNoticeId,
                   kind: 'notice',
@@ -6447,6 +6560,7 @@ export function ChatView({
       running,
       todoHidden,
       updateNotice,
+      updateHistoryPage,
       updateMessages
     ]
   )
@@ -7745,16 +7859,33 @@ export function ChatView({
         >
           <div ref={transcriptRef} className="chat-transcript">
             {!historyLoaded && <div className="chat-loading">正在加载会话…</div>}
+            {historyLoaded && loadedHistoryPage?.nextBefore && (
+              <div className="chat-loading" role="status">
+                <Button disabled={loadingEarlier} onClick={() => void loadEarlierHistory(findOpen)}>
+                  {loadingEarlier ? (findOpen ? '正在加载全文…' : '正在加载更早记录…') : `加载更早记录（还有 ${loadedHistoryPage.start} 条）`}
+                </Button>
+                {historyPageError && <span>{historyPageError}</span>}
+              </div>
+            )}
             {showEmpty && <WelcomeHint cwd={cwd} />}
             {transcriptRows}
           </div>
         </div>
 
+        {findOpen && loadedHistoryPage?.nextBefore && (
+          <div className="chat-find no-drag" role="status" data-no-chat-focus>
+            <span>{historyPageError || '正在加载完整会话以供查找…'}</span>
+            {historyPageError && (
+              <Button disabled={loadingEarlier} onClick={() => void loadEarlierHistory(true)}>重试</Button>
+            )}
+            <ArcoAction iconOnly aria-label="关闭查找" onClick={closeFind}><IconX size={13} /></ArcoAction>
+          </div>
+        )}
         <ChatFind
-          open={findOpen}
+          open={findOpen && !loadedHistoryPage?.nextBefore}
           focusSignal={findFocusSignal}
           preset={findPreset}
-          presetSignal={findPreset?.nonce ?? 0}
+          presetSignal={findPreset ? `${findPreset.nonce}:${loadedHistoryPage?.start ?? 0}` : 0}
           targetRef={transcriptRef}
           onClose={closeFind}
         />
@@ -7810,38 +7941,41 @@ export function ChatView({
           <ComposerImageStrip
             text={input}
             pending={imagePastePending}
+            uploads={Object.values(attachmentUploads)}
             onPreview={(source, alt) => setImagePreview({ source, alt })}
           />
           <ComposerQuoteStrip text={input} onRemove={removeQuoteFromComposer} />
           {settingsSection && (
-            <SessionSettingsDialog
-              nodeId={nodeId}
-              sessionId={sessionIdRef.current}
-              cwd={cwd}
-              role={activeRole}
-              running={running || remoteRunning}
-              section={settingsSection}
-              onOpenPluginPanel={(id) => {
-                setPluginPanelOpen(id)
-                setPluginPanelSection('')
-                setSettingsSection(null)
-              }}
-              loopProps={{
-                loop: activeLoop,
-                running: loopRunning,
-                draft: input,
-                onStart: handleLoopStart,
-                onSetInterval: (intervalMs) =>
-                  activeLoop && window.mica.loops.setInterval(nodeId, intervalMs).catch(() => {}),
-                onSetTask: (task) =>
-                  activeLoop && window.mica.loops.setTask(nodeId, task).catch(() => {}),
-                onPause: () => window.mica.loops.setStatus(nodeId, 'paused').catch(() => {}),
-                onResume: () => window.mica.loops.setStatus(nodeId, 'active').catch(() => {}),
-                onFireNow: () => window.mica.loops.fireNow(nodeId).catch(() => {}),
-                onStop: () => window.mica.loops.stop(nodeId).catch(() => {})
-              }}
-              onClose={() => setSettingsSection(null)}
-            />
+            <Suspense fallback={<DialogLoading onClose={() => setSettingsSection(null)} />}>
+              <SessionSettingsDialog
+                nodeId={nodeId}
+                sessionId={sessionIdRef.current}
+                cwd={cwd}
+                role={activeRole}
+                running={running || remoteRunning}
+                section={settingsSection}
+                onOpenPluginPanel={(id) => {
+                  setPluginPanelOpen(id)
+                  setPluginPanelSection('')
+                  setSettingsSection(null)
+                }}
+                loopProps={{
+                  loop: activeLoop,
+                  running: loopRunning,
+                  draft: input,
+                  onStart: handleLoopStart,
+                  onSetInterval: (intervalMs) =>
+                    activeLoop && window.mica.loops.setInterval(nodeId, intervalMs).catch(() => {}),
+                  onSetTask: (task) =>
+                    activeLoop && window.mica.loops.setTask(nodeId, task).catch(() => {}),
+                  onPause: () => window.mica.loops.setStatus(nodeId, 'paused').catch(() => {}),
+                  onResume: () => window.mica.loops.setStatus(nodeId, 'active').catch(() => {}),
+                  onFireNow: () => window.mica.loops.fireNow(nodeId).catch(() => {}),
+                  onStop: () => window.mica.loops.stop(nodeId).catch(() => {})
+                }}
+                onClose={() => setSettingsSection(null)}
+              />
+            </Suspense>
           )}
           {/* 插件快捷按钮：悬浮在输入框正上方（插件的「立刻检查」「频道设置」这类入口）。 */}
           <PluginQuickBar
@@ -7967,8 +8101,22 @@ export function ChatView({
                 emptyText={completionEmptyText(completion.kind, completionLoading, completionFailed)}
               />
             )}
-            {/* 相册/拍照：手机上没有系统剪贴板粘贴，只能靠文件选择器（accept 限定成
-              CLI 认识的格式，iOS 会据此把 HEIC 转成 JPEG）。 */}
+            {/* 图片入口声明支持的格式，让系统相册尽可能提供可读取的照片；
+              通用附件入口仍可选择任意文件。 */}
+            <input
+              ref={photoInputRef}
+              type="file"
+              accept="image/png,image/jpeg,image/webp,image/gif"
+              multiple
+              className="sr-only"
+              aria-hidden="true"
+              tabIndex={-1}
+              onChange={(event) => {
+                const files = Array.from(event.target.files || [])
+                event.target.value = ''
+                void attachFiles(files, { imagesOnly: true })
+              }}
+            />
             <input
               ref={attachInputRef}
               type="file"
@@ -8196,6 +8344,18 @@ export function ChatView({
                       className="mica-arco-row"
                       onClick={() => {
                         setMoreOpen(false)
+                        photoInputRef.current?.click()
+                      }}
+                    >
+                      <IconPhoto size={13} />
+                      <span>添加图片</span>
+                    </ArcoAction>
+                    <ArcoAction
+                      type="button"
+                      role="menuitem"
+                      className="mica-arco-row"
+                      onClick={() => {
+                        setMoreOpen(false)
                         attachInputRef.current?.click()
                       }}
                     >
@@ -8334,18 +8494,22 @@ export function ChatView({
         </div>
         </div>
         {contextDetail && (
-          <ContextDetailPopover
-            sessionId={sessionIdRef.current}
-            onClose={() => setContextDetail(false)}
-          />
+          <Suspense fallback={<DialogLoading onClose={() => setContextDetail(false)} />}>
+            <ContextDetailDialog
+              sessionId={sessionIdRef.current}
+              onClose={() => setContextDetail(false)}
+            />
+          </Suspense>
         )}
         {turnTimingOpen ? (
-          <TurnTimingDialog
-            sessionId={sessionIdRef.current}
-            liveRound={liveTimingRound}
-            now={turnTimingNow}
-            onClose={() => setTurnTimingOpen(false)}
-          />
+          <Suspense fallback={<DialogLoading onClose={() => setTurnTimingOpen(false)} />}>
+            <TurnTimingDialog
+              sessionId={sessionIdRef.current}
+              liveRound={liveTimingRound}
+              now={turnTimingNow}
+              onClose={() => setTurnTimingOpen(false)}
+            />
+          </Suspense>
         ) : null}
         {sessionDetailOpen && sessionIdRef.current
           ? createPortal(

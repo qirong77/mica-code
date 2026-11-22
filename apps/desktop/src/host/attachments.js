@@ -35,11 +35,3 @@ export function sanitizeFileName(name) {
   const bounded = cleaned.slice(0, 120)
   return bounded || 'file'
 }
-
-/** `data:<mime>;base64,...` → 字节。附件不校验具体类型，只要求声明了 base64。 */
-export function decodeDataUrl(dataUrl) {
-  const match = /^data:[^;,]*;base64,/i.exec(String(dataUrl || ''))
-  if (!match) return null
-  const bytes = Buffer.from(String(dataUrl).slice(match[0].length), 'base64')
-  return bytes.length ? bytes : null
-}

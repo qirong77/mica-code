@@ -268,7 +268,10 @@ describe('sameSessionSnapshot', () => {
       { cwd: '/other' },
       { parentSessionId: 'parent' },
       { updatedAtMs: 2000 },
-      { turnState: 'running' }
+      { turnState: 'running' },
+      { interrupted: true },
+      { remoteRunning: true },
+      { awaiting: true }
     ]
     for (const change of cases) {
       expect(sameSessionSnapshot([row()], [row(change)])).toBe(false)

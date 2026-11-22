@@ -117,6 +117,15 @@ describe('unmounted transcript cache', () => {
     expect(takeCachedTranscript('a').messages).toBe(messages)
   })
 
+  it('preserves loaded history range metadata across eviction and same-node restoration', () => {
+    const messages = [{ kind: 'message', role: 'user', text: 'loaded older turn' }]
+    const historyPage = { start: 80, total: 300, startCursor: { index: 80, anchor: 'prefix' } }
+    writeCachedTranscript('paged', messages, null, historyPage)
+    const handoff = takeCachedTranscript('paged')
+    expect(handoff.historyPage).toBe(historyPage)
+    expect(readRestoreTranscript('paged', 'paged', messages, null, historyPage).historyPage).toBe(historyPage)
+  })
+
   it('releases closed nodes while preserving evicted views that still have a workspace node', () => {
     writeCachedTranscript('closed', [{ text: 'large history' }], null)
     writeCachedTranscript('open', [{ text: 'visual history' }], null)

@@ -21,6 +21,7 @@ import { resolveMicaExecutable } from './mica-cli'
 import { logger } from './log'
 import { readTopLevelCwd } from './session-file-head'
 import { createSessionReader, filterCurrentThinking } from './session-reader'
+import { historyPage } from './chat-history-page'
 import { readTodoCheckpointInput } from './todo-checkpoint'
 import { isDirectory, resolveUsableCwd } from './cwd-utils'
 import {
@@ -1534,7 +1535,7 @@ function handleHostNotification(id, run, notification) {
         id,
         sessionId: runSessionId(run),
         sequence: ++run.sequence,
-        event: { ...replacedEvent, history, ...(meta ? { meta } : {}) }
+        event: { ...replacedEvent, historyPage: historyPage(history), ...(meta ? { meta } : {}) }
       })
     }
     return
@@ -2391,6 +2392,17 @@ export function registerChatIpc() {
         (item) => item.id === result.meta?.providerId
       )
       return filterCurrentThinking(result.history, provider)
+    })
+  })
+
+  ipcMain.handle('chat:history-page', async (event, { sessionId, id, ...options } = {}) => {
+    rememberChatSender(event)
+    if (!sessionId) return historyPage([])
+    const result = await readSessionAsync(sessionFile(sessionId))
+    const provider = readMicaConfig().providers.find((item) => item.id === result.meta?.providerId)
+    const run = runs.get(id || liveRunIdForSession(sessionId)) || (id ? completedRuns.get(id) : null)
+    return historyPage(filterCurrentThinking(result.history, provider), {
+      ...options, replayPrompt: runSessionId(run) === sessionId ? run.prompt : null
     })
   })
 

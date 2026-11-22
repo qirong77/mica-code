@@ -60,20 +60,35 @@ const KIND_LABEL = {
   mcpServers: 'MCP 服务'
 }
 
-export function SessionSettingsDialog({
+export function SessionSettingsDialog({ section: initialSection = 'capabilities', ...props }) {
+  const [section, setSection] = useState(initialSection)
+  return (
+    <SessionSettingsContent
+      // 身份变化时隔离读取、乐观选择和保存状态，分类仍保留用户当前的位置。
+      key={JSON.stringify([props.nodeId, props.sessionId, props.cwd, props.role ?? 'default'])}
+      {...props}
+      section={section}
+      setSection={setSection}
+    />
+  )
+}
+
+function SessionSettingsContent({
   nodeId,
   sessionId,
   cwd,
   role = 'default',
   running,
-  section: initialSection = 'capabilities',
+  section,
+  setSection,
   loopProps = null,
   /** 打开插件面板：设置弹窗先关掉，再交给对话区去收起/展开右侧抽屉。 */
   onOpenPluginPanel,
   onClose
 }) {
-  const [section, setSection] = useState(initialSection)
   const [catalog, setCatalog] = useState(null)
+  const loadRef = useRef(null)
+  const mountedRef = useRef(false)
   const [selection, setSelection] = useState(null)
   const [tab, setTab] = useState('tools')
   const [error, setError] = useState('')
@@ -97,30 +112,44 @@ export function SessionSettingsDialog({
   })
   const activePlugin = pickActivePlugin(pluginSettings.plugins, pluginId)
 
-  const load = useCallback(async () => {
-    setError('')
-    try {
-      const capabilityResult = await window.mica.chat.capabilities(nodeId, { sessionId, cwd, role })
-      if (!capabilityResult?.ok) {
-        setError(capabilityResult?.error || '读取能力列表失败')
-        return
-      }
-      setCatalog({
-        skills: Array.isArray(capabilityResult.skills) ? capabilityResult.skills : [],
-        tools: Array.isArray(capabilityResult.tools) ? capabilityResult.tools : [],
-        mcpServers: Array.isArray(capabilityResult.mcpServers) ? capabilityResult.mcpServers : []
-      })
-      setSelection(capabilityResult.selection || EMPTY_SELECTION)
-      selectionRef.current = capabilityResult.selection || EMPTY_SELECTION
-      confirmedRef.current = selectionRef.current
-    } catch (loadError) {
-      setError(formatError(loadError))
+  useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
     }
-  }, [nodeId, sessionId, cwd, role])
+  }, [])
 
   useEffect(() => {
-    void load()
-  }, [load])
+    if (section !== 'capabilities' || catalog || loadRef.current) return
+    setError('')
+    // 分类来回切时复用在途请求；成功后保留目录，失败后再次进入这一节可重试。
+    const request = Promise.resolve().then(() =>
+      window.mica.chat.capabilities(nodeId, { sessionId, cwd, role })
+    )
+    loadRef.current = request
+    void request
+      .then((capabilityResult) => {
+        if (!mountedRef.current) return
+        if (!capabilityResult?.ok) {
+          setError(capabilityResult?.error || '读取能力列表失败')
+          return
+        }
+        setCatalog({
+          skills: Array.isArray(capabilityResult.skills) ? capabilityResult.skills : [],
+          tools: Array.isArray(capabilityResult.tools) ? capabilityResult.tools : [],
+          mcpServers: Array.isArray(capabilityResult.mcpServers) ? capabilityResult.mcpServers : []
+        })
+        setSelection(capabilityResult.selection || EMPTY_SELECTION)
+        selectionRef.current = capabilityResult.selection || EMPTY_SELECTION
+        confirmedRef.current = selectionRef.current
+      })
+      .catch((loadError) => {
+        if (mountedRef.current) setError(formatError(loadError))
+      })
+      .finally(() => {
+        if (loadRef.current === request) loadRef.current = null
+      })
+  }, [section, catalog, nodeId, sessionId, cwd, role])
 
   // 保存串行化：连点不丢弃，攒成「最后一次选择」再发一轮请求。丢弃会让开关停在
   // DOM 已翻转、状态没变的中间态，用户必须再点一次才生效。
@@ -330,7 +359,9 @@ export function SessionSettingsDialog({
             />
           ) : null}
 
-          {error ? <p className="session-settings-error">{error}</p> : null}
+          {section === 'capabilities' && error ? (
+            <p className="session-settings-error">{error}</p>
+          ) : null}
         </div>
       </div>
 

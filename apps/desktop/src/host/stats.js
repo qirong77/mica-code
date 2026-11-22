@@ -29,6 +29,7 @@ import { createSessionParentWriter } from './session-parent'
 import { HEAD_BYTES, readTopLevelString } from './session-file-head'
 import { readSessionUsageJson } from './session-usage-reader'
 import { logger } from './log'
+import { createSessionListVersions } from './session-list-versions.js'
 
 /**
  * mica 的对话 session 快照统计：直接扫描 ~/.mica/sessions/*.json（真实 AI 会话），
@@ -117,12 +118,7 @@ const hasLiveTurnLease = createTurnLeaseProbe({ lockDir })
 const withTurnLease = createTurnLeaseRunner({ lockDir })
 
 let metaInterrupted = { rows: null, key: '', value: null }
-/** 会话列表的版本号：`scanMeta()` 换过引用就 +1，页面据此跳过没变的轮询结果。 */
-let metaEtag = 0
-let metaEtagRows = null
-// 版本号带上这一次进程的身份：宿主重启后计数器从 0 重来，页面手里那个 `"1"` 会与
-// 重启后的第一批结果撞上，于是它继续用旧列表、直到真有下一次变化才刷新。
-const metaEtagSalt = Math.random().toString(36).slice(2, 8)
+const sessionListVersions = createSessionListVersions()
 
 function sessionTitle(sessionId) {
   const file = sessionFile(sessionId)
@@ -436,20 +432,7 @@ export function registerStatsIpc() {
   })
   ipcMain.handle('stats:list-sessions', async (_event, options = {}) => {
     const sessions = await scanMeta({ staleWhileRevalidate: options.refresh !== true })
-    // `scanMeta()` 在内容没变时把同一个数组引用交回来（见它的注释），所以引用变了
-    // 就等于「会话列表真的变了」。用一个单调递增的版本号当 etag 就够了，不必对
-    // 1273 条记录做哈希。
-    if (sessions !== metaEtagRows) {
-      metaEtagRows = sessions
-      metaEtag += 1
-    }
-    const etag = `${metaEtagSalt}:${metaEtag}`
-    // 页面每 10 秒轮询一次、每个窗口各一轮，而会话列表大多数时候没变：这时还把
-    // 全量行（约 250KB）序列化过 IPC，纯粹是白烧。带上 `since` 且版本没变就只回一个标记，
-    // 页面继续用手里那份（引用也保持不变，侧栏不会白刷一遍）。
-    const since = typeof options?.since === 'string' ? options.since : ''
-    if (since && since === etag) return { sessions: [], etag, unchanged: true }
-    return { sessions, etag, unchanged: false }
+    return sessionListVersions(sessions, options)
   })
   // 会话行上的插件标记（标签色点等）：宿主只提供通用读写面，具体有哪些、叫什么由插件决定。
   ipcMain.handle('stats:list-annotations', () => listSessionAnnotations())

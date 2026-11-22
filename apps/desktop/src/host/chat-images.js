@@ -49,17 +49,20 @@ function sniffExtension(bytes) {
 }
 
 /**
- * 落盘一个 `data:image/*;base64,...`（网页端粘贴/上传走这条）。
- * 扩展名以 data URL 声明的类型为准，声明未知时按 magic bytes 兜底，
+ * 落盘网页端上传的原始图片字节。
+ * 扩展名以浏览器声明的类型为准，声明未知时按 magic bytes 兜底，
  * 两者都不认才拒绝——浏览器给的是原始字节，不能一律当 PNG 存。
  */
-export function saveImageDataUrl(dataUrl) {
-  const match = /^data:(image\/[a-z0-9.+-]+);base64,/i.exec(String(dataUrl || ''))
-  if (!match) return { ok: false, error: '缺少图片数据' }
-  const bytes = Buffer.from(String(dataUrl).slice(match[0].length), 'base64')
-  if (!bytes.length) return { ok: false, error: '缺少图片数据' }
-  const extension = EXTENSION_BY_MEDIA_TYPE[match[1].toLowerCase()] || sniffExtension(bytes)
-  if (!extension) return { ok: false, error: `不支持的图片格式：${match[1]}` }
+export function saveUploadedImage(bytes, mediaType = '') {
+  if (!bytes?.length) return { ok: false, error: '缺少图片数据' }
+  const extension =
+    EXTENSION_BY_MEDIA_TYPE[String(mediaType).toLowerCase()] || sniffExtension(bytes)
+  if (!extension)
+    return {
+      ok: false,
+      code: 'unsupported_image',
+      error: `不支持的图片格式：${mediaType || '未知'}，请使用 PNG、JPEG、WebP 或 GIF`
+    }
   return saveImageBytes(bytes, extension)
 }
 

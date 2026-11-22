@@ -12,6 +12,15 @@ const notice = (id, status, command = 'digest:1') => ({
 })
 
 describe('upsertChatNotice', () => {
+  test('does not overwrite another command if a partial page has stale persisted indices', () => {
+    const b = { ...notice('b', 'success', 'b'), noticeIndex: 1, text: 'B must survive' }
+    const pending = { ...notice('a', 'running', 'a'), noticeIndex: 1 }
+    const replaced = upsertChatNotice([b], pending, { replace: true })
+    const finished = upsertChatNotice(replaced, { ...pending, id: 'done', status: 'success', text: 'A done' })
+    expect(finished).toHaveLength(2)
+    expect(finished[0]).toBe(b)
+    expect(finished[1]).toMatchObject({ id: 'a', command: 'a', status: 'success', text: 'A done' })
+  })
   test('clears an old full text when a replayed update contains only a short result', () => {
     const old = { ...notice('saved', 'info'), text: '短版…', fullText: '之前的全文', noticeIndex: 0 }
     const result = restoreChatNotices([old], [], [{
