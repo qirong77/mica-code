@@ -693,6 +693,7 @@ export function summary(api) { return api.currentHost() } // 可选：入口行�
 - 客户端能力：`currentTarget()` 保留完整页面入口（含中转机令牌），`client` 在普通浏览器为 null；
   原生桌面提供 `client.context()` → `{ localHost }`、`client.probe(address)`、`client.open(url)`
   （切到那台运行时的窗口：已开着的直接换显示、页面不重载，没开过的才新开）、
+  `client.openWindow(url)`（每次创建普通独立窗口，加载 HTTP(S) URL；关闭即销毁，不注入客户端桥）、
   `client.local()`（切回本机窗口），
   以及 `client.readData/writeData`（本机同一份插件数据，
   读取版本及写入 `expectedVersion` 与下述数据 API 相同）。数据访问要求本机随包清单声明
@@ -700,7 +701,7 @@ export function summary(api) { return api.currentHost() } // 可选：入口行�
   能力由外壳的隔离 preload 提供固定的 `window.micaClient` 方法，不暴露通用 IPC；主进程逐次核对
   已登记窗口与顶层 frame 的身份及入口来源，不受当前页面所在机器影响。以桥是否存在检测能力，
   不凭 Electron UA 猜测；旧 `mica-client:` fetch 协议不再支持。
-  Connections 显式使用这份本机清单，因此切换机器后保留同一组连接；`access` 继续控制当前运行时。
+  Connections 在有桥的主应用窗口使用这份本机清单；普通 URL 窗口没有桥，使用页面所在运行时的清单。`access` 继续控制当前运行时。
 - 插件数据：`currentHost()`（页面所在运行时的 origin）、`probe(address)`
   （探活一个地址，页面跨源读不到结果，由运行时代查）、`readData()` / `writeData(value, options?)`
   （插件自己的 `$MICA_HOME/plugin-data/<id>/data.json`，宿主不解析结构）、`open(url)`

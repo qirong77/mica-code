@@ -30,7 +30,7 @@ function httpOrigin(value) {
 
 // Plugin data may occupy 256 KiB; leave room for its JSON request envelope.
 const MAX_BODY_BYTES = 256 * 1024 + 4096
-const OPERATIONS = new Set(['context', 'read-data', 'write-data', 'probe', 'open', 'local'])
+const OPERATIONS = new Set(['context', 'read-data', 'write-data', 'probe', 'open', 'open-window', 'local'])
 
 /**
  * Electron-independent IPC handler. Authorization is checked on every invocation.
@@ -39,7 +39,8 @@ const OPERATIONS = new Set(['context', 'read-data', 'write-data', 'probe', 'open
  * conflicts, pass through unchanged. Omitted expectedVersion stays omitted.
  *
  * `open(url, event)` / `local(event)` receive the IPC event because both act on **the window
- * that asked** (switch / return in place), not on some window chosen by the shell.
+ * that asked** (switch / return in place), not on some window chosen by the shell. `open-window`
+ * deliberately creates an independent ordinary window and does not inherit that window state.
  */
 export function createClientContextHandler({
   isAllowedSender,
@@ -49,6 +50,7 @@ export function createClientContextHandler({
   writeData,
   probe,
   open,
+  openWindow,
   local,
   localHost
 }) {
@@ -92,7 +94,8 @@ export function createClientContextHandler({
           }
           result = await probe(body.address)
           break
-        case 'open': {
+        case 'open':
+        case 'open-window': {
           let target
           try {
             target = typeof body.url === 'string' ? new URL(body.url) : null
@@ -102,7 +105,10 @@ export function createClientContextHandler({
           if (!target || !['http:', 'https:'].includes(target.protocol)) {
             throw new Error('Only HTTP and HTTPS URLs are supported')
           }
-          result = await open(body.url, event)
+          result =
+            operation === 'open-window'
+              ? await openWindow(body.url)
+              : await open(body.url, event)
           break
         }
         case 'local':

@@ -224,8 +224,9 @@ function clientFixture(peers: string[]) {
       disk = next;
       return { ok: true };
     }),
-    probe: vi.fn(async (address: string) => ({ ok: true, url: address, access: 'password' })),
+    probe: vi.fn(async (address: string) => ({ ok: true, kind: 'runtime', url: address, access: 'password' })),
     open: vi.fn(async () => {}),
+    openWindow: vi.fn(async () => {}),
     local: vi.fn(async () => {}),
   };
 }
@@ -264,9 +265,10 @@ describe('client connections across runtime windows', () => {
     const client = clientFixture([c, b, a]);
     const { api, render } = await fixture({ current: a, client });
     peerButtons(render())[0]!.props.onClick();
-    await vi.waitFor(() => expect(client.open).toHaveBeenCalledWith(b));
+    await vi.waitFor(() => expect(client.openWindow).toHaveBeenCalledWith(b));
     expect(client.probe).toHaveBeenCalledWith(b);
     expect(client.writeData.mock.calls.at(-1)?.[0].peers[0]?.url).toBe(b);
+    expect(client.open).not.toHaveBeenCalled();
     expect(api.probe).not.toHaveBeenCalled();
     expect(api.writeData).not.toHaveBeenCalled();
   });
@@ -278,7 +280,8 @@ describe('client connections across runtime windows', () => {
     const { render } = await fixture({ current: 'https://relay.example', target: relayA, client });
     expect(peerButtons(render())).toHaveLength(1);
     peerButtons(render())[0]!.props.onClick();
-    await vi.waitFor(() => expect(client.open).toHaveBeenCalledWith(relayB));
+    await vi.waitFor(() => expect(client.openWindow).toHaveBeenCalledWith(relayB));
+    expect(client.open).not.toHaveBeenCalled();
   });
 
   it('does not show a Local return action on the actual local port', async () => {
@@ -289,5 +292,47 @@ describe('client connections across runtime windows', () => {
     expect(
       elements(render()).some((element) => element.type === 'button' && JSON.stringify(element).includes('Local')),
     ).toBe(false);
+  });
+
+  it('opens an ordinary webpage in a disposable desktop window without probing it', async () => {
+    const client = clientFixture([b]);
+    const { render } = await fixture({ current: a, client });
+    const input = elements(render()).find((element) => element.props.placeholder?.includes('网页地址'))!;
+    input.props.onChange('https://www.zhihu.com/');
+    const button = elements(render()).find(
+      (element) =>
+        typeof element.type !== 'string' && element.type?.name === 'Button' && element.props.children === '连接',
+    )!;
+    button.props.onClick();
+
+    await vi.waitFor(() => expect(client.openWindow).toHaveBeenCalledWith('https://www.zhihu.com/'));
+    expect(client.probe).not.toHaveBeenCalled();
+    expect(client.open).not.toHaveBeenCalled();
+  });
+
+  it('opens a probed webpage in a disposable desktop window', async () => {
+    const client = clientFixture([b]);
+    client.probe.mockResolvedValueOnce({
+      ok: true,
+      kind: 'web',
+      url: 'https://127.0.0.1:8788/docs',
+      access: 'password',
+    });
+    const { render } = await fixture({ current: a, client });
+    peerButtons(render())[0]!.props.onClick();
+
+    await vi.waitFor(() => expect(client.openWindow).toHaveBeenCalledWith('https://127.0.0.1:8788/docs'));
+    expect(client.open).not.toHaveBeenCalled();
+    expect(client.writeData).not.toHaveBeenCalled();
+  });
+
+  it('shows a desktop window opening failure instead of silently closing', async () => {
+    const client = clientFixture([b]);
+    client.openWindow.mockRejectedValueOnce(new Error('window unavailable'));
+    const { render } = await fixture({ current: a, client });
+    peerButtons(render())[0]!.props.onClick();
+
+    await vi.waitFor(() => expect(JSON.stringify(render())).toContain('window unavailable'));
+    expect(client.open).not.toHaveBeenCalled();
   });
 });

@@ -4,7 +4,7 @@ import { createClientContextApi } from './client-context.js'
 function fixture() {
   const calls = []
   const bridge = Object.fromEntries(
-    ['context', 'readData', 'writeData', 'probe', 'open', 'local'].map((operation) => [
+    ['context', 'readData', 'writeData', 'probe', 'open', 'openWindow', 'local'].map((operation) => [
       operation,
       async (...args) => {
         calls.push([operation, ...args])
@@ -40,7 +40,12 @@ describe('native client context API', () => {
     const { api, calls } = fixture()
     await api.local()
     await api.open('https://relay.example/?t=machine-b&session=two')
-    expect(calls).toEqual([['local'], ['open', 'https://relay.example/?t=machine-b&session=two']])
+    await api.openWindow('https://relay.example/?t=machine-b&session=two')
+    expect(calls).toEqual([
+      ['local'],
+      ['open', 'https://relay.example/?t=machine-b&session=two'],
+      ['openWindow', 'https://relay.example/?t=machine-b&session=two']
+    ])
   })
 
   test('reports native errors to the card', async () => {

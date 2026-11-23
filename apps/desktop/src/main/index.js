@@ -38,6 +38,7 @@ import { officialPluginManifests } from '@packages/mica-official-plugins/manifes
 import { readDisabledPluginIds, resolvePluginStatePath } from '@packages/mica-plugin/PluginState.js'
 import { createPluginLaunchers } from './plugin-launchers.js'
 import { EDITOR_WINDOW_CHANNEL, createEditorWindows, resolveEditorTarget } from './editor-window.js'
+import { createUrlWindows } from './url-window.js'
 import { attachDevToolsShortcut } from './devtools-shortcut.js'
 import {
   CLIENT_CONTEXT_CHANNEL,
@@ -187,6 +188,17 @@ const editorWindows = createEditorWindows({
   openExternal: (url) => shell.openExternal(url),
   onError: (error) =>
     logger('main').warn('editor-window', { message: error?.message || String(error) })
+})
+
+/** 普通 URL 窗口独立于主窗口集合，不注入客户端桥，关闭即销毁。 */
+const urlWindows = createUrlWindows({
+  BrowserWindow,
+  backgroundColor: windowBackgroundColor,
+  openExternal: (url) => shell.openExternal(url),
+  onError: (error) =>
+    logger('main').warn('url-window', {
+      code: /^ERR_[A-Z0-9_]+$/.test(error?.code || '') ? error.code : 'load_failed'
+    })
 })
 
 /** 打开（或端到前端已有的）编辑器窗口；校验过路径之后才到这里。 */
@@ -1156,6 +1168,11 @@ app.whenReady().then(async () => {
       probe: probeRemoteRuntime,
       // 卡片就在某个窗口里，切过去是换到那台运行时的窗口（页面不重载，没开过的才新开）
       open: (url, event) => switchWindowTo(stateOfSender(event), url),
+      // 普通 URL 窗口不继承运行时窗口身份，也不注入客户端桥。
+      openWindow: (url) => {
+        urlWindows.open(url)
+        return { opened: true }
+      },
       local: (event) => backToLocalPage(stateOfSender(event)),
       localHost: () => localPageUrl
     })
@@ -1259,6 +1276,8 @@ app.on('will-quit', () => {
   pluginLaunchers = null
   // 编辑器窗口是独立窗口（不是「关闭即隐藏」），退出时一并收掉
   editorWindows.close()
+  // 普通 URL 窗口关闭即销毁，应用退出时也一并收掉。
+  urlWindows.close()
   // 受控浏览器窗口是「关闭即隐藏」的，退出时必须显式销毁，否则 app 退不掉
   if (browserHost) void browserHost.close().catch(() => {})
   browserHost = null

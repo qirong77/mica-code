@@ -20,6 +20,7 @@ export function createClientContextApi(pluginId, { bridge = globalThis.window?.m
       ),
     probe: (address) => request('probe', address),
     open: (url) => request('open', url),
+    openWindow: (url) => request('openWindow', url),
     local: () => request('local')
   }
 }

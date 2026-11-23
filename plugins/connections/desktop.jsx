@@ -37,10 +37,9 @@ function isOrdinaryWebAddress(value) {
 /**
  * Connections 的卡片：连接到另一台机器上的 Mica 运行时。
  *
- * 页面由哪台运行时托管就代表在用哪台，所以「切过去」= 切到那台运行时的窗口：桌面外壳里
- * 每台运行时各有一个常驻窗口，切换只是换显示、页面不重载，浏览器里开新标签页。桌面端清单始终
- * 来自启动客户端的本机（`api.client`），切到远程后也是同一份清单；浏览器则从当前运行时
- * 读插件数据。
+ * 页面由哪台运行时托管就代表在用哪台。桌面端连接在普通独立窗口中打开，关闭窗口就销毁；
+ * 浏览器通常打开新标签页，弹窗被拦截时才在当前标签页打开。有客户端桥的页面从启动客户端的
+ * 本机读取清单，没有桥的页面从当前运行时读插件数据。
  *
  * 宿主只提供三样东西（见 `api`）：探活、打开地址、读写这份数据。探活必须由运行时代劳
  * ——页面跨源 `fetch` 读不到结果。
@@ -115,6 +114,15 @@ export default function ConnectionsCard({ api, onClose }) {
   };
   const save = (updater) => void update(updater).catch((caught) => setError(caught?.message || String(caught)));
 
+  // 远程连接在桌面端必须是普通独立窗口，不能复用带客户端身份的运行时窗口；浏览器保持原有打开行为。
+  const openRemote = async (url) => {
+    if (api.client) {
+      await api.client.openWindow(url);
+      return;
+    }
+    await api.open(url);
+  };
+
   const startNoteEdit = (url) => {
     const note = findPeer(storeRef.current, url)?.note ?? '';
     pendingNote.current = { url, note };
@@ -180,14 +188,14 @@ export default function ConnectionsCard({ api, onClose }) {
     setNoteTarget('');
     try {
       if (isOrdinaryWebAddress(target)) {
-        api.open(normalizeEntryAddress(target));
+        await openRemote(normalizeEntryAddress(target));
         onClose?.();
         return;
       }
       const result = await (api.client ?? api).probe(target);
       // 普通网页也可以从这里打开：探活收到的不是 Mica 响应时，不写入 Connections 清单。
       if (result?.kind === 'web' && result.url) {
-        api.open(result.url);
+        await openRemote(result.url);
         onClose?.();
         return;
       }
@@ -203,7 +211,7 @@ export default function ConnectionsCard({ api, onClose }) {
         }
         // 名字取中转机回报的机器名，作为这条记录的默认备注（用户改过就不动）
         await update((previous) => rememberPeer(previous, result.url, result.label));
-        await (api.client ?? api).open(result.url);
+        await openRemote(result.url);
         onClose?.();
         return;
       }
@@ -219,7 +227,7 @@ export default function ConnectionsCard({ api, onClose }) {
       if (!samePeer(result.url, current)) {
         // 探通了才记：地址已经规范成 origin，下次直接从这里点回去
         await update((previous) => rememberPeer(previous, result.url));
-        await (api.client ?? api).open(result.url);
+        await openRemote(result.url);
       }
       onClose?.();
     } catch (caught) {
@@ -268,7 +276,7 @@ export default function ConnectionsCard({ api, onClose }) {
     <div className="mica-config-ui is-embed">
       <h2 className="mb-1 text-sm font-semibold text-fg-max">Connections</h2>
       <p className="mb-2.5 text-[11px] leading-4 text-fg-muted">
-        连接到另一台机器上的 Mica 运行时，文件、终端、会话都来自那台机器（切换会保留各台的页面状态）。
+        连接到另一台机器上的 Mica 运行时，文件、终端、会话都来自那台机器（桌面端打开独立窗口，关闭后窗口即销毁）。
       </p>
 
       <div className="mb-2.5 rounded-sm border border-line bg-overlay-subtle">
