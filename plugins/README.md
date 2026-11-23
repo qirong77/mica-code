@@ -1259,3 +1259,5 @@ sandbox 模块，不对宿主 API 开放 CORS。插件在自己的 `desktop.jsx`
 CDN 版本与 CSP，宿主不写具体插件分支。UI 仍复用宿主共享主题与控件适配，不能借隔离再维护一套皮肤。
 
 插件工具通过 `ctx.tools.register()` 注册时，由 PluginManager 自动注入 `group: { key, label }`（插件 id 与清单名称），宿主传给工具 registry。会话能力与默认能力列表按插件归组，只提供整组开关；工具详情的开关同样作用于整组。
+
+工具行那个 emoji 在注册选项里声明：`ctx.tools.register(tool, { icon: '📅' })`（纯描述工具写 `icon` 字段）。终端与桌面共用这一处声明——桌面读的是注册表的投影 `$MICA_HOME/tool-icons.json`，所以插件声明的图标在历史消息里也一样。不声明就是默认齿轮，界面上跟别的工具分不出来；同一族的工具可以共用一个图标（如 `background_tasks_*` 全是 📋）。

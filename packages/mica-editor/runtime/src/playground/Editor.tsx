@@ -20,7 +20,6 @@ import ComponentPickerPlugin from './plugins/ComponentPickerPlugin';
 import ContextMenuPlugin from './plugins/ContextMenuPlugin';
 import DraggableBlockPlugin from './plugins/DraggableBlockPlugin';
 import EmojiPickerPlugin from './plugins/EmojiPickerPlugin';
-import { ExcalidrawPlugin } from './plugins/ExcalidrawExtension';
 import FloatingLinkEditorPlugin from './plugins/FloatingLinkEditorPlugin';
 import FloatingTextFormatToolbarPlugin from './plugins/FloatingTextFormatToolbarPlugin';
 import { MentionsPlugin } from './plugins/MentionsExtension';
@@ -121,7 +120,6 @@ export default function Editor(): JSX.Element {
             <MarkdownPastePlugin />
             <TableClipboardPlugin />
             <TableFeaturesGate hasFitNestedTables={hasFitNestedTables} />
-            <ExcalidrawPlugin />
             {floatingAnchorElem && (
               <>
                 <CodeFeaturesGate anchorElem={floatingAnchorElem} />

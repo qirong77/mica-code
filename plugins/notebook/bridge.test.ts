@@ -170,16 +170,14 @@ describe('Notebook iframe boundary', () => {
     expect(f.target.postMessage).not.toHaveBeenCalled();
     await f.load('a');
     const loadId = f.last('load').loadId;
-    for (const action of ['style', 'present'] as const) {
-      f.bridge.action('a', action);
-      expect(f.last('action')).toEqual({channel: NOTEBOOK_CHANNEL, token: 'nonce', type: 'action', noteId: 'a', loadId, action});
-    }
+    f.bridge.action('a', 'style');
+    expect(f.last('action')).toEqual({channel: NOTEBOOK_CHANNEL, token: 'nonce', type: 'action', noteId: 'a', loadId, action: 'style'});
     f.bridge.title('a', '新标题');
     expect(f.last('title')).toEqual({channel: NOTEBOOK_CHANNEL, token: 'nonce', type: 'title', noteId: 'a', loadId, title: '新标题'});
     const replacement = f.bridge.load('b', document);
     vi.mocked(f.target.postMessage).mockClear();
     f.bridge.action('a', 'style');
-    f.bridge.action('b', 'present');
+    f.bridge.action('b', 'style');
     expect(f.target.postMessage).not.toHaveBeenCalled();
     f.receive({type: 'loaded', noteId: 'b', requestId: 'load-2', loadId: 'load-2'});
     await replacement;

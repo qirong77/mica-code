@@ -1,45 +1,9 @@
 import { useEffect, useState } from 'react';
 import { Box, Text } from '@anthropic/ink';
+import { micaTools } from '@packages/mica-tools/index.js';
 import type { MicaUiAgentTurnLogItem } from './types.js';
 import { useSpinner } from './primitives/Spin.js';
 import { formatElapsed } from './utils/format.js';
-
-const DEFAULT_TOOL_ICONS = new Map<string, string>(
-  Object.entries({
-    read_file: '📖',
-    read_image: '📷',
-    write_file: '✍️',
-    list_files: '📂',
-    grep_search: '📊',
-    run_shell: '⚡️',
-    background_tasks_start: '⚡️',
-    web_fetch: '🔗',
-    web_search: '🌐',
-    Skill: '✨',
-    apply_patch: '🩹',
-    Agent: '🤖',
-    agent: '🤖',
-    background_tasks_list: '📋',
-    background_tasks_kill: '📋',
-    background_tasks_read: '📋',
-    wait_for: '⏳',
-  }),
-);
-const toolIconRegistrations = new Map<string, Array<{ icon: string }>>();
-
-export function registerToolIcon(name: string, icon: string): () => void {
-  const registration = { icon };
-  const registrations = toolIconRegistrations.get(name) ?? [];
-  registrations.push(registration);
-  toolIconRegistrations.set(name, registrations);
-  return () => {
-    const current = toolIconRegistrations.get(name);
-    if (!current) return;
-    const index = current.indexOf(registration);
-    if (index >= 0) current.splice(index, 1);
-    if (current.length === 0) toolIconRegistrations.delete(name);
-  };
-}
 
 /**
  * 思考正文里的空行整段删掉。桌面端同一规则见 `chat-tool-views.jsx` 的
@@ -126,9 +90,14 @@ function singleLine(text: string): string {
   return text.replace(/\s+/g, ' ').trim();
 }
 
+/**
+ * 工具行左侧的 emoji。
+ *
+ * 只有一份事实来源：注册表里工具自己的声明（内置工具类的 `icon`、插件注册时的
+ * `{ icon }`）。这里不再留静态表——表与注册表漂移的时候，缺的那一行就退化成默认齿轮。
+ */
 export function getToolIcon(name: string): string {
-  if (name.startsWith('mcp__')) return '🔌';
-  return toolIconRegistrations.get(name)?.at(-1)?.icon ?? DEFAULT_TOOL_ICONS.get(name) ?? '⚙️';
+  return micaTools.getIcon(name);
 }
 
 function useNow(interval = 100): number {

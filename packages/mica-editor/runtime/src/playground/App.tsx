@@ -62,11 +62,9 @@ import {CardExtension} from './plugins/CardExtension';
 import {CodeHighlightExtension} from './plugins/CodeHighlightExtension';
 import {CollapsibleExtension} from './plugins/CollapsibleExtension';
 import {ComponentExtension} from './plugins/ComponentExtension';
-import {DateTimeExtension} from './plugins/DateTimeExtension';
 import {DragDropPasteExtension} from './plugins/DragDropPasteExtension';
 import {EmojisExtension} from './plugins/EmojisExtension';
 import {EquationsExtension} from './plugins/EquationsExtension';
-import {ExcalidrawExtension} from './plugins/ExcalidrawExtension';
 import {FigmaExtension} from './plugins/FigmaExtension';
 import {ReactFindReplaceExtension} from './plugins/FindReplaceExtension';
 import {ImagesExtension} from './plugins/ImagesExtension';
@@ -132,7 +130,6 @@ const PlaygroundRichTextExtension = defineExtension({
     PollExtension,
     EquationsExtension,
     LayoutExtension,
-    ExcalidrawExtension,
     CardExtension,
     ReactReviewExtension,
     ReactFindReplaceExtension,
@@ -157,7 +154,6 @@ const AppExtension = defineExtension({
     EditorModeAnnounceExtension,
     KeywordsExtension,
     HashtagExtension,
-    DateTimeExtension,
     MaxLengthExtension,
     SpecialTextExtension,
     DragDropPasteExtension,

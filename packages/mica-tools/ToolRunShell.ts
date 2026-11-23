@@ -30,6 +30,8 @@ const DESCRIPTION = [
 ].join('\n');
 
 export class ToolRunShell extends MicaTool {
+  icon = '⚡️';
+
   constructor() {
     super('run_shell', DESCRIPTION, {
       type: 'object' as const,

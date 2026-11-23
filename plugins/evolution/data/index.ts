@@ -7,6 +7,7 @@ import { memoryScopes } from './memory.js';
 import { notebookComments } from './notebook-comments.js';
 import { notebookComponentBlocks } from './notebook-component-blocks.js';
 import { notebookMcpData } from './notebook-mcp.js';
+import { notebookRemovedFeatures } from './notebook-removed-features.js';
 import { pluginEventIdentity } from './plugin-events.js';
 import { pluginHealthIssues, pluginStartupHealth } from './plugin-health.js';
 import { pluginHealthRuntimeHistory } from './plugin-health-runtime.js';
@@ -37,6 +38,7 @@ export const DATA_MIGRATIONS: DataMigration[] = [
   subagentTaskFiles,
   notebookComments,
   notebookComponentBlocks,
+  notebookRemovedFeatures,
   notebookMcpData,
   schedulePlansStages,
   promptContributions,

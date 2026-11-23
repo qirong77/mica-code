@@ -289,12 +289,12 @@ export class Application {
             const registered = micaTools.registerRuntime(tool, {
               primaryAgentOnly: options.primaryAgentOnly,
               group: options.group,
+              // 图标跟着工具实例走：终端直接读注册表，桌面读它的投影（见 publishIcons）。
+              icon: options.icon,
             });
-            const unregisterIcon = options.icon ? micaUi.registerToolIcon(registered.name, options.icon) : null;
             return {
               dispose: () => {
                 micaTools.unregisterRuntime(registered);
-                unregisterIcon?.();
               },
             };
           },

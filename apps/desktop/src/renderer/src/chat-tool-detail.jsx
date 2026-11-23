@@ -1,6 +1,6 @@
 import { ArcoAction } from '@mica-config-ui/web'
 import { IconCopy, IconLayoutColumns } from '@tabler/icons-react'
-import { toolIcon } from '@packages/mica-web-shared'
+import { toolIcon, useToolIcons } from './tool-icons'
 import { copyText } from './transport'
 import { ModalMeta, ModalSection, ModalShell } from './chat-modal'
 import { CodeView, displayText } from './CodeView'
@@ -93,6 +93,7 @@ function SectionActions({ text, language, onOpenInEditor, onClose, documentId, t
 }
 
 export function ToolDetailDialog({ tool, onOpenInEditor, onClose, nested = false }) {
+  const icons = useToolIcons()
   if (!tool) return null
   const output = toolOutput(tool)
   const outputRaw = output ? output.lines.join('\n') : ''
@@ -109,7 +110,7 @@ export function ToolDetailDialog({ tool, onOpenInEditor, onClose, nested = false
   return (
     <ModalShell
       title={toolDisplayName(tool)}
-      icon={toolIcon(tool.tool)}
+      icon={toolIcon(tool.tool, icons)}
       subtitle={summary || null}
       className="chat-modal-tool"
       nested={nested}

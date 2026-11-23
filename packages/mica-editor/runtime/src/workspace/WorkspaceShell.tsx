@@ -8,7 +8,6 @@ import './notebook-document.css';
 import {useNotebookSession} from './NotebookBridge';
 import NotebookBlockEditing from './NotebookBlockEditing';
 import NotebookDocumentStyle from './NotebookDocumentStyle';
-import NotebookPresentation from './NotebookPresentation';
 import {countCharacters} from './storage';
 
 export default function WorkspaceShell({children}: {children: ReactNode}) {
@@ -32,7 +31,6 @@ export default function WorkspaceShell({children}: {children: ReactNode}) {
         {children}
         <NotebookBlockEditing />
         <NotebookDocumentStyle />
-        <NotebookPresentation />
         <footer className="document-statusbar">
           <span role="status">{characters.toLocaleString()} 字</span>
         </footer>

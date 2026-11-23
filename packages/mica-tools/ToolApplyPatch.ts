@@ -58,6 +58,8 @@ type AppliedChange =
 type LoadedFile = string | null;
 
 export class ToolApplyPatch extends MicaTool {
+  icon = '🩹';
+
   constructor() {
     super('apply_patch', '应用 Codex 风格的文件补丁，支持 Add File、Update File、Delete File 和 Move to。', {
       type: 'object' as const,

@@ -43,7 +43,6 @@ export class NotebookSession {
   private active = true;
   private loaded = false;
   private frozen = false;
-  private presenting = false;
   private frozenBeforeEditable: boolean | null = null;
   private navigateOutline: ((navigation: NotebookNavigation) => void) | null = null;
   private titleNeedsAlignment: boolean;
@@ -121,14 +120,9 @@ export class NotebookSession {
     this.syncEditability();
   }
 
-  setPresenting(presenting: boolean): void {
-    this.presenting = presenting;
-    this.syncEditability();
-  }
-
   private syncEditability(): void {
     if (!this.editor) return;
-    if (this.frozen || this.presenting) {
+    if (this.frozen) {
       // Repeated freezes must not replace the user's pre-existing read-only
       // state. Nested composers keep their own parent editability binding;
       // DOM/input guards also cover captions and native inputs.

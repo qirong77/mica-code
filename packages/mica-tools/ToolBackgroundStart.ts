@@ -55,6 +55,8 @@ function backgroundCommand(command: string, id: string): string {
 }
 
 export class ToolBackgroundStart extends MicaTool {
+  icon = '⚡️';
+
   constructor() {
     super(
       'background_tasks_start',

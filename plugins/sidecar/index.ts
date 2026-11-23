@@ -159,7 +159,8 @@ const plugin: MicaPlugin = {
       },
     });
     // primaryAgentOnly：子代理不该再派生会话，否则会变成没人收的进程树。
-    const options = { primaryAgentOnly: true } as const;
+    // 图标整族一个（同 background_tasks_*）：它们说的是同一件事——一条被派出去的子会话。
+    const options = { icon: '🧵', primaryAgentOnly: true } as const;
     const tools = [
       ctx.tools.register(new SidecarSpawnTool(registry), options),
       ctx.tools.register(new SidecarAttachTool(registry), options),

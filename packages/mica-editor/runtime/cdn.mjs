@@ -32,10 +32,6 @@ Object.assign(cdnImports, {
   '@floating-ui/react': esm('@floating-ui/react', '0.27.19'),
   '@atlaskit/drag-and-drop-indicator/box': esm('@atlaskit/drag-and-drop-indicator', '0.11.1', '/box'),
   '@atlaskit/pragmatic-drag-and-drop/element/adapter': esm('@atlaskit/pragmatic-drag-and-drop', '1.7.7', '/element/adapter'),
-  // 使用上游原生 ESM，避开转换服务对其分片依赖的错误重写。
-  '@excalidraw/excalidraw': 'https://cdn.jsdelivr.net/npm/@excalidraw/excalidraw@0.18.1/dist/prod/index.js',
-  'date-fns': esm('date-fns', '4.4.0'),
-  'react-day-picker': esm('react-day-picker', '9.14.0'),
   katex: esm('katex', '0.16.10'),
   'lodash-es': esm('lodash-es', '4.18.1'),
   prettier: esm('prettier', '3.6.2'),
@@ -49,15 +45,6 @@ Object.assign(cdnImports, {
   prismjs: esm('prismjs', '1.30.0'),
   'lib0/': 'https://esm.sh/lib0@0.2.114/'
 })
-const drawingImports = JSON.parse(readFileSync(new URL('./excalidraw-imports.json', import.meta.url), 'utf8'))
-for (const [specifier, entry] of Object.entries(drawingImports)) {
-  cdnImports[specifier] = esm(entry.package, entry.version, entry.subpath, 'react,react-dom,jotai')
-}
-cdnImports['jotai/vanilla'] = esm('jotai', '2.11.0', '/vanilla', 'react,react-dom,jotai')
-cdnImports['jotai/react'] = esm('jotai', '2.11.0', '/react', 'react,react-dom,jotai')
-cdnImports['jotai/react/utils'] = esm('jotai', '2.11.0', '/react/utils', 'react,react-dom,jotai')
-cdnImports['jotai/utils'] = esm('jotai', '2.11.0', '/utils', 'react,react-dom,jotai')
-cdnImports['jotai/vanilla/utils'] = esm('jotai', '2.11.0', '/vanilla/utils', 'react,react-dom,jotai')
 for (const name of ['babel', 'html', 'markdown', 'postcss', 'typescript']) {
   cdnImports[`prettier/parser-${name}`] = esm('prettier', '3.6.2', `/plugins/${name}`)
 }

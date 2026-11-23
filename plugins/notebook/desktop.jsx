@@ -7,7 +7,6 @@ import {
   ChevronsDownUp,
   ChevronsUpDown,
   Copy,
-  Download,
   FilePlus2,
   Focus,
   FolderInput,
@@ -19,7 +18,6 @@ import {
   Pencil,
   Plug,
   Plus,
-  Presentation,
   RefreshCw,
   Search,
   ShieldCheck,
@@ -1253,20 +1251,6 @@ export default function NotebookPage({ api }) {
     setMenu({ source: 'row', id: node.id });
     edit(node);
   };
-  const downloadActive = async () => {
-    setMenu(null);
-    const note = active;
-    if (!note) return;
-    if (ready.current && loadedNote.current === note.id) {
-      try {
-        const value = await bridge.current.flush();
-        acceptChange(value.noteId, value.document);
-      } catch (cause) {
-        setError(message(cause));
-      }
-    }
-    if (current.current) download(current.current.document, note.title);
-  };
   const runAction = (node, action) => {
     if (action === 'note' || action === 'folder') {
       setMenu(null);
@@ -2018,15 +2002,6 @@ export default function NotebookPage({ api }) {
                     <>
                       <Button
                         variant="ghost"
-                        icon={<Presentation size={16} strokeWidth={1.6} />}
-                        title="演示"
-                        aria-label="演示"
-                        disabled={busy || frameState !== 'ready'}
-                        onMouseDown={(event) => event.preventDefault()}
-                        onClick={() => bridge.current?.action(active.id, 'present')}
-                      />
-                      <Button
-                        variant="ghost"
                         icon={<SlidersHorizontal size={16} strokeWidth={1.6} />}
                         title="样式设置"
                         aria-label="样式设置"
@@ -2052,12 +2027,6 @@ export default function NotebookPage({ api }) {
                         position="bl"
                         extraRows={
                           <>
-                            <MenuRow
-                              action="download"
-                              label="下载 JSON"
-                              Icon={Download}
-                              onSelect={() => void downloadActive()}
-                            />
                             <MenuRow
                               action="focus"
                               label={focused ? '退出专注' : '专注写作'}

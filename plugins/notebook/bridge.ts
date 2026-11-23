@@ -193,7 +193,7 @@ export function createEditorBridge(options: {
     navigate(noteId: string, target: { heading?: string; block?: 'top' | keyof NotebookOutline['blocks'] }) {
       if (active?.loaded && active.noteId === noteId) send('navigate', { noteId, loadId: active.loadId, ...target });
     },
-    action(noteId: string, action: 'style' | 'present') {
+    action(noteId: string, action: 'style') {
       if (active?.loaded && active.noteId === noteId) send('action', { noteId, loadId: active.loadId, action });
     },
     title(noteId: string, title: string) {

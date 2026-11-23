@@ -41,6 +41,18 @@ export type ToolScheduleOptions = {
   overlappable?: boolean;
 };
 
+export type ToolDisplayOptions = {
+  /**
+   * 工具行左侧的 emoji，终端与桌面共用同一个（`toolIcon()` 只查这个声明）。
+   *
+   * 内置工具在自己的类里直接写 `icon = '📖'`；插件在 `ctx.tools.register(tool, { icon })`
+   * 里给。不声明就是 `DEFAULT_TOOL_ICON`，所以新增工具时别忘了一起加上。
+   */
+  icon?: string;
+};
+
+export type ToolOptions = ToolSafetyOptions & ToolScheduleOptions & ToolDisplayOptions;
+
 export abstract class MicaTool {
   name: string;
   description: string;
@@ -49,12 +61,14 @@ export abstract class MicaTool {
   source: ToolSource;
   mcpServer?: string;
   overlappable: boolean;
+  /** 工具行左侧的 emoji：只有一处声明（工具自己或注册选项），界面不再另存一张表。 */
+  icon?: string;
 
   constructor(
     name: string,
     description: string,
     input_schema: ToolInputSchema,
-    options: ToolSafetyOptions & ToolScheduleOptions = {},
+    options: ToolOptions = {},
   ) {
     this.name = name;
     this.description = description;
@@ -63,6 +77,7 @@ export abstract class MicaTool {
     this.source = options.source ?? 'builtin';
     this.mcpServer = options.mcpServer;
     this.overlappable = options.overlappable ?? false;
+    this.icon = options.icon;
   }
 
   validateInput(input: unknown): ValidationResult {

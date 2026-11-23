@@ -25,10 +25,8 @@ import {CollapsibleTitleNode} from '../plugins/CollapsibleExtension/CollapsibleT
 import {PullQuoteNode} from '../plugins/PullQuoteExtension/PullQuoteNode';
 import {ReviewNode} from '../plugins/ReviewExtension/ReviewNode';
 import {ComponentNode} from './ComponentNode';
-import {DateTimeNode} from './DateTimeNode/DateTimeNode';
 import {EmojiNode} from './EmojiNode';
 import {EquationNode} from './EquationNode';
-import {ExcalidrawNode} from './ExcalidrawNode';
 import {FigmaNode} from './FigmaNode';
 import {HtmlNode} from './HtmlNode';
 import {ImageNode} from './ImageNode';
@@ -63,7 +61,6 @@ const PlaygroundNodes: Klass<LexicalNode>[] = [
   ImageNode,
   MentionNode,
   EmojiNode,
-  ExcalidrawNode,
   EquationNode,
   KeywordNode,
   HorizontalRuleNode,
@@ -78,7 +75,6 @@ const PlaygroundNodes: Klass<LexicalNode>[] = [
   LayoutContainerNode,
   LayoutItemNode,
   SpecialTextNode,
-  DateTimeNode,
   CardNode,
   SlotContainerNode,
   ReviewNode,

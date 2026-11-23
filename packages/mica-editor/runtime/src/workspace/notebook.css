@@ -249,10 +249,10 @@ body.mica-arco-theme {
 .editor-modal .KatexEquationAlterer_textArea { font-family: var(--font-mono, ui-monospace, monospace); }
 .settings-intro, .settings-options .editor-setting label, .workspace-outline .outline-link { font-size: 12px; }
 .settings-options .editor-setting { padding: 10px 0; border-color: var(--color-line-soft); }
-.Modal__overlay, .ExcalidrawModal__overlay { background: var(--color-mask-bg); }
-.Modal__modal, .ExcalidrawModal__modal { color: var(--color-fg-soft); background: var(--color-panel); box-shadow: var(--notebook-popup-shadow); }
+.Modal__overlay { background: var(--color-mask-bg); }
+.Modal__modal { color: var(--color-fg-soft); background: var(--color-panel); box-shadow: var(--notebook-popup-shadow); }
 .Modal__title { color: var(--color-fg-strong); border-color: var(--color-line); }
-.Modal__closeButton, .ExcalidrawModal__actions button { color: var(--color-fg-soft); background: var(--color-panel-hi); }
+.Modal__closeButton { color: var(--color-fg-soft); background: var(--color-panel-hi); }
 .Modal__closeButton:hover { background: var(--color-active); }
 .Modal__modal :focus { outline-color: var(--color-accent); }
 .color-picker-wrapper { color: var(--color-fg-soft); font-size: 12px; }

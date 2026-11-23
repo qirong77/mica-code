@@ -26,7 +26,7 @@ export const MAX_PEERS = 8;
 /** 备注只是这条记录认得出来的名字，限长免得把卡片撑变形。 */
 export const MAX_PEER_NOTE_LENGTH = 40;
 
-export type PeerEntry = { url: string; note: string };
+export type PeerEntry = { url: string; note: string; kind?: 'web' };
 export type PeerStore = { version: number; peers: PeerEntry[] };
 
 export function emptyPeerStore(): PeerStore {
@@ -63,6 +63,10 @@ export function samePeer(a: unknown, b: unknown): boolean {
   const right = relayKey(b);
   if (left && right) return left === right;
   if (left || right) return false;
+  // 普通网页是具体的入口地址，不是 Mica 运行时；同一站点的不同路径也应各自留在清单里。
+  const leftWeb = webEntryAddress(a);
+  const rightWeb = webEntryAddress(b);
+  if (leftWeb || rightWeb) return leftWeb !== null && leftWeb === rightWeb;
   return isSameRuntime(a, b);
 }
 
@@ -80,7 +84,7 @@ export function normalizePeerStore(raw: unknown): PeerStore {
   for (const value of raw.peers) {
     const entry = asPeerEntry(value);
     if (!entry) continue;
-    if (peers.some((existing) => samePeer(existing.url, entry.url))) continue;
+    if (peers.some((existing) => samePeerEntry(existing, entry))) continue;
     peers.push(entry);
     if (peers.length >= MAX_PEERS) break;
   }
@@ -99,17 +103,17 @@ export function normalizePeerNote(value: unknown): string {
  * 备注属于这台机器（「办公室的 Mac」不会因为又连了一次就不成立），所以重新连接只调整
  * 位置。地址非法时原样返回 store，调用方照旧渲染。
  */
-export function rememberPeer(store: PeerStore, url: unknown, label?: unknown): PeerStore {
-  const entry = asPeerEntry({ url, note: '' });
+export function rememberPeer(store: PeerStore, url: unknown, label?: unknown, kind?: 'web'): PeerStore {
+  const entry = asPeerEntry({ url, note: '', kind });
   if (!entry) return store;
   const current = normalizePeerStore(store);
-  const existing = current.peers.find((peer) => samePeer(peer.url, entry.url));
+  const existing = current.peers.find((peer) => samePeerEntry(peer, entry));
   // 探活带回来的名字（中转机那台机器的 `label`）只作为「还没有备注」时的默认值：
   // 用户自己起的备注永远优先，重新连接也不会被覆盖。
   const fallback = normalizePeerNote(label);
   const peers = [
-    { url: entry.url, note: existing?.note || fallback },
-    ...current.peers.filter((peer) => !samePeer(peer.url, entry.url)),
+    { url: entry.url, note: existing?.note || fallback, ...(entry.kind ? { kind: entry.kind } : {}) },
+    ...current.peers.filter((peer) => !samePeerEntry(peer, entry)),
   ];
   return { version: PEER_STORE_VERSION, peers: peers.slice(0, MAX_PEERS) };
 }
@@ -123,10 +127,10 @@ export function setPeerNote(store: PeerStore, url: unknown, note: unknown): Peer
   const target = normalizeEntryAddress(url);
   if (!target) return store;
   const peers = normalizePeerStore(store).peers;
-  const index = peers.findIndex((peer) => samePeer(peer.url, target));
+  const index = peers.findIndex((peer) => samePeerEntry(peer, { url: target, note: '' }));
   if (index < 0) return store;
   const next = [...peers];
-  next[index] = { url: peers[index]!.url, note: normalizePeerNote(note) };
+  next[index] = { ...peers[index]!, note: normalizePeerNote(note) };
   return { version: PEER_STORE_VERSION, peers: next };
 }
 
@@ -134,7 +138,7 @@ export function setPeerNote(store: PeerStore, url: unknown, note: unknown): Peer
 export function findPeer(store: PeerStore, url: unknown): PeerEntry | null {
   const target = normalizeEntryAddress(url);
   if (!target) return null;
-  return normalizePeerStore(store).peers.find((peer) => samePeer(peer.url, target)) ?? null;
+  return normalizePeerStore(store).peers.find((peer) => samePeerEntry(peer, { url: target, note: '' })) ?? null;
 }
 
 /**
@@ -164,10 +168,54 @@ export function peerLabel(peer: PeerEntry): string {
 
 function asPeerEntry(value: unknown): PeerEntry | null {
   if (!isRecord(value)) return null;
-  // 中转机链接必须原样保留（`t` 与 `session` 都在查询串里），直连地址才补 8787 丢路径
-  const url = relayTokenOf(value.url) ? normalizeEntryAddress(value.url) : normalizeRuntimeAddress(value.url);
+  // 中转机和普通网页都是「要打开的入口」，必须原样保留路径与查询串；直连运行时才补 8787 丢路径。
+  const web = value.kind === 'web';
+  const url = web
+    ? normalizeEntryAddress(value.url)
+    : relayTokenOf(value.url)
+      ? normalizeEntryAddress(value.url)
+      : normalizeRuntimeAddress(value.url);
   if (!url) return null;
-  return { url, note: normalizePeerNote(value.note) };
+  const kind = web ? 'web' : undefined;
+  return { url, note: normalizePeerNote(value.note), ...(kind ? { kind } : {}) };
+}
+
+function samePeerEntry(a: PeerEntry, b: PeerEntry): boolean {
+  if (a.kind === 'web') return normalizeEntryAddress(a.url) === normalizeEntryAddress(b.url);
+  if (b.kind === 'web') return false;
+  return samePeer(a.url, b.url);
+}
+
+/**
+ * 普通网页的清单地址。带路径/查询的地址本身就是网页入口；根地址则用外部域名且没有显式
+ * 端口这一特征识别。真正写入网页历史时会带 `kind: 'web'`，这样 localhost 等带端口的网页
+ * 也能保留完整入口；没有 kind 的旧项仍按 Mica 运行时地址解析。
+ */
+function webEntryAddress(value: unknown): string | null {
+  if (relayTokenOf(value)) return null;
+  const entry = normalizeEntryAddress(value);
+  if (!entry) return null;
+  let url: URL;
+  try {
+    url = new URL(entry);
+  } catch {
+    return null;
+  }
+  const host = url.hostname.replace(/^\[|\]$/g, '').toLowerCase();
+  const internal =
+    host === 'localhost' ||
+    host === '127.0.0.1' ||
+    host === '::1' ||
+    host.endsWith('.local') ||
+    /^\d{1,3}(\.\d{1,3}){3}$/.test(host);
+  const authority = String(value ?? '').trim().replace(/^[a-z][a-z0-9+.-]*:\/\//i, '').split(/[/?#]/)[0] ?? '';
+  const explicitPort = /:\d+$/.test(authority) || host.includes(':') && authority.includes(']');
+  // 带端口的地址以及内网主机名仍按 Mica 运行时处理，即使入口后面带了路径；探活返回的
+  // 普通网页才会把这类地址保留下来。否则旧的运行时链接 `mac.local:9102/files` 会被误当成
+  // 网页，导致同一台机器在清单里出现两条记录。
+  if (url.pathname !== '/' || url.search || url.hash) return entry;
+  if (!internal && !explicitPort) return entry;
+  return null;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

@@ -10,6 +10,8 @@ const GREP_TIMEOUT_MS = 20_000;
 const DEFAULT_HEAD_LIMIT = 200;
 
 export class ToolGrepSearch extends MicaTool {
+  icon = '📊';
+
   constructor() {
     super(
       'grep_search',

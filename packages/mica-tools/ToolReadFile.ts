@@ -47,6 +47,8 @@ async function readLineRange(
 }
 
 export class ToolReadFile extends MicaTool {
+  icon = '📖';
+
   constructor() {
     super(
       'read_file',

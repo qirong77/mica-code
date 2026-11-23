@@ -33,11 +33,11 @@ describe('optional editor styles', () => {
     } as unknown as Document;
     vi.stubGlobal('document', fakeDocument);
 
-    ensureEditorOptionalStyle('datePicker');
-    ensureEditorOptionalStyle('datePicker');
+    ensureEditorOptionalStyle('katex');
+    ensureEditorOptionalStyle('katex');
 
     expect(links).toHaveLength(1);
-    expect(links[0].dataset.micaEditorOptionalStyle).toBe('datePicker');
-    expect(links[0].href).toContain('react-day-picker@9.14.0/src/style.css');
+    expect(links[0].dataset.micaEditorOptionalStyle).toBe('katex');
+    expect(links[0].href).toContain('katex@0.16.10/dist/katex.css');
   });
 });

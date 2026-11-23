@@ -18,7 +18,6 @@ import zhCN from '@arco-design/web-react/es/locale/zh-CN';
 import {createRoot} from 'react-dom/client';
 
 import App from './App';
-import './setupEnv';
 
 createRoot(document.getElementById('root') as HTMLElement).render(
   <React.StrictMode>

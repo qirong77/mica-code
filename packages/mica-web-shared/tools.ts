@@ -1,34 +1,22 @@
 import { normalizeToolName } from '@packages/mica-common/toolNames.js';
+import { toolIcon as resolveToolIcon } from '@packages/mica-common/toolIcons.js';
 
 // Tool display vocabulary shared by the desktop renderer and runtime.
 // Pure functions only, matching the desktop ChatView tool-row grammar so both
 // UIs show the same icon/label for the same tool.
 
-const TOOL_ICONS: Record<string, string> = {
-  read_file: '📖',
-  read_image: '📷',
-  write_file: '✍️',
-  apply_patch: '🩹',
-  list_files: '📂',
-  grep_search: '📊',
-  run_shell: '⚡️',
-  background_tasks_start: '⚡️',
-  web_fetch: '🔗',
-  web_search: '🌐',
-  skill: '✨',
-  agent: '🤖',
-  todo_write: '📝',
-  session_notes: '🗒️',
-  background_tasks_list: '📋',
-  background_tasks_kill: '📋',
-  background_tasks_read: '📋',
-  wait_for: '⏳',
-};
-
-export function toolIcon(toolName: string | null | undefined): string {
-  const name = normalizeToolName(toolName);
-  if (name.startsWith('mcp__')) return '🔌';
-  return TOOL_ICONS[name] || '⚙';
+/**
+ * 工具行左侧的 emoji。
+ *
+ * `icons` 是宿主给的「已注册工具的图标」投影（`$MICA_HOME/tool-icons.json`，
+ * 桌面经 `chat:tool-icons` 拿到）。**这里不存静态表**：emoji 的事实来源是工具自己的
+ * 声明，抄一份到界面就会漂移，缺的那些行只能显示默认齿轮。
+ */
+export function toolIcon(
+  toolName: string | null | undefined,
+  icons?: Record<string, string> | null,
+): string {
+  return resolveToolIcon(toolName, (name) => icons?.[name]);
 }
 
 const TOOL_LABELS: Record<string, string> = {

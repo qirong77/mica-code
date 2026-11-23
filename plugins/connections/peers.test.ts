@@ -61,6 +61,20 @@ describe('normalizePeerStore', () => {
     });
   });
 
+  it('保留普通网页的完整入口地址，不把它误归一成 Mica 运行时', () => {
+    expect(
+      store([
+        { url: 'https://www.zhihu.com/', kind: 'web' },
+        { url: 'https://www.zhihu.com/question/123?source=home#answer', kind: 'web' },
+        { url: 'http://10.0.0.2:8787/files' },
+      ]).peers,
+    ).toEqual([
+      { url: 'https://www.zhihu.com/', note: '', kind: 'web' },
+      { url: 'https://www.zhihu.com/question/123?source=home#answer', note: '', kind: 'web' },
+      { url: 'http://10.0.0.2:8787', note: '' },
+    ]);
+  });
+
   it('备注折叠空白、去首尾并限长', () => {
     const [peer] = store([{ url: 'http://10.0.0.2:9102', note: `  办公室\n 的   Mac ${'x'.repeat(80)}` }]).peers;
     expect(peer?.note.startsWith('办公室 的 Mac')).toBe(true);

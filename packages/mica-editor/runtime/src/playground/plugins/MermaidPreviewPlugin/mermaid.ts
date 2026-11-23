@@ -4,7 +4,7 @@ import type {Mermaid, MermaidConfig} from 'mermaid';
 import {sanitizeMermaidSVG} from './sanitizeSVG';
 import type {DiagramSize} from './diagramViewport';
 
-// Native browser ESM, just like Excalidraw. These packages never enter Vite's
+// Native browser ESM. These packages never enter Vite's
 // bundle. Keep the versions aligned with the existing transitive dependencies.
 export const MERMAID_CDN_URL = 'https://cdn.jsdelivr.net/npm/mermaid@11.17.2/dist/mermaid.esm.min.mjs';
 export const DOMPURIFY_CDN_URL = 'https://cdn.jsdelivr.net/npm/dompurify@3.4.17/dist/purify.es.mjs';

@@ -20,6 +20,9 @@ import { ToolReadImage } from './ToolReadImage.js';
 import { ToolWaitFor } from './ToolWaitFor.js';
 import type { ToolExecuteCallbacks, ToolInput, ToolSource } from './MicaTool.js';
 import { RUNTIME_TOOL_DESCRIPTORS } from './runtimeToolDescriptors.js';
+import { toolIcon } from '@packages/mica-common/toolIcons.js';
+import type { ToolIconCatalog } from './toolIconCatalog.js';
+import { writeToolIconCatalog } from './toolIconCatalog.js';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { resolveMicaHome } from '@packages/mica-config/brand.js';
@@ -29,6 +32,13 @@ export type ToolFilter = (name: string) => boolean;
 export type RuntimeToolRegistrationOptions = {
   primaryAgentOnly?: boolean;
   group?: ToolGroupEntry;
+  /**
+   * 工具行左侧的 emoji（`ctx.tools.register(tool, { icon })`）。
+   *
+   * 内置工具在自己的类里写死 `icon`；插件工具只有这一处能声明，声明完就跟着工具实例
+   * 走——终端直接读注册表，桌面读的是这份注册表的投影（见 `toolIconCatalog.ts`）。
+   */
+  icon?: string;
 };
 
 export type ToolCatalogEntry = {
@@ -44,6 +54,8 @@ export type ToolCatalogEntry = {
   parameters: ToolParameterEntry[];
   /** 所属插件；内核工具可按工具族分组，`null` 表示独立工具。 */
   group: ToolGroupEntry | null;
+  /** 工具行左侧的 emoji；没声明的工具是 `DEFAULT_TOOL_ICON`。 */
+  icon: string;
 };
 
 export type ToolGroupEntry = {
@@ -127,6 +139,13 @@ let runtimeTools: MicaTool[] = [];
 let runtimeToolFallback = true;
 const runtimeToolOptions = new WeakMap<MicaTool, RuntimeToolRegistrationOptions>();
 const executionObservers = new Set<ToolExecutionObserver>();
+/**
+ * 投影目录：宿主装配完插件后调 `publishToolIcons()` 一次性打开，此后工具增减都会
+ * 自动重写 `tool-icons.json`（同一 tick 内合并成一次）。没打开的宿主（配置页、测试）
+ * 一行业务都不做——注册表不背「到处写盘」的责任。
+ */
+let iconCatalogDir: string | null = null;
+let iconCatalogQueued = false;
 
 export function observeToolExecution(observer: ToolExecutionObserver): Disposable {
   executionObservers.add(observer);
@@ -157,8 +176,11 @@ export function registerRuntimeTool(
   options: RuntimeToolRegistrationOptions = {},
 ): MicaTool {
   const registered = toMicaTool(tool);
+  // 图标只在这里落一次：注册选项优先于工具自己写的声明（插件可以覆盖内置工具的 emoji）。
+  if (options.icon) registered.icon = options.icon;
   runtimeTools = [...runtimeTools.filter((entry) => entry !== registered), registered];
   runtimeToolOptions.set(registered, options);
+  scheduleIconCatalogSync();
   return registered;
 }
 
@@ -167,15 +189,64 @@ export function unregisterRuntimeTool(nameOrTool: string | MicaTool): void {
     typeof nameOrTool === 'string'
       ? runtimeTools.filter((tool) => tool.name !== nameOrTool)
       : runtimeTools.filter((tool) => tool !== nameOrTool);
+  scheduleIconCatalogSync();
 }
 
 export function unregisterRuntimeTools(): void {
   runtimeTools = [];
+  scheduleIconCatalogSync();
 }
 
 /** 装配过插件的宿主关掉静态兜底（见 `runtimeToolFallback`）。 */
 export function setRuntimeToolFallback(enabled: boolean): void {
   runtimeToolFallback = enabled;
+}
+
+/**
+ * 工具行图标：工具自己声明的那一个（见 `MicaTool.icon`），没声明就是默认齿轮。
+ *
+ * 终端（`mica-ui`）直接读这里；桌面渲染层读同一份数据的投影（`publishToolIcons()`）。
+ */
+export function getToolIcon(name: string): string {
+  return toolIcon(name, (candidate) => findTool(candidate)?.icon);
+}
+
+/**
+ * 当前注册表里所有**声明了 emoji** 的工具：{ 工具名: emoji }。
+ *
+ * 排除 MCP 工具：它们的图标由 `mcp__` 前缀决定（一个插头），不需要逐条投影，否则每接
+ * 一个 server 就往文件里塞几十行会变的键。
+ */
+export function getToolIcons(): ToolIconCatalog {
+  const icons: ToolIconCatalog = {};
+  for (const tool of getAllToolsForPrompt()) {
+    if (tool.source === 'mcp' || tool.name.startsWith('mcp__')) continue;
+    const icon = (tool.icon ?? '').trim();
+    if (icon) icons[tool.name] = icon;
+  }
+  return icons;
+}
+
+/**
+ * 打开图标投影：装配过插件的宿主调一次，之后注册表自己把变化写进 `tool-icons.json`。
+ *
+ * 传 `null` 关闭（测试与一次性运行用得上）。桌面渲染层在另一个进程、还要画没启动会话的
+ * 历史消息，只能靠这份文件拿到插件工具长什么样。
+ */
+export function publishToolIcons(configDir: string | null): void {
+  iconCatalogDir = configDir;
+  if (configDir) scheduleIconCatalogSync();
+}
+
+/** 同一 tick 里的多次注册 / 卸载合并成一次写盘。 */
+function scheduleIconCatalogSync(): void {
+  if (!iconCatalogDir || iconCatalogQueued) return;
+  iconCatalogQueued = true;
+  queueMicrotask(() => {
+    iconCatalogQueued = false;
+    if (!iconCatalogDir) return;
+    writeToolIconCatalog(getToolIcons(), iconCatalogDir);
+  });
 }
 
 function getAllTools(): MicaTool[] {
@@ -248,6 +319,7 @@ export function getToolCatalog(): ToolCatalogEntry[] {
     readOnly: tool.readOnly,
     parameters: toolParameters(tool),
     group: runtimeToolOptions.get(tool)?.group ?? descriptorGroup(tool.name) ?? families.get(tool.name) ?? null,
+    icon: toolIcon(tool.name, (name) => findTool(name)?.icon),
   }));
   // 运行期工具只存在于跑 agent 的进程里：配置页 / 桌面设置页不加载插件，目录会缺
   // todo_write 这类工具，「新会话默认值」里就关不掉它们。未注册时用描述补一行。
@@ -260,6 +332,7 @@ export function getToolCatalog(): ToolCatalogEntry[] {
       ...descriptor,
       source: 'builtin',
       group: descriptorGroup(descriptor.name) ?? families.get(descriptor.name) ?? null,
+      icon: toolIcon(descriptor.name, (name) => findTool(name)?.icon),
     });
   }
   return entries.sort((a, b) => a.name.localeCompare(b.name));

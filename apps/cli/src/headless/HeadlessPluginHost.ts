@@ -446,6 +446,8 @@ export function createHeadlessPluginHost(options: HeadlessPluginHostOptions): He
         const registered = micaTools.registerRuntime(tool, {
           primaryAgentOnly: toolOptions.primaryAgentOnly,
           group: toolOptions.group,
+          // 图标跟着工具实例走：桌面渲染层读的是注册表的投影（见 publishIcons）。
+          icon: toolOptions.icon,
         });
         return {
           dispose: () => {
@@ -500,6 +502,12 @@ export function createHeadlessPluginHost(options: HeadlessPluginHostOptions): He
   // 这个进程装配插件，注册表就是能力的唯一事实来源：关掉配置页那套静态兜底，
   // 否则停用一个插件之后它的工具仍会从描述里补回来。
   micaTools.setRuntimeToolFallback(false);
+  // 工具图标投影：桌面渲染层在另一个进程，靠 `$MICA_HOME/tool-icons.json` 拿到插件工具
+  // 长什么样（没启动会话的历史消息也要画对）。
+  //
+  // 只由常驻宿主写：`mica exec` 是回合一结束就退的一次性运行，它写出来的那份会少掉
+  // 「那里没装配的插件」（桌面专属的 `ask` 之类），反而让桌面工具行退化成默认图标。
+  if (!options.oneShot) micaTools.publishIcons(paths.config);
   const setupPromise = plugins.setupAll(baseContext);
 
   const host: HeadlessPluginHost = {

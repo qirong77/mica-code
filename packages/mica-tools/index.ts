@@ -10,6 +10,9 @@ import {
   getToolCounts,
   getToolCatalog,
   getRegisteredToolSource,
+  getToolIcon,
+  getToolIcons,
+  publishToolIcons,
   executeTool,
   getToolDisplayText,
   isToolReadOnly,
@@ -40,6 +43,12 @@ export const micaTools = {
   getCatalog: getToolCatalog,
   /** 按名称查询实际注册工具的来源，不包含静态目录兜底。 */
   getRegisteredSource: getRegisteredToolSource,
+  /** 工具行左侧的 emoji：工具自己声明的（`MicaTool.icon`），缺省为默认齿轮。 */
+  getIcon: getToolIcon,
+  /** 当前注册表里声明过 emoji 的工具：{ 工具名: emoji }。 */
+  getIcons: getToolIcons,
+  /** 把图标写成 `$MICA_HOME/tool-icons.json` 投影（桌面渲染层读它）。 */
+  publishIcons: publishToolIcons,
   /** 按工具名执行工具，并返回序列化后的执行结果。 */
   execute: executeTool,
   /** 获取工具调用在 UI 日志中的展示文本。 */
@@ -58,6 +67,8 @@ export const micaTools = {
 };
 
 export { MicaTool } from './MicaTool.js';
+export { TOOL_ICON_CATALOG_FILE, readToolIconCatalog, toolIconCatalogPath } from './toolIconCatalog.js';
+export type { ToolIconCatalog } from './toolIconCatalog.js';
 export { createPluginTool } from './PluginTool.js';
 export type { PluginToolDescriptor } from './PluginTool.js';
 export { ToolRunShell } from './ToolRunShell.js';
@@ -65,7 +76,7 @@ export { ToolBackgroundStart } from './ToolBackgroundStart.js';
 export { ToolBackgroundRead } from './ToolBackgroundRead.js';
 export { ToolWaitFor } from './ToolWaitFor.js';
 export type { ToolExecuteCallbacks, ToolInput } from './MicaTool.js';
-export type { ToolSafetyOptions, ToolScheduleOptions } from './MicaTool.js';
+export type { ToolDisplayOptions, ToolOptions, ToolSafetyOptions, ToolScheduleOptions } from './MicaTool.js';
 export type { RuntimeToolRegistrationOptions, ToolFilter } from './registry.js';
 export type { ToolCatalogEntry, ToolGroupEntry, ToolParameterEntry } from './registry.js';
 export type { ToolExecutionEvent, ToolExecutionObserver } from './registry.js';

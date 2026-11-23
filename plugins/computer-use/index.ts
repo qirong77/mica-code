@@ -128,7 +128,7 @@ const plugin: MicaPlugin = {
     // 工具是模型动桌面的**唯一**入口：写操作（改键鼠/焦点/剪贴板）由它先向用户确认，
     // 直接 shell 调 desktop.mjs 的那些命令会被 runtime 拒绝。没有 `ctx.ask` 的宿主
     // （TUI / `mica exec`）里只读命令照旧可用，写操作直接拒绝——不是静默降级。
-    const tool = ctx.tools?.register(createComputerUseTool({ runtimeDir, ask: ctx.ask }));
+    const tool = ctx.tools?.register(createComputerUseTool({ runtimeDir, ask: ctx.ask }), { icon: '🖱️' });
     if (!tool) {
       ctx.health.report({
         issueKey: 'dependency:tools',

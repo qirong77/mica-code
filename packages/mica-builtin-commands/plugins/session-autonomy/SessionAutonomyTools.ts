@@ -99,6 +99,8 @@ function truncate(text: string, max: number): string {
 }
 
 export class ToolSessionPeers extends MicaTool {
+  icon = '👥';
+
   constructor(private readonly deps: SessionToolDeps) {
     super(
       'session_peers',

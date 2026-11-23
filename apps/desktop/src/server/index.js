@@ -117,6 +117,7 @@ import {
   setUiStateSender
 } from '../host/ui-state.js'
 import { registerSharedSessionIpc } from '../host/shared-sessions.js'
+import { registerToolIconIpc } from '../host/tool-icons.js'
 import { initializeDesktopProcessPath, stripContainerEnv } from '../host/desktop-process-env.js'
 import { warmShellEnv } from '../host/shell-env.js'
 import { createAttachmentUploads } from './attachment-uploads.js'
@@ -799,6 +800,7 @@ export async function startDesktopServer(options = {}) {
   registerBrowserControlIpc()
   registerTerminalControlIpc()
   registerUiStateIpc()
+  registerToolIconIpc()
   registerFilesIpc()
   registerGitIpc()
   registerStatsIpc()

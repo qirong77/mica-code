@@ -118,6 +118,8 @@ function getTurndown(): TurndownService {
 }
 
 export class ToolWebFetch extends MicaTool {
+  icon = '🔗';
+
   constructor() {
     super(
       'web_fetch',

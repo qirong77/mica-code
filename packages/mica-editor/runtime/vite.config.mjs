@@ -53,7 +53,6 @@ export default defineConfig({
   }],
   define: {
     'import.meta.env.DEV': 'false',
-    'process.env.EXCALIDRAW_ASSET_PATH': JSON.stringify('https://cdn.jsdelivr.net/npm/@excalidraw/excalidraw@0.18.1/dist/prod/'),
     'process.env.NODE_ENV': JSON.stringify('production')
   },
   esbuild: { jsx: 'automatic', jsxDev: false },

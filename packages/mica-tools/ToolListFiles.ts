@@ -18,6 +18,8 @@ const DEFAULT_IGNORE = [
 ];
 
 export class ToolListFiles extends MicaTool {
+  icon = '📂';
+
   constructor() {
     super(
       'list_files',

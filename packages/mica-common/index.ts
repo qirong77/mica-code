@@ -173,6 +173,8 @@ export {
 } from './capabilities.js';
 export type { CapabilityKind, CapabilitySelection } from './capabilities.js';
 export { LEGACY_TOOL_NAMES, normalizeToolName } from './toolNames.js';
+export { DEFAULT_TOOL_ICON, MCP_TOOL_ICON, toolIcon } from './toolIcons.js';
+export type { ToolIconLookup } from './toolIcons.js';
 export { acquireProcessLock } from './processLock.js';
 export {
   MAX_TURN_TIMINGS,

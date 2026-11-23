@@ -19,6 +19,11 @@ export type PluginToolDescriptor = {
   readOnly?: boolean;
   /** 纯等待类工具（见 `ToolScheduleOptions.overlappable`）。 */
   overlappable?: boolean;
+  /**
+   * 工具行左侧的 emoji。用户插件（普通 JS，没有 `MicaTool` 可继承）只有这一处能声明，
+   * 缺省是默认齿轮——界面上就与别的工具分不出来。
+   */
+  icon?: string;
   execute(input: ToolInput, callbacks?: ToolExecuteCallbacks): Promise<ToolResult> | ToolResult;
   /** 工具行那一行字；不给就用工具名。 */
   displayText?(input: ToolInput): string;
@@ -42,6 +47,7 @@ class DescriptorTool extends MicaTool {
     super(descriptor.name, descriptor.description ?? '', descriptor.input_schema ?? { type: 'object' }, {
       readOnly: descriptor.readOnly ?? false,
       overlappable: descriptor.overlappable ?? false,
+      icon: descriptor.icon,
     });
     this.descriptor = descriptor;
   }

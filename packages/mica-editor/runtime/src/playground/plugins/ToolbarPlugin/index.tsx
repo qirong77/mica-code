@@ -72,11 +72,9 @@ import EditorIcon from '../../ui/EditorIcon';
 import { isKeyboardInput } from '../../utils/focusUtils';
 import { getSelectedNode } from '../../utils/getSelectedNode';
 import { INSERT_COLLAPSIBLE_COMMAND } from '../CollapsibleExtension';
-import { INSERT_DATETIME_COMMAND } from '../DateTimeExtension';
 import { InsertEquationDialog } from '../EquationsExtension';
 import { InsertHtmlDialog, INSERT_HTML_COMMAND } from '../HtmlExtension';
 import { InsertComponentDialog, INSERT_COMPONENT_COMMAND } from '../ComponentExtension';
-import { INSERT_EXCALIDRAW_COMMAND } from '../ExcalidrawExtension';
 import { InsertImageDialog } from '../ImagesExtension';
 import InsertLayoutDialog from '../LayoutExtension/InsertLayoutDialog';
 import { $isRubyNode, $toggleRuby } from '../RubyExtension/RubyNode';
@@ -1136,11 +1134,6 @@ export default function ToolbarPlugin({
               <span className="text">HTML 页面</span>
             </DropDownItem>
 
-            <DropDownItem onClick={() => dispatchToolbarCommand(INSERT_EXCALIDRAW_COMMAND)} className="item">
-              <EditorIcon icon="diagram-2" />
-              <span className="text">绘图</span>
-            </DropDownItem>
-
             <DropDownItem
               onClick={() => {
                 showModal('插入分栏', (onClose) => (
@@ -1168,17 +1161,6 @@ export default function ToolbarPlugin({
             <DropDownItem onClick={() => dispatchToolbarCommand(INSERT_COLLAPSIBLE_COMMAND)} className="item">
               <EditorIcon icon="caret-right" />
               <span className="text">折叠区块</span>
-            </DropDownItem>
-            <DropDownItem
-              onClick={() => {
-                const dateTime = new Date();
-                dateTime.setHours(0, 0, 0, 0);
-                dispatchToolbarCommand(INSERT_DATETIME_COMMAND, { dateTime });
-              }}
-              className="item"
-            >
-              <EditorIcon icon="calendar" />
-              <span className="text">日期</span>
             </DropDownItem>
           </DropDown>
         </div>

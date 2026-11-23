@@ -165,9 +165,18 @@ describe('default capability catalog', () => {
         parameters: [],
         source: 'builtin',
         group: { key: 'plugin:todo', label: 'Todo' },
+        icon: '📝',
         inputSchema,
       },
-      { name: 'mcp-a', description: 'MCP tool', readOnly: true, parameters: [], source: 'mcp', group: null },
+      {
+        name: 'mcp-a',
+        description: 'MCP tool',
+        readOnly: true,
+        parameters: [],
+        source: 'mcp',
+        group: null,
+        icon: '🔌',
+      },
     ]);
     vi.mocked(micaMcp.loadConfig).mockResolvedValue({ 'server-a': { command: 'server' } });
 

@@ -17,6 +17,8 @@ type LoadedImage = {
 };
 
 export class ToolReadImage extends MicaTool {
+  icon = '📷';
+
   constructor() {
     super(
       'read_image',

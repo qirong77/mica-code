@@ -36,7 +36,7 @@ export default function setup(ctx: PluginContext): void {
     ctx.onDispose(() => registration.dispose());
   }
 
-  const tool = tools.register(new AgentTool(subagents), { primaryAgentOnly: true });
+  const tool = tools.register(new AgentTool(subagents), { icon: '🤖', primaryAgentOnly: true });
   ctx.onDispose(() => tool.dispose());
 
   const section = prompt.section({

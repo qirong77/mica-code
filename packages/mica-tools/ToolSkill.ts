@@ -30,6 +30,8 @@ function substituteArgs(content: string, args: string | undefined, skill: Skill)
 }
 
 export class ToolSkill extends MicaTool {
+  icon = '✨';
+
   constructor() {
     super(
       'skill',

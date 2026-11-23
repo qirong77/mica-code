@@ -6,8 +6,6 @@
  */
 export const EDITOR_OPTIONAL_STYLES = {
   katex: 'https://cdn.jsdelivr.net/npm/katex@0.16.10/dist/katex.css',
-  excalidraw: 'https://cdn.jsdelivr.net/npm/@excalidraw/excalidraw@0.18.1/dist/prod/index.css',
-  datePicker: 'https://cdn.jsdelivr.net/npm/react-day-picker@9.14.0/src/style.css',
 } as const;
 
 export type EditorOptionalStyle = keyof typeof EDITOR_OPTIONAL_STYLES;

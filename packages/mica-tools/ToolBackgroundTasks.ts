@@ -34,6 +34,8 @@ function pad(text: string, width: number): string {
 }
 
 export class ToolBackgroundTasks extends MicaTool {
+  icon = '📋';
+
   constructor() {
     super(
       'background_tasks_list',

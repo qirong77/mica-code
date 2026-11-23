@@ -132,12 +132,12 @@ describe('connection card callbacks', () => {
     expect(calls).toBe(1);
   });
 
-  it('opens an ordinary webpage without adding it to the connection list', async () => {
+  it('remembers an opened webpage with its full URL and shows it in the list', async () => {
     const { api, render } = await fixture();
     const tree = render();
     const input = elements(tree).find((element) => element.props.placeholder?.includes('网页地址'))!;
 
-    input.props.onChange('https://www.zhihu.com/');
+    input.props.onChange('https://www.zhihu.com/question/123?source=home#answer');
     const updatedTree = render();
     const updatedConnect = elements(updatedTree).find(
       (element) =>
@@ -145,8 +145,33 @@ describe('connection card callbacks', () => {
     )!;
     updatedConnect.props.onClick();
 
-    await vi.waitFor(() => expect(api.open).toHaveBeenCalledWith('https://www.zhihu.com/'));
-    expect(api.writeData).not.toHaveBeenCalled();
+    await vi.waitFor(() => expect(api.writeData).toHaveBeenCalled());
+    expect(api.open).toHaveBeenCalledWith('https://www.zhihu.com/question/123?source=home#answer');
+    expect(api.writeData.mock.calls.at(-1)?.[0].peers[0]?.url).toBe(
+      'https://www.zhihu.com/question/123?source=home#answer',
+    );
+    expect(JSON.stringify(render())).toContain('https://www.zhihu.com/question/123?source=home#answer');
+    await vi.waitFor(() => expect(peerButtons(render()).every((entry) => !entry.props.disabled)).toBe(true));
+    const saved = peerButtons(render()).find((entry) => JSON.stringify(entry).includes('www.zhihu.com'))!;
+    saved.props.onClick();
+    await vi.waitFor(() => expect(api.open).toHaveBeenCalledTimes(2));
+    expect(api.open).toHaveBeenLastCalledWith('https://www.zhihu.com/question/123?source=home#answer');
+  });
+
+  it('reports a webpage history save failure without showing an unsaved entry', async () => {
+    const { api, render } = await fixture();
+    api.writeData.mockRejectedValueOnce(new Error('disk full'));
+    const input = elements(render()).find((element) => element.props.placeholder?.includes('网页地址'))!;
+    input.props.onChange('https://example.com/docs');
+    const button = elements(render()).find(
+      (element) =>
+        typeof element.type !== 'string' && element.type?.name === 'Button' && element.props.children === '连接',
+    )!;
+    button.props.onClick();
+
+    await vi.waitFor(() => expect(JSON.stringify(render())).toContain('disk full'));
+    expect(api.open).toHaveBeenCalledWith('https://example.com/docs');
+    expect(peerButtons(render()).some((entry) => JSON.stringify(entry).includes('example.com'))).toBe(false);
   });
 
   it('keeps a failed note edit available for retry and only clears it after saving', async () => {
@@ -305,7 +330,10 @@ describe('client connections across runtime windows', () => {
     )!;
     button.props.onClick();
 
-    await vi.waitFor(() => expect(client.openWindow).toHaveBeenCalledWith('https://www.zhihu.com/'));
+    await vi.waitFor(() => expect(client.writeData).toHaveBeenCalled());
+    expect(client.openWindow).toHaveBeenCalledWith('https://www.zhihu.com/');
+    expect(client.writeData.mock.calls.at(-1)?.[0].peers[0]?.url).toBe('https://www.zhihu.com/');
+    expect(JSON.stringify(render())).toContain('https://www.zhihu.com/');
     expect(client.probe).not.toHaveBeenCalled();
     expect(client.open).not.toHaveBeenCalled();
   });
@@ -321,9 +349,10 @@ describe('client connections across runtime windows', () => {
     const { render } = await fixture({ current: a, client });
     peerButtons(render())[0]!.props.onClick();
 
-    await vi.waitFor(() => expect(client.openWindow).toHaveBeenCalledWith('https://127.0.0.1:8788/docs'));
+    await vi.waitFor(() => expect(client.writeData).toHaveBeenCalled());
+    expect(client.openWindow).toHaveBeenCalledWith('https://127.0.0.1:8788/docs');
     expect(client.open).not.toHaveBeenCalled();
-    expect(client.writeData).not.toHaveBeenCalled();
+    expect(client.writeData.mock.calls.at(-1)?.[0].peers[0]?.url).toBe('https://127.0.0.1:8788/docs');
   });
 
   it('shows a desktop window opening failure instead of silently closing', async () => {

@@ -27,7 +27,7 @@ describe('subagent plugin', () => {
     ]);
     expect(harness.tools).toHaveLength(1);
     expect(harness.tools[0]?.tool.name).toBe('agent');
-    expect(harness.tools[0]?.options).toEqual({ primaryAgentOnly: true });
+    expect(harness.tools[0]?.options).toEqual({ icon: '🤖', primaryAgentOnly: true });
     expect(harness.sections).toHaveLength(1);
     expect(harness.sections[0]?.id).toBe('delegation');
     expect(harness.sections[0]?.label).toBe('委派策略');

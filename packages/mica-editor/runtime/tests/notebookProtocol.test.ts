@@ -122,35 +122,6 @@ describe('notebook persistence boundary', () => {
     expect(updates).toEqual(['document']);
   });
 
-  it('restores presentation editability only after an overlapping freeze ends', () => {
-    const session = new NotebookSession('a', {version: 1, editorState: null});
-    const editor = createHeadlessEditor({namespace: 'presentation-freeze', onError(error) {throw error;}});
-    session.editor = editor;
-    session.setPresenting(true);
-    expect(editor.isEditable()).toBe(false);
-    session.setFrozen(true);
-    session.setPresenting(false);
-    expect(editor.isEditable()).toBe(false);
-    session.setFrozen(false);
-    expect(editor.isEditable()).toBe(true);
-    session.setFrozen(true);
-    session.setPresenting(true);
-    session.setFrozen(false);
-    expect(editor.isEditable()).toBe(false);
-    session.setPresenting(false);
-    expect(editor.isEditable()).toBe(true);
-  });
-
-  it('preserves a document that was already read-only before presentation', () => {
-    const session = new NotebookSession('a', {version: 1, editorState: null});
-    const editor = createHeadlessEditor({namespace: 'presentation-readonly', editable: false, onError(error) {throw error;}});
-    session.editor = editor;
-    session.setPresenting(true);
-    session.setPresenting(true);
-    session.setPresenting(false);
-    expect(editor.isEditable()).toBe(false);
-  });
-
   it('tags loaded, outline and content messages with the mounted load identity and stops after detach', async () => {
     const post = vi.mocked(window.parent.postMessage);
     post.mockClear();

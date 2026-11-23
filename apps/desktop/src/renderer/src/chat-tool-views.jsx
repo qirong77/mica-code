@@ -1,6 +1,6 @@
 import { IconLoader2 } from '@tabler/icons-react'
 import { PathText } from './PathToken'
-import { toolIcon } from '@packages/mica-web-shared'
+import { toolIcon, useToolIcons } from './tool-icons'
 import { formatLogElapsed, toolCallText, toolDurationMs } from './chat-tool-display'
 
 /**
@@ -72,6 +72,8 @@ export function ReasoningRow({ text }) {
  * `now` 只给还在跑的那一行算耗时（已完成的行用 `finishedAt`，与 ChatView 的 memo 判定一致）。
  */
 export function ToolActivityRow({ tool, now = Date.now(), onOpen }) {
+  // 工具 emoji 来自宿主投影（插件工具也在里面）：订阅它，投影到了这一行自己会重画。
+  const icons = useToolIcons()
   if (!tool) return null
   const running = ['pending', 'running'].includes(tool.status)
   // 没有起止时间的调用（如 subagent 时间线里配不上调用的孤立结果）不显示耗时，
@@ -94,7 +96,7 @@ export function ToolActivityRow({ tool, now = Date.now(), onOpen }) {
           </span>
         ) : null}
         <span className="chat-turn-log-icon" aria-hidden="true">
-          {toolIcon(tool.tool)}
+          {toolIcon(tool.tool, icons)}
         </span>
         <span className="chat-turn-log-display">{text}</span>
         {duration ? (

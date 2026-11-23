@@ -56,6 +56,8 @@ const DESCRIPTION = [
 ].join('\n');
 
 export class ToolWaitFor extends MicaTool {
+  icon = '⏳';
+
   constructor() {
     super(
       'wait_for',

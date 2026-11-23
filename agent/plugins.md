@@ -242,6 +242,7 @@ macOS 浮窗只取键盘焦点、不连带唤起主应用；原生窗口策略�
 ## 工具与程序化 PTY
 
 - `mica-tools` 是唯一 registry，产品工具优先经插件 `ctx.tools.register()`；新增工具继承 `MicaTool`，声明 schema、展示、错误格式与 `readOnly`。
+- 工具行左侧的 emoji 由工具自己声明：内置工具在类里写 `icon = '📖'`，插件在 `ctx.tools.register(tool, { icon })` 里给（用户插件的纯描述工具写 `icon` 字段）。界面不再各存一张名字→emoji 的表：终端直查注册表（`micaTools.getIcon()`）；桌面渲染层在另一个进程，读的是注册表的投影 `$MICA_HOME/tool-icons.json`，由 `micaTools.publishIcons()` 打开——只有常驻宿主（`mica app-server`）写这份文件，一次性宿主（`mica exec`）那份会少掉它没装配的插件。不声明就是默认齿轮，所以新增工具时一起加 `icon`。
 - 工具名一律 snake_case 全小写；历史遗留名登记在 `mica-common/toolNames.ts`，读取处统一过 `normalizeToolName`。
 - `readOnly` 分类受 `MicaTool.test.ts` 约束：纯查询为 true；写文件、patch、shell、kill、wait 为 false。
 - 执行类工具按「启动 / 等待 / 查看」拆开：`run_shell` 只跑前台命令（≤120s）；`background_tasks_start` 启动并立即返回 id；`wait_for` 只观察条件。

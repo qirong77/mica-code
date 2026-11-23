@@ -188,14 +188,17 @@ export default function ConnectionsCard({ api, onClose }) {
     setNoteTarget('');
     try {
       if (isOrdinaryWebAddress(target)) {
-        await openRemote(normalizeEntryAddress(target));
+        const url = normalizeEntryAddress(target);
+        await openRemote(url);
+        await update((previous) => rememberPeer(previous, url, undefined, 'web'));
         onClose?.();
         return;
       }
       const result = await (api.client ?? api).probe(target);
-      // 普通网页也可以从这里打开：探活收到的不是 Mica 响应时，不写入 Connections 清单。
+      // 探活认出普通网页时，连同完整路径一起记入清单。
       if (result?.kind === 'web' && result.url) {
         await openRemote(result.url);
+        await update((previous) => rememberPeer(previous, result.url, undefined, 'web'));
         onClose?.();
         return;
       }

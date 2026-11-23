@@ -19,6 +19,8 @@ const DESCRIPTION = [
 ].join('\n');
 
 export class ToolBackgroundRead extends MicaTool {
+  icon = '📋';
+
   constructor() {
     super(
       'background_tasks_read',

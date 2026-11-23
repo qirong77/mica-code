@@ -34,11 +34,9 @@ import {type JSX, useCallback, useMemo, useState} from 'react';
 
 import useModal from '../../hooks/useModal';
 import {INSERT_COLLAPSIBLE_COMMAND} from '../CollapsibleExtension';
-import {INSERT_DATETIME_COMMAND} from '../DateTimeExtension';
 import {InsertEquationDialog} from '../EquationsExtension';
 import {InsertHtmlDialog, INSERT_HTML_COMMAND} from '../HtmlExtension';
 import {InsertComponentDialog, INSERT_COMPONENT_COMMAND} from '../ComponentExtension';
-import {INSERT_EXCALIDRAW_COMMAND} from '../ExcalidrawExtension';
 import {InsertImageDialog} from '../ImagesExtension';
 import InsertLayoutDialog from '../LayoutExtension/InsertLayoutDialog';
 import {insertDefaultTable} from '../tableInsert';
@@ -233,77 +231,6 @@ export function getBaseOptions(editor: LexicalEditor, showModal: ShowModal) {
       onSelect: () => editor.dispatchCommand(INSERT_HORIZONTAL_RULE_COMMAND),
     }),
 
-    new ComponentPickerOption('绘图 Excalidraw', {
-      icon: <i className="icon diagram-2" />,
-      keywords: ['excalidraw', 'diagram', 'drawing', '绘图', '图表', '画板'],
-      onSelect: () => editor.dispatchCommand(INSERT_EXCALIDRAW_COMMAND),
-    }),
-
-    new ComponentPickerOption('日期 Date', {
-      icon: <i className="icon calendar" />,
-      keywords: ['date', 'calendar', 'time', '日期', '日历', '时间'],
-      onSelect: () => {
-        const dateTime = new Date();
-        dateTime.setHours(0, 0, 0, 0); // Set time to midnight
-        editor.dispatchCommand(INSERT_DATETIME_COMMAND, {dateTime});
-      },
-    }),
-    new ComponentPickerOption('今天 Today', {
-      icon: <i className="icon calendar" />,
-      keywords: [
-        'date',
-        'calendar',
-        'time',
-        'today',
-        '日期',
-        '日历',
-        '时间',
-        '今天',
-      ],
-      onSelect: () => {
-        const dateTime = new Date();
-        dateTime.setHours(0, 0, 0, 0); // Set time to midnight
-        editor.dispatchCommand(INSERT_DATETIME_COMMAND, {dateTime});
-      },
-    }),
-    new ComponentPickerOption('明天 Tomorrow', {
-      icon: <i className="icon calendar" />,
-      keywords: [
-        'date',
-        'calendar',
-        'time',
-        'tomorrow',
-        '日期',
-        '日历',
-        '时间',
-        '明天',
-      ],
-      onSelect: () => {
-        const dateTime = new Date();
-        dateTime.setDate(dateTime.getDate() + 1);
-        dateTime.setHours(0, 0, 0, 0); // Set time to midnight
-        editor.dispatchCommand(INSERT_DATETIME_COMMAND, {dateTime});
-      },
-    }),
-    new ComponentPickerOption('昨天 Yesterday', {
-      icon: <i className="icon calendar" />,
-      keywords: [
-        'date',
-        'calendar',
-        'time',
-        'yesterday',
-        '日期',
-        '日历',
-        '时间',
-        '昨天',
-      ],
-      onSelect: () => {
-        const dateTime = new Date();
-        dateTime.setDate(dateTime.getDate() - 1);
-        dateTime.setHours(0, 0, 0, 0); // Set time to midnight
-        editor.dispatchCommand(INSERT_DATETIME_COMMAND, {dateTime});
-      },
-    }),
     new ComponentPickerOption('公式 Equation', {
       icon: <i className="icon equation" />,
       keywords: ['equation', 'latex', 'math', '公式', '数学'],

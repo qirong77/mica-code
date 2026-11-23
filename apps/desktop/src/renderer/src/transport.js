@@ -289,6 +289,9 @@ function createWebApi(env) {
       meta: (sessionId, cwd) => invoke('chat:meta', { sessionId, cwd }),
       models: () => invoke('chat:models'),
       roles: () => invoke('chat:roles'),
+      // 工具行 emoji：跑 agent 的宿主把注册表投影成 `$MICA_HOME/tool-icons.json`，
+      // 页面按名字查（插件工具也在里面）。页面里没有第二张静态表。
+      toolIcons: () => invoke('chat:tool-icons'),
       // 会话级能力（skills / tools / MCP servers）：读取目录与开关、提交选择。
       // 选择落在会话快照里，同一会话的其他窗口通过 onCapabilitiesUpdated 同步。
       capabilities: (id, { sessionId, cwd, role } = {}) =>

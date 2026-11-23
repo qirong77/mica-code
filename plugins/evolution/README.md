@@ -71,6 +71,7 @@ mica 选后者，这个插件就是「洗」的地方。
 | `subagent-task-files` | 将 `subagent-tasks/<sessionId>.json` 的旧任务数组拆为 `<sessionId>/<taskId>.json`，已有独立任务更新优先；完整原文件改名归档为 `*.legacy-v1.json`，归档重名时加编号。损坏、未知数据与符号链接不改。运行时不再读取旧数组，需经此迁移。 |
 | `notebook-comments` | 评论功能移除后，笔记文档里的 `comments` 讨论记录先归档到 `plugin-data/evolution/legacy-notebook-comments/<noteId>.json`（重名加编号），再删掉该字段；正文里由评论产生的 MarkNode 锚点拆回普通子节点，文字与格式不变。文档只剩 `version` 与 `editorState`，损坏文档与非 `version: 1` 文档不动；重复执行改动数为 0。 |
 | `notebook-component-blocks` | React + Arco 交互块从 HTML 节点拆成独立的 `component` 节点：`type: 'html'` + `runtime: 'react'` 改写为 `type: 'component'`，源码字段 `html` 改名为 `code`；`runtime: 'html'` 的静态块只删掉 `runtime`。高度、格式与源码原样保留，损坏文档与非 `version: 1` 文档不动；重复执行改动数为 0，运行时不再认 `runtime` 字段。 |
+| `notebook-removed-features` | 绘图和日期功能移除后，先将笔记原文私有归档，再把正文中的 `excalidraw` / `datetime` 节点转换为普通文本（日期保留显示值，绘图写入「绘图内容已移除」），运行时不再认识旧节点类型。 |
 | `notebook-mcp` | 将 Notebook 旧插件 skill 索引移到 `plugin-data/evolution/legacy-notebook-skill/` 原文归档，迁移默认能力中的旧工具停用项；不改笔记正文、用户手写 skill 或其它插件索引。旧 skill / 直连工具入口不再支持。 |
 | `connections-peer-store` | 将 Connections 旧纯地址数组或缺 `version` 的 `{ peers }` 迁为 version 1 清单；原文归档到 `legacy-connections/` 后原子替换，运行时不再回写旧形态。 |
 | `schedule-plans-stages` | 将 Schedule 旧 `plans/stages` 数据严格迁为扁平 `tasks`；原文归档到 `legacy-schedule/` 后原子替换，损坏或无法安全转换时不改原文件，运行时不再读取旧形态。 |

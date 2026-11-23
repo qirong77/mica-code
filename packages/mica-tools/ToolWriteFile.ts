@@ -7,6 +7,8 @@ import { truncateDisplayText } from './utils/display.js';
 import { assertWritablePath } from './utils/pathOwnership.js';
 
 export class ToolWriteFile extends MicaTool {
+  icon = '✍️';
+
   constructor() {
     super('write_file', '写入文件，不存在则创建，存在则覆盖。', {
       type: 'object' as const,

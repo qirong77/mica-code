@@ -617,7 +617,7 @@ export function createTools(deps: ToolDeps): Disposable[] {
           }
         },
       },
-      { icon: '🖧' },
+      { icon: '🖥️' },
     ),
   );
 }

@@ -9,6 +9,8 @@ const HARD_FORCE_AFTER_MS = 30_000;
 const ALLOWED_SIGNALS = new Set<NodeJS.Signals>(['SIGTERM', 'SIGKILL', 'SIGINT']);
 
 export class ToolKillTask extends MicaTool {
+  icon = '📋';
+
   constructor() {
     super('background_tasks_kill', [
       '终止一个仍在运行的后台任务。先默认 SIGTERM，`force_after_ms` 后仍不退出则升级为 SIGKILL。',

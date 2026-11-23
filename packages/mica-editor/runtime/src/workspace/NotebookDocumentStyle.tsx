@@ -47,7 +47,6 @@ export default function NotebookDocumentStyle() {
       editor.registerUpdateListener(sync),
       editor.registerCommand(NOTEBOOK_ACTION_COMMAND, action => {
         if (action === 'style') {setOpen(previous => !previous); return false;}
-        setOpen(false);
         return false;
       }, COMMAND_PRIORITY_LOW),
     );
