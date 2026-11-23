@@ -10,6 +10,7 @@ import {
   useReducer,
   useRef,
   useState,
+  useId,
   useSyncExternalStore
 } from 'react'
 import { createPortal } from 'react-dom'
@@ -182,6 +183,7 @@ import {
   buildSubagentTimeline,
   isBackgroundTaskRunning,
   isSubagentRunning,
+  isSubagentToolRunning,
   sameTaskDetail,
   subagentStatusLabel,
   subagentToolOf,
@@ -1578,20 +1580,33 @@ function PluginTableDialog({
  * 正文（`text`）按回答渲染，过程行套一层日志排版（`.chat-activity-log`），字号与
  * 主对话「回答 + 回合日志」的关系保持一致。
  */
-function SubagentTranscript({ steps, running, onOpenTool }) {
+function SubagentTranscript({ steps, task, onOpenTool }) {
   const [showAll, setShowAll] = useState(false)
+  const [now, setNow] = useState(() => Date.now())
+  const pageVisible = usePageVisible()
   const hidden = showAll ? 0 : Math.max(0, steps.length - SUBAGENT_STEP_WINDOW)
   const visible = hidden > 0 ? steps.slice(hidden) : steps
-  // 只有最后一个还没有结果的调用算「正在跑」（与回合日志同规则）：时间线被截断时
-  // 早期那些没有结果的步骤不该一起转圈。
-  let pendingKey = ''
-  for (let index = steps.length - 1; index >= 0; index -= 1) {
-    const step = steps[index]
-    if (step.kind === 'tool' && !step.resultText) {
-      pendingKey = step.key
-      break
+  // Older hosts do not project activeToolIds. Keep their conservative
+  // single-pending fallback, but never use it when the host supplied ids.
+  const hasActiveToolIds = Array.isArray(task?.activeToolIds)
+  let legacyPendingKey = ''
+  if (!hasActiveToolIds) {
+    for (let index = steps.length - 1; index >= 0; index -= 1) {
+      const step = steps[index]
+      if (step.kind === 'tool' && subagentToolOf(step, false).status === 'unknown') {
+        legacyPendingKey = step.key
+        break
+      }
     }
   }
+  const hasRunningTool =
+    steps.some((step) => isSubagentToolRunning(step, task)) || (!hasActiveToolIds && Boolean(legacyPendingKey))
+  useEffect(() => {
+    if (!pageVisible || !hasRunningTool) return undefined
+    setNow(Date.now())
+    const timer = window.setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(timer)
+  }, [pageVisible, hasRunningTool])
 
   return (
     <div className="chat-timeline">
@@ -1609,11 +1624,16 @@ function SubagentTranscript({ steps, running, onOpenTool }) {
           )
         }
         const tool =
-          step.kind === 'thinking' ? null : subagentToolOf(step, running && step.key === pendingKey)
+          step.kind === 'thinking'
+            ? null
+            : subagentToolOf(
+                step,
+                hasActiveToolIds ? isSubagentToolRunning(step, task) : task.status === 'running' && step.key === legacyPendingKey
+              )
         return (
           <div className="chat-activity-log" key={step.key}>
             {tool ? (
-              <ToolActivityRow tool={tool} onOpen={() => onOpenTool(tool)} />
+              <ToolActivityRow tool={tool} now={now} onOpen={() => onOpenTool(tool)} />
             ) : (
               <ReasoningRow text={step.text} />
             )}
@@ -1629,6 +1649,58 @@ function subagentStatusClass(status) {
   if (status === 'partial') return 'is-partial'
   if (status === 'failed') return 'is-error'
   return 'is-done'
+}
+
+function SubagentDetailTabs({ active, onChange, steps, hasPrompt, hasResult, hasError, idPrefix }) {
+  const tabs = [
+    { id: 'activity', label: '活动', detail: steps ? `${steps} 步` : '' },
+    ...(hasPrompt ? [{ id: 'prompt', label: '任务说明', detail: '' }] : []),
+    ...(hasResult
+      ? [{ id: 'result', label: '结果', detail: hasError ? '失败' : '' }]
+      : [])
+  ]
+
+  const move = (offset) => {
+    const index = tabs.findIndex((tab) => tab.id === active)
+    const next = tabs[(index + offset + tabs.length) % tabs.length]
+    if (next) onChange(next.id)
+  }
+
+  return (
+    <div className="chat-task-detail-tabs" role="tablist" aria-label="Subagent 详情">
+      {tabs.map((tab) => (
+        <ArcoAction
+          key={tab.id}
+          type="button"
+          role="tab"
+          id={`${idPrefix}-tab-${tab.id}`}
+          aria-controls={`${idPrefix}-panel-${tab.id}`}
+          aria-selected={active === tab.id}
+          tabIndex={active === tab.id ? 0 : -1}
+          className={`chat-task-detail-tab ${active === tab.id ? 'is-active' : ''}`}
+          onClick={() => onChange(tab.id)}
+          onKeyDown={(event) => {
+            if (event.key === 'ArrowRight') {
+              event.preventDefault()
+              move(1)
+            } else if (event.key === 'ArrowLeft') {
+              event.preventDefault()
+              move(-1)
+            } else if (event.key === 'Home') {
+              event.preventDefault()
+              onChange(tabs[0].id)
+            } else if (event.key === 'End') {
+              event.preventDefault()
+              onChange(tabs.at(-1).id)
+            }
+          }}
+        >
+          <span>{tab.label}</span>
+          {tab.detail ? <span className="chat-task-detail-tab-detail">{tab.detail}</span> : null}
+        </ArcoAction>
+      ))}
+    </div>
+  )
 }
 
 // `runKey` 是持有这个 run 的节点 id（工作区只有一份，所以就是本节点的 id）：
@@ -1648,6 +1720,7 @@ function SubagentDetailModalView({ runKey, task: initialTask, onClose, onStop, o
   const [restarting, setRestarting] = useState(false)
   // 点开的工具详情：就用主对话那一个弹窗，参数/输出/「在编辑器中打开」都在里面。
   const [openTool, setOpenTool] = useState(null)
+  const detailId = useId().replaceAll(':', '')
   const task = detail?.task || initialTask
   // 时间线是 append-only 的，用内容指纹当依赖：轮询给的数组引用每秒都新，
   // 直接依赖它会让所有步骤跟着重建，memo 全部失效。
@@ -1655,7 +1728,24 @@ function SubagentDetailModalView({ runKey, task: initialTask, onClose, onStop, o
   // eslint-disable-next-line react-hooks/exhaustive-deps -- 指纹已经覆盖 timeline 内容
   const steps = useMemo(() => buildSubagentTimeline(task), [signature])
   // 只在步骤数变化时贴底：内容长高不算（否则展开一段输出就被拽回底部）。
-  const { bodyRef, onBodyScroll } = useStickToBottom(steps.length)
+  const [activeSection, setActiveSection] = useState('activity')
+  const hasPrompt = Boolean(task.prompt)
+  const hasResult = Boolean(task.result || task.error || !running)
+  const availableSections = [
+    'activity',
+    ...(hasPrompt ? ['prompt'] : []),
+    ...(hasResult ? ['result'] : [])
+  ]
+  const section = availableSections.includes(activeSection) ? activeSection : 'activity'
+  const { bodyRef, onBodyScroll } = useStickToBottom(
+    section === 'activity' ? `activity:${steps.length}` : `section:${section}`
+  )
+  useLayoutEffect(() => {
+    if (section !== activeSection) setActiveSection(section)
+  }, [activeSection, section])
+  useLayoutEffect(() => {
+    if (bodyRef.current && section !== 'activity') bodyRef.current.scrollTop = 0
+  }, [bodyRef, section])
   const usage = task.usage
 
   const stop = async () => {
@@ -1722,34 +1812,59 @@ function SubagentDetailModalView({ runKey, task: initialTask, onClose, onStop, o
       }
     >
       {error && <div className="chat-modal-note is-warn">{error}</div>}
-      {task.prompt ? (
-        // 提示词就是「这个 subagent 收到的用户消息」：用主对话那条用户消息的样子，
-        // 不再折成一块默认收起的 `<pre>`。
-        <div className="chat-message chat-message-user chat-timeline-prompt">
-          <div className="chat-message-marker">▌</div>
-          <div className="chat-message-body">
-            <UserMessageText text={textOf(task.prompt)} />
-          </div>
+      <SubagentDetailTabs
+        active={section}
+        onChange={setActiveSection}
+        steps={steps.length}
+        hasPrompt={hasPrompt}
+        hasResult={hasResult}
+        hasError={Boolean(task.error)}
+        idPrefix={detailId}
+      />
+      {section === 'activity' ? (
+        <div role="tabpanel" id={`${detailId}-panel-activity`} aria-labelledby={`${detailId}-tab-activity`}>
+          {task.error ? <div className="chat-task-detail-alert">{textOf(task.error)}</div> : null}
+          {task.timelineTruncated ? (
+            <div className="chat-modal-note">较早的步骤已被丢弃（只保留最近 120 步）。</div>
+          ) : null}
+          {steps.length ? (
+            <SubagentTranscript steps={steps} task={task} onOpenTool={setOpenTool} />
+          ) : (
+            <div className="chat-modal-empty">{running ? '正在等待第一个步骤…' : '没有步骤记录。'}</div>
+          )}
         </div>
       ) : null}
-      {task.timelineTruncated ? (
-        <div className="chat-modal-note">较早的步骤已被丢弃（只保留最近 120 步）。</div>
-      ) : null}
-      {steps.length ? (
-        <SubagentTranscript steps={steps} running={running} onOpenTool={setOpenTool} />
-      ) : (
-        <div className="chat-modal-empty">{running ? '正在等待第一个步骤…' : '没有步骤记录。'}</div>
-      )}
-      {task.result ? (
-        // 结果是一家「回答」：与主对话的 assistant 消息同一种块，前面带 ● 标记。
-        <div className="chat-message chat-message-assistant">
-          <div className="chat-message-marker">●</div>
-          <div className="chat-message-body">
-            <Markdown text={textOf(task.result)} />
+      {section === 'prompt' && hasPrompt ? (
+        <div role="tabpanel" id={`${detailId}-panel-prompt`} aria-labelledby={`${detailId}-tab-prompt`}>
+          <ModalSection title="任务说明">
+          {/* 提示词就是「这个 subagent 收到的用户消息」：用主对话那条用户消息的样子，
+              但放在独立页签里，长提示词不会把正在运行的活动推到屏幕底部。 */}
+          <div className="chat-message chat-message-user chat-timeline-prompt">
+            <div className="chat-message-marker">▌</div>
+            <div className="chat-message-body">
+              <UserMessageText text={textOf(task.prompt)} />
+            </div>
           </div>
+          </ModalSection>
         </div>
       ) : null}
-      {task.error && <div className="chat-modal-error">{textOf(task.error)}</div>}
+      {section === 'result' && hasResult ? (
+        <div role="tabpanel" id={`${detailId}-panel-result`} aria-labelledby={`${detailId}-tab-result`}>
+          <ModalSection title={task.error ? '失败信息' : '最终结果'}>
+          {task.result ? (
+            // 结果是一家「回答」：与主对话的 assistant 消息同一种块，前面带 ● 标记。
+            <div className="chat-message chat-message-assistant">
+              <div className="chat-message-marker">●</div>
+              <div className="chat-message-body">
+                <Markdown text={textOf(task.result)} />
+              </div>
+            </div>
+          ) : null}
+          {task.error ? <div className="chat-modal-error">{textOf(task.error)}</div> : null}
+          {!task.result && !task.error ? <div className="chat-modal-empty">（没有最终结果）</div> : null}
+          </ModalSection>
+        </div>
+      ) : null}
       {openTool && (
         <ToolDetailDialog
           tool={openTool}

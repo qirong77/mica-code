@@ -388,6 +388,7 @@ export type {
   PluginSubagentTaskHandle,
   PluginSubagentTaskSnapshot,
   PluginSubagentTaskStatus,
+  PluginSubagentWaitMode,
   PluginSubagentThread,
   PluginSubagentThreadAskOptions,
   PluginSubagentThreadOptions,

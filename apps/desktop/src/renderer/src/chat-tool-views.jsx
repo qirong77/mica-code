@@ -29,6 +29,7 @@ function singleLine(text) {
 
 function toolStatusClass(tool) {
   if (tool?.status === 'error') return 'chat-turn-log-error'
+  if (tool?.status === 'unknown') return 'chat-turn-log-unknown'
   if (['pending', 'running'].includes(tool?.status)) return 'chat-turn-log-running'
   return 'chat-turn-log-complete'
 }
@@ -78,7 +79,7 @@ export function ToolActivityRow({ tool, now = Date.now(), onOpen }) {
   const running = ['pending', 'running'].includes(tool.status)
   // 没有起止时间的调用（如 subagent 时间线里配不上调用的孤立结果）不显示耗时，
   // 免得每一行都挂一个没有意义的 `0ms`。
-  const elapsed = toolDurationMs(tool, now)
+  const elapsed = tool.durationKnown === false ? 0 : toolDurationMs(tool, now)
   const duration = elapsed > 0 ? formatLogElapsed(elapsed) : ''
   const text = singleLine(toolCallText(tool))
 

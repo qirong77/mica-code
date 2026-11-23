@@ -393,6 +393,7 @@ export function createPluginSubagentHost(
           settle = resolve;
         });
         let settled = false;
+        let finalResult: PluginSubagentRunResult | undefined;
         const settleOnce = (result: PluginSubagentRunResult): void => {
           if (settled) return;
           settled = true;
@@ -403,13 +404,13 @@ export function createPluginSubagentHost(
           ...taskOptionsOf(prepared),
           getUsage: () => summarizeSubagentUsage(prepared.child.usageHistory),
           onStartCancelled: () => {
-            // A failed restart commit never enters run(), so its finally block
-            // cannot release the lease or settle the background handle.
+            // A failed restart commit never enters run(), so its callback must
+            // release the lease; the completion watcher below settles the
+            // handle after the manager records the terminal state.
             if (taskId) {
               pathLeases.release(taskId);
               spawnMeta.delete(taskId);
             }
-            settleOnce({ taskId, status: 'killed', output: '', error: 'Subagent task was not started.' });
           },
           run: async (signal) => {
             const runTaskId = taskId || task.id;
@@ -429,29 +430,21 @@ export function createPluginSubagentHost(
                 onIterationComplete: activityTracking.onIterationComplete,
               });
               recordUsage(prepared, runTaskId, 'completed');
-              settleOnce({ taskId: runTaskId, status: 'completed', output: result });
+              finalResult = { taskId: runTaskId, status: 'completed', output: result };
               return { result, usage: summarizeSubagentUsage(prepared.child.usageHistory) };
             } catch (error) {
               const status = resolveFailureStatus(error, signal);
               const partial = error instanceof AgentMaxTurnsError ? error.partialResult : undefined;
               recordUsage(prepared, runTaskId, status);
-              settleOnce({
+              finalResult = {
                 taskId: runTaskId,
                 status,
                 output: partial ?? '',
                 error: formatErrorMessage(error),
-              });
+              };
               throw error;
             } finally {
               activityTracking.dispose();
-              // 任务被父代理中止或被管理器回收时 run 可能不再走到上面两条路径，
-              // 这里兜底结算一次，保证 done 不会永远挂着。
-              settleOnce({
-                taskId: runTaskId,
-                status: signal.aborted ? 'killed' : 'failed',
-                output: '',
-                error: 'Subagent task ended without a result.',
-              });
               if (taskId) {
                 taskManager.clearActivities(taskId, prepared.owner);
                 pathLeases.release(taskId);
@@ -474,6 +467,29 @@ export function createPluginSubagentHost(
             throw error;
           }
         }
+        // The handle must settle after SubagentTaskManager.complete(), not just
+        // after the provider query. That is when the manager's concurrency slot
+        // is free and a dependent run_many task may safely start.
+        void taskManager.waitForCompletion(taskId, prepared.owner).then(
+          (record) => {
+            const status = record.status === 'running' ? 'failed' : record.status;
+            settleOnce(
+              finalResult ?? {
+                taskId,
+                status,
+                output: record.result ?? '',
+                ...(record.error ? { error: record.error } : {}),
+              },
+            );
+          },
+          (error: unknown) =>
+            settleOnce({
+              taskId,
+              status: 'failed',
+              output: '',
+              error: formatErrorMessage(error),
+            }),
+        );
         return { taskId, done };
       },
 
@@ -520,27 +536,71 @@ export function createPluginSubagentHost(
         async wait(taskIds, waitOptions = {}) {
           const uniqueIds = [...new Set(taskIds.map((id) => id.trim()).filter(Boolean))];
           if (uniqueIds.length === 0) return [];
+          const waitMode = normalizeWaitMode(waitOptions.waitMode);
           const byOwner = new Map<AgentRuntime, string[]>();
+          const metas = new Map<string, SpawnMeta>();
           for (const taskId of uniqueIds) {
             const meta = metaOf(taskId);
             if (!meta) throw new Error(`Subagent task not found: ${taskId}`);
+            metas.set(taskId, meta);
             const ids = byOwner.get(meta.owner);
             if (ids) ids.push(taskId);
             else byOwner.set(meta.owner, [taskId]);
           }
-          const settled = new Map<string, PluginSubagentTaskSnapshot>();
-          for (const [owner, ids] of byOwner) {
-            const records = await taskManager.awaitTasks(owner, ids, {
-              timeoutMs: waitOptions.timeoutMs,
-              signal: waitOptions.signal,
+          if (waitOptions.signal?.aborted) throw new Error('await aborted.');
+
+          const snapshots = (): PluginSubagentTaskSnapshot[] =>
+            uniqueIds.map((taskId) => {
+              const meta = metas.get(taskId)!;
+              const snapshot = snapshotOf(taskId, meta);
+              if (!snapshot) throw new Error(`Subagent task not found: ${taskId}`);
+              return snapshot;
             });
-            for (const record of records) {
-              settled.set(record.id, toTaskSnapshot(record, metaOf(record.id)?.initiatedByCallId));
+          const timeoutMs = normalizeWaitTimeout(waitOptions.timeoutMs);
+          const initial = snapshots();
+          if (waitSatisfied(initial, waitMode)) return initial;
+          // `timeoutMs=0` is an immediate snapshot, not a timer turn. This is
+          // also important for restored tasks that do not have live execution
+          // handles in this process.
+          if (timeoutMs !== undefined && timeoutMs <= 0) return initial;
+
+          const waitController = new AbortController();
+          const onAbort = () => waitController.abort();
+          waitOptions.signal?.addEventListener('abort', onAbort, { once: true });
+          const ownerWaits = [...byOwner].map(([owner, ids]) =>
+            taskManager.awaitTasks(owner, ids, {
+              waitMode,
+              signal: waitController.signal,
+            }),
+          );
+          const completed =
+            waitMode === 'any'
+              ? Promise.race(ownerWaits).then(() => undefined)
+              : Promise.all(ownerWaits).then(() => undefined);
+          let timeout: ReturnType<typeof setTimeout> | undefined;
+          try {
+            if (timeoutMs === undefined) {
+              await completed;
+            } else {
+              const timedOut = new Promise<'timeout'>((resolve) => {
+                timeout = setTimeout(() => resolve('timeout'), timeoutMs);
+                timeout.unref?.();
+              });
+              const outcome = await Promise.race([
+                completed.then(() => 'completed' as const),
+                timedOut,
+              ]);
+              if (outcome === 'timeout') return snapshots();
             }
+            return snapshots();
+          } finally {
+            if (timeout) clearTimeout(timeout);
+            waitOptions.signal?.removeEventListener('abort', onAbort);
+            // This only stops the wait subscriptions. It never aborts the
+            // subagent tasks themselves.
+            waitController.abort();
+            await Promise.allSettled(ownerWaits);
           }
-          return uniqueIds
-            .map((taskId) => settled.get(taskId))
-            .filter((item): item is PluginSubagentTaskSnapshot => Boolean(item));
         },
       },
 
@@ -628,6 +688,7 @@ export function createPluginSubagentHost(
 }
 
 type UsageStatus = 'completed' | 'partial' | 'failed' | 'killed';
+type SubagentWaitMode = 'all' | 'any';
 
 function normalizeTypeName(name: string): string {
   return name.trim().toLowerCase();
@@ -655,6 +716,22 @@ function resolveMaxTurns(requested: number | undefined, fallback: number | undef
 function resolveFailureStatus(error: unknown, signal: AbortSignal): UsageStatus {
   if (error instanceof AgentMaxTurnsError) return 'partial';
   return signal.aborted ? 'killed' : 'failed';
+}
+
+function normalizeWaitMode(value: SubagentWaitMode | undefined): SubagentWaitMode {
+  if (value === undefined || value === 'all' || value === 'any') return value ?? 'all';
+  throw new Error(`Invalid wait mode: ${String(value)}. Use all or any.`);
+}
+
+function normalizeWaitTimeout(value: number | undefined): number | undefined {
+  if (value === undefined || !Number.isFinite(value)) return undefined;
+  return Math.max(0, Math.floor(value));
+}
+
+function waitSatisfied(tasks: PluginSubagentTaskSnapshot[], waitMode: SubagentWaitMode): boolean {
+  return waitMode === 'any'
+    ? tasks.some((task) => task.status !== 'running')
+    : tasks.every((task) => task.status !== 'running');
 }
 
 function formatErrorMessage(error: unknown): string {

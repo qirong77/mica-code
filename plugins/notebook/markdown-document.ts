@@ -1,5 +1,6 @@
 import { Lexer, type Token } from 'marked';
 
+import { serializedBlock } from './component-blocks';
 import { parseNotebookDocument, type NotebookDocument } from './model';
 
 /**
@@ -147,14 +148,10 @@ function blocks(tokens: Token[], context: Context): JsonRecord[] {
           // component using htm + Arco, rendered in an isolated frame.
           if (language.toLowerCase() === 'react') {
             context.statistics.component_blocks += 1;
-            result.push({
-              code: String(item.text ?? ''),
-              direction: null,
-              format: '',
-              indent: 0,
-              type: 'component',
-              version: 1,
-            });
+            const source = String(item.text ?? '');
+            if (!source.trim())
+              context.warnings.push(`组件块 ${context.statistics.component_blocks} 只有空白；请补上 function App。`);
+            result.push(serializedBlock('component', source));
             break;
           }
           if (metadata.length)
@@ -199,14 +196,7 @@ function blocks(tokens: Token[], context: Context): JsonRecord[] {
           const source = htmlBlockSource(String(item.raw ?? item.text ?? ''));
           if (source) {
             context.statistics.html_blocks += 1;
-            result.push({
-              direction: null,
-              format: '',
-              html: source,
-              indent: 0,
-              type: 'html',
-              version: 1,
-            });
+            result.push(serializedBlock('html', source));
           } else {
             context.warnings.push(
               'HTML that is not one complete element (or is mixed with text) was inserted as plain text.',
@@ -422,9 +412,7 @@ function inline(tokens: Token[] | undefined, context: Context, fallback = ''): J
           `Image "${alt || String(item.href ?? '')}" was kept as an inline link; only an image that owns its whole paragraph becomes an image block.`,
         );
         const children = [textNode(decodeMarkdownEntities(alt || String(item.href ?? '') || '[image]'), 0, context)];
-        result.push(
-          ...linkNodes({ href: String(item.href ?? ''), title: item.title }, children, context),
-        );
+        result.push(...linkNodes({ href: String(item.href ?? ''), title: item.title }, children, context));
         break;
       }
       case 'html':
@@ -641,7 +629,7 @@ export function isSafeUrl(value: string): boolean {
 /** Decode the entity subset Markdown permits in ordinary text and destinations. */
 function decodeMarkdownEntities(value: string): string {
   return value.replace(/&(?:#x([0-9a-f]+)|#([0-9]+)|(amp|lt|gt|quot|apos));/gi, (whole, hex, decimal, named) => {
-    if (named) return ({ amp: '&', lt: '<', gt: '>', quot: '"', apos: "'" })[String(named).toLowerCase()] ?? whole;
+    if (named) return { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'" }[String(named).toLowerCase()] ?? whole;
     const codePoint = Number.parseInt(hex || decimal, hex ? 16 : 10);
     return Number.isInteger(codePoint) && codePoint > 0 && codePoint <= 0x10ffff
       ? String.fromCodePoint(codePoint)

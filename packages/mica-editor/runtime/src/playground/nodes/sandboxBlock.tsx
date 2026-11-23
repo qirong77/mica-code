@@ -18,6 +18,16 @@ export const BLOCK_MIN_HEIGHT = 80;
 export const BLOCK_MAX_HEIGHT = 1200;
 export const BLOCK_DEFAULT_HEIGHT = 420;
 
+function finiteBlockHeight(value: unknown): number | null {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return null;
+  return Math.min(BLOCK_MAX_HEIGHT, Math.max(BLOCK_MIN_HEIGHT, Math.ceil(value)));
+}
+
+/** Keep persisted and measured heights inside the iframe's safe viewport. */
+export function clampBlockHeight(value: unknown, fallback = BLOCK_DEFAULT_HEIGHT): number {
+  return finiteBlockHeight(value) ?? finiteBlockHeight(fallback) ?? BLOCK_DEFAULT_HEIGHT;
+}
+
 type BlockTheme = {
   dark: boolean;
   background: string;
@@ -91,13 +101,13 @@ export function useBlockTheme(anchor: React.RefObject<HTMLElement | null>): Bloc
 
 /** Auto height reported by the block's own `ResizeObserver`. */
 export function useBlockHeight(frame: React.RefObject<HTMLIFrameElement | null>, initial?: number): number {
-  const [height, setHeight] = React.useState(initial ?? BLOCK_DEFAULT_HEIGHT);
+  const [height, setHeight] = React.useState(() => clampBlockHeight(initial));
   React.useEffect(() => {
     const onMessage = (event: MessageEvent) => {
       if (event.source !== frame.current?.contentWindow) return;
       const data = event.data as { type?: string; height?: number };
-      if (data?.type !== 'mica-block-height' || typeof data.height !== 'number') return;
-      const next = Math.min(BLOCK_MAX_HEIGHT, Math.max(BLOCK_MIN_HEIGHT, Math.ceil(data.height)));
+      if (data?.type !== 'mica-block-height' || typeof data.height !== 'number' || !Number.isFinite(data.height)) return;
+      const next = clampBlockHeight(data.height);
       setHeight((previous) => (previous === next ? previous : next));
     };
     window.addEventListener('message', onMessage);
@@ -125,6 +135,27 @@ function resizeScript(): string {
   return `<script>(function(){var send=function(){var b=document.body;var h=Math.ceil(b?b.getBoundingClientRect().height:0);if(!h)h=Math.ceil(document.documentElement.scrollHeight);parent.postMessage({type:'mica-block-height',height:h},'*')};try{new ResizeObserver(send).observe(document.body)}catch(e){}addEventListener('load',send);setTimeout(send,0);setTimeout(send,120);setTimeout(send,600);send()})()</script>`;
 }
 
+/** Apply a host theme without navigating the iframe or losing its local state. */
+function themeMessageScript(): string {
+  return `<script>
+(function(){
+  var apply=function(theme){
+    if(!theme||typeof theme!=='object')return;
+    var root=document.documentElement;
+    var body=document.body;
+    var value=function(name,fallback){return typeof theme[name]==='string'&&theme[name]?theme[name]:fallback};
+    root.style.setProperty('--color-canvas',value('background',root.style.getPropertyValue('--color-canvas')));
+    root.style.setProperty('--color-fg-strong',value('foreground',root.style.getPropertyValue('--color-fg-strong')));
+    root.style.setProperty('--color-line',value('border',root.style.getPropertyValue('--color-line')));
+    root.style.setProperty('--notebook-font-family',value('fontFamily',root.style.getPropertyValue('--notebook-font-family')));
+    root.style.colorScheme=theme.dark===true?'dark':'light';
+    if(body){if(theme.dark===true)body.setAttribute('arco-theme','dark');else body.removeAttribute('arco-theme')}
+  };
+  addEventListener('message',function(event){var data=event.data;if(event.source!==parent)return;if(data&&data.type==='mica-block-theme')apply(data.theme)});
+})();
+</script>`;
+}
+
 /**
  * Wrap a block's body in the shared shell: colour scheme, host typography and
  * the height reporter. `style` is appended last so a block type can override
@@ -137,20 +168,27 @@ export function blockDocument(theme: BlockTheme, options: { body: string; style?
   return `<!doctype html><meta charset="utf-8">
 <meta http-equiv="Content-Security-Policy" content="${BLOCK_POLICY}">
 <style>
-  :root { color-scheme: ${theme.dark ? 'dark' : 'light'}; }
+  :root {
+    color-scheme: ${theme.dark ? 'dark' : 'light'};
+    --color-canvas: ${theme.background};
+    --color-fg-strong: ${theme.foreground};
+    --color-line: ${theme.border};
+    --notebook-font-family: ${theme.fontFamily};
+  }
   html, body { margin: 0; padding: 0; }
   body {
     box-sizing: border-box;
     padding: 14px;
-    background: ${theme.background};
-    color: ${theme.foreground};
-    font-family: ${theme.fontFamily};
+    background: var(--color-canvas);
+    color: var(--color-fg-strong);
+    font-family: var(--notebook-font-family);
     font-size: 14px;
     line-height: 1.6;
     overflow-wrap: anywhere;
   }
 ${options.style ?? ''}
 </style>
+${themeMessageScript()}
 ${options.head ?? ''}
 <body${theme.dark ? ' arco-theme="dark"' : ''}>
 ${options.body}
@@ -180,6 +218,8 @@ type SandboxBlockProps = Readonly<{
   editLabel: string;
   /** Current source (`html` or component code) the overlay starts from. */
   source: string;
+  /** Hide the editor in presentation/readonly mode. Defaults to true. */
+  editable?: boolean;
   height?: number;
   onSave: (next: string) => void;
 }>;
@@ -194,6 +234,7 @@ export function SandboxBlock({
   frameTitle,
   editLabel,
   source,
+  editable = true,
   height,
   onSave,
 }: SandboxBlockProps): React.JSX.Element {
@@ -214,8 +255,26 @@ export function SandboxBlock({
     frame.setAttribute('srcdoc', document);
   }, [document]);
 
+  React.useEffect(() => {
+    const frame = frameRef.current;
+    if (!frame) return;
+    const sendTheme = () => {
+      frame.contentWindow?.postMessage({type: 'mica-block-theme', theme}, '*');
+    };
+    frame.addEventListener('load', sendTheme);
+    sendTheme();
+    return () => frame.removeEventListener('load', sendTheme);
+  }, [theme]);
+
+  React.useEffect(() => {
+    if (!editable) setDraft(null);
+  }, [editable]);
+
   const commit = () => {
-    if (draft === null) return;
+    if (!editable || draft === null) {
+      if (!editable) setDraft(null);
+      return;
+    }
     onSave(draft);
     setDraft(null);
   };
@@ -240,7 +299,7 @@ export function SandboxBlock({
           display: 'block',
         }}
       />
-      {draft === null ? (
+      {editable && draft === null ? (
         <Button
           small
           secondary
@@ -250,7 +309,7 @@ export function SandboxBlock({
           {editLabel}
         </Button>
       ) : null}
-      {draft === null ? null : (
+      {editable && draft !== null ? (
         <Modal
           title={editLabel}
           onClose={() => setDraft(null)}
@@ -277,7 +336,7 @@ export function SandboxBlock({
             </DialogActions>
           </div>
         </Modal>
-      )}
+      ) : null}
     </div>
   );
 }

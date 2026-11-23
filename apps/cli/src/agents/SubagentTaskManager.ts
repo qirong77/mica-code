@@ -31,6 +31,8 @@ const TIMELINE_CHAR_LIMITS: Record<SubagentTaskTimelineKind, number> = {
 /** `partial` 是跑到轮次上限的子代理：有可用的部分成果，但没完成任务。 */
 export type SubagentTaskStatus = 'running' | 'completed' | 'partial' | 'failed' | 'killed';
 
+export type SubagentTaskWaitMode = 'all' | 'any';
+
 export type SubagentTaskActivity = {
   id: string;
   summary: string;
@@ -492,45 +494,111 @@ export class SubagentTaskManager {
   async awaitTasks(
     owner: AgentRuntime,
     taskIds: string[],
-    options: { timeoutMs?: number; signal?: AbortSignal } = {},
+    options: { timeoutMs?: number; waitMode?: SubagentTaskWaitMode; signal?: AbortSignal } = {},
   ): Promise<SubagentTaskRecord[]> {
     const uniqueIds = [...new Set(taskIds.map((id) => id.trim()).filter(Boolean))];
     if (uniqueIds.length === 0) throw new Error('await requires at least one task_id.');
 
-    const timeoutMs = options.timeoutMs;
+    const waitMode = normalizeWaitMode(options.waitMode);
+    if (options.signal?.aborted) throw new Error('await aborted.');
+    const timeoutMs = normalizeTimeout(options.timeoutMs);
+    const initial = this.recordsForIds(owner, uniqueIds);
+    if (waitSatisfied(initial, waitMode)) return initial;
+    // Keep zero a non-blocking snapshot, including for restored tasks whose
+    // execution is owned by another process.
+    if (timeoutMs !== undefined && timeoutMs <= 0) return initial;
+
     const startedAt = Date.now();
+    const deadline = timeoutMs === undefined ? undefined : startedAt + timeoutMs;
+    const taskIdsSet = new Set(uniqueIds);
+    const hasRestoredTasks = Boolean(this.readRestoredTasks);
 
-    while (true) {
-      if (options.signal?.aborted) throw new Error('await aborted.');
-      const tasks = uniqueIds.map((id) => {
-        const task = this.get(id, owner);
-        if (!task) throw new Error(`Subagent task not found: ${id}`);
-        return task;
+    return new Promise<SubagentTaskRecord[]>((resolve, reject) => {
+      let settled = false;
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      let unsubscribe: () => void = () => undefined;
+      const onAbort = () => finishError(new Error('await aborted.'));
+
+      const cleanup = () => {
+        unsubscribe();
+        if (timer) clearTimeout(timer);
+        timer = undefined;
+        options.signal?.removeEventListener('abort', onAbort);
+      };
+      const finish = (records: SubagentTaskRecord[]) => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        resolve(records);
+      };
+      const finishError = (error: unknown) => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        reject(error);
+      };
+      const schedule = () => {
+        if (settled || timer) return;
+        let delay: number | undefined;
+        if (hasRestoredTasks) {
+          const remaining = deadline === undefined ? 250 : Math.max(0, deadline - Date.now());
+          delay = Math.min(250, remaining);
+        } else if (deadline !== undefined) {
+          delay = Math.max(0, deadline - Date.now());
+        }
+        if (delay === undefined) return;
+        timer = setTimeout(() => {
+          timer = undefined;
+          check();
+        }, delay);
+        timer.unref?.();
+      };
+      const check = () => {
+        if (settled) return;
+        if (options.signal?.aborted) {
+          finishError(new Error('await aborted.'));
+          return;
+        }
+        let records: SubagentTaskRecord[];
+        try {
+          records = this.recordsForIds(owner, uniqueIds);
+        } catch (error) {
+          finishError(error);
+          return;
+        }
+        if (waitSatisfied(records, waitMode) || (deadline !== undefined && Date.now() >= deadline)) {
+          finish(records);
+          return;
+        }
+        schedule();
+      };
+
+      // The first snapshot above is deliberately taken before subscribing. A
+      // second check after subscribing closes the small gap where a task can
+      // finish between those two operations.
+      unsubscribe = this.subscribe((task, changedOwner) => {
+        if (changedOwner === owner && taskIdsSet.has(task.id)) check();
       });
-      if (tasks.every((task) => task.status !== 'running')) return tasks;
+      options.signal?.addEventListener('abort', onAbort, { once: true });
+      check();
+    });
+  }
 
-      if (timeoutMs !== undefined && Date.now() - startedAt >= timeoutMs) {
-        return tasks;
-      }
+  private recordsForIds(owner: AgentRuntime, taskIds: string[]): SubagentTaskRecord[] {
+    this.refreshRestored(owner);
+    return taskIds.map((id) => {
+      const task = this.tasks.get(id);
+      if (!task || task.owner !== owner) throw new Error(`Subagent task not found: ${id}`);
+      return cloneRecord(task.record);
+    });
+  }
 
-      const pending = uniqueIds
-        .map((id) => this.tasks.get(id))
-        .filter((task): task is ManagedSubagentTask =>
-          Boolean(task && task.owner === owner && task.record.status === 'running'),
-        );
-      if (pending.length === 0) {
-        return uniqueIds.map((id) => {
-          const task = this.get(id, owner);
-          if (!task) throw new Error(`Subagent task not found: ${id}`);
-          return task;
-        });
-      }
-
-      await Promise.race([
-        ...pending.map((task) => task.promise),
-        sleep(Math.min(250, timeoutMs ?? 250), options.signal),
-      ]);
-    }
+  /** Resolve after `complete()` has released the manager's execution slot. */
+  waitForCompletion(id: string, owner: AgentRuntime): Promise<SubagentTaskRecord> {
+    const task = this.tasks.get(id);
+    if (!task || task.owner !== owner) throw new Error(`Subagent task not found: ${id}`);
+    if (task.record.status !== 'running') return Promise.resolve(cloneRecord(task.record));
+    return task.promise.then(() => cloneRecord(task.record));
   }
 
   subscribe(listener: SubagentTaskChangeListener): () => void {
@@ -737,6 +805,22 @@ function safePromptJson(value: unknown): string {
     .replaceAll('&', '\\u0026');
 }
 
+function normalizeWaitMode(value: SubagentTaskWaitMode | undefined): SubagentTaskWaitMode {
+  if (value === undefined || value === 'all' || value === 'any') return value ?? 'all';
+  throw new Error(`Invalid wait mode: ${String(value)}. Use all or any.`);
+}
+
+function normalizeTimeout(value: number | undefined): number | undefined {
+  if (value === undefined || !Number.isFinite(value)) return undefined;
+  return Math.max(0, Math.floor(value));
+}
+
+function waitSatisfied(tasks: SubagentTaskRecord[], waitMode: SubagentTaskWaitMode): boolean {
+  return waitMode === 'any'
+    ? tasks.some((task) => task.status !== 'running')
+    : tasks.every((task) => task.status !== 'running');
+}
+
 async function waitForTasks(tasks: Promise<void>[], timeoutMs: number): Promise<void> {
   let timeout: ReturnType<typeof setTimeout> | undefined;
   try {
@@ -750,23 +834,4 @@ async function waitForTasks(tasks: Promise<void>[], timeoutMs: number): Promise<
   } finally {
     if (timeout) clearTimeout(timeout);
   }
-}
-
-function sleep(ms: number, signal?: AbortSignal): Promise<void> {
-  return new Promise((resolve, reject) => {
-    if (signal?.aborted) {
-      reject(new Error('await aborted.'));
-      return;
-    }
-    const timer = setTimeout(() => {
-      signal?.removeEventListener('abort', onAbort);
-      resolve();
-    }, ms);
-    timer.unref?.();
-    const onAbort = () => {
-      clearTimeout(timer);
-      reject(new Error('await aborted.'));
-    };
-    signal?.addEventListener('abort', onAbort, { once: true });
-  });
 }

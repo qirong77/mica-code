@@ -13,6 +13,7 @@
 packages/mica-editor/
   index.ts            # 浏览器侧公共 API（只导出 MarkdownEditor，不引入 Lexical）
   protocol.ts         # Markdown 模式的宿主 ⇄ runtime 消息契约
+  componentCatalog.ts # 无运行时依赖的组件源码模板；富文本插入弹窗与 Notebook HTTP 手册共用
   build.mjs           # 构建产物与两个宿主共用的 vite 插件 editorWebAssets()
   web/                # 宿主组件：iframe + postMessage 桥 + 主题读取
   runtime/            # 隔离页面本体（Lexical、Arco、CDN import map、测试）
@@ -94,7 +95,7 @@ Notebook 粘贴代码只检查开头最多 4096 个字符，用固定关键字�
 
 `workspace/blockEditing.ts` 只在笔记富文本主编辑器注册：普通标题/引用块首的 Enter 或 Backspace 将当前块转为正文，不插入额外空行，保留文本、链接和显式行内格式；固定一级标题不会被清除。块中/块尾分段、Shift+Enter、列表和代码块仍由各自的 Lexical 扩展处理；输入法组合态、只读和嵌套图注编辑器不触发块首转换。
 
-两种沙箱块各有自己的节点类型与插入入口，不再靠一个 `runtime` 字段区分：`HtmlNode`（`type: 'html'`，字段 `html`）渲染静态 HTML/CSS，入口是工具栏与 `/` 菜单的「HTML 页面」（`HtmlExtension`，也支持本地 `.html` 文件内联源码与受限 iframe 网页链接）；`ComponentNode`（`type: 'component'`，字段 `code`）是「组件块」（`ComponentExtension`），源码是一段 `function App({React, Arco, html})`，用 htm 模板组合 Arco 组件，React 18.3.1 / Arco 2.66.18 / htm 3.1.1 从 esm.sh 与 jsDelivr 固定版本加载。两者共用 `nodes/sandboxBlock.tsx` 的 iframe 外壳（无 `allow-same-origin`、`ResizeObserver` 回报高度、悬停「编辑 HTML / 编辑组件」浮层）与 `blockDocument()` 的共享 CSP，源码随 Lexical JSON 保存，块内脚本不能访问宿主 DOM、文件系统或笔记状态。组件块能用的范围是刻意收窄的：没有 JSX 与打包步骤（用 htm 模板），`connect-src` 只放行 esm.sh 与 jsDelivr，读不到笔记数据，块高上限 1200px——它适合原型、表单、图表与演示，不是完整应用运行时。宿主切到深色时块自己的 `<body>` 带 `arco-theme="dark"`，Arco 的颜色 token 与宿主一致。
+两种沙箱块各有自己的节点类型与插入入口，不再靠一个 `runtime` 字段区分：`HtmlNode`（`type: 'html'`，字段 `html`）渲染静态 HTML/CSS，入口是工具栏与 `/` 菜单的「HTML 页面」（`HtmlExtension`，也支持本地 `.html` 文件内联源码与受限 iframe 网页链接）；`ComponentNode`（`type: 'component'`，字段 `code`）是「组件块」（`ComponentExtension`），源码是一段 `function App({React, Arco, html})`，用 htm 模板组合 Arco 组件，React 18.3.1 / Arco 2.66.18 / htm 3.1.1 从 esm.sh 与 jsDelivr 固定版本加载。两者共用 `nodes/sandboxBlock.tsx` 的 iframe 外壳（无 `allow-same-origin`、`ResizeObserver` 回报高度、悬停「编辑 HTML / 编辑组件」浮层）与 `blockDocument()` 的共享 CSP，源码随 Lexical JSON 保存，块内脚本不能访问宿主 DOM、文件系统或笔记状态。组件块能用的范围是刻意收窄的：没有 JSX 与打包步骤（用 htm 模板），`connect-src` 只放行 esm.sh 与 jsDelivr，读不到笔记数据，块高上限 1200px——它适合原型、表单、图表与演示，不是完整应用运行时。宿主切到深色时块自己的 `<body>` 带 `arco-theme="dark"`，Arco 的颜色 token 与宿主一致。共用目录目前包含计数器、指标卡、筛选列表、参数计算、趋势图、可排序对比表和分步流程七种 AI 起步模板；组件插入弹窗支持源码 / 运行预览，模板切换会在弹窗内保护未保存草稿。
 
 组件块与 HTML 块的源码编辑共用独立弹窗，不受预览块高度限制；长行保留缩进并在输入区内滚动，取消不写回节点。编辑入口支持鼠标悬停、键盘聚焦与触屏。共享弹窗通过 `modalVisibility` 维护嵌套可见状态，Notebook 桥仅向宿主发送带当前 `noteId/loadId` 的 `modal` 布尔消息；宿主同步侧栏遮罩、暂停侧栏交互，并隐藏覆盖在 iframe 上的文档栏。切换文档或释放桥时清除遮罩，不改变正文数据。
 

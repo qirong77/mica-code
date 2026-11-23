@@ -404,6 +404,9 @@ describe('PluginSubagentHost background tasks', () => {
     expect(second.tasks.list()).toEqual([]);
     expect(second.tasks.get(handle.taskId)).toBeNull();
     expect(second.tasks.kill(handle.taskId)).toBe(false);
+    await expect(second.tasks.wait([handle.taskId], { timeoutMs: 0 })).rejects.toThrow(
+      `Subagent task not found: ${handle.taskId}`,
+    );
 
     expect(first.tasks.kill(handle.taskId)).toBe(true);
     await expect(handle.done).resolves.toMatchObject({ status: 'killed' });
@@ -425,6 +428,76 @@ describe('PluginSubagentHost background tasks', () => {
     await expect(harness.api.tasks.wait([handle.taskId], { timeoutMs: 10 })).resolves.toEqual([
       expect.objectContaining({ id: handle.taskId, status: 'completed' }),
     ]);
+  });
+
+  it('waits across owners in parallel and any returns all current snapshots', async () => {
+    const firstPending = createPendingQuery();
+    const secondPending = createPendingQuery();
+    const harness = createHarness({ query: firstPending.query });
+    const otherOwner = createRuntimeStub({ query: secondPending.query, taskOwnerId: 'other-owner' }).runtime;
+    harness.api.registerType(exploreType());
+
+    const slow = harness.api.background({ description: 'slow', prompt: 'slow work' });
+    const fast = harness.api.background({ description: 'fast', prompt: 'fast work', caller: { owner: otherOwner } });
+    await flushAsyncWork();
+
+    const waiting = harness.api.tasks.wait([slow.taskId, fast.taskId], { waitMode: 'any', timeoutMs: 1_000 });
+    secondPending.settle('fast output');
+    const snapshots = await waiting;
+
+    expect(snapshots).toEqual([
+      expect.objectContaining({ id: slow.taskId, status: 'running' }),
+      expect.objectContaining({ id: fast.taskId, status: 'completed', result: 'fast output' }),
+    ]);
+    // Stopping the wait does not cancel a task belonging to another owner.
+    expect(harness.api.tasks.get(slow.taskId)?.status).toBe('running');
+    harness.api.tasks.kill(slow.taskId);
+    await expect(slow.done).resolves.toMatchObject({ status: 'killed' });
+  });
+
+  it('uses one overall timeout for tasks owned by different agents', async () => {
+    const firstPending = createPendingQuery();
+    const secondPending = createPendingQuery();
+    const harness = createHarness({ query: firstPending.query });
+    const otherOwner = createRuntimeStub({ query: secondPending.query, taskOwnerId: 'other-owner' }).runtime;
+    harness.api.registerType(exploreType());
+
+    const first = harness.api.background({ description: 'first', prompt: 'first work' });
+    const second = harness.api.background({ description: 'second', prompt: 'second work', caller: { owner: otherOwner } });
+    await flushAsyncWork();
+
+    const startedAt = Date.now();
+    await expect(harness.api.tasks.wait([first.taskId, second.taskId], { timeoutMs: 30 })).resolves.toEqual([
+      expect.objectContaining({ id: first.taskId, status: 'running' }),
+      expect.objectContaining({ id: second.taskId, status: 'running' }),
+    ]);
+    expect(Date.now() - startedAt).toBeLessThan(250);
+
+    harness.api.tasks.kill(first.taskId);
+    harness.api.tasks.kill(second.taskId);
+    await Promise.all([first.done, second.done]);
+  });
+
+  it('cancels the wait across owners without cancelling either task', async () => {
+    const firstPending = createPendingQuery();
+    const secondPending = createPendingQuery();
+    const harness = createHarness({ query: firstPending.query });
+    const otherOwner = createRuntimeStub({ query: secondPending.query, taskOwnerId: 'other-owner' }).runtime;
+    harness.api.registerType(exploreType());
+
+    const first = harness.api.background({ description: 'first', prompt: 'first work' });
+    const second = harness.api.background({ description: 'second', prompt: 'second work', caller: { owner: otherOwner } });
+    await flushAsyncWork();
+    const controller = new AbortController();
+    const waiting = harness.api.tasks.wait([first.taskId, second.taskId], { signal: controller.signal });
+    controller.abort();
+
+    await expect(waiting).rejects.toThrow('await aborted');
+    expect(harness.api.tasks.get(first.taskId)?.status).toBe('running');
+    expect(harness.api.tasks.get(second.taskId)?.status).toBe('running');
+    harness.api.tasks.kill(first.taskId);
+    harness.api.tasks.kill(second.taskId);
+    await Promise.all([first.done, second.done]);
   });
 });
 

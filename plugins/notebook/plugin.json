@@ -2,18 +2,18 @@
   "id": "notebook",
   "name": "Notebook",
   "icon": "book-spine",
-  "version": "1.5.0",
-  "description": "本地笔记本：左侧目录树，右侧完整富文本编辑器，支持表格、图片、代码与公式，自动保存到本机。",
+  "version": "1.6.0",
+  "description": "本地富文本笔记本：支持表格、图片、代码、公式和可交互的组件块。AI 可通过 HTTP 接口选模板、写笔记、单独修改一个块。",
   "author": "Mica Code",
   "main": "index.ts",
   "assets": ["README.md", "LICENSE.lexical"],
   "priority": 20,
-  "mica": {"apiVersion": 1},
+  "mica": { "apiVersion": 1 },
   "requires": [],
   "api": true,
   "roles": ["roles"],
   "desktop": {
-    "entry": {"label": "Notebook", "placement": "header"},
-    "page": {"title": "笔记本"}
+    "entry": { "label": "Notebook", "placement": "header" },
+    "page": { "title": "笔记本" }
   }
 }

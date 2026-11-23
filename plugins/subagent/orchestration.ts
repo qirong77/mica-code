@@ -76,35 +76,30 @@ export function planSubagentRuns(
   }
   if (order.length !== planned.length) throw new Error('run_many task graph contains a cycle.');
 
-  // Soft validation: warn-level conflicts become hard errors for same-wave owned paths.
   const byId = new Map(planned.map((task) => [task.id, task]));
-  const waveById = new Map<string, number>();
+  // Rolling dispatch can overlap tasks at different depths. A wave-only check
+  // misses e.g. A -> B while an unrelated C is still using B's paths. Require an
+  // explicit dependency for conflicting paths unless the batch is serial.
+  const ancestors = new Map<string, Set<string>>();
   for (const id of order) {
     const task = byId.get(id)!;
-    const wave = task.depends_on.reduce((max, dep) => Math.max(max, (waveById.get(dep) ?? 0) + 1), 0);
-    waveById.set(id, wave);
-  }
-  const waves = new Map<number, PlannedSubagentRun[]>();
-  for (const task of planned) {
-    const wave = waveById.get(task.id) ?? 0;
-    const list = waves.get(wave) ?? [];
-    list.push(task);
-    waves.set(wave, list);
-  }
-  for (const [, waveTasks] of waves) {
-    if (waveTasks.length > maxParallel) {
-      throw new Error(
-        `run_many wave requires ${waveTasks.length} parallel tasks but max_parallel is ${maxParallel}. Add depends_on or raise max_parallel.`,
-      );
+    const dependencies = new Set<string>();
+    for (const dep of task.depends_on) {
+      dependencies.add(dep);
+      for (const ancestor of ancestors.get(dep) ?? []) dependencies.add(ancestor);
     }
-    for (let i = 0; i < waveTasks.length; i++) {
-      for (let j = i + 1; j < waveTasks.length; j++) {
-        const left = waveTasks[i]!;
-        const right = waveTasks[j]!;
+    ancestors.set(id, dependencies);
+  }
+  if (maxParallel > 1) {
+    for (let i = 0; i < planned.length; i++) {
+      for (let j = i + 1; j < planned.length; j++) {
+        const left = planned[i]!;
+        const right = planned[j]!;
+        if (ancestors.get(left.id)?.has(right.id) || ancestors.get(right.id)?.has(left.id)) continue;
         const conflict = findPathConflict(left.owned_paths, right.owned_paths);
         if (conflict) {
           throw new Error(
-            `run_many owned_paths conflict between ${left.id} and ${right.id}: ${conflict.left} overlaps ${conflict.right}`,
+            `run_many owned_paths conflict between ${left.id} and ${right.id}: ${conflict.left} overlaps ${conflict.right}. Add depends_on or use max_parallel=1.`,
           );
         }
       }

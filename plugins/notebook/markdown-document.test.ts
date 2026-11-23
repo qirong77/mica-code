@@ -179,9 +179,7 @@ describe('Notebook Markdown document conversion', () => {
   it('refuses an inline image past the size limit instead of writing it into the document', () => {
     const huge = 'data:image/png;base64,' + 'A'.repeat(1024 * 1024);
     const result = markdownDocument(empty, `![大图](${huge})`);
-    expect(rootOf(result.document).children.some((node: Record<string, unknown>) => node.type === 'image')).toBe(
-      false,
-    );
+    expect(rootOf(result.document).children.some((node: Record<string, unknown>) => node.type === 'image')).toBe(false);
     expect(result.statistics.images).toBe(0);
     expect(result.warnings.join(' ')).toMatch(/exceeds the 512 KiB inline limit/);
   });
@@ -225,6 +223,13 @@ describe('Notebook Markdown document conversion', () => {
     expect(result.statistics.component_blocks).toBe(1);
     expect(result.statistics.html_blocks).toBe(0);
     expect(result.statistics.code_blocks).toBe(2);
+  });
+
+  it('reports an empty React fence without discarding adjacent text', () => {
+    const result = markdownDocument(empty, '```react\n```\n\n下一段');
+    expect(result.statistics.component_blocks).toBe(1);
+    expect(result.warnings.join(' ')).toContain('function App');
+    expect(rootOf(result.document).children).toMatchObject([{ type: 'component', code: '' }, { type: 'paragraph' }]);
   });
 
   it.each([

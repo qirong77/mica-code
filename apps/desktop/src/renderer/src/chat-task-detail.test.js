@@ -128,6 +128,18 @@ describe('buildSubagentTimeline', () => {
     expect(steps).toEqual([{ key: 'd:0', kind: 'tool_result', text: 'ok', toolName: 'read_file' }])
   })
 
+  it('keeps an empty tool call and pairs an empty result by invocation id', () => {
+    const steps = buildSubagentTimeline({
+      timeline: [
+        { id: 'tool:empty', kind: 'tool', text: '', toolName: 'read_file' },
+        { id: 'result:empty', kind: 'tool_result', text: '', toolName: 'read_file' }
+      ]
+    })
+    expect(steps).toHaveLength(1)
+    expect(subagentToolOf(steps[0])).toMatchObject({ status: 'completed', output: '' })
+    expect(subagentToolOf(steps[0]).unresolved).toBeUndefined()
+  })
+
   it('does not attach a result to a call of another tool', () => {
     const steps = buildSubagentTimeline({
       timeline: [
@@ -137,6 +149,23 @@ describe('buildSubagentTimeline', () => {
     })
     expect(steps.map((step) => step.kind)).toEqual(['tool', 'tool_result'])
     expect(steps[0].resultText).toBe('')
+  })
+
+  it('pairs parallel calls by invocation id instead of tool name', () => {
+    const steps = buildSubagentTimeline({
+      timeline: [
+        { id: 'tool:read-a', kind: 'tool', text: '{"file_path":"a.ts"}', toolName: 'read_file' },
+        { id: 'tool:read-b', kind: 'tool', text: '{"file_path":"b.ts"}', toolName: 'read_file' },
+        { id: 'result:read-a', kind: 'tool_result', text: 'A', toolName: 'read_file' },
+        { id: 'result:read-b', kind: 'tool_result', text: 'B', toolName: 'read_file' }
+      ]
+    })
+
+    expect(steps).toHaveLength(2)
+    expect(steps.map((step) => [step.argsText, step.resultText])).toEqual([
+      ['{"file_path":"a.ts"}', 'A'],
+      ['{"file_path":"b.ts"}', 'B']
+    ])
   })
 })
 
@@ -181,6 +210,32 @@ describe('subagentToolOf', () => {
     })
     expect(tool).toMatchObject({ tool: 'run_shell', input: {}, output: 'done' })
   })
+
+  it('does not invent a duration for a completed call without a result timestamp', () => {
+    const tool = subagentToolOf({
+      key: 'c:0',
+      kind: 'tool',
+      toolName: 'read_file',
+      argsText: '{}',
+      resultText: 'ok',
+      startedAt: 1000
+    })
+    expect(tool).toMatchObject({ status: 'completed', durationKnown: false })
+    expect(tool.finishedAt).toBeUndefined()
+  })
+
+  it('marks an unmatched historical call as unknown instead of completed', () => {
+    expect(
+      subagentToolOf({
+        key: 'c:0',
+        kind: 'tool',
+        toolName: 'read_file',
+        argsText: '{}',
+        resultText: '',
+        startedAt: 1000
+      })
+    ).toMatchObject({ status: 'unknown', unresolved: true, durationKnown: false })
+  })
 })
 
 describe('timelineSignature', () => {
@@ -190,7 +245,7 @@ describe('timelineSignature', () => {
     expect(timelineSignature({ timeline: base })).not.toBe(
       timelineSignature({ timeline: [{ id: 'text', kind: 'text', text: 'hello world' }] })
     )
-    expect(timelineSignature({})).toBe('0:::0')
+    expect(timelineSignature({})).toBe('0::::')
   })
 })
 
@@ -235,6 +290,12 @@ describe('sameTaskDetail', () => {
   it('detects new background output', () => {
     expect(sameTaskDetail({ content: 'a' }, { content: 'a' })).toBe(true)
     expect(sameTaskDetail({ content: 'a' }, { content: 'ab' })).toBe(false)
+  })
+
+  it('detects total usage growth even when the visible token parts stay the same', () => {
+    const first = detail({ task: { ...detail().task, usage: { records: 1, totalTokens: 10 } } })
+    const second = detail({ task: { ...detail().task, usage: { records: 1, totalTokens: 11 } } })
+    expect(sameTaskDetail(first, second)).toBe(false)
   })
 })
 

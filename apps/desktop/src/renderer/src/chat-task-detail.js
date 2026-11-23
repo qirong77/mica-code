@@ -48,6 +48,8 @@ export function isBackgroundTaskRunning(task) {
 }
 
 const TIMELINE_KINDS = new Set(['thinking', 'text', 'tool', 'tool_result'])
+const timelineInvocationIds = new WeakMap()
+const timelineResultSteps = new WeakSet()
 
 /** 时间线条目自带的写入时间（毫秒）；缺失时返回 undefined，不编造时间。 */
 function entryTime(entry) {
@@ -55,21 +57,44 @@ function entryTime(entry) {
   return Number.isFinite(value) ? value : undefined
 }
 
+function invocationKey(entry) {
+  const id = typeof entry?.id === 'string' ? entry.id : ''
+  const prefix = entry?.kind === 'tool' ? 'tool:' : 'result:'
+  if (!id.startsWith(prefix)) return ''
+  const key = id.slice(prefix.length)
+  // The name is the host's fallback when no provider id was supplied; it does
+  // not identify an invocation and may occur in several parallel calls.
+  return key && key !== entry?.toolName ? key : ''
+}
+
 /**
- * 找最近一条还没挂上结果的工具调用。
+ * Pair a result with the call that produced it.
  *
- * 工具的入参与结果原本是两条平铺记录（`tool` / `tool_result`），详情弹窗里
- * 「一次调用」才是读者心里的单位，所以这里配成一步。只看最后一个候选：
- * 流式输出里结果紧跟在调用后面，跳过中间未配对的调用反而会错配。
+ * The host keeps the provider call id in both timeline entries (`tool:<id>` and
+ * `result:<id>`).  Looking only at the tool name is tempting, but it breaks as
+ * soon as two `read_file` calls are in flight together or results arrive out of
+ * order.  The name fallback is intentionally kept for old records/providers
+ * which did not expose a call id.
  */
-function takePendingToolStep(steps, toolName) {
-  for (let index = steps.length - 1; index >= 0; index -= 1) {
-    const step = steps[index]
-    if (step.kind !== 'tool' || step.resultText) continue
-    if (toolName && step.toolName && step.toolName !== toolName) return null
-    return step
+function takePendingToolStep(steps, entry, toolName) {
+  const resultKey = invocationKey(entry)
+  if (resultKey) {
+    for (let index = steps.length - 1; index >= 0; index -= 1) {
+      const step = steps[index]
+      if (step.kind !== 'tool' || hasSubagentToolResult(step)) continue
+      if (timelineInvocationIds.get(step) === resultKey && (!toolName || !step.toolName || step.toolName === toolName)) {
+        return step
+      }
+    }
   }
-  return null
+  // Fall back only if at least one side lacks an id and the match is unique.
+  // A result whose call was truncated must not attach to a different known id.
+  const candidates = steps.filter((step) =>
+    step.kind === 'tool' && !hasSubagentToolResult(step) &&
+    (!toolName || !step.toolName || step.toolName === toolName) &&
+    (!resultKey || !timelineInvocationIds.get(step))
+  )
+  return candidates.length === 1 ? candidates[0] : null
 }
 
 export function buildSubagentTimeline(task) {
@@ -77,26 +102,29 @@ export function buildSubagentTimeline(task) {
   const steps = []
   entries.forEach((entry, index) => {
     const text = typeof entry?.text === 'string' ? entry.text : ''
-    if (!text.trim()) return
     const key = `${entry?.id || index}:${index}`
     // 未知 kind 按 thinking 渲染：至少不会把工具参数当正文 markdown 打出去。
     const kind = TIMELINE_KINDS.has(entry?.kind) ? entry.kind : 'thinking'
+    if (!text.trim() && kind !== 'tool' && kind !== 'tool_result') return
     const toolName = entry?.toolName || ''
     if (kind === 'tool') {
-      steps.push({
+      const step = {
         key,
         kind,
         toolName,
         argsText: text,
         resultText: '',
         startedAt: entryTime(entry)
-      })
+      }
+      timelineInvocationIds.set(step, invocationKey(entry))
+      steps.push(step)
       return
     }
     if (kind === 'tool_result') {
-      const target = takePendingToolStep(steps, toolName)
+      const target = takePendingToolStep(steps, entry, toolName)
       if (target) {
         target.resultText = text
+        timelineResultSteps.add(target)
         target.finishedAt = entryTime(entry)
         return
       }
@@ -114,6 +142,18 @@ export function buildSubagentTimeline(task) {
   return steps
 }
 
+function hasSubagentToolResult(step) {
+  return step?.kind === 'tool_result' || timelineResultSteps.has(step) || Boolean(step?.resultText)
+}
+
+/** Live ids come from the executing host; never infer an active invocation from
+ * an unmatched historical row. Several calls can be live simultaneously. */
+export function isSubagentToolRunning(step, task) {
+  if (task?.status !== 'running' || step?.kind !== 'tool' || hasSubagentToolResult(step)) return false
+  const id = timelineInvocationIds.get(step)
+  return Boolean(id && Array.isArray(task?.activeToolIds) && task.activeToolIds.includes(id))
+}
+
 /**
  * 把时间线里的一步工具调用转成**回合日志那一行**要的形状。
  *
@@ -125,14 +165,23 @@ export function buildSubagentTimeline(task) {
 export function subagentToolOf(step, running = false) {
   // 配不上调用的孤立结果（时间线被截断过）本身就只有输出，没有入参。
   const output = step?.resultText || (step?.kind === 'tool_result' ? step?.text : '') || ''
+  const received = hasSubagentToolResult(step)
+  const active = running === true && !received
+  const hasStartedAt = Number.isFinite(step?.startedAt)
+  const hasFinishedAt = Number.isFinite(step?.finishedAt)
+  // 旧记录可能只有工具结果、没有结果写入时间。不能把这种「未知」当成
+  // 「从调用开始一直跑到现在」——否则详情里每一行都会显示同一个当前耗时。
+  const durationKnown = active ? hasStartedAt : hasStartedAt && hasFinishedAt
   return {
     id: step?.key,
     tool: step?.toolName || '',
     input: parseToolArgs(step?.argsText),
     output,
-    status: output || !running ? 'completed' : 'running',
+    status: received ? 'completed' : active ? 'running' : 'unknown',
     startedAt: step?.startedAt,
-    finishedAt: step?.finishedAt
+    finishedAt: step?.finishedAt,
+    durationKnown,
+    ...(received ? {} : { unresolved: true })
   }
 }
 
@@ -141,13 +190,26 @@ export function subagentToolOf(step, running = false) {
  *
  * 详情弹窗每秒轮询一次，host 每次都会给一份新的数组与条目对象；直接用它当
  * `useMemo` 依赖会让所有步骤每秒重建一次，`memo` 也就全部失效。时间线是
- * append-only 的（同一 id 的增量只合并进最后一条），所以「条数 + 最后一条的
- * id/kind/长度」变化就等价于内容变化。
+ * 有界时间线达到上限后会从头部丢弃条目：条数与最后一条相同时，中间也可能不同。
  */
 export function timelineSignature(task) {
   const entries = Array.isArray(task?.timeline) ? task.timeline : []
+  if (entries.length === 0) return '0::::'
+  const first = entries[0]
   const last = entries.at(-1)
-  return [entries.length, last?.id ?? '', last?.kind ?? '', last?.text?.length ?? 0].join(':')
+  // Timeline updates are append-only and only the last entry is merged. The
+  // first entry catches head truncation without serializing all 120 entries on
+  // every poll.
+  return JSON.stringify([
+    task?.timelineTruncated === true,
+    entries.length,
+    first?.id ?? '',
+    first?.kind ?? '',
+    first?.text ?? '',
+    last?.id ?? '',
+    last?.kind ?? '',
+    last?.text ?? ''
+  ])
 }
 
 /**
@@ -166,16 +228,24 @@ export function sameTaskDetail(previous, next) {
   if (timelineSignature(previous.task) !== timelineSignature(next.task)) return false
   const a = previous.task || {}
   const b = next.task || {}
-  if (a.status !== b.status || a.finishedAt !== b.finishedAt) return false
+  if (JSON.stringify(a.activeToolIds) !== JSON.stringify(b.activeToolIds)) return false
+  if (
+    a.status !== b.status ||
+    a.finishedAt !== b.finishedAt ||
+    a.interrupted !== b.interrupted ||
+    a.timelineTruncated !== b.timelineTruncated ||
+    a.result !== b.result ||
+    a.error !== b.error
+  ) return false
   // 结果与错误是收尾时才出现的字段，不能只靠 status 判断（失败原因可能补充得更晚）。
-  if (a.result !== b.result || a.error !== b.error) return false
   const au = a.usage || {}
   const bu = b.usage || {}
   return (
     au.records === bu.records &&
     au.inputTokens === bu.inputTokens &&
     au.outputTokens === bu.outputTokens &&
-    au.cachedInputTokens === bu.cachedInputTokens
+    au.cachedInputTokens === bu.cachedInputTokens &&
+    au.totalTokens === bu.totalTokens
   )
 }
 

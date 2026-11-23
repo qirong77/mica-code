@@ -52,24 +52,62 @@ export function buildComponentDocument(code: string, theme: BlockTheme): string 
     style: '  #root { padding: 0; }',
     head: `<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@arco-design/web-react@${ARCO_VERSION}/dist/css/arco.css">`,
     body: `<div id="root"><div style="opacity:.55;font-size:13px">正在加载 React / Arco…</div></div>
+<script>
+(function(){
+  var showError=function(error){
+    var root=document.getElementById('root');
+    if(!root)return;
+    var pre=document.createElement('pre');
+    pre.style.cssText='color:#d4380d;white-space:pre-wrap;font:12.5px/1.6 ui-monospace,monospace';
+    pre.textContent=String(error&&error.stack||error);
+    root.replaceChildren(pre);
+  };
+  window.__micaComponentError=showError;
+  addEventListener('error',function(event){
+    var target=event.target;
+    var isModuleScript=target&&target.tagName==='SCRIPT'&&target.type==='module';
+    if(event.error||isModuleScript)showError(event.error||event.message||'组件模块加载失败');
+  },true);
+  addEventListener('unhandledrejection',function(event){showError(event.reason||'组件块存在未处理的异步错误')});
+})();
+</script>
 <script type="module">
 import React from 'https://esm.sh/react@${REACT_VERSION}';
 import {createRoot} from 'https://esm.sh/react-dom@${REACT_VERSION}/client';
 import * as Arco from 'https://esm.sh/@arco-design/web-react@${ARCO_VERSION}?deps=react@${REACT_VERSION},react-dom@${REACT_VERSION}';
 import htm from 'https://esm.sh/htm@${HTM_VERSION}';
 const html = htm.bind(React.createElement);
-function showError(message) {
-  const root = document.getElementById('root');
-  root.innerHTML = '<pre style="color:#d4380d;white-space:pre-wrap;font:12.5px/1.6 ui-monospace,monospace"></pre>';
-  root.querySelector('pre').textContent = String(message);
+const showError = window.__micaComponentError;
+function formatError(error) {
+  return String((error && error.stack) || error);
+}
+class ComponentErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = {error: null};
+  }
+  static getDerivedStateFromError(error) {
+    return {error};
+  }
+  componentDidCatch(error) {
+    console.error('组件块渲染错误', error);
+  }
+  render() {
+    if (this.state.error) {
+      return html\`<pre style=\${{color:"#d4380d",whiteSpace:"pre-wrap",font:"12.5px/1.6 ui-monospace,monospace"}}>\${formatError(this.state.error)}</pre>\`;
+    }
+    return this.props.children;
+  }
 }
 try {
 ${escapeModuleSource(code)}
   const component = typeof App === 'function' ? App : null;
   if (!component) throw new Error('组件块需要定义 function App(props) { ... }');
-  createRoot(document.getElementById('root')).render(html\`<\${component} React=\${React} Arco=\${Arco} html=\${html} />\`);
+  createRoot(document.getElementById('root')).render(
+    html\`<\${ComponentErrorBoundary}><\${component} React=\${React} Arco=\${Arco} html=\${html} /></\${ComponentErrorBoundary}>\`,
+  );
 } catch (error) {
-  showError((error && error.stack) || error);
+  showError(formatError(error));
 }
 </script>`,
   });
@@ -87,7 +125,10 @@ type ComponentBlockProps = Readonly<{
 function ComponentBlock({className, format, nodeKey, editor, code, height}: ComponentBlockProps): JSX.Element {
   const anchorRef = React.useRef<HTMLDivElement>(null);
   const theme = useBlockTheme(anchorRef);
-  const source = React.useMemo(() => buildComponentDocument(code, theme), [code, theme]);
+  const [editable, setEditable] = React.useState(() => editor.isEditable());
+  const source = React.useMemo(() => buildComponentDocument(code, theme), [code]);
+
+  React.useEffect(() => editor.registerEditableListener(setEditable), [editor]);
 
   return (
     <BlockWithAlignableContents className={className} format={format} nodeKey={nodeKey}>
@@ -97,6 +138,7 @@ function ComponentBlock({className, format, nodeKey, editor, code, height}: Comp
           editLabel="编辑组件"
           frameTitle="组件块"
           height={height}
+          editable={editable}
           onSave={next => {
             editor.update(() => {
               const node = $getNodeByKey(nodeKey);

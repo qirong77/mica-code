@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { COMPONENT_TEMPLATES } from '@packages/mica-editor/componentCatalog.js';
 import {
   PluginApiError,
   type PluginApiHandler,
@@ -48,7 +49,7 @@ function createHandler() {
   const data = memoryData();
   const handler = createApi({
     pluginId: 'notebook',
-    pluginVersion: '1.5.0',
+    pluginVersion: '1.6.0',
     data: data as unknown as PluginDataApi,
     settings: { get: () => ({}) },
   });
@@ -155,7 +156,14 @@ describe('Notebook plugin API', () => {
     const index = await request(handler, 'GET', '/modules');
     expect(index.modules.map((module: Record<string, any>) => module.id)).toEqual(['tree', 'content', 'blocks']);
     const listed = index.modules.find((module: Record<string, any>) => module.id === 'blocks');
-    expect(listed.endpoints.map((endpoint: Record<string, any>) => endpoint.path)).toContain('/notes/:id/content');
+    const blockRoutes = [
+      ['GET', '/notes/:id/blocks'],
+      ['POST', '/notes/:id/blocks'],
+      ['PATCH', '/notes/:id/blocks/:block_id'],
+    ];
+    expect(listed.endpoints.map(({ method, path }: Record<string, string>) => [method, path])).toEqual(
+      expect.arrayContaining(blockRoutes),
+    );
     for (const endpoint of listed.endpoints) {
       expect(Object.keys(endpoint).sort()).toEqual(['method', 'path', 'summary']);
     }
@@ -167,6 +175,48 @@ describe('Notebook plugin API', () => {
     expect(blocks.guide).toContain('rgb(var(--primary-6))');
     expect(blocks.guide).toContain('1200px');
     expect(blocks.guide).toContain('没有 JSX');
+    expect(blocks.guide).toContain('没有 import');
+    expect(blocks.guide).toContain('fetch');
+    expect(blocks.guide).not.toMatch(/^```(?:js|jsx|javascript)$/m);
+    expect(blocks.guide).toContain('block_id');
+    expect(blocks.guide).toContain('expected_version');
+    expect(blocks.templates).toEqual(
+      COMPONENT_TEMPLATES.map(({ id, name, description, capabilities }) => ({
+        id,
+        name,
+        description,
+        capabilities,
+        path: `/plugin/notebook/api/modules/blocks/templates/${id}`,
+      })),
+    );
+    expect(blocks.guide).not.toContain(COMPONENT_TEMPLATES[0].code);
+    expect(blocks.endpoints.map(({ method, path }: Record<string, string>) => [method, path])).toEqual(
+      expect.arrayContaining(blockRoutes),
+    );
+    for (const [method, path] of blockRoutes) {
+      const doc = blocks.endpoints.find((item: Record<string, string>) => item.path === path && item.method === method);
+      const required = doc.params
+        .filter((p: Record<string, unknown>) => p.required)
+        .map((p: { name: string }) => p.name);
+      expect(required).toEqual(
+        method === 'GET'
+          ? ['id']
+          : method === 'POST'
+            ? ['id', 'expected_version']
+            : ['id', 'block_id', 'source', 'expected_version'],
+      );
+    }
+    const steps = blocks.recipes.flatMap((recipe: { steps: string[] }) => recipe.steps).join('\n');
+    expect(steps).toContain('GET /notes/:id/blocks');
+    expect(steps).toContain('PATCH /notes/:id/blocks/:block_id');
+    // In particular, a Markdown recipe must use JSON \n escapes, not raw newlines inside a quoted string.
+    expect(guide.recipes).toEqual(expect.arrayContaining(blocks.recipes));
+    for (const recipe of guide.recipes) {
+      if (!recipe.curl) continue;
+      const body = / -d '([\s\S]+)'$/.exec(recipe.curl)?.[1];
+      expect(body).toBeDefined();
+      expect(() => JSON.parse(body!.replaceAll("'\\''", "'"))).not.toThrow();
+    }
     expect(blocks.next).toEqual(['/plugin/notebook/api/modules/content', '/plugin/notebook/api/modules/tree']);
 
     const content = blocks.endpoints.find((endpoint: Record<string, any>) => endpoint.path === '/notes/:id/content');
@@ -178,6 +228,7 @@ describe('Notebook plugin API', () => {
     );
 
     await expectFailure(request(handler, 'GET', '/modules/unknown'), 404, 'module_not_found');
+    await expectFailure(request(handler, 'GET', '/modules/blocks/templates/unknown'), 404, 'template_not_found');
   });
 
   it('serves an overview with tree, counts, trash and links to the docs', async () => {
@@ -187,7 +238,7 @@ describe('Notebook plugin API', () => {
     const rootNote = (await request(handler, 'POST', '/notes', { body: { title: '根笔记' } })).node;
 
     const overview = await request(handler, 'GET', '/overview');
-    expect(overview.notebook).toEqual({ name: 'Notebook', version: '1.5.0', api: '/plugin/notebook/api' });
+    expect(overview.notebook).toEqual({ name: 'Notebook', version: '1.6.0', api: '/plugin/notebook/api' });
     expect(overview.today).toMatch(/^\d{4}-\d{2}-\d{2}$/);
     expect(overview.counts).toEqual({ folders: 1, notes: 2, trashed: 0 });
     expect(overview.tree).toMatchObject([
@@ -336,6 +387,187 @@ describe('Notebook plugin API', () => {
     expect((await request(handler, 'GET', '/notes')).nodes).toContainEqual(
       expect.objectContaining({ id: note.id, trashed: false }),
     );
+  });
+
+  it('reads, appends, prepends and updates blocks without round-tripping Lexical', async () => {
+    const { handler } = createHandler();
+    const note = (await request(handler, 'POST', '/notes', { body: { title: '组件块' } })).node;
+    const initialState = JSON.stringify({
+      root: {
+        type: 'root',
+        version: 1,
+        children: [
+          { type: 'paragraph', version: 1, children: [{ type: 'text', text: '正文' }] },
+          {
+            type: 'quote',
+            version: 1,
+            children: [{ type: 'component', version: 1, code: 'function App() { return null; }', height: 321 }],
+          },
+          { type: 'html', version: 1, html: '<div>旧 HTML</div>', format: 'keep-me' },
+        ],
+      },
+    });
+    const seeded = await request(handler, 'POST', `/notes/${note.id}/content`, {
+      body: { mode: 'set_editor_state', editor_state: initialState, expected_version: null },
+    });
+
+    const listed = await request(handler, 'GET', `/notes/${note.id}/blocks`);
+    expect(listed).toMatchObject({ node: { id: note.id }, version: seeded.version });
+    expect(listed.blocks).toEqual([
+      { block_id: '1.0', path: [1, 0], type: 'component', source: 'function App() { return null; }' },
+      { block_id: '2', path: [2], type: 'html', source: '<div>旧 HTML</div>' },
+    ]);
+
+    const patched = await request(handler, 'PATCH', `/notes/${note.id}/blocks/1.0`, {
+      body: { source: 'function App() { return html`<p>新组件</p>`; }', expected_version: listed.version },
+    });
+    expect(patched.block).toMatchObject({
+      block_id: '1.0',
+      type: 'component',
+      source: 'function App() { return html`<p>新组件</p>`; }',
+    });
+    const lexical = await request(handler, 'GET', `/notes/${note.id}`, { query: { format: 'lexical' } });
+    const expectedState = JSON.parse(initialState);
+    expectedState.root.children[1].children[0].code = patched.block.source;
+    expect(JSON.parse(lexical.editor_state)).toEqual(expectedState);
+
+    const appended = await request(handler, 'POST', `/notes/${note.id}/blocks`, {
+      body: {
+        type: 'component',
+        source: COMPONENT_TEMPLATES[0].code,
+        position: 'append',
+        expected_version: patched.version,
+      },
+    });
+    expect(appended.block).toMatchObject({ block_id: '3', type: 'component', source: COMPONENT_TEMPLATES[0].code });
+    const prepended = await request(handler, 'POST', `/notes/${note.id}/blocks`, {
+      body: { type: 'html', source: '<aside>新块</aside>', position: 'prepend', expected_version: appended.version },
+    });
+    expect(prepended.block).toMatchObject({ block_id: '0', type: 'html', source: '<aside>新块</aside>' });
+    expect((await request(handler, 'GET', `/notes/${note.id}/blocks`)).blocks).toEqual([
+      { block_id: '0', path: [0], type: 'html', source: '<aside>新块</aside>' },
+      { block_id: '2.0', path: [2, 0], type: 'component', source: 'function App() { return html`<p>新组件</p>`; }' },
+      { block_id: '3', path: [3], type: 'html', source: '<div>旧 HTML</div>' },
+      { block_id: '4', path: [4], type: 'component', source: COMPONENT_TEMPLATES[0].code },
+    ]);
+
+    await expectFailure(
+      request(handler, 'PATCH', `/notes/${note.id}/blocks/3`, {
+        body: { source: '<div>不应覆盖</div>', expected_version: appended.version },
+      }),
+      409,
+      'version_conflict',
+    );
+    for (const [blockId, reason] of [
+      ['1..0', '不合法'],
+      ['-1', '不合法'],
+      ['01', '不合法'],
+      ['99', '不存在'],
+      ['1', '不是组件块'],
+    ]) {
+      const error = await expectFailure(
+        request(handler, 'PATCH', `/notes/${note.id}/blocks/${blockId}`, {
+          body: { source: '<div>更新</div>', expected_version: prepended.version },
+        }),
+        400,
+        'invalid_request',
+      );
+      expect(error.message).toContain(reason);
+    }
+    await expectFailure(
+      request(handler, 'POST', `/notes/${note.id}/blocks`, {
+        body: { type: 'html', source: '   ', position: 'append', expected_version: prepended.version },
+      }),
+      400,
+      'invalid_request',
+    );
+  });
+
+  it('writes every catalog entry using the Markdown returned by its advertised URL', async () => {
+    const { handler } = createHandler();
+    const { templates, guide } = await request(handler, 'GET', '/modules/blocks');
+    const markdown = [guide.match(/^```react\n[\s\S]*?\n```$/m)[0]];
+    for (const [i, entry] of templates.entries()) {
+      const detail = await request(handler, 'GET', entry.path.slice('/plugin/notebook/api'.length));
+      expect(detail).toMatchObject({
+        id: entry.id,
+        capabilities: COMPONENT_TEMPLATES[i].capabilities,
+        source: COMPONENT_TEMPLATES[i].code,
+      });
+      markdown.push(detail.markdown);
+    }
+    const created = await request(handler, 'POST', '/notes', {
+      body: { title: '模板目录', markdown: markdown.join('\n\n') },
+    });
+    expect(created).toMatchObject({ statistics: { component_blocks: templates.length + 1 }, warnings: [] });
+    const listed = await request(handler, 'GET', `/notes/${created.node.id}/blocks`);
+    expect(listed.blocks.slice(1)).toEqual(
+      COMPONENT_TEMPLATES.map(({ code: source }, i) => ({
+        block_id: String(i + 1),
+        path: [i + 1],
+        type: 'component',
+        source,
+      })),
+    );
+  });
+
+  it('inserts a template as an independent source snapshot after the fixed title, never resolving ambiguous input', async () => {
+    const { handler } = createHandler();
+    const { node, version } = await request(handler, 'POST', '/notes', {
+      body: { title: '预算', markdown: '# 预算\n\n下文' },
+    });
+    const path = `/notes/${node.id}/blocks`;
+    const template = COMPONENT_TEMPLATES.find((item) => item.id === 'calculator')!;
+    const body = { template_id: template.id, expected_version: version, position: 'prepend' };
+    for (const bad of [{ source: '正文' }, { type: 'html' }, { template_id: 'unknown' }, { template_id: null }]) {
+      await expectFailure(request(handler, 'POST', path, { body: { ...body, ...bad } }), 400, 'invalid_request');
+    }
+    const added = await request(handler, 'POST', path, { body });
+    expect(added.block).toEqual({ block_id: '1', path: [1], type: 'component', source: template.code });
+    const snapshot = await request(handler, 'GET', `/notes/${node.id}`, { query: { format: 'lexical' } });
+    const nodes = JSON.parse(snapshot.editor_state).root.children;
+    expect(nodes.map((n: { type: string }) => n.type)).toEqual(['heading', 'component', 'paragraph']);
+    expect(nodes[1]).not.toHaveProperty('template_id');
+  });
+
+  it('writes a first block on null editorState and uses the document CAS without overwriting another writer', async () => {
+    const { handler, data } = createHandler();
+    const { node } = await request(handler, 'POST', '/notes', { body: { title: '空笔记' } });
+    const path = `/notes/${node.id}/blocks`;
+    expect(await request(handler, 'GET', path)).toEqual({ node, version: null, blocks: [] });
+    const source = '  <aside>草稿</aside>\n';
+    const insert = { type: 'html', position: 'append', source, expected_version: null };
+    for (const body of [{ ...insert, type: 'code' }, { ...insert, position: 'before' }, { source }]) {
+      await expectFailure(request(handler, 'POST', path, { body }), 400, 'invalid_request');
+    }
+    const first = await request(handler, 'POST', path, { body: insert });
+    expect(first.block).toEqual({ type: 'html', source, path: [0], block_id: '0' });
+    expect(data.documents.read(node.id).value).toMatchObject({ version: 1 });
+    await expectFailure(request(handler, 'POST', path, { body: insert }), 409, 'version_conflict');
+    const edit = { source: '<section>已确认</section>', expected_version: first.version };
+    await expectFailure(
+      request(handler, 'PATCH', `${path}/0`, { body: { ...edit, source: '' } }),
+      400,
+      'invalid_request',
+    );
+    const updated = await request(handler, 'PATCH', `${path}/0`, { body: edit });
+    expect(updated.block).toEqual({ ...first.block, source: edit.source });
+
+    // Disk changed after updateDocument read but before saveDocument attempted its versioned write.
+    const write = data.documents.write;
+    const external = { root: { children: [{ type: 'html', html: '<p>另一窗口写入</p>', version: 1 }] } };
+    data.documents.write = (id, value, options) => {
+      data.externalDocument(id, { version: 1, editorState: JSON.stringify(external) });
+      return write(id, value, options);
+    };
+    await expectFailure(
+      request(handler, 'PATCH', `${path}/0`, { body: { ...edit, expected_version: updated.version } }),
+      409,
+      'version_conflict',
+    );
+    expect((await request(handler, 'GET', path)).blocks).toEqual([
+      { ...first.block, source: external.root.children[0].html },
+    ]);
   });
 
   it('maps missing nodes, stale versions and invalid input to stable error codes', async () => {

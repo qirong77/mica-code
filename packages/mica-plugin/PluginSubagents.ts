@@ -49,6 +49,9 @@ export type PluginSubagentType = {
 
 export type PluginSubagentTaskStatus = 'running' | 'completed' | 'partial' | 'failed' | 'killed';
 
+/** Whether task waits return after every requested task or the first terminal one. */
+export type PluginSubagentWaitMode = 'all' | 'any';
+
 export type PluginSubagentTaskSnapshot = {
   id: string;
   type: string;
@@ -113,6 +116,8 @@ export type PluginSubagentTaskHandle = {
 
 export type PluginSubagentAwaitOptions = {
   timeoutMs?: number;
+  /** Defaults to all; any returns all requested snapshots after the first terminal task. */
+  waitMode?: PluginSubagentWaitMode;
   signal?: AbortSignal;
 };
 

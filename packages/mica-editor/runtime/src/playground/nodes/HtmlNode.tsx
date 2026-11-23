@@ -47,7 +47,10 @@ type HtmlBlockProps = Readonly<{
 function HtmlBlockComponent({className, format, nodeKey, editor, html, height}: HtmlBlockProps): JSX.Element {
   const anchorRef = React.useRef<HTMLDivElement>(null);
   const theme = useBlockTheme(anchorRef);
-  const source = React.useMemo(() => blockDocument(theme, {body: html}), [html, theme]);
+  const [editable, setEditable] = React.useState(() => editor.isEditable());
+  const source = React.useMemo(() => blockDocument(theme, {body: html}), [html]);
+
+  React.useEffect(() => editor.registerEditableListener(setEditable), [editor]);
 
   return (
     <BlockWithAlignableContents className={className} format={format} nodeKey={nodeKey}>
@@ -57,6 +60,7 @@ function HtmlBlockComponent({className, format, nodeKey, editor, html, height}: 
           editLabel="编辑 HTML"
           frameTitle="HTML 块"
           height={height}
+          editable={editable}
           onSave={next => {
             editor.update(() => {
               const node = $getNodeByKey(nodeKey);

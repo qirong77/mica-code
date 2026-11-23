@@ -39,6 +39,20 @@ describe('ToolActivityRow', () => {
     expect(html).toContain('chat-turn-log-complete')
     expect(html).not.toContain('0ms')
   })
+
+  test('does not show the current elapsed time for an unmatched historical call', () => {
+    const tool = subagentToolOf({
+      key: 'c:0',
+      kind: 'tool',
+      toolName: 'read_file',
+      argsText: '{}',
+      resultText: '',
+      startedAt: Date.now() - 120000
+    })
+    const html = renderToStaticMarkup(createElement(ToolActivityRow, { tool, now: Date.now() }))
+    expect(html).toContain('chat-turn-log-unknown')
+    expect(html).not.toContain('2m')
+  })
 })
 
 describe('ReasoningRow', () => {

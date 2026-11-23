@@ -17,6 +17,7 @@ import {
 import { getBuiltinSubagent } from './definitions.js';
 import { parseRunManySpecs, planSubagentRuns, type PlannedSubagentRun } from './orchestration.js';
 import { formatStructuredSubagentResult, type StructuredSubagentResult } from './result.js';
+import { scheduleSubagentRuns, type BatchStatus } from './runManyScheduler.js';
 
 type AgentToolOperation = 'run' | 'list' | 'read' | 'kill' | 'restart' | 'await' | 'run_many' | 'join';
 
@@ -30,6 +31,7 @@ type AgentToolInput = ToolInput & {
   task_id?: string;
   task_ids?: string[];
   timeout_ms?: number;
+  wait_mode?: 'all' | 'any';
   context_mode?: PluginSubagentContextMode;
   context_files?: string[];
   owned_paths?: string[];
@@ -47,8 +49,6 @@ type RunRequest = {
   ownedPaths?: string[];
   runInBackground?: boolean;
 };
-
-type BatchStatus = PluginSubagentRunResult['status'] | 'running' | 'skipped';
 
 /**
  * 整轮重跑的次数上限。
@@ -108,6 +108,11 @@ export class AgentTool extends MicaTool {
             type: 'number',
             description:
               'await/join 最长等待毫秒；超时后返回当前状态，不抛错。0 表示立即返回当前状态，省略默认 600000（10 分钟）。',
+          },
+          wait_mode: {
+            type: 'string',
+            enum: ['all', 'any'],
+            description: 'await/join 等待模式；默认 all，any 在任意任务结束时返回所有请求任务的当前状态，不取消其它任务。',
           },
           context_mode: {
             type: 'string',
@@ -193,11 +198,10 @@ export class AgentTool extends MicaTool {
 
   private async runMany(input: AgentToolInput, callbacks?: ToolExecuteCallbacks): Promise<string> {
     const specs = parseRunManySpecs(input.tasks);
+    const maxParallel =
+      typeof input.max_parallel === 'number' && Number.isFinite(input.max_parallel) ? Math.floor(input.max_parallel) : 4;
     const planned = planSubagentRuns(specs, {
-      maxParallel:
-        typeof input.max_parallel === 'number' && Number.isFinite(input.max_parallel)
-          ? Math.floor(input.max_parallel)
-          : 4,
+      maxParallel,
     });
 
     // 校验整批任务后再启动，避免非法参数留下已经启动却拿不到 id 的后台任务。
@@ -208,64 +212,36 @@ export class AgentTool extends MicaTool {
     }
 
     const results: string[] = [];
-    const remaining = new Map(planned.map((task) => [task.id, task]));
-    const settled = new Set<string>();
-    const handles = new Map<string, PluginSubagentTaskHandle>();
     const statuses = new Map<string, BatchStatus>();
     const taskIdByPlanId = new Map<string, string>();
 
-    while (remaining.size > 0) {
-      callbacks?.signal?.throwIfAborted();
-      const ready = [...remaining.values()].filter((task) => task.depends_on.every((dep) => settled.has(dep)));
-      if (ready.length === 0) throw new Error('run_many stalled: no runnable tasks without unmet dependencies.');
+    const batchResults = await scheduleSubagentRuns(
+      planned,
+      maxParallel,
+      (task) => {
+        const request = toRunRequest(task);
+        if (request.runInBackground) {
+          const started = this.startInBackground(request, callbacks);
+          return {
+            background: true,
+            taskId: started.handle.taskId,
+            output: started.output,
+            done: started.handle.done.then((result) => ({ status: result.status, output: result.output })),
+          };
+        }
+        const done = this.runForeground(request, callbacks).then((result) => ({
+          status: result.status,
+          output: result.output,
+        }));
+        return { background: false, done };
+      },
+      callbacks?.signal,
+    );
 
-      const batchResults = await Promise.all(
-        ready.map(async (task) => {
-          try {
-            // 后台任务的启动并不代表成功；失败或被杀的依赖必须阻止下游继续执行。
-            for (const dep of task.depends_on) {
-              const handle = handles.get(dep);
-              if (handle) statuses.set(dep, (await waitForDependency(handle, callbacks?.signal)).status);
-            }
-            callbacks?.signal?.throwIfAborted();
-            const blocked = task.depends_on.filter((dep) => statuses.get(dep) !== 'completed');
-            if (blocked.length > 0) {
-              return {
-                task,
-                status: 'skipped' as const,
-                taskId: undefined,
-                output: `Status: skipped\nDependencies did not complete successfully: ${blocked.join(', ')}`,
-              };
-            }
-            const request = toRunRequest(task);
-            if (request.runInBackground) {
-              const handle = this.startInBackground(request, callbacks);
-              handles.set(task.id, handle.handle);
-              return { task, output: handle.output, taskId: handle.handle.taskId, status: 'running' as const };
-            }
-            const result = await this.runForeground(request, callbacks);
-            return { task, output: result.output, status: result.status, taskId: undefined };
-          } catch (error) {
-            // 父请求被中止要立刻停下整批；其余启动失败（租约冲突、并发已满、宿主拒绝）
-            // 只结算这一条任务——否则已经启动的同批任务会连同结果一起丢掉。
-            if (callbacks?.signal?.aborted) throw error;
-            return {
-              task,
-              status: 'failed' as const,
-              taskId: undefined,
-              output: `Status: failed\n\nThe subagent could not be started: ${formatErrorMessage(error)}`,
-            };
-          }
-        }),
-      );
-
-      for (const { task, output, taskId, status } of batchResults) {
-        remaining.delete(task.id);
-        settled.add(task.id);
-        statuses.set(task.id, status);
-        if (taskId) taskIdByPlanId.set(task.id, taskId);
-        results.push([`## ${task.id}: ${task.description}`, output].join('\n'));
-      }
+    for (const { task, output, taskId, status } of batchResults) {
+      statuses.set(task.id, status);
+      if (taskId) taskIdByPlanId.set(task.id, taskId);
+      results.push([`## ${task.id}: ${task.description}`, output].join('\n'));
     }
 
     return [
@@ -446,13 +422,16 @@ export class AgentTool extends MicaTool {
     const inaccessible = this.findInaccessibleTask(taskIds, callbacks);
     if (inaccessible) return `Subagent task not found: ${inaccessible}`;
     const timeoutMs = resolveTimeout(input);
+    const waitMode = resolveWaitMode(input.wait_mode);
     const tasks = await this.subagents.tasks.wait(taskIds, {
       timeoutMs,
+      waitMode,
       signal: callbacks?.signal,
     });
     const running = tasks.filter((task) => task.status === 'running');
     return [
       `Awaited ${tasks.length} subagent task(s).`,
+      waitMode === 'any' ? 'wait_mode: any (returned when the first requested task reached a terminal state).' : '',
       running.length > 0
         ? `${running.length} task(s) still running after ${Math.round(timeoutMs / 1000)}s of waiting; await again to keep waiting.`
         : '',
@@ -467,8 +446,10 @@ export class AgentTool extends MicaTool {
     if (taskIds.length === 0) return '错误：Agent join 操作需要 task_id 或 task_ids。';
     const inaccessible = this.findInaccessibleTask(taskIds, callbacks);
     if (inaccessible) return `Subagent task not found: ${inaccessible}`;
+    const waitMode = resolveWaitMode(input.wait_mode);
     const tasks = await this.subagents.tasks.wait(taskIds, {
       timeoutMs: resolveTimeout(input),
+      waitMode,
       signal: callbacks?.signal,
     });
     const completed = tasks.filter((task) => task.status === 'completed');
@@ -477,6 +458,7 @@ export class AgentTool extends MicaTool {
     const failed = tasks.filter((task) => task.status === 'failed' || task.status === 'killed');
     return [
       `Joined ${tasks.length} subagent task(s): completed=${completed.length}, partial=${partial.length}, failed_or_killed=${failed.length}, running=${running.length}.`,
+      waitMode === 'any' ? 'wait_mode: any (returned when the first requested task reached a terminal state).' : '',
       '## Combined structured results',
       ...tasks.map((task) => formatTaskRecord(task)),
       '',
@@ -509,25 +491,8 @@ function buildDescription(types: PluginSubagentType[]): string {
     `可用 subagent_type: ${types.map((type) => `${type.name} (${type.description})`).join('; ')}。`,
     'effort 取子代理模型自己声明的档位名（模型不同档位集合也不同），省略时继承主 agent 当前 effort。',
     '只读与提案类子代理（write_mode none/proposal）遇到可重试的 provider 错误会自动整轮重试一次；可写子代理失败后不会自动重跑，需要重新提交。',
+    'await/join 默认 wait_mode=all；wait_mode=any 会在任意一个任务结束时返回全部请求任务的当前状态，不取消仍在运行的任务。',
   ].join(' ');
-}
-
-async function waitForDependency(
-  handle: PluginSubagentTaskHandle,
-  signal?: AbortSignal,
-): Promise<PluginSubagentRunResult> {
-  signal?.throwIfAborted();
-  if (!signal) return handle.done;
-  let abort!: () => void;
-  const cancelled = new Promise<never>((_resolve, reject) => {
-    abort = () => reject(signal.reason);
-    signal.addEventListener('abort', abort, { once: true });
-  });
-  try {
-    return await Promise.race([handle.done, cancelled]);
-  } finally {
-    signal.removeEventListener('abort', abort);
-  }
 }
 
 function toRunRequest(task: PlannedSubagentRun): RunRequest {
@@ -570,6 +535,11 @@ function resolveTimeout(input: AgentToolInput): number {
     return DEFAULT_AWAIT_TIMEOUT_MS;
   }
   return Math.floor(input.timeout_ms);
+}
+
+function resolveWaitMode(value: AgentToolInput['wait_mode']): 'all' | 'any' {
+  if (value === undefined || value === 'all' || value === 'any') return value ?? 'all';
+  throw new Error(`Invalid wait_mode: ${String(value)}. Use all or any.`);
 }
 
 function toStructuredStatus(status: PluginSubagentRunResult['status']): StructuredSubagentResult['status'] {

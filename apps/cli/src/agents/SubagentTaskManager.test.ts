@@ -288,6 +288,115 @@ describe('SubagentTaskManager', () => {
     expect(records[0]?.result).toBe('done');
   });
 
+  it('returns every requested snapshot as soon as any task reaches a terminal state', async () => {
+    const owner = {} as AgentRuntime;
+    const slow = createDeferred<{ result: string }>();
+    const fast = createDeferred<{ result: string }>();
+    const manager = new SubagentTaskManager();
+    const slowTask = manager.start({
+      owner,
+      description: 'slow',
+      subagentType: 'Explore',
+      model: 'm',
+      effort: 'none',
+      run: () => slow.promise,
+    });
+    const fastTask = manager.start({
+      owner,
+      description: 'fast',
+      subagentType: 'Explore',
+      model: 'm',
+      effort: 'none',
+      run: () => fast.promise,
+    });
+
+    const awaiting = manager.awaitTasks(owner, [slowTask.id, fastTask.id], { waitMode: 'any' });
+    await flushAsyncWork();
+    fast.resolve({ result: 'fast result' });
+    const records = await awaiting;
+
+    expect(records.map((record) => [record.id, record.status])).toEqual([
+      [slowTask.id, 'running'],
+      [fastTask.id, 'completed'],
+    ]);
+    expect(records[1]?.result).toBe('fast result');
+
+    // `any` only stops waiting; it never cancels the slower task.
+    expect(manager.get(slowTask.id, owner)?.status).toBe('running');
+    slow.resolve({ result: 'slow result' });
+    await flushAsyncWork();
+  });
+
+  it('checks already terminal tasks before waiting or subscribing', async () => {
+    const owner = {} as AgentRuntime;
+    const manager = new SubagentTaskManager();
+    const finished = manager.start({
+      owner,
+      description: 'finished first',
+      subagentType: 'Explore',
+      model: 'm',
+      effort: 'none',
+      run: async () => ({ result: 'already done' }),
+    });
+    const running = manager.start({
+      owner,
+      description: 'still running',
+      subagentType: 'Explore',
+      model: 'm',
+      effort: 'none',
+      run: () => new Promise(() => undefined),
+    });
+    await flushAsyncWork();
+
+    const subscribe = vi.spyOn(manager, 'subscribe');
+    await expect(
+      manager.awaitTasks(owner, [finished.id, running.id], { waitMode: 'any' }),
+    ).resolves.toEqual([
+      expect.objectContaining({ id: finished.id, status: 'completed' }),
+      expect.objectContaining({ id: running.id, status: 'running' }),
+    ]);
+    expect(subscribe).not.toHaveBeenCalled();
+    manager.kill(running.id, owner);
+  });
+
+  it('returns current snapshots after one overall timeout', async () => {
+    const owner = {} as AgentRuntime;
+    const manager = new SubagentTaskManager();
+    const task = manager.start({
+      owner,
+      description: 'timeout',
+      subagentType: 'Explore',
+      model: 'm',
+      effort: 'none',
+      run: () => new Promise(() => undefined),
+    });
+
+    await expect(manager.awaitTasks(owner, [task.id], { timeoutMs: 15 })).resolves.toEqual([
+      expect.objectContaining({ id: task.id, status: 'running' }),
+    ]);
+    manager.kill(task.id, owner);
+  });
+
+  it('aborts a wait without cancelling the requested task', async () => {
+    const owner = {} as AgentRuntime;
+    const manager = new SubagentTaskManager();
+    const task = manager.start({
+      owner,
+      description: 'cancel wait',
+      subagentType: 'Explore',
+      model: 'm',
+      effort: 'none',
+      run: () => new Promise(() => undefined),
+    });
+    const controller = new AbortController();
+    const waiting = manager.awaitTasks(owner, [task.id], { signal: controller.signal });
+    controller.abort();
+
+    await expect(waiting).rejects.toThrow('await aborted');
+    expect(manager.get(task.id, owner)?.status).toBe('running');
+    manager.kill(task.id, owner);
+  });
+
   it('tracks parallel in-flight activities and clears them on completion', async () => {
     const owner = {} as AgentRuntime;
     const deferred = createDeferred<{ result: string }>();

@@ -193,6 +193,9 @@ kbd { font: 12px/1.5 monospace; border: 1px solid var(--workspace-line); border-
 .block-insert-runtime { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
 .block-insert-runtime > label { flex: none; font-size: 12px; color: var(--block-insert-soft); }
 .block-insert-runtime .arco-select { flex: 1; min-width: 0; }
+.block-insert-template-confirm { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 0 0 12px; padding: 9px 10px; border: 1px solid var(--color-warning-3, var(--block-insert-line)); border-radius: 6px; color: var(--block-insert-soft); background: var(--color-warning-1, var(--block-insert-fill)); font-size: 12px; line-height: 1.55; }
+.block-insert-template-confirm p { margin: 0; min-width: 0; }
+.block-insert-template-confirm-actions { display: flex; flex: none; gap: 6px; }
 .block-insert-source { display: flex; flex-direction: column; gap: 6px; margin-top: 4px; }
 .block-insert-source-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 20px; font-size: 12px; color: var(--block-insert-soft); }
 .block-insert-view-tabs { display: flex; gap: 2px; padding: 2px; border-radius: 4px; background: var(--block-insert-fill); }
@@ -202,6 +205,8 @@ kbd { font: 12px/1.5 monospace; border: 1px solid var(--workspace-line); border-
 .block-insert-source textarea { box-sizing: border-box; width: 100%; max-width: 100%; height: clamp(160px, 30vh, 320px); min-height: 160px; max-height: 320px; resize: none; overflow-x: hidden; overflow-y: auto; white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; padding: 10px 12px; border: 1px solid var(--block-insert-line); border-radius: 6px; color: var(--block-insert-fg); background: var(--block-insert-fill); font: 12px/1.65 var(--block-insert-mono); }
 .block-insert-source textarea:focus { border-color: var(--color-accent, var(--workspace-accent)); outline: none; }
 .block-insert-source textarea[wrap='off'] { height: clamp(240px, 42vh, 460px); max-height: 460px; overflow: auto; white-space: pre; overflow-wrap: normal; word-break: normal; }
+.block-insert-component-preview { width: 100%; min-width: 0; }
+.block-insert-component-preview .sandbox-block-edit { display: none; }
 .block-insert-help { margin-top: 6px; color: var(--block-insert-faint); font-size: 11px; line-height: 1.65; }
 .block-insert-help summary { width: fit-content; cursor: pointer; color: var(--block-insert-soft); }
 .block-insert-help p { margin: 6px 0 0; }

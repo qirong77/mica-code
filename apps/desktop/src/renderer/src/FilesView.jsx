@@ -45,6 +45,7 @@ import { GitComparePanel } from './GitComparePanel'
 import { GitCompareWelcome, GitReviewTabs } from './GitReviewTabs'
 import { isFileReviewed } from './git-review'
 import { useGitReview } from './useGitReview'
+import { planActivityBarClick } from './editor-activity-bar'
 import { FloatingMenu, MenuItem, MenuSeparator } from './FloatingMenu'
 import { buildGitDecorations, stagedCode, worktreeCode } from './git-decorations'
 import { useIsMobile, usePaneWidth } from './hooks'
@@ -319,6 +320,8 @@ export const FilesView = forwardRef(function FilesView(
   const messageTimer = useRef(null)
   const saveActionRef = useRef(null)
   const [documentTasks] = useState(createDocumentTaskQueue)
+  // 布局分叉在下面好几处都要用（侧栏/编辑器互相占满、活动栏收起），读到最前面来。
+  const isMobile = useIsMobile()
   const [tree, setTreeState] = useState({
     root: null,
     parent: null,
@@ -333,6 +336,11 @@ export const FilesView = forwardRef(function FilesView(
   // 只开编辑器：活动栏、文件树、Git 面板全部收起，整块宽度给编辑器。插件面板里点
   // 「编辑」走这条（见 openPath 的 focus），标签条最左给一个「显示文件目录」把侧栏放回来。
   const [focusMode, setFocusMode] = useState(false)
+  // 活动栏再点一次当前项＝把整块侧栏收起来（VS Code 的活动栏语义），再点一次放回来。
+  // 手机上侧栏与编辑器互相占满，收起会留下没有任何入口的空白页，所以那里不收起
+  // （判定在 `planActivityBarClick`，这里只记用户的选择）。
+  const [panelCollapsed, setPanelCollapsed] = useState(false)
+  const collapseSidebar = panelCollapsed && !isMobile
   const overrideRoot = rootOverride && rootOverride.base === root ? rootOverride.path : null
   const treeRef = useRef(tree)
   // 与页签一样同步更新 ref，让同一帧内的请求和用户操作始终合并到最新树上。
@@ -391,6 +399,8 @@ export const FilesView = forwardRef(function FilesView(
     if (reviewPanelRef.current !== compareHeadKey) {
       reviewPanelRef.current = compareHeadKey
       setActivePanel('git-tree')
+      // 进一份对比要把面板本身露出来：用户可能刚把侧栏收起来了。
+      setPanelCollapsed(false)
       setGitPreview(true)
     }
     if (autoCompareRef.current === compareHeadKey) return
@@ -525,11 +535,21 @@ export const FilesView = forwardRef(function FilesView(
     [gitRepository, gitCwd, gitSelectedFile, onRefreshGit, showMessage]
   )
 
-  const switchPanel = useCallback((panel) => {
-    openRequestRef.current += 1
-    setActivePanel((current) => (current === panel ? 'explorer' : panel))
-    setGitPreview(true)
-  }, [])
+  const switchPanel = useCallback(
+    (panel) => {
+      openRequestRef.current += 1
+      setGitPreview(true)
+      const next = planActivityBarClick({
+        panel,
+        activePanel,
+        collapsed: collapseSidebar,
+        mobile: isMobile
+      })
+      setActivePanel(next.panel)
+      setPanelCollapsed(next.collapsed)
+    },
+    [activePanel, collapseSidebar, isMobile]
+  )
 
   useEffect(() => {
     openRequestRef.current += 1
@@ -1769,9 +1789,11 @@ export const FilesView = forwardRef(function FilesView(
     (isGitTree && gitPreview ? showDiff : tabs.length > 0 || showDiff) ||
     (!!message && !message.transient)
   // 手机上目录树与编辑器互相占满：打开文件后显示编辑器，点「返回文件列表」切回目录树
-  const isMobile = useIsMobile()
   const [mobileTreeVisible, setMobileTreeVisible] = useState(false)
   const editorOpen = isMobile ? hasEditorContent && !mobileTreeVisible : true
+  // 侧栏让出位置的情形：只开编辑器、图谱整页、手机上打开了文件，以及用户在活动栏
+  // 上把当前项又点了一次。
+  const sidebarHidden = collapseSidebar || focusMode || isGraph || (isMobile && editorOpen)
   const tabNameCounts = tabs.reduce((counts, tab) => {
     counts.set(tab.name, (counts.get(tab.name) || 0) + 1)
     return counts
@@ -1839,17 +1861,25 @@ export const FilesView = forwardRef(function FilesView(
           ['git-tree', IconGitCompare, 'Git 比较'],
           ['git-graph', IconGitMerge, 'Git 图谱']
         ].map(([id, Icon, label]) => {
-          const active = activePanel === id
+          // 「选中」＝面板是它且侧栏确实画着：收起后图标回到未选中态，再点一次才放回来。
+          const active = activePanel === id && !collapseSidebar
           return (
             <button
               key={id}
               type="button"
-              title={label}
+              title={active ? `${label}（再点一次收起）` : label}
               aria-label={badges?.[id] ? `${label}，${changeCount} 处改动` : label}
               aria-pressed={active}
               className="group relative grid size-12 shrink-0 place-items-center"
               onClick={() => switchPanel(id)}
             >
+              {/* VS Code 的选中标记：贴左边的一条短竖线，收起时一起消失 */}
+              {active && (
+                <span
+                  aria-hidden="true"
+                  className="absolute left-0 top-1/2 h-6 w-0.5 -translate-y-1/2 rounded-r-full bg-accent"
+                />
+              )}
               {/* VS Code 的活动栏是 48px 的项目里放 32px 的圆角高亮块 + 24px 图标 */}
               <span
                 className={`grid size-8 place-items-center rounded-md transition-colors ${
@@ -1874,11 +1904,9 @@ export const FilesView = forwardRef(function FilesView(
       </nav>
       <aside
         className={`min-h-0 flex-col bg-panel ${
-          focusMode || isGraph || (isMobile && editorOpen)
-            ? 'hidden'
-            : `flex ${editorOpen ? 'shrink-0' : 'min-w-0 flex-1'}`
+          sidebarHidden ? 'hidden' : `flex ${editorOpen ? 'shrink-0' : 'min-w-0 flex-1'}`
         }`}
-        style={editorOpen && !isMobile ? { width } : undefined}
+        style={!sidebarHidden && editorOpen && !isMobile ? { width } : undefined}
         aria-label="侧边面板"
       >
         {activePanel === 'search' ? (
@@ -2077,7 +2105,7 @@ export const FilesView = forwardRef(function FilesView(
       <div
         {...separatorProps}
         className={`pane-resizer z-10 w-1.25 shrink-0 ${
-          editorOpen && !isMobile && !focusMode && !isGraph ? '' : 'hidden'
+          editorOpen && !isMobile && !sidebarHidden ? '' : 'hidden'
         }`}
         role="separator"
         aria-label="调整文件目录宽度"
@@ -2086,7 +2114,7 @@ export const FilesView = forwardRef(function FilesView(
         aria-valuenow={width}
         tabIndex={0}
       />
-      {onCornerResizeStart && !focusMode && !isGraph && (
+      {onCornerResizeStart && !sidebarHidden && (
         <div
           className="pane-corner-resizer absolute z-30"
           style={{ left: width + 2.5, top: '100%' }}
@@ -2226,7 +2254,11 @@ export const FilesView = forwardRef(function FilesView(
                 title="显示文件目录与 Git"
                 aria-label="显示文件目录与 Git"
                 className={`grid h-8 w-9 shrink-0 place-items-center ${TAB_UNDERLINE}`}
-                onClick={() => setFocusMode(false)}
+                onClick={() => {
+                  // 侧栏刚被收起过也要一起放回来，否则这个按钮按下去什么都不动。
+                  setFocusMode(false)
+                  setPanelCollapsed(false)
+                }}
               >
                 <IconArrowLeft size={15} />
               </ArcoAction>

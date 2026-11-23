@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { parseRunManySpecs, planSubagentRuns } from './orchestration.js';
 
 describe('subagentOrchestration', () => {
-  it('plans dependency order and rejects same-wave owned_paths conflicts', () => {
+  it('plans dependency order and rejects unordered owned_paths conflicts', () => {
     const planned = planSubagentRuns(
       parseRunManySpecs([
         {
@@ -42,6 +42,27 @@ describe('subagentOrchestration', () => {
         ]),
       ),
     ).toThrow('owned_paths conflict');
+  });
+
+  it('accepts more ready tasks than slots for the rolling scheduler', () => {
+    const specs = parseRunManySpecs([
+      { id: 'a', description: 'a', prompt: 'a' },
+      { id: 'b', description: 'b', prompt: 'b' },
+      { id: 'c', description: 'c', prompt: 'c' },
+    ]);
+    expect(planSubagentRuns(specs, { maxParallel: 2 }).map((task) => task.id)).toEqual(['a', 'b', 'c']);
+  });
+
+  it('checks path conflicts across dependency depths, not just within a wave', () => {
+    const specs = parseRunManySpecs([
+      { id: 'a', description: 'a', prompt: 'a' },
+      { id: 'b', description: 'b', prompt: 'b', depends_on: ['a'], owned_paths: ['src/shared'] },
+      { id: 'c', description: 'c', prompt: 'c', owned_paths: ['src/shared/utils'] },
+    ]);
+    expect(() => planSubagentRuns(specs, { maxParallel: 2 })).toThrow('owned_paths conflict between b and c');
+    expect(planSubagentRuns(specs, { maxParallel: 1 })).toHaveLength(3);
+    specs[2]!.depends_on = ['b'];
+    expect(planSubagentRuns(specs, { maxParallel: 2 })).toHaveLength(3);
   });
 
   it('rejects cyclic dependencies', () => {

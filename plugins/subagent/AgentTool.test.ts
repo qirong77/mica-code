@@ -287,6 +287,27 @@ describe('AgentTool', () => {
     expect(joined).toContain('## Parent merge guidance');
   });
 
+  it('forwards wait_mode any and explains the early-return semantics for await and join', async () => {
+    const { api } = createApi({
+      tasks: [snapshot({ id: 'slow', status: 'running', result: undefined }), snapshot({ id: 'fast' })],
+    });
+    const wait = vi.spyOn(api.tasks, 'wait');
+    const tool = new AgentTool(api);
+
+    const awaited = await tool.execute({ operation: 'await', task_ids: ['slow', 'fast'], wait_mode: 'any' });
+    expect(wait).toHaveBeenCalledWith(
+      ['slow', 'fast'],
+      expect.objectContaining({ waitMode: 'any', timeoutMs: 600_000 }),
+    );
+    expect(awaited).toContain('wait_mode: any');
+    expect(awaited).toContain('task_id: slow');
+    expect(awaited).toContain('status: running');
+
+    const joined = await tool.execute({ operation: 'join', task_ids: ['slow', 'fast'], wait_mode: 'any' });
+    expect(joined).toContain('wait_mode: any');
+    expect(joined).toContain('Joined 2 subagent task(s)');
+  });
+
   it('runs run_many wave by wave and reports background task ids', async () => {
     const { api, events, spawns } = createApi();
     const tool = new AgentTool(api);
@@ -314,6 +335,36 @@ describe('AgentTool', () => {
     expect(output).toContain('## docs: docs');
     expect(events.some((event) => event.startsWith('background:'))).toBe(true);
     expect(spawns.map((spawn) => spawn.type).sort()).toEqual(['Explore', 'Implementer', 'Reviewer']);
+  });
+
+  it('keeps dispatching ready tasks as rolling slots become free', async () => {
+    const completions = new Map<string, (result: PluginSubagentRunResult) => void>();
+    const { api, spawns } = createApi({
+      run: (request) =>
+        new Promise((resolve) => {
+          completions.set(request.description, resolve);
+        }),
+    });
+    const batch = new AgentTool(api).execute({
+      operation: 'run_many',
+      max_parallel: 2,
+      tasks: [
+        { id: 'a', description: 'a', prompt: 'a', subagent_type: 'Explore' },
+        { id: 'b', description: 'b', prompt: 'b', subagent_type: 'Explore' },
+        { id: 'c', description: 'c', prompt: 'c', subagent_type: 'Explore' },
+      ],
+    });
+
+    await vi.waitFor(() => expect(spawns.map((spawn) => spawn.description)).toEqual(['a', 'b']));
+    completions.get('b')?.({ taskId: 'b-task', status: 'completed', output: 'b done' });
+    await vi.waitFor(() => expect(spawns.map((spawn) => spawn.description)).toEqual(['a', 'b', 'c']));
+    completions.get('a')?.({ taskId: 'a-task', status: 'completed', output: 'a done' });
+    completions.get('c')?.({ taskId: 'c-task', status: 'completed', output: 'c done' });
+
+    const output = await batch;
+    expect(output).toContain('run_many finished 3 task(s).');
+    expect(output).toContain('status: completed=3');
+    expect(output).toContain('## c: c');
   });
 
   it('waits for a background dependency before starting its dependent', async () => {

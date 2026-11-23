@@ -6,6 +6,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 const runtimeRoot = fileURLToPath(new URL('./runtime/', import.meta.url))
 const iconRoot = fileURLToPath(new URL('./web/assets/yuque/', import.meta.url))
 const themeFile = fileURLToPath(new URL('../mica-config-ui/web/arco-settings.css', import.meta.url))
+const catalogFile = fileURLToPath(new URL('./componentCatalog.ts', import.meta.url))
 const devRoot = fileURLToPath(new URL('../../temp/editor-web-dev/', import.meta.url))
 const runtimeRequire = createRequire(new URL('./runtime/package.json', import.meta.url))
 const prefix = '/editor/'
@@ -72,10 +73,10 @@ export function editorWebAssets() {
       const invalidate = (_event, file) => {
         const path = resolve(file)
         const parts = relative(runtimeRoot, path).split(sep)
-        if (path !== themeFile && !path.startsWith(iconRoot) && (!path.startsWith(runtimeRoot) || parts.some((part) => ['node_modules', 'dist', 'coverage', '.vite'].includes(part)))) return
+        if (path !== themeFile && path !== catalogFile && !path.startsWith(iconRoot) && (!path.startsWith(runtimeRoot) || parts.some((part) => ['node_modules', 'dist', 'coverage', '.vite'].includes(part)))) return
         revision += 1
       }
-      server.watcher.add([runtimeRoot, iconRoot, themeFile])
+      server.watcher.add([runtimeRoot, iconRoot, themeFile, catalogFile])
       server.watcher.on('all', invalidate)
       stopWatching = () => server.watcher.off('all', invalidate)
 

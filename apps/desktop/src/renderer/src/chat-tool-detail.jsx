@@ -39,6 +39,7 @@ function toolStatusLabel(status) {
 function statusClass(status) {
   if (status === 'error') return 'is-error'
   if (status === 'pending' || status === 'running') return 'is-running'
+  if (status === 'unknown') return 'is-unknown'
   return 'is-done'
 }
 
@@ -103,7 +104,7 @@ export function ToolDetailDialog({ tool, onOpenInEditor, onClose, nested = false
   const inputRaw = Object.keys(input).length ? JSON.stringify(input, null, 2) : ''
   const inputText = inputRaw ? displayText(inputRaw, 'json') : ''
   const summary = toolSummary(tool)
-  const duration = formatLogElapsed(toolDurationMs(tool))
+  const duration = tool.durationKnown === false ? '' : formatLogElapsed(toolDurationMs(tool))
   // 同一次工具调用的两次点击要落回同一个编辑器页签，所以用 callID 作记忆点。
   const documentBase = tool.callID || tool.id || `${tool.tool}-${tool.startedAt || ''}`
 
@@ -174,7 +175,11 @@ export function ToolDetailDialog({ tool, onOpenInEditor, onClose, nested = false
           <CodeView className="chat-modal-pre" text={outputText} language={outputLang} wrap />
         ) : (
           <div className="chat-modal-note">
-            {tool.status === 'running' || tool.status === 'pending' ? '还在运行…' : '（没有输出）'}
+            {tool.status === 'running' || tool.status === 'pending'
+              ? '还在运行…'
+              : tool.status === 'unknown'
+                ? '无法确认这次调用是否已经结束。'
+                : '（没有输出）'}
           </div>
         )}
         {output?.capped ? (

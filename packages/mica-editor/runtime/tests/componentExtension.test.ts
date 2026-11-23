@@ -3,6 +3,7 @@ import { HeadingNode } from '@lexical/rich-text';
 import { $createParagraphNode, $createTextNode, $getRoot } from 'lexical';
 import { describe, expect, it } from 'vitest';
 
+import { COMPONENT_TEMPLATES, DEFAULT_COMPONENT_TEMPLATE_ID } from '../../componentCatalog';
 import { DEFAULT_COMPONENT_BLOCK, insertComponentBlock } from '../src/playground/plugins/ComponentExtension';
 import { ComponentNode, buildComponentDocument } from '../src/playground/nodes/ComponentNode';
 
@@ -101,11 +102,24 @@ describe('Notebook component blocks', () => {
     expect(DEFAULT_COMPONENT_BLOCK).toContain('setCount(count + 1)');
   });
 
+  it('publishes runnable local templates with a stable default', () => {
+    expect(COMPONENT_TEMPLATES.length).toBeGreaterThanOrEqual(5);
+    expect(COMPONENT_TEMPLATES[0]?.id).toBe(DEFAULT_COMPONENT_TEMPLATE_ID);
+    for (const template of COMPONENT_TEMPLATES) {
+      expect(template.code).toContain('function App({React, Arco, html})');
+      expect(template.code).toContain('return html`');
+      expect(template.code).not.toMatch(/\b(import|fetch)\b/);
+    }
+  });
+
   it('pins React + Arco and escapes a script terminator in the source', () => {
     const document = buildComponentDocument('const x = "</script>";', THEME);
     expect(document).toContain('esm.sh/react@18.3.1');
     expect(document).toContain('@arco-design/web-react@2.66.18');
     expect(document).toContain('mica-block-height');
+    expect(document).toContain('mica-block-theme');
+    expect(document).toContain('unhandledrejection');
+    expect(document).toContain('getDerivedStateFromError');
     expect(document).toContain('<\\/script>');
   });
 
