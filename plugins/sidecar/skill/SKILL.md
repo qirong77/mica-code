@@ -10,6 +10,20 @@ argument_hint: [要交给子会话做的事]
 一个 sidecar 就是一个**独立的 mica 会话**：自己的上下文、自己的进程、自己的会话文件。
 你和它之间是"派活 + 读结果"，不是共享上下文——它看不到你的对话，你也只看到它回传的正文。
 
+每次 `sidecar_spawn` 的第一条用户消息会自动包装成一个 issue：
+
+```text
+<context>
+父会话：xxx
+父会话 ID：...
+</context>
+<task>
+...
+</task>
+```
+
+后续消息不会重复包装。子会话可以继续派生下一级，所以 A → B → C 会分别记录 B.parent=A、C.parent=B。
+
 **为什么是工具而不是开个终端手敲**：`mica app-server` 给的是结构化事件（正文 delta、
 工具调用与结果、轮次终态、用量），一个 `sidecar_status` 就拿到全部进度；而驱动界面要读屏、
 点控件，一次观测要几十个回合，界面一改就碎。
@@ -77,6 +91,7 @@ sidecar_collect({ close: true })                             // 一次收齐结�
 | `sidecar_wait`       | 等条件：`idle`（默认）/ `text`（正文匹配）/ `turn`（新一轮结束）；可等多个 |
 | `sidecar_abort`      | 打断当前这一轮（`all: true` 打断全部），进程与会话都还在                   |
 | `sidecar_close`      | 收掉进程（`all` / `idle` / `session_ids`）；会话历史仍在，可 attach 接回   |
+| `session-control`    | 按会话 ID 通用控制另一条已落盘会话：`send` / `start` / `pause` / `resume` / `status` / `close` |
 
 **不限额**：想开多少个就开多少个（每个都是一个完整进程，内存自己看着办）。跑完用
 `sidecar_collect({ close: true })` 或 `sidecar_close({ idle: true })` 一步收尾。
@@ -139,6 +154,20 @@ sidecar_attach({ session_id: "<会话 id>" })
 
 三种场合用它：**收掉的子会话想接着干**、**父会话重启后接回之前的子会话**、**把用户另一条
 会话拉进来当执行体**。它不新建会话、不产生空壳；会话文件不存在（第一轮还没落盘）时直接报错。
+
+### 通用控制
+
+`session-control` 面向的是会话 ID，而不是当前 registry 里的子会话：
+
+```text
+session-control({ session_id: "<id>", action: "send", text: "继续完成并汇报验证" })
+session-control({ session_id: "<id>", action: "pause" })
+session-control({ session_id: "<id>", action: "resume", text: "从上次进度继续" })
+```
+
+`start` 与 `send` 都会启动一轮；`pause` 的准确语义是中断当前轮，不是冻结进程；`resume` 不带
+`text` 只接回并保持空闲。目标正在桌面端或其它 app-server 里运行时，会被跨进程 turn lease 拒绝，
+不会抢写同一份会话历史。
 
 ## 边界
 

@@ -175,3 +175,26 @@ describe('SidecarRegistry startup', () => {
     await registry.closeAll();
   });
 });
+
+describe('SidecarRegistry spawn overrides', () => {
+  it('treats placeholder model/effort as inherit instead of passing them to the child', async () => {
+    // 真链路里模型会把可选参数填成 "default"：照传就是 `--model default`，
+    // 子会话起得来、第一句话却因为「模型不存在」失败。
+    const { registry } = harness();
+    const start = vi.spyOn(SidecarProcess, 'start').mockResolvedValue(processFor('placeholder-child'));
+    const result = await registry.spawn({ prompt: 'work', model: 'default', effort: 'inherit' });
+    expect(result.ok).toBe(true);
+    const options = start.mock.calls[0]?.[0] as { model?: string; effort?: string };
+    expect(options.model).toBeUndefined();
+    expect(options.effort).toBeUndefined();
+  });
+
+  it('passes a real model id through untouched', async () => {
+    const { registry } = harness();
+    const start = vi.spyOn(SidecarProcess, 'start').mockResolvedValue(processFor('model-child'));
+    await registry.spawn({ prompt: 'work', model: 'deepseek/deepseek-flash', effort: 'high' });
+    const options = start.mock.calls[0]?.[0] as { model?: string; effort?: string };
+    expect(options.model).toBe('deepseek/deepseek-flash');
+    expect(options.effort).toBe('high');
+  });
+});

@@ -52,8 +52,11 @@ export class SidecarSpawnTool extends MicaTool {
           },
           cwd: { type: 'string', description: '子会话的工作目录，默认与当前会话相同。' },
           role: { type: 'string', description: '角色名（$MICA_HOME/role/<name>.md），默认沿用当前配置。' },
-          model: { type: 'string', description: '模型 id（provider/model），默认沿用当前配置。' },
-          effort: { type: 'string', description: '推理档位，取该模型声明的档位名。' },
+          model: {
+            type: 'string',
+            description: '模型 id（provider/model），默认沿用父会话；不确定就省略，不要填 default。',
+          },
+          effort: { type: 'string', description: '推理档位，取该模型声明的档位名；不确定就省略。' },
         },
         required: ['prompt'],
       },
@@ -144,6 +147,84 @@ export class SidecarSendTool extends MicaTool {
 
   onToolUseDisplayText(input: Record<string, unknown>): string {
     return `sidecar send ${clip(String(input.session_id ?? ''), 10)}`;
+  }
+}
+
+export class SessionControlTool extends MicaTool {
+  constructor(private readonly registry: SidecarRegistry) {
+    super(
+      'session-control',
+      '按会话 ID 控制另一条 mica 会话。send/start 发送消息并启动或排队一轮，pause 中断当前轮，' +
+        'resume 接回已退出的会话（可同时发送消息），status 查看目标，close 收掉当前控制进程。' +
+        '目标可以不是当前 sidecar registry 直接派生的会话，但必须已经落盘；正在其它进程运行时会按 turn lease 拒绝，避免并发写历史。',
+      {
+        type: 'object' as const,
+        properties: {
+          session_id: { type: 'string', description: '目标会话的完整 ID。不要传当前会话自己的 ID。' },
+          action: {
+            type: 'string',
+            enum: ['send', 'start', 'pause', 'resume', 'status', 'close'],
+            description: '要执行的控制动作。',
+          },
+          text: { type: 'string', description: 'send/start，或 resume 时可选的消息内容。' },
+        },
+        required: ['session_id', 'action'],
+      },
+    );
+  }
+
+  async execute(
+    input: { session_id: string; action: string; text?: string },
+    callbacks?: ToolExecuteCallbacks,
+  ): Promise<string> {
+    const sessionId = String(input.session_id ?? '').trim();
+    const action = String(input.action ?? '').trim();
+    if (!sessionId) return 'session_id 不能为空。';
+    if (!['send', 'start', 'pause', 'resume', 'status', 'close'].includes(action)) {
+      return 'action 必须为 send、start、pause、resume、status 或 close。';
+    }
+    if (this.registry.isCurrentSession(sessionId)) {
+      return '不能通过 session-control 控制当前会话自己；请直接继续当前对话。';
+    }
+
+    const result = await this.registry.ensureAttached(sessionId, callbacks?.signal);
+    if (!result.ok) return result.error;
+    const entry = result.entry;
+
+    try {
+      if (action === 'status') {
+        this.registry.markRead(entry.id);
+        return renderSidecar(entry, { full: false, quietWhenUnchanged: false });
+      }
+      if (action === 'close') {
+        await this.registry.close(entry.id);
+        return `已关闭会话 ${entry.id} 的控制进程；会话历史仍保留，需要时可再次 resume。`;
+      }
+      if (action === 'pause') {
+        const stopped = await entry.process.abort();
+        return stopped ? `已暂停（中断）会话 ${entry.id} 当前这一轮。` : `会话 ${entry.id} 当前没有运行中的一轮。`;
+      }
+      if (action === 'resume' && !String(input.text ?? '').trim()) {
+        return `已接回会话 ${entry.id}，当前可继续发送消息。resume 不会凭空生成一轮；需要启动请同时传 text。`;
+      }
+
+      const text = String(input.text ?? '').trim();
+      if (!text) return `${action} 需要提供 text。`;
+      const { queued } = await entry.process.send(text);
+      return action === 'start'
+        ? queued
+          ? `已向 ${entry.id} 排队启动一轮（将在下一迭代边界注入）。`
+          : `已向 ${entry.id} 启动一轮。`
+        : queued
+          ? `已向 ${entry.id} 排队消息（将在下一迭代边界注入）。`
+          : `已向 ${entry.id} 发送消息并启动一轮。`;
+    } catch (error) {
+      return `控制 ${entry.id} 失败：${error instanceof Error ? error.message : String(error)}`;
+    }
+  }
+
+  onToolUseDisplayText(input: Record<string, unknown>): string {
+    return `session-control ${String(input.action ?? '')} ${clip(String(input.session_id ?? ''), 10)}`;
   }
 }
 

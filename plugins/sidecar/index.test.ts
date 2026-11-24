@@ -100,6 +100,7 @@ describe('setup', () => {
     expect(skill.description).toContain('会话');
 
     expect(tools.map((tool) => tool.name).sort()).toEqual([
+      'session-control',
       'sidecar_abort',
       'sidecar_attach',
       'sidecar_close',

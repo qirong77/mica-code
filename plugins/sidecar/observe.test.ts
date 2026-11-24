@@ -220,7 +220,12 @@ function homeWithSession(id: string): string {
 describe('sidecar attach', () => {
   it('resumes the session and seeds the history the notification stream does not carry', async () => {
     const home = homeWithSession('sess-1');
-    const registry = makeRegistry({}, { paths: { home, config: home, plugins: join(home, 'plugins') } });
+    // `home` 是系统家目录，`config` 才是 MICA_HOME：会话必须从后者找，
+    // 拿 home 拼会去 `~/sessions` 里找一个永远不存在的文件。
+    const registry = makeRegistry(
+      {},
+      { paths: { home: join(home, 'os-home'), config: home, plugins: join(home, 'plugins') } },
+    );
     startMock.mockImplementation(async (options: { resumeSessionId?: string }) =>
       makeProcess(options.resumeSessionId ?? 'fresh').process,
     );
@@ -241,16 +246,24 @@ describe('sidecar attach', () => {
   it('refuses a session that never landed on disk', async () => {
     const home = mkdtempSync(join(tmpdir(), 'mica-sidecar-attach-'));
     homes.push(home);
-    const registry = makeRegistry({}, { paths: { home, config: home, plugins: home } });
+    const registry = makeRegistry(
+      {},
+      { paths: { home: join(home, 'os-home'), config: home, plugins: home } },
+    );
     const result = await registry.attach({ sessionId: 'missing' });
     expect(result.ok).toBe(false);
     expect(result.ok ? '' : result.error).toContain('找不到会话');
+    // 报错里给的是真正查过的目录：指到系统家目录会把人带到错的排查方向。
+    expect(result.ok ? '' : result.error).toContain(join(home, 'sessions'));
     expect(startMock).not.toHaveBeenCalled();
   });
 
   it('returns the existing entry instead of attaching twice', async () => {
     const home = homeWithSession('sess-2');
-    const registry = makeRegistry({}, { paths: { home, config: home, plugins: home } });
+    const registry = makeRegistry(
+      {},
+      { paths: { home: join(home, 'os-home'), config: home, plugins: home } },
+    );
     startMock.mockImplementation(async (options: { resumeSessionId?: string }) =>
       makeProcess(options.resumeSessionId ?? 'fresh').process,
     );

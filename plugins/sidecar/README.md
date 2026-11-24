@@ -10,6 +10,10 @@
 下一迭代边界，空闲时开新一轮），`sidecar_abort` 打断当前这一轮，`sidecar_close` 收进程。
 并发、迭代轮数、token 与嵌套层数都不设上限（每个子会话都是完整进程，资源开销自己判断）。
 
+派发的第一句话会自动变成一个 issue 信封，带上父会话标题 / ID 与 `<task>` 内容；B 再派 C
+时会重新生成 B → C 的上下文。`session-control` 是同一套协议的通用入口，按会话 ID 执行
+`send`、`start`、`pause`、`resume`、`status`、`close`，可接管当前进程尚未登记的已落盘会话。
+
 **读结果，按成本分层**：`sidecar_status`（一行到一屏的进度）→ `sidecar_turns`（每轮一行）
 → `sidecar_grep`（命中行，`scope: "tools"` 连命令输出一起搜）→ `sidecar_transcript`（正文，
 按字符预算截断）。收尾用 `sidecar_collect`：一次给出每个子会话的状态、最后一轮结论、失败
@@ -42,6 +46,7 @@
 ## 边界
 
 - 子会话看不到父会话的对话：目标、约束、路径、验收方式都要写进 `prompt`。
+- `session-control` 不能控制当前会话自己；目标在其它进程运行时服从 turn lease，返回 busy 而不是并发写入。
 - 多个子会话同时改同一个仓库等于没人在管：写代码的活一次只派一个，`cwd` 写到具体目录。
 - 角色默认继承父会话当前的角色；模型、档位可覆盖。迭代与 token 不设参数，也不设上限。
 - 会话级 MCP 配置随委派继承，子进程是纯 headless 宿主，不继承桌面插件宿主能力。

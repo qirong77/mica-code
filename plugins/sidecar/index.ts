@@ -19,6 +19,7 @@ import {
   SidecarTranscriptTool,
   SidecarTurnsTool,
   SidecarWaitTool,
+  SessionControlTool,
 } from './tools.js';
 
 /**
@@ -173,6 +174,7 @@ const plugin: MicaPlugin = {
       ctx.tools.register(new SidecarWaitTool(registry), options),
       ctx.tools.register(new SidecarAbortTool(registry), options),
       ctx.tools.register(new SidecarCloseTool(registry), options),
+      ctx.tools.register(new SessionControlTool(registry), options),
     ];
     // 推送：子会话自己发生的事（跑完、退出、卡住）下一轮直接出现在 prompt 里。
     //

@@ -8,6 +8,7 @@ import {
   SidecarProcess,
   type SidecarProcessOptions,
 } from './sidecarProcess.js';
+import { buildSidecarIssuePrompt } from './issue.js';
 import type { SidecarTranscript, SidecarTurn } from './transcript.js';
 import { clip } from './views.js';
 
@@ -94,6 +95,21 @@ export function resolveSidecarRole(inputRole: string | undefined, parentRole: st
 }
 
 /**
+ * 模型 / 档位的「沿用父会话」占位值。
+ *
+ * 可选参数在真实链路里会被模型填满：`sidecar_spawn` 的 `model` 经常收到 `"default"`，
+ * 照着传给子进程就是 `--model default`——子会话起得来，第一句话却因为「模型不存在」
+ * 直接失败。这类值表达的就是「不覆盖」，和空串一样处理。
+ */
+const INHERIT_PLACEHOLDERS = new Set(['default', 'inherit', 'auto', 'same', 'current', 'none']);
+
+export function resolveSidecarOverride(value: string | undefined): string | undefined {
+  const trimmed = value?.trim();
+  if (!trimmed) return undefined;
+  return INHERIT_PLACEHOLDERS.has(trimmed.toLowerCase()) ? undefined : trimmed;
+}
+
+/**
  * 子会话的登记表。
  *
  * 只活在父会话的 app-server 进程里：父会话结束，子会话进程一起收掉（见 index.ts 的
@@ -149,9 +165,18 @@ export class SidecarRegistry {
   }
 
   /** 父会话的当前状态：会话换过就跟着换，不能一直用 setup 时抓到的那份。 */
-  private currentSession(): { id: string | null; cwd: string } {
+  private currentSession(): { id: string | null; cwd: string; title: string } {
     const live = this.ctx.session?.describe();
-    return { id: live?.id ?? this.parentSessionId, cwd: live?.cwd || this.defaultCwd };
+    return {
+      id: live?.id ?? this.parentSessionId,
+      cwd: live?.cwd || this.defaultCwd,
+      title: live?.title || '未命名会话',
+    };
+  }
+
+  /** session-control 用来避免把当前父会话再 resume 一遍。 */
+  isCurrentSession(id: string): boolean {
+    return Boolean(id.trim()) && this.currentSession().id === id.trim();
   }
 
   /**
@@ -342,17 +367,20 @@ export class SidecarRegistry {
     // 那里才知道这个值会同时被当作子进程 cwd 和 --dir。
     const parent = this.currentSession();
     const cwd = resolveSessionCwd(input.cwd, parent.cwd);
-    const prompt = input.prompt.trim();
-    if (!prompt) return { ok: false, error: 'prompt 不能为空：子会话需要一句话才知道自己该做什么。' };
+    const task = input.prompt.trim();
+    if (!task) return { ok: false, error: 'prompt 不能为空：子会话需要一句话才知道自己该做什么。' };
+    const prompt = buildSidecarIssuePrompt({ parentId: parent.id, parentTitle: parent.title, task });
     const role = resolveSidecarRole(input.role, this.currentRole());
+    const model = resolveSidecarOverride(input.model);
+    const effort = resolveSidecarOverride(input.effort);
 
     const options: SidecarProcessOptions = {
       cwd,
       // 不传 role 时沿用父会话的角色：子会话是「同一个 agent 换个上下文干活」，
       // 默认落到配置里的 default 会让它的行为规则跟父会话不一致。
       ...(role ? { role } : {}),
-      ...(input.model ? { model: input.model } : {}),
-      ...(input.effort ? { effort: input.effort } : {}),
+      ...(model ? { model } : {}),
+      ...(effort ? { effort } : {}),
       ...(parent.id ? { parentSessionId: parent.id } : {}),
       ...(input.signal ? { signal: input.signal } : {}),
     };
@@ -387,7 +415,7 @@ export class SidecarRegistry {
     }
     const entry: SidecarEntry = {
       id,
-      title: input.title?.trim() || firstLine(prompt),
+      title: input.title?.trim() || firstLine(task),
       // 用进程手里的规范路径（不是入参）：报告给用户的目录必须是子会话真正工作的那个。
       cwd: process_.cwd,
       createdAt: Date.now(),
@@ -434,7 +462,9 @@ export class SidecarRegistry {
 
   /** 落盘会话目录：接管已有会话时要读它（历史不在通知流里）。 */
   private sessionsDir(): string {
-    return join(this.ctx.paths?.home ?? resolveMicaHome(), 'sessions');
+    // 会话存在 MICA_HOME 下，不是系统家目录：`paths.home` 是 `~`（插件读
+    // `~/.ssh` 之类用的），拿它拼 sessions 会去 `~/sessions` 里找，永远找不到。
+    return join(this.ctx.paths?.config ?? resolveMicaHome(), 'sessions');
   }
 
   /** 当前生效的两项阈值：静态配置打底，插件设置运行期覆盖。 */
@@ -464,7 +494,12 @@ export class SidecarRegistry {
     if (!sessionId) return { ok: false, error: 'session_id 不能为空。' };
     this.sweep();
     const existing = this.get(sessionId);
-    if (existing) return { ok: true, entry: existing };
+    if (existing && !existing.process.closed) return { ok: true, entry: existing };
+    if (existing?.process.closed) {
+      // 死条目只是最后一轮的阅读缓存，再次 attach 应该能真正 thread/resume。
+      this.entries.delete(existing.id);
+      this.eventLog.dropSession(existing.id);
+    }
     const history = readSessionHistory(sessionId, this.sessionsDir());
     if (!history) {
       return {
@@ -507,6 +542,15 @@ export class SidecarRegistry {
     this.emit('attach', entry, `已接管这条会话（历史 ${history.totalTurns} 轮，工具调用只保留名字）`);
     this.ctx.logger.info('sidecar:attached', { sessionId: entry.id, turns: history.totalTurns });
     return { ok: true, entry };
+  }
+
+  /** 确保任意已落盘会话在当前 registry 中有一个可驱动的 app-server。 */
+  async ensureAttached(sessionId: string, signal?: AbortSignal): Promise<SpawnResult> {
+    const key = sessionId.trim();
+    if (!key) return { ok: false, error: 'session_id 不能为空。' };
+    const existing = this.get(key);
+    if (existing && !existing.process.closed) return { ok: true, entry: existing };
+    return this.attach({ sessionId: key, ...(signal ? { signal } : {}) });
   }
 
   /**
