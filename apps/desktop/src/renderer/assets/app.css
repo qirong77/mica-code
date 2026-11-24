@@ -4001,12 +4001,12 @@ html[data-appearance='light'] .chat-markdown code:not(pre code) {
   color: inherit;
 }
 
-.chat-status-warn {
-  color: var(--color-warn-soft);
+.chat-status-blue {
+  color: var(--color-info);
 }
 
-.chat-status-hot {
-  color: var(--color-accent);
+.chat-status-yellow {
+  color: var(--color-warn);
 }
 
 .chat-status-completed {
@@ -4017,7 +4017,7 @@ html[data-appearance='light'] .chat-markdown code:not(pre code) {
   font-variant-numeric: tabular-nums;
 }
 
-.chat-status-error {
+.chat-status-red {
   color: var(--color-danger);
 }
 
