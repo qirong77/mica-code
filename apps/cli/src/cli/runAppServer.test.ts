@@ -273,12 +273,13 @@ describe('task snapshot projection (mica task extension)', () => {
     ]);
   });
 
-  it('projects all running subagents and no finished ones', () => {
+  it('projects every running subagent and no finished one', () => {
     const base: SubagentTaskRecord = {
       id: 'running', description: 'find usages', subagent_type: 'Explore', model: 'gpt-5',
       effort: 'medium', status: 'running', started_at: '2026-08-06T00:00:00.000Z',
     };
-    const failed = Array.from({ length: 21 }, (_, index) => ({
+    // 结束的任务记录留在盘上供 detail / restart，但不占 dock 的任何一行。
+    const failed = Array.from({ length: 3 }, (_, index) => ({
       ...base,
       id: `failed-${index}`,
       status: 'failed' as const,
@@ -286,8 +287,6 @@ describe('task snapshot projection (mica task extension)', () => {
     }));
     const result = projectSubagentTasks([...failed, base]);
     expect(result).toHaveLength(1);
-    expect(result.map((item) => item.taskId)).not.toContain('failed-0');
-    expect(result.map((item) => item.taskId)).not.toContain('failed-20');
     expect(result.map((item) => item.taskId)).toContain('running');
   });
 });

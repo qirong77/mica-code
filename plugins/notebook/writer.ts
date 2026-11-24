@@ -6,6 +6,8 @@ export interface NotebookDraft {
   document: NotebookDocument;
   version: NotebookStorageVersion;
   saved: string;
+  /** The last saved editorState, kept separately so typing does not stringify the whole document. */
+  savedEditorState?: string | null;
   dirty: boolean;
   /** The last save may have changed disk without returning its committed version. */
   unconfirmed: boolean;
@@ -17,6 +19,7 @@ export function createNotebookDraft(id: string, snapshot: NotebookDocumentSnapsh
     document: snapshot.value,
     version: snapshot.version,
     saved: JSON.stringify(snapshot.value),
+    savedEditorState: snapshot.value.editorState,
     dirty: false,
     unconfirmed: false,
   };
@@ -24,7 +27,11 @@ export function createNotebookDraft(id: string, snapshot: NotebookDocumentSnapsh
 
 export function updateNotebookDraft(draft: NotebookDraft, document: NotebookDocument): void {
   draft.document = document;
-  draft.dirty = draft.unconfirmed || JSON.stringify(document) !== draft.saved;
+  draft.dirty = draft.unconfirmed || (
+    draft.savedEditorState === undefined
+      ? JSON.stringify(document) !== draft.saved
+      : document.editorState !== draft.savedEditorState
+  );
 }
 
 /** Retain only a few recent clean notes in memory. Active or unsaved drafts are never evicted. */
@@ -67,7 +74,8 @@ export function createNotebookWriter(controller: Pick<NotebookController, 'saveD
           }
           draft.saved = serialized;
           draft.unconfirmed = false;
-          draft.dirty = JSON.stringify(draft.document) !== serialized;
+          draft.savedEditorState = snapshot.editorState;
+          draft.dirty = draft.document.editorState !== snapshot.editorState;
         }
       });
       tail = result.catch(() => undefined);

@@ -1,24 +1,24 @@
 import type { MicaPlugin, PluginContext } from '@packages/mica-plugin/index.js';
-import type { FfmpegTools } from './ffmpeg.js';
+import { readVideoConfig } from './config.js';
+import { detectFfmpeg, type FfmpegTools } from './ffmpeg.js';
 import { cacheStats, defaultCacheRoot } from './frames.js';
 import { formatBytes, publishStatus } from './status.js';
-import { VideoFramesTool, warmUpFfmpeg } from './VideoFramesTool.js';
 
 /**
  * 视频理解。
  *
- * 各家多模态模型目前都没有「原生视频输入」这个通用能力，Gemini 的 video 输入本质上也是
- * 服务端按秒抽帧。所以这里不做协议层的特判：**抽帧 → 走已有的图片链路**，内核一行都不用改
- * （`ToolResult` 本来就支持多图，两个 adapter 都会把工具返回的图片塞进下一次请求）。
+ * 各家多模态模型都没有「原生视频输入」这个通用能力，Gemini 的 video 输入本质上也是服务端
+ * 按秒抽帧。所以这里不做协议层的特判：**抽帧 → 落成本地 JPEG → 模型用内置 read_image 看**，
+ * 图片走已有的图片链路，内核一行都不用改。
  *
- * 可寻址的单位是时间而不是帧序号：下一轮的模型看不到上一轮返回的图片，`at: ["1:03"]` 才是
- * 自洽的引用方式。于是工具只有一条，两种用法——不给 at 是均匀概览，给了 at 是精确点名。
+ * 它不是一个每轮随请求发送 schema 的工具，而是 `/plugin/video/api` 上的一个端点（api.ts）：
+ * 用到才读文档、用到才调用。会话里这一侧只保留设置、状态、健康检查与 ffmpeg 预热。
+ *
+ * 可寻址的单位是时间而不是帧序号：下一轮的模型看不到上一轮读过的图片，`at: ["1:03"]` 才是
+ * 自洽的引用方式。于是只有一个端点，两种用法——不给 at 是按画面变化取概览，给了 at 是精确点名。
  */
 
 const PLUGIN_ID = 'video';
-const DEFAULT_MAX_EDGE = 1024;
-const DEFAULT_CACHE_LIMIT_MB = 512;
-
 const plugin: MicaPlugin = {
   id: PLUGIN_ID,
   name: 'Video',
@@ -27,11 +27,7 @@ const plugin: MicaPlugin = {
   required: false,
 
   setup(ctx: PluginContext) {
-    const readConfig = () => ({
-      ffmpegPath: String(ctx.settings.get().ffmpegPath ?? '').trim() || undefined,
-      maxEdge: resolveNumber(ctx.settings.get().maxEdge, DEFAULT_MAX_EDGE),
-      cacheLimitMb: resolveNumber(ctx.settings.get().cacheLimitMb, DEFAULT_CACHE_LIMIT_MB),
-    });
+    const readConfig = () => readVideoConfig(ctx.settings.get());
 
     if (ctx.actions) {
       const action = ctx.actions.register('check', async ({ values }) => {
@@ -42,10 +38,11 @@ const plugin: MicaPlugin = {
       });
       ctx.onDispose(() => action.dispose());
     }
-    if (!ctx.tools) return;
 
-    // 探测放在后台：装没装 ffmpeg 不该拖慢启动，而第一次调用自己也会探测一次。
-    void refreshAvailability(ctx, readConfig().ffmpegPath);
+    // 探测放在后台：装没装 ffmpeg 不该拖慢启动，而接口第一次调用自己也会探测一次。
+    // 配置页那个一次性动作宿主（没有 ctx.agent）不预热：它点完就退出，动作自己会探测，
+    // 再在 setup 里预热一遍只是白起一次子进程、白写一份状态。
+    if (ctx.agent) void refreshAvailability(ctx, readConfig().ffmpegPath);
 
     const issues = ctx.settings.validate();
     if (issues.length > 0) {
@@ -57,17 +54,6 @@ const plugin: MicaPlugin = {
       });
     }
 
-    const tool = new VideoFramesTool({
-      getConfig: readConfig,
-      onMissingFfmpeg: () => reportMissing(ctx),
-      onScenePlan: (result) => {
-        if (result.outcome === 'partial') ctx.logger.warn('video:scene-plan', result);
-        else ctx.logger.info('video:scene-plan', result);
-      },
-    });
-    const registration = ctx.tools.register(tool, { icon: '🎞️' });
-    ctx.onDispose(() => registration.dispose());
-
     ctx.logger.info('video:ready', readConfig());
   },
 };
@@ -76,7 +62,7 @@ async function refreshAvailability(
   ctx: PluginContext,
   configuredPath: string | undefined,
 ): Promise<FfmpegTools | null> {
-  const tools = await warmUpFfmpeg(configuredPath);
+  const tools = await detectFfmpeg(configuredPath);
   const stats = await cacheStats(defaultCacheRoot()).catch(() => ({ bytes: 0, files: 0 }));
 
   if (!tools) {
@@ -107,11 +93,6 @@ function reportMissing(ctx: PluginContext): void {
     message: '没有找到 ffmpeg，视频抽帧不可用',
     hint: 'macOS 执行 brew install ffmpeg；已经装了的话，在插件设置里填写 ffmpeg 的绝对路径。',
   });
-}
-
-function resolveNumber(raw: unknown, fallback: number): number {
-  const value = Number(String(raw ?? '').trim());
-  return Number.isFinite(value) && value > 0 ? value : fallback;
 }
 
 export default function setup(ctx: PluginContext): void {

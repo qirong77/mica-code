@@ -7,6 +7,8 @@ type Harness = {
   calls: PluginIdleCompactOptions[];
   requests: Array<{ purpose: string; system: string; user: string }>;
   prepare: (event: PluginTurnPrepareEvent) => Promise<void>;
+  notices: string[];
+  logs: Array<{ event: string; data?: unknown }>;
 };
 
 const applied = (beforeTokens = 806_000, afterTokens = 46_000): PluginIdleCompactOutcome => ({
@@ -22,6 +24,8 @@ function createHarness(
 ): Harness {
   const calls: PluginIdleCompactOptions[] = [];
   const requests: Harness['requests'] = [];
+  const notices: string[] = [];
+  const logs: Harness['logs'] = [];
   let prepare: Harness['prepare'] = async () => {};
   let handler: { run: (input: { action: string }) => ReturnType<Harness['run']> } = {
     run: async () => ({ message: '未注册' }),
@@ -29,6 +33,12 @@ function createHarness(
   setup({
     pluginId: 'session-compact',
     health: { report: () => undefined },
+    logger: {
+      info: (event: string, data?: unknown) => logs.push({ event, data }),
+      warn: (event: string, data?: unknown) => logs.push({ event, data }),
+      error: (event: string, data?: unknown) => logs.push({ event, data }),
+    },
+    ui: { notice: (content: string) => notices.push(content) },
     hooks: { on: (_name: string, handler: Harness['prepare']) => { prepare = handler; return { dispose() {} }; } },
     onDispose: () => {},
     desktop: {
@@ -51,7 +61,7 @@ function createHarness(
       },
     },
   } as unknown as PluginContext);
-  return { run: (action) => handler.run({ action }), calls, requests, prepare: (event) => prepare(event) };
+  return { run: (action) => handler.run({ action }), calls, requests, prepare: (event) => prepare(event), notices, logs };
 }
 
 describe('session compaction menu', () => {
@@ -70,6 +80,43 @@ describe('session compaction menu', () => {
       await harness.prepare({ previous: config, current, compactHistory });
     }
     expect(calls).toEqual([{ mode: 'quick' }, { mode: 'quick' }]);
+    // 轮前这条路没有菜单可以回话：压了什么写日志，不往对话里发 notice。
+    expect(harness.notices).toEqual([]);
+    expect(harness.logs.map((entry) => entry.event)).toEqual([
+      'compact.turn-prepare',
+      'compact.turn-prepare',
+    ]);
+  });
+
+  it('keeps the turn alive and says so when the automatic compaction fails', async () => {
+    const harness = createHarness(applied());
+    const config = { providerId: 'p', model: 'a', effort: 'low' };
+    const compactHistory = async () => {
+      throw new Error('压缩结果没能写入会话文件，已保留原历史');
+    };
+
+    // 处理器不抛错：宿主的 failPolicy 会吞掉异常，用户就只剩「什么都没发生」。
+    await expect(
+      harness.prepare({ previous: config, current: { ...config, model: 'b' }, compactHistory }),
+    ).resolves.toBeUndefined();
+    expect(harness.notices).toEqual([
+      '切换模型后的自动快速压缩没做成：压缩结果没能写入会话文件，已保留原历史。这一轮照常发送。',
+    ]);
+    expect(harness.logs[0]).toMatchObject({ event: 'compact.turn-prepare-failed' });
+  });
+
+  it('stays quiet when the turn itself was cancelled during preparation', async () => {
+    const harness = createHarness(applied());
+    const config = { providerId: 'p', model: 'a', effort: 'low' };
+    const compactHistory = async () => {
+      const abort = new Error('aborted');
+      abort.name = 'AgentAbortError';
+      throw abort;
+    };
+
+    await harness.prepare({ previous: config, current: { ...config, model: 'b' }, compactHistory });
+    expect(harness.notices).toEqual([]);
+    expect(harness.logs).toEqual([]);
   });
   it('quick compaction only replaces tool results', async () => {
     const harness = createHarness(applied());

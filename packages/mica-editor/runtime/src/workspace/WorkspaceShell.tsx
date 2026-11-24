@@ -1,6 +1,6 @@
 import {useLexicalComposerContext} from '@lexical/react/LexicalComposerContext';
-import {$getRoot} from 'lexical';
-import {type ReactNode, useEffect, useState} from 'react';
+import {type NodeKey, type UpdateListenerPayload} from 'lexical';
+import {type ReactNode, useEffect, useRef, useState} from 'react';
 
 import './notebook-workbench.css';
 import './notebook-document.css';
@@ -8,21 +8,48 @@ import './notebook-document.css';
 import {useNotebookSession} from './NotebookBridge';
 import NotebookBlockEditing from './NotebookBlockEditing';
 import NotebookDocumentStyle from './NotebookDocumentStyle';
-import {countCharacters} from './storage';
+import {readNotebookCharacterCount, updateNotebookCharacterCount, type NotebookCharacterCountCache} from './storage';
 
 export default function WorkspaceShell({children}: {children: ReactNode}) {
   const [editor] = useLexicalComposerContext();
   const session = useNotebookSession();
   const [characters, setCharacters] = useState(0);
+  const characterCount = useRef<NotebookCharacterCountCache | null>(null);
 
   useEffect(() => {
-    const updateCharacters = () => setCharacters(editor.getEditorState().read(() => countCharacters($getRoot().getTextContent())));
-    updateCharacters();
-    return editor.registerUpdateListener(({dirtyElements, dirtyLeaves}) => {
+    const initial = readNotebookCharacterCount(editor.getEditorState());
+    characterCount.current = initial;
+    setCharacters(initial.total);
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let pending: {editorState: UpdateListenerPayload['editorState']; dirtyElements: Map<NodeKey, boolean>; dirtyLeaves: Set<NodeKey>} | null = null;
+    const updateCharacters = () => {
+      timer = null;
+      const update = pending;
+      pending = null;
+      if (!update || !characterCount.current) return;
+      const next = updateNotebookCharacterCount(update.editorState, characterCount.current, update.dirtyElements, update.dirtyLeaves);
+      setCharacters(previous => previous === next ? previous : next);
+    };
+    const scheduleCharacters = ({editorState, dirtyElements, dirtyLeaves}: UpdateListenerPayload) => {
       if (!dirtyElements.size && !dirtyLeaves.size) return;
-      updateCharacters();
+      if (!pending) {
+        pending = {editorState, dirtyElements: new Map(dirtyElements), dirtyLeaves: new Set(dirtyLeaves)};
+      } else {
+        pending.editorState = editorState;
+        for (const [key, dirty] of dirtyElements) pending.dirtyElements.set(key, pending.dirtyElements.get(key) === true || dirty);
+        for (const key of dirtyLeaves) pending.dirtyLeaves.add(key);
+      }
       session?.dirty();
-    });
+      if (timer === null) timer = setTimeout(updateCharacters, 100);
+    };
+    const unregister = editor.registerUpdateListener(scheduleCharacters);
+    return () => {
+      if (timer !== null) clearTimeout(timer);
+      timer = null;
+      pending = null;
+      characterCount.current = null;
+      unregister();
+    };
   }, [editor, session]);
 
   return (

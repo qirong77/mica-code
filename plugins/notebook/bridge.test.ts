@@ -75,6 +75,19 @@ describe('Notebook iframe boundary', () => {
     await expect(flush).resolves.toEqual({ noteId: 'note-a', document });
     f.bridge.dispose();
   });
+  it('tracks a debounced dirty notification so a clean switch can skip a full snapshot', async () => {
+    const f = fixture();
+    await f.load('note-a');
+    expect(f.bridge.needsFlush()).toBe(false);
+    f.receive({ type: 'dirty', noteId: 'note-a' });
+    expect(f.bridge.needsFlush()).toBe(true);
+    const flush = f.bridge.flush();
+    const payload = f.last('flush');
+    f.receive({ type: 'result', requestId: payload.requestId, noteId: 'note-a', document });
+    await flush;
+    expect(f.bridge.needsFlush()).toBe(false);
+    f.bridge.dispose();
+  });
   it('surfaces runtime snapshot failures without completing the flush', async () => {
     const f = fixture();
     await f.load('a');

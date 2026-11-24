@@ -1,5 +1,5 @@
 import {useLexicalComposerContext} from '@lexical/react/LexicalComposerContext';
-import {type LexicalEditor, mergeRegister} from 'lexical';
+import {type EditorState, type LexicalEditor, mergeRegister} from 'lexical';
 import {Component, createContext, type ReactNode, useContext, useEffect, useRef, useState} from 'react';
 
 import NotebookOutline, {type NotebookNavigation, type NotebookOutlineSnapshot} from './NotebookOutline';
@@ -35,15 +35,21 @@ const post = (message: Record<string, unknown>) =>
 let mountSequence = 0;
 
 export class NotebookSession {
+  static readonly CHANGE_SNAPSHOT_DELAY_MS = 50;
   readonly mountKey: string;
   title: string;
   editor: LexicalEditor | null = null;
   nestedEditors = new Set<LexicalEditor>();
+  private nestedDirtyEditors = new Set<LexicalEditor>();
   private queued = false;
+  private dirtyTimer: ReturnType<typeof setTimeout> | null = null;
   private active = true;
   private loaded = false;
   private frozen = false;
   private frozenBeforeEditable: boolean | null = null;
+  private mainEditorDirty = true;
+  private snapshotting = false;
+  private cachedSnapshot: {editorState: EditorState; document: NotebookDocument} | null = null;
   private navigateOutline: ((navigation: NotebookNavigation) => void) | null = null;
   private titleNeedsAlignment: boolean;
   private unregisterTitle: (() => void) | null = null;
@@ -136,18 +142,50 @@ export class NotebookSession {
 
   snapshot(): NotebookDocument {
     if (!this.editor) throw new Error('编辑器尚未就绪，请稍后再试');
-    // Commit any pending edit (including captions) before serializing.
-    for (const nested of this.nestedEditors) nested.update(() => {}, {discrete: true});
-    this.editor.update(() => {}, {discrete: true});
-    return {
-      version: 1,
-      editorState: JSON.stringify(this.editor.getEditorState().toJSON()),
-    };
+    this.cancelScheduledDirty();
+    let mainUpdateDone = false;
+    if (!this.mainEditorDirty && !this.nestedDirtyEditors.size && this.cachedSnapshot) {
+      const cached = this.cachedSnapshot;
+      // Keep the existing commit barrier for callers that flush twice in a
+      // row; the no-op update is cheap and the serialized JSON remains cached.
+      this.editor.update(() => {}, {discrete: true});
+      mainUpdateDone = true;
+      if (cached.editorState === this.editor.getEditorState() && this.cachedSnapshot === cached) return cached.document;
+      this.mainEditorDirty = true;
+    }
+
+    this.snapshotting = true;
+    try {
+      // Commit pending edits (including captions) before serializing. Nested
+      // editors are tracked individually so an ordinary body keystroke does
+      // not force every image caption through another update pass.
+      const nested = [...this.nestedDirtyEditors];
+      this.nestedDirtyEditors.clear();
+      for (const nestedEditor of nested) nestedEditor.update(() => {}, {discrete: true});
+      // The nested update listener sees this internal commit too. It is now
+      // part of the snapshot, so do not let that listener force a second full
+      // serialization on the next flush.
+      this.nestedDirtyEditors.clear();
+      if (this.mainEditorDirty && !mainUpdateDone) this.editor.update(() => {}, {discrete: true});
+      const editorState = this.editor.getEditorState();
+      const document = {
+        version: 1 as const,
+        editorState: JSON.stringify(editorState.toJSON()),
+      };
+      this.mainEditorDirty = false;
+      this.cachedSnapshot = {editorState, document};
+      return document;
+    } finally {
+      this.snapshotting = false;
+    }
   }
 
   attach(editor: LexicalEditor): () => void {
     this.editor = editor;
     this.active = true;
+    this.mainEditorDirty = true;
+    this.cachedSnapshot = null;
+    this.nestedDirtyEditors.clear();
     let titleChanged = false;
     try {
       // A document that already carries a title block owns its text, including
@@ -169,7 +207,11 @@ export class NotebookSession {
       registerNotebookTitle(editor),
       typeof editor.registerUpdateListener === 'function'
         ? editor.registerUpdateListener(({dirtyElements, dirtyLeaves}) => {
-          if (dirtyElements.size || dirtyLeaves.size) this.ensureTitle(editor);
+          if (dirtyElements.size || dirtyLeaves.size) {
+            this.mainEditorDirty = true;
+            this.cachedSnapshot = null;
+            this.ensureTitle(editor);
+          }
         })
         : () => {},
     );
@@ -185,6 +227,7 @@ export class NotebookSession {
       this.unregisterTitle?.();
       this.unregisterTitle = null;
       this.active = false;
+      this.cancelScheduledDirty();
       this.editor = null;
       this.restoreEditor(editor);
     };
@@ -192,7 +235,17 @@ export class NotebookSession {
 
   attachNested(editor: LexicalEditor): () => void {
     this.nestedEditors.add(editor);
-    return () => { this.nestedEditors.delete(editor); };
+    this.nestedDirtyEditors.add(editor);
+    return () => {
+      this.nestedEditors.delete(editor);
+      this.nestedDirtyEditors.delete(editor);
+    };
+  }
+
+  markNestedDirty(editor: LexicalEditor): void {
+    if (!this.nestedEditors.has(editor)) return;
+    this.nestedDirtyEditors.add(editor);
+    this.cachedSnapshot = null;
   }
 
   publishOutline(snapshot: NotebookOutlineSnapshot): boolean {
@@ -216,15 +269,34 @@ export class NotebookSession {
     if (this.active && this.editor) this.navigateOutline?.(navigation);
   }
 
+  private cancelScheduledDirty(): void {
+    if (this.dirtyTimer !== null) clearTimeout(this.dirtyTimer);
+    this.dirtyTimer = null;
+    this.queued = false;
+  }
+
   dirty = () => {
-    if (this.queued || !this.active) return;
+    if (!this.active || this.snapshotting) return;
+    this.mainEditorDirty = true;
+    this.cachedSnapshot = null;
+    if (this.dirtyTimer !== null) clearTimeout(this.dirtyTimer);
+    if (!this.queued && this.loaded) {
+      // Tell the parent immediately that a flush is required. The serialized
+      // document remains debounced below, so switching away can skip a full
+      // snapshot for clean notes while a just-typed character is still safe.
+      post({type: 'dirty', noteId: this.noteId, loadId: this.requestId});
+    }
     this.queued = true;
-    queueMicrotask(() => {
+    // Debounce the expensive cross-frame serialization while the user is
+    // typing. flush() still takes a synchronous latest snapshot before a
+    // switch/close, so a pending timer never hides the final input.
+    this.dirtyTimer = setTimeout(() => {
+      this.dirtyTimer = null;
       this.queued = false;
       if (!this.active || !this.loaded) return;
       try { post({type: 'change', noteId: this.noteId, loadId: this.requestId, document: this.snapshot()}); }
       catch (error) { post({type: 'error', loadId: this.requestId, noteId: this.noteId, message: String(error)}); }
-    });
+    }, NotebookSession.CHANGE_SNAPSHOT_DELAY_MS);
   };
 }
 
@@ -248,7 +320,10 @@ export function useNotebookNestedEditor(nested: LexicalEditor): void {
     if (!session) return;
     const detach = session.attachNested(nested);
     const unregister = nested.registerUpdateListener(({dirtyElements, dirtyLeaves}) => {
-      if (dirtyElements.size || dirtyLeaves.size) session.dirty();
+      if (dirtyElements.size || dirtyLeaves.size) {
+        session.markNestedDirty(nested);
+        session.dirty();
+      }
     });
     return () => { unregister(); detach(); };
   }, [nested, session]);

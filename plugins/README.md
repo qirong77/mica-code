@@ -455,8 +455,9 @@ export default function createApi(ctx: PluginApiContext): PluginApiHandler {
 - 路由在 remoteGate 与独立 MCP **之前**分派（MCP 接管整个 `/plugin/*` 命名空间，排在后面就
   轮不到），沿用 Host/Origin 校验，未知路径 404、不回落 SPA，分享 cookie 不开放。它只跑在应用
   运行时里（桌面 / Web 宿主），不占新端口、不启动会话；TUI 与外部客户端要等应用在运行。
-- 当前只加载随包模块。Notebook 是首个使用方：它不再提供 MCP 工具，模型按 `$MICA_DESKTOP_ORIGIN`
-  直连文档与 `/overview`。
+- 当前只加载随包模块。Notebook、Schedule、Video 是使用方：三家都不再提供工具，能力只剩接口，
+  清单里各挂一条 `uriApis`，模型按 `$MICA_DESKTOP_ORIGIN`（或插入的 URI）直连文档与端点。
+  视频这类要交付图片的能力因此改成「接口回本地路径 + `read_image`」，代价是 30 秒上限与多一次往返。
 
 ## 只读 Web 查询
 
@@ -557,6 +558,27 @@ export default function createWeb(ctx: PluginWebContext): PluginWebHandler {
 条目写在清单里而不是运行期注册，是为了**没有会话宿主时也能列出来**：刚打开应用、还没跑过任何
 一轮时也能看到。宿主只读 `plugin.json`（官方插件读编译进产物的那份清单），不导入插件入口，
 所以列几个名字不会顺带把插件实现拖进进程。
+
+## 按需文档（`uriApis`）
+
+skill 与 MCP 工具是常驻的：每一轮都进 prompt 索引，哪怕这个会话根本用不到。用得少的能力可以只挂一份文档地址，用户需要时从输入框 `/` 里挑中它 —— 插进去的是一条 URI，模型自己按需去读：
+
+```json
+{
+  "uriApis": [
+    {
+      "name": "notebook",
+      "description": "笔记的机读接口：先读文档目录，再照它建/改/搜/翻页",
+      "uri": "/plugin/notebook/api"
+    }
+  ]
+}
+```
+
+- `name` 是 `/` 后面显示与匹配的名字，不能带空白；`uri` 必填。
+- `uri` 三种写法：完整 `https://…`、`file:///…`、**同源根路径**（`/plugin/<id>/api`）。最后一种在插入时按当前页面的 origin 补全 —— 页面连哪台机器的运行时，地址就跟到哪台，插件不必知道端口。
+- `/plugin/<id>/api` 只有声明了 `"api": true` 且带 `api.ts` 的插件才有（见上一节「独立 HTTP 接口」，那里的根路径就是文档本身）。只提供工具、没有说话接口的插件请写完整地址，别指向一个 404。
+- `roles` 与 `completions` 同一套门控：缺省所有角色可见，声明了就只有那些角色的会话看得到；停用插件一律跳过，重名时用户插件优先。宿主只读清单，不为列几个名字启动插件。
 
 ## 代码注册 skill（剩下的场合）
 
@@ -1203,7 +1225,7 @@ const child = spawn(micaExecutable, ['app-server', '--dir', cwd, '--parent', thi
 用户正文覆盖，界面快照带对应可用性。仅返回空正文不代表不可用，仍允许用户覆盖。
 
 工具参数、操作顺序与调用纪律统一写在工具描述中，不再额外注入同一份提示词或用 skill 包装同一个工具。
-提示词段落保留工具无法提供的动态事实和额外策略：例如 Memory 的适用记忆与历史回查、SSH 的会话主机范围、并发会话提醒、可配置的委派倾向。Todo 的计划纪律、Video 的抽帧用法与 Web Search 的查证步骤归工具描述；Schedule 直接提供排期工具，不再分发重复的说明 skill。历史回查归 Memory，宿主不再另装 `builtin.command-memory`。
+提示词段落保留工具无法提供的动态事实和额外策略：例如 Memory 的适用记忆与历史回查、SSH 的会话主机范围、并发会话提醒、可配置的委派倾向。Todo 的计划纪律与 Web Search 的查证步骤归工具描述；Video 的抽帧用法与 Schedule 的调用纪律写在各自 `api.ts` 的 `description` / `guide` 里（接口文档即说明书，不再分发重复的说明 skill）。历史回查归 Memory，宿主不再另装 `builtin.command-memory`。
 
 Capabilities 会显示当前会话各插件的工具、技能与提示词来源。用户可在 Plugins 页签开关整个插件的提示词注入，或在提示词控制中逐段开关、覆盖正文与恢复原文；插件的工具保持注册。控制存全局 `prompt-controls.json`，下一轮开始生效。覆盖正文后该段使用固定内容，恢复原文后继续由 `render()` 动态生成；完整预览与最近实际发送的存档分开。
 

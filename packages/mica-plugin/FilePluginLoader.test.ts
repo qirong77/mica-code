@@ -184,6 +184,7 @@ describe('parsePluginManifest', () => {
         skills: [],
         roles: [],
         completions: [],
+        uriApis: [],
       },
     });
   });

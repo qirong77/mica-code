@@ -49,6 +49,21 @@ describe('parsePluginManifest desktop checks', () => {
     expect(broken.ok).toBe(false);
     if (!broken.ok) expect(broken.error).toContain('insert 不能为空');
   });
+
+  it('清单里的 uriApis 进 ` / ` 的 API 文档候选，坏条目让整份清单不通过', () => {
+    const ok = parsePluginManifest(
+      base({
+        uriApis: [{ name: 'notebook', description: '笔记的机读接口', uri: '/plugin/notebook/api' }],
+      }),
+    );
+    expect(ok.ok).toBe(true);
+    if (ok.ok) expect(ok.manifest.uriApis).toHaveLength(1);
+
+    const broken = parsePluginManifest(base({ uriApis: [{ name: 'notebook' }] }));
+    expect(broken.ok).toBe(false);
+    if (!broken.ok) expect(broken.error).toContain('uri 不能为空');
+  });
+
   it('reads the declared run requirements in declaration order', () => {
     const result = parsePluginManifest(base({ desktop: { checks: ['screen-recording', 'accessibility'] } }));
 
@@ -260,7 +275,8 @@ describe('parsePluginManifest desktop launcher', () => {
     expect(result.ok && result.manifest.desktopLauncher?.webContent).toEqual({ top: 64 });
     for (const webContent of [null, {}, { top: -1 }, { top: 513 }, { top: 1.5 }, { top: '64' }]) {
       expect(parse({ title: 'Browser', webContent })).toEqual({
-        ok: false, error: 'desktop.launcher.webContent.top 必须是 0–512 的整数',
+        ok: false,
+        error: 'desktop.launcher.webContent.top 必须是 0–512 的整数',
       });
     }
   });

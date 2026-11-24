@@ -2,14 +2,23 @@
   "id": "video",
   "name": "Video",
   "icon": "video",
-  "version": "1.0.0",
-  "description": "给模型一个 video_frames 工具：把视频按时间点抽成图片，模型先看概览再点名要看的那几秒。依赖本机的 ffmpeg。",
+  "version": "1.1.0",
+  "description": "视频抽帧的机读接口：按时间点把本地视频抽成 JPEG 帧并返回本地路径，模型再用 read_image 逐张看。依赖本机的 ffmpeg。",
   "author": "Mica",
   "main": "index.ts",
+  "assets": ["README.md"],
   "priority": 205,
   "required": false,
   "mica": { "apiVersion": 1 },
-  "requires": ["tools", "settings", "actions"],
+  "requires": ["settings", "actions"],
+  "api": true,
+  "uriApis": [
+    {
+      "name": "video",
+      "description": "视频抽帧：把几个时间点抽成本地图片，再用 read_image 看",
+      "uri": "/plugin/video/api"
+    }
+  ],
   "settings": [
     {
       "key": "ffmpegPath",
@@ -27,7 +36,7 @@
       "max": 1568,
       "step": 8,
       "unit": "px",
-      "description": "每一帧缩到这个尺寸再发。调大能看清小字，但每一帧的 token 会成倍上涨，而且会一直留在对话历史里。"
+      "description": "每一帧缩到这个尺寸再落盘。调大能看清小字，但每一帧的体积和 token 会成倍上涨。"
     },
     {
       "key": "cacheLimitMb",

@@ -3380,7 +3380,7 @@ html[data-appearance='light'] .chat-markdown code:not(pre code) {
   white-space: nowrap;
 }
 
-/* 类型标记（skill / MCP / prompt）：实心淡底，是这一行唯一的一枚标记——回答「这是什么」；
+/* 类型标记（skill / MCP / prompt / API）：实心淡底，是这一行唯一的一枚标记——回答「这是什么」；
    「它从哪来」进了悬停提示（`mica · plugin · computer-use` 那种三段式太长，右侧放不下）。 */
 .chat-command-kind {
   flex: none;
@@ -3519,7 +3519,7 @@ html[data-appearance='light'] .chat-markdown code:not(pre code) {
 
 .chat-completion-palette:has(.chat-completion-filters) {
   /* 高度由组件按「内容需要多高」钉住（ComposerCompletionPalette 的 pinnedHeight）：打开时
-     贴着条目收，切 skill / MCP / plugins 时不跟着缩，所以框体不跳。这里只管上限——条目
+     贴着条目收，切 skill / MCP / API 文档 时不跟着缩，所以框体不跳。这里只管上限——条目
      多到超过它之后由列表自己滚。 */
   max-height: min(420px, 56vh);
 }

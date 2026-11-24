@@ -518,6 +518,7 @@ export type {
   PluginInspectionResult,
 } from './FilePluginLoader.js';
 export type { PluginManifest, PluginManifestParseResult } from './PluginManifest.js';
+export type { PluginUriApi, PluginUriApisParseResult } from './PluginUriApis.js';
 export type { PluginState, PluginStateOptions } from './PluginState.js';
 export {
   PLUGIN_DATA_DIR,

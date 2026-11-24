@@ -26,6 +26,7 @@ import {
 } from './PluginDesktop.js';
 import type { PluginSessionMenuItem } from './PluginSessionMenu.js';
 import { readPluginCompletions, type PluginCompletion } from './PluginCompletions.js';
+import { readPluginUriApis, type PluginUriApi } from './PluginUriApis.js';
 import { isPluginPageRoute } from '@packages/mica-web-shared/app-paths.js';
 
 /**
@@ -178,6 +179,8 @@ export type PluginManifest = {
    * 运行期注册。
    */
   completions: PluginCompletion[];
+  /** 输入框 `/` 列表里的按需 URI 文档（清单 `uriApis`）。 */
+  uriApis: PluginUriApi[];
 };
 
 export type PluginStatusField = {
@@ -345,6 +348,9 @@ export function parsePluginManifest(input: unknown): PluginManifestParseResult {
   const completions = readPluginCompletions(input.completions);
   if (!completions.ok) return completions;
 
+  const uriApis = readPluginUriApis(input.uriApis);
+  if (!uriApis.ok) return uriApis;
+
   return {
     ok: true,
     manifest: {
@@ -380,6 +386,7 @@ export function parsePluginManifest(input: unknown): PluginManifestParseResult {
       skills: skills.value,
       roles: roles.value,
       completions: completions.value,
+      uriApis: uriApis.value,
     },
   };
 }

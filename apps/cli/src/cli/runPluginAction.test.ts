@@ -31,9 +31,9 @@ vi.mock('@packages/mica-official-plugins/index.js', async () => {
     ],
   };
 });
-vi.mock('../../../../plugins/video/VideoFramesTool.js', () => ({
-  warmUpFfmpeg: probe.warmUp,
-  VideoFramesTool: class {},
+// video 不再注册工具，预热也从 setup 挪到了接口首调；这里只关心「点一下检查」触发的那次探测。
+vi.mock('../../../../plugins/video/ffmpeg.js', () => ({
+  detectFfmpeg: probe.warmUp,
 }));
 vi.mock('../../../../plugins/video/frames.js', () => ({
   cacheStats: async () => ({ bytes: 0, files: 0 }),

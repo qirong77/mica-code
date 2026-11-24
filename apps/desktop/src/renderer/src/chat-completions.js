@@ -91,6 +91,11 @@ export function completionInsertText(item) {
   if (!item) return ''
   // 插件声明的条目自带插入正文（一段提示词），不是链接
   if (item.kind === 'prompt') return String(item.insert ?? '')
+  // URI API 是按需文档：插入原始 URI，让 agent 按需读取，而不是把文档正文提前塞进上下文。
+  if (item.kind === 'uri-api') {
+    const uri = String(item.uri ?? '')
+    return uri ? `${uri} ` : ''
+  }
   if (item.kind === 'skill' || item.kind === 'mcp') {
     // `path` 是浮层选项上的统一字段；host 的原始候选里 MCP 叫 `url`。
     return completionLink(item.kind, item.name, item.path || item.url)
@@ -200,7 +205,7 @@ export function skillCompletionOptions(items, query, limit = SKILL_COMPLETION_LI
  * 所以不分组、按同一套评分（完全匹配 → 前缀 → 包含 → 只在说明里命中）排。
  */
 export function slashCompletionOptions(
-  { skills, mcpServers, completions } = {},
+  { skills, mcpServers, completions, uriApis } = {},
   query,
   limit = SKILL_COMPLETION_LIMIT
 ) {
@@ -225,12 +230,20 @@ export function slashCompletionOptions(
       name: String(completion?.name ?? ''),
       description: String(completion?.description ?? ''),
       searchLabel: sourceSearchLabel(completion)
+    })),
+    ...(Array.isArray(uriApis) ? uriApis : []).map((uriApi) => ({
+      kind: 'uri-api',
+      item: uriApi,
+      name: String(uriApi?.name ?? ''),
+      description: String(uriApi?.description ?? ''),
+      searchLabel: sourceSearchLabel(uriApi)
     }))
   ]
   const ranked = rankCompletions(entries, query, limit)
   return ranked.map((entry) => {
     if (entry.kind === 'mcp') return mcpOption(entry.item, query)
     if (entry.kind === 'prompt') return promptOption(entry.item, query)
+    if (entry.kind === 'uri-api') return uriApiOption(entry.item, query)
     return skillOption(entry.item, query)
   })
 }
@@ -361,6 +374,34 @@ function promptOption(completion, query) {
     // label 前面多了 `/`，名称里的下标整体右移一位
     highlights: matchIndexes(name, query).map((index) => index + 1),
     descriptionHighlights: matchIndexes(description, query)
+  }
+}
+
+/** 按需 URI 文档：选中后插入 `uri`，不执行调用也不注入正文。 */
+function uriApiOption(uriApi, query) {
+  const name = String(uriApi?.name ?? '')
+  const description = String(uriApi?.description ?? '')
+  const uri = resolveUri(String(uriApi?.uri ?? ''))
+  const label = `api:${name}`
+  return {
+    key: `uri-api:${uriApi?.pluginId ?? ''}:${name}`,
+    kind: 'uri-api',
+    name,
+    uri,
+    label,
+    description,
+    ...sourceFields(uriApi),
+    highlights: matchIndexes(name, query).map((index) => index + 'api:'.length),
+    descriptionHighlights: matchIndexes(description, query)
+  }
+}
+
+function resolveUri(uri) {
+  if (!uri.startsWith('/') || typeof window === 'undefined' || !window.location?.origin) return uri
+  try {
+    return new URL(uri, window.location.origin).toString()
+  } catch {
+    return uri
   }
 }
 

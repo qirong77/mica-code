@@ -568,6 +568,11 @@ function createWebApi(env) {
       list: (role) => invoke('completions:list', { role })
     },
 
+    uriApis: {
+      // 同一个 `/` 浮层里的按需 URI 文档：只读清单，不把工具注入当前会话
+      list: (role) => invoke('uri-apis:list', { role })
+    },
+
     mcp: {
       // 同一个 `/` 浮层里的 MCP server 候选（只读 config.json，不发起连接）
       listCandidates: () => invoke('mcp:candidates')

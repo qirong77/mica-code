@@ -375,6 +375,8 @@ export default function NotebookPage({ api }) {
   const uncollected = useRef(false);
   const current = useRef(null);
   const drafts = useRef(new Map());
+  const prefetchTimer = useRef(null);
+  const prefetches = useRef(new Map());
   const saveTimer = useRef(null);
   const titleTimer = useRef(null);
   const pendingTitle = useRef(null);
@@ -392,6 +394,35 @@ export default function NotebookPage({ api }) {
   const token = useMemo(() => createNodeId(), [frameKey]);
   const controller = useMemo(() => createNotebookController({ host: api, onIndex: setIndex }), [api]);
   const writer = useMemo(() => createNotebookWriter(controller), [controller]);
+  // Start the next body read while the pointer/focus is still on its tree row.
+  // The promise is consumed only when the same clean draft is still current;
+  // otherwise openNote performs its normal version-checked read.
+  const prefetchNote = useCallback((id) => {
+    if (id === current.current?.id) return;
+    if (prefetches.current.has(id)) return;
+    if (prefetchTimer.current) clearTimeout(prefetchTimer.current);
+    prefetchTimer.current = setTimeout(() => {
+      prefetchTimer.current = null;
+      const draft = drafts.current.get(id);
+      if (draft?.dirty || draft?.unconfirmed) return;
+      const cached = draft?.version
+        ? { value: draft.document, version: draft.version, missing: false }
+        : undefined;
+      const promise = controller.readDocument(id, cached);
+      prefetches.current.set(id, { promise, draft, version: draft?.version ?? null });
+      void promise.catch(() => undefined).finally(() => {
+        const pending = prefetches.current.get(id);
+        if (pending?.promise === promise) prefetches.current.delete(id);
+      });
+    }, 120);
+  }, [controller]);
+  const cancelNotePrefetch = useCallback((event) => {
+    if (event?.currentTarget && document.activeElement === event.currentTarget) return;
+    if (prefetchTimer.current) {
+      clearTimeout(prefetchTimer.current);
+      prefetchTimer.current = null;
+    }
+  }, []);
   const lifecycle = useMemo(
     () =>
       createNotebookLifecycle({
@@ -480,6 +511,8 @@ export default function NotebookPage({ api }) {
     () => () => {
       clearFolderHover();
       if (copyHintTimer.current) clearTimeout(copyHintTimer.current);
+      if (prefetchTimer.current) clearTimeout(prefetchTimer.current);
+      prefetches.current.clear();
     },
     [],
   );
@@ -756,7 +789,8 @@ export default function NotebookPage({ api }) {
     async (includeIndex = true) => {
       try {
         if (lifecycle.switching && includeIndex) throw new Error('正在切换笔记，请稍后再返回');
-        if (current.current && ready.current && loadedNote.current === current.current.id) {
+        if (current.current && ready.current && loadedNote.current === current.current.id &&
+            (bridge.current.needsFlush() || uncollected.current)) {
           const result = await bridge.current.flush();
           if (result.noteId !== current.current.id) throw new Error('笔记切换尚未完成，请稍后再试');
           acceptChange(result.noteId, result.document);
@@ -814,8 +848,24 @@ export default function NotebookPage({ api }) {
             const cached = draft?.version && draft !== current.current
               ? { value: draft.document, version: draft.version, missing: false }
               : undefined;
-            const snapshot = await controller.readDocument(id, cached);
-            return snapshot === cached ? draft : createNotebookDraft(id, snapshot);
+            const prefetched = prefetches.current.get(id);
+            const canUsePrefetch = prefetched && prefetched.draft === draft && prefetched.version === (draft?.version ?? null);
+            let snapshot;
+            if (canUsePrefetch) {
+              try {
+                snapshot = await prefetched.promise;
+              } catch {
+                // A hover read is speculative. A failed prefetch must not turn
+                // an intentional click into a permanent load error.
+                snapshot = await controller.readDocument(id, cached);
+              }
+            } else {
+              snapshot = await controller.readDocument(id, cached);
+            }
+            const unchanged = snapshot === cached || (
+              draft && snapshot.version === draft.version && snapshot.value === draft.document
+            );
+            return unchanged ? draft : createNotebookDraft(id, snapshot);
           },
           async (draft) => {
             if (!draft) return;
@@ -838,7 +888,7 @@ export default function NotebookPage({ api }) {
         setBusy(false);
       }
     },
-    [api, controller, flush, loadEditor, lifecycle],
+    [api, controller, flush, loadEditor, lifecycle, prefetchNote],
   );
 
   actions.current = { flush, openNote, save, loadEditor };
@@ -1765,6 +1815,9 @@ export default function NotebookPage({ api }) {
                     title={node.title}
                     className="notebook-tree-row"
                     onClick={(event) => handleRowClick(event, node)}
+                    onPointerEnter={() => !trash && node.kind === 'note' && prefetchNote(node.id)}
+                    onFocus={() => !trash && node.kind === 'note' && prefetchNote(node.id)}
+                    onPointerLeave={cancelNotePrefetch}
                     onContextMenu={(event) => {
                       if (trash) return;
                       event.preventDefault();

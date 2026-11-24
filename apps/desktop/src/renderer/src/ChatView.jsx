@@ -152,10 +152,12 @@ function btwDraftKey(nodeId, threadId) {
 }
 
 /** 补全浮层的空态文案：加载中 / 失败 / 没有匹配（文件侧与 CLI 的措辞一致）。 */
-function completionEmptyText(kind, loading, failed) {
+function completionEmptyText(kind, loading, failed, filter) {
   if (kind === 'skill') {
     if (loading) return '正在加载…'
-    return failed ? '加载 skill / MCP / plugins 失败' : '没有匹配的结果'
+    if (failed) return '加载 skill / MCP / API 文档 失败'
+    // 按需文档要插件主动声明才有：整类都空时说清楚缺的是什么，别让人以为是搜索没命中
+    return filter === 'uri-api' ? '还没有插件声明按需文档（清单 uriApis）' : '没有匹配的结果'
   }
   if (loading) return '正在搜索文件…'
   return failed ? '文件搜索失败' : '没有找到匹配文件'
@@ -4794,19 +4796,22 @@ export function ChatView({
 
     if (completion.kind === 'skill') {
       setCompletionLoading(true)
-      // `/` 的候选有三个来源：本地 skills、config.json 里的 MCP server、插件清单声明的条目。
+      // `/` 的候选有四个来源：本地 skills、config.json 里的 MCP server、插件清单声明的条目、
+      // 以及插件给「按需文档」留的 URI（选中只插链接，不注入工具）。
       // 任一失败仍然展示其余，全都拿不到才算失败。
       Promise.allSettled([
         window.mica.skills.list(cwd || null, activeRole),
         window.mica.mcp.listCandidates(),
         // 老运行时（或连到别的机器上那台版本更早的）没有这个通道：退回空列表，不要连累另外两个来源
-        window.mica.completions?.list(activeRole) ?? Promise.resolve([])
-      ]).then(([skills, mcpServers, completions]) => {
+        window.mica.completions?.list(activeRole) ?? Promise.resolve([]),
+        window.mica.uriApis?.list(activeRole) ?? Promise.resolve([])
+      ]).then(([skills, mcpServers, completions, uriApis]) => {
         if (cancelled) return
         if (
           skills.status === 'rejected' &&
           mcpServers.status === 'rejected' &&
-          completions.status === 'rejected'
+          completions.status === 'rejected' &&
+          uriApis.status === 'rejected'
         ) {
           fail()
           return
@@ -4816,7 +4821,8 @@ export function ChatView({
             {
               skills: skills.status === 'fulfilled' ? skills.value : [],
               mcpServers: mcpServers.status === 'fulfilled' ? mcpServers.value : [],
-              completions: completions.status === 'fulfilled' ? completions.value : []
+              completions: completions.status === 'fulfilled' ? completions.value : [],
+              uriApis: uriApis.status === 'fulfilled' ? uriApis.value : []
             },
             completion.query,
             Infinity
@@ -5308,7 +5314,7 @@ export function ChatView({
           setBackgroundTasks(Array.isArray(event.tasks) ? event.tasks : [])
           break
         case 'subagent_tasks':
-          // Host 快照：整体替换运行中及最近结束的 subagent 列表。
+          // Host 快照：整体替换运行中的 subagent 列表（结束的不进 dock）。
           setSubagentTasks(Array.isArray(event.tasks) ? event.tasks : [])
           break
         case 'wait_tasks':
@@ -8252,7 +8258,12 @@ export function ChatView({
                   setCompletionFilter(kind)
                   setCompletionIndex(0)
                 } : undefined}
-                emptyText={completionEmptyText(completion.kind, completionLoading, completionFailed)}
+                emptyText={completionEmptyText(
+                  completion.kind,
+                  completionLoading,
+                  completionFailed,
+                  completionFilter
+                )}
               />
             )}
             {/* 图片入口声明支持的格式，让系统相册尽可能提供可读取的照片；

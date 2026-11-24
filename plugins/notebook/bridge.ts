@@ -24,6 +24,11 @@ export function createEditorBridge(options: {
   let ready = false;
   let sequence = 0;
   let active: { noteId: string; loadId: string; loaded: boolean } | null = null;
+  // The iframe announces a dirty editor immediately, while the larger
+  // serialized change remains debounced. The host can therefore avoid a full
+  // cross-frame snapshot when switching away from a clean note, without ever
+  // skipping the latest keystroke.
+  let pendingChanges = false;
   const pending = new Map<
     string,
     {
@@ -74,6 +79,11 @@ export function createEditorBridge(options: {
     if (disposed || !target || event.source !== target) return;
     const data = event.data;
     if (!data || data.channel !== NOTEBOOK_CHANNEL || data.token !== options.token) return;
+    if (data.type === 'dirty') {
+      if (!active?.loaded || data.noteId !== active.noteId || data.loadId !== active.loadId) return;
+      pendingChanges = true;
+      return;
+    }
     if (data.type === 'modal') {
       if (!active?.loaded || data.noteId !== active.noteId || data.loadId !== active.loadId || typeof data.open !== 'boolean') return;
       options.onModalChange?.(data.open);
@@ -156,10 +166,14 @@ export function createEditorBridge(options: {
         document = structuredClone(data.document) as NotebookDocument;
         options.onError('这篇笔记超过 6 MiB 保存上限。最新草稿已保留，请减少内嵌图片或先下载草稿备份。');
       }
-      if (data.type === 'change') options.onChange(data.noteId, document);
+      if (data.type === 'change') {
+        options.onChange(data.noteId, document);
+        pendingChanges = false;
+      }
       else {
         clearTimeout(result!.timer);
         pending.delete(data.requestId);
+        pendingChanges = false;
         result!.resolve({ noteId: data.noteId, document });
       }
     } catch (cause) {
@@ -178,6 +192,7 @@ export function createEditorBridge(options: {
       rejectRequests('笔记已切换，请重试');
       options.onModalChange?.(false);
       active = { noteId, loadId: `load-${++sequence}`, loaded: false };
+      pendingChanges = false;
       return request('load', document, title).then(() => undefined);
     },
     freeze(frozen: boolean) {
@@ -201,6 +216,9 @@ export function createEditorBridge(options: {
     },
     flush(): Promise<{ noteId: string; document: NotebookDocument }> {
       return request('flush');
+    },
+    needsFlush(): boolean {
+      return pendingChanges;
     },
     dispose() {
       options.onModalChange?.(false);

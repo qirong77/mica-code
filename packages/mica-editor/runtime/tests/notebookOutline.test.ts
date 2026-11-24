@@ -7,7 +7,7 @@ import {$createParagraphNode, $createTextNode, $getRoot, $getSelection, defineEx
 import {describe, expect, it, vi} from 'vitest';
 
 import {$createImageNode, ImageNode} from '../src/playground/nodes/ImageNode';
-import {$readNotebookOutline} from '../src/workspace/NotebookOutline';
+import {resolveNotebookOutlinePosition, $readNotebookOutline, shouldRebuildNotebookOutline} from '../src/workspace/NotebookOutline';
 
 function createEditor() {
   return createHeadlessEditor({
@@ -24,6 +24,42 @@ const createCaptionEditor = () => buildEditorFromExtensions(defineExtension({
 }));
 
 describe('Notebook outline metadata', () => {
+  it('skips metadata walks for a leaf-only body edit but keeps structural edits conservative', () => {
+    expect(shouldRebuildNotebookOutline(
+      new Map([['paragraph', false], ['root', true]]),
+      new Set(['text']),
+      false,
+    )).toBe(false);
+    expect(shouldRebuildNotebookOutline(
+      new Map([['paragraph', false]]),
+      new Set(['text']),
+      false,
+    )).toBe(false);
+    expect(shouldRebuildNotebookOutline(
+      new Map([['root', true]]),
+      new Set(['text']),
+      false,
+    )).toBe(true);
+    expect(shouldRebuildNotebookOutline(
+      new Map([['paragraph', true], ['root', true]]),
+      new Set(['text']),
+      false,
+    )).toBe(true);
+    expect(shouldRebuildNotebookOutline(
+      new Map([['paragraph', false], ['root', true]]),
+      new Set(['text']),
+      true,
+    )).toBe(true);
+  });
+
+  it('finds the active heading from cached document positions', () => {
+    const positions = [{key: 'h1', top: 100}, {key: 'h2', top: 260}, {key: 'h3', top: 520}] as const;
+    expect(resolveNotebookOutlinePosition(positions, 40)).toBe('h1');
+    expect(resolveNotebookOutlinePosition(positions, 300)).toBe('h2');
+    expect(resolveNotebookOutlinePosition(positions, 800)).toBe('h3');
+    expect(resolveNotebookOutlinePosition([], 300)).toBeNull();
+  });
+
   it('keeps all six heading levels in document order, excluding table and nested-editor headings', () => {
     const editor = createEditor();
     const expected: {key: string; text: string; level: number; parentKey: string | null}[] = [];

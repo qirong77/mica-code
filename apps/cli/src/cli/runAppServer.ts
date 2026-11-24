@@ -134,20 +134,11 @@ export function isOwnedBackgroundTask(task: BackgroundTaskMeta, ownerId: string)
   return Boolean(ownerId) && task.agent_owner_id === ownerId;
 }
 
-/** Include recent finished tasks so their transcripts remain accessible after a turn. */
+/** Project only the subagents that are still running. Finished ones keep their
+ * record on disk (detail / restart stay answerable) but never take a dock row. */
 export function projectSubagentTasks(tasks: SubagentTaskRecord[]): MicaSubagentTaskItem[] {
-  const recentFinished = tasks
-    .filter((task) => task.status !== 'running' && task.activity !== 'maintenance' && keepsSubagentTaskRow(task))
-    .sort((a, b) => Date.parse(b.finished_at ?? b.started_at) - Date.parse(a.finished_at ?? a.started_at))
-    .slice(0, 20);
-  const retainedIds = new Set(recentFinished.map((task) => task.id));
   return tasks
-    .filter(
-      (task) =>
-        task.activity !== 'maintenance' &&
-        keepsSubagentTaskRow(task) &&
-        (task.status === 'running' || retainedIds.has(task.id)),
-    )
+    .filter((task) => task.activity !== 'maintenance' && keepsSubagentTaskRow(task))
     .map((task) => ({
       taskId: task.id,
       ...(task.parent_task_id ? { parentTaskId: task.parent_task_id } : {}),

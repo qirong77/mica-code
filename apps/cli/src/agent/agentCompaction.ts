@@ -248,16 +248,29 @@ export async function compactIdleSessionHistory(input: {
   }
 
   const conversationMessages = input.conversationMessages?.();
-  sessionController.saveCurrent({
-    preserveTitle: true,
-    ...(conversationMessages ? { conversationMessages } : {}),
-    // 压缩后的上下文占用：`lastUsage` 仍是压缩前那次真实请求（Stats 的对账口径，
-    // 也是重试与自动压缩判断阈值的依据），所以界面上的 ctx 徽标读这一份，否则压完
-    // 输入框左下角还写着压缩前的数字，看着像「没生效」。与 `mica compact` 同一种写法：
-    // 下一次真实请求会把它替换掉。
-    ...(result.afterTokenEstimate > 0
-      ? { displayUsage: { totalTokens: afterTokens, compactedAt: new Date().toISOString() } }
-      : {}),
-  });
+  let saved = false;
+  try {
+    saved = sessionController.saveCurrent({
+      preserveTitle: true,
+      ...(conversationMessages ? { conversationMessages } : {}),
+      // 压缩后的上下文占用：`lastUsage` 仍是压缩前那次真实请求（Stats 的对账口径，
+      // 也是重试与自动压缩判断阈值的依据），所以界面上的 ctx 徽标读这一份，否则压完
+      // 输入框左下角还写着压缩前的数字，看着像「没生效」。与 `mica compact` 同一种写法：
+      // 下一次真实请求会把它替换掉。
+      ...(result.afterTokenEstimate > 0
+        ? { displayUsage: { totalTokens: afterTokens, compactedAt: new Date().toISOString() } }
+        : {}),
+    });
+  } catch (error) {
+    agent.loadSnapshot(snapshot);
+    throw error;
+  }
+  // 写盘被拒（会话已经没有可写的对话内容、文件被挪走…）时内存里是压缩后的历史、磁盘上
+  // 还是旧的。报成功是最糟的一种：用户以为生效了，而下一轮 `refreshFromStore()` 会照着
+  // 磁盘把这份压缩结果整份丢掉，看起来就是「压了又回去」。退回压缩前那份并如实失败。
+  if (!saved) {
+    agent.loadSnapshot(snapshot);
+    throw new Error('压缩结果没能写入会话文件，已保留原历史');
+  }
   return summary;
 }

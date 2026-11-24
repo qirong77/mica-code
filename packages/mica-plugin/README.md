@@ -34,6 +34,7 @@ lease 并应用配置后、保存用户输入前执行，可通过事件上的 `
 - 提供 service container 和 service token，用于插件间共享能力。
 - 定义 `PluginContext` capability，由应用注入 runtime queue、工具注册和 UI 扩展入口。
 - 定义插件包格式：`plugin.json` 清单（id / name / version / main / assets / dependencies / required / priority / settings / requires / `mica.apiVersion`）、目录加载器与只读扫描（配置页用）。
+- 输入框按需文档：清单 `uriApis`（`[{ name, description?, uri, roles? }]`，解析器 `PluginUriApis.ts`）声明一份文档地址；桌面端 `/` 列表里挑中它只把 URI 插进输入框，模型按需去读，不占工具与 skill 的常驻位。URI 收 `http(s)` / `file:` / 同源根路径（`/plugin/<id>/api`）三种，后者由渲染层按当前运行时补全。完整约定见根 `plugins/README.md`。
 - 维护启停状态（`$MICA_HOME/plugins-state.json`）：停用的插件照常注册、装配阶段跳过；常驻宿主经 `pluginStateSync` 在每轮开始时对齐名单，卸载 / 重新装配单个插件而不必重开会话。
 - 插件设置：清单里声明 `settings` 字段，值存 `$MICA_HOME/plugin-settings/<id>.json`，插件用 `ctx.settings.get()` 读。字段标 `perSession: true` 表示「这条会话可以不一样」：会话覆盖存在快照的 `pluginSessionSettings`（只存改过的键），插件改用 `ctx.sessionSettings.get()` 读合并后的生效值，`overrides()` / `set()` / `clear()` 改本会话，需要 `requires` 里有 `sessionSettings`。
 - 插件日志：`ctx.logger` 自带文件输出，落在 `resolveLogDir()`（与运行时日志同目录），按天分片、按大小轮转。 `pluginLogPath()` 返回该插件实际存在的最新日志；没有记录时返回日志目录，不创建空日志。

@@ -36,7 +36,9 @@
   - 模型压缩 → `agent.compactIdleHistory({ mode: 'model', summarize })`，历史折成 checkpoint 摘要 + 最近几轮。摘要请求只带用户与助手的对话（`summaryInput: 'dialogue'`：工具调用、工具结果、思考都不进摘要输入，它们占九成篇幅却不进结论），走清单 `llm`（「压缩摘要模型」面板）：默认复用当前会话模型，也能换成更便宜的独立接口，失败自动降级；插件只决定「谁写这段摘要」，分段、预算与截断仍归内核的 `CompactionService`。
 - 轮次之外的压缩会改写已落盘的会话历史（`compactIdleSessionHistory`：拿到 turn lease → 压内存里的快照 → 根据当前压缩结果生成 `conversationMessages`，连同 notice 落盘）。界面完整展示当前持久化记录，模型压缩后旧历史会随之变为摘要加最近几轮，不另外保留永不变化的原始展示历史。会话正忙（这一轮在跑、另一个进程持有 lease）时宿主回 `busy`，插件只提示「等这一轮结束再压」，不排队、不插进正在跑的请求。
 - 这条通路整段跑在宿主的**维护窗口**里（`runAppServer` 的 `runIdleTask` → `runMaintenance({ reason: 'compaction', label: '压缩' })`）：客户端把这几秒的发送留在排队行里（`waitingFor: 'maintenance'`），压完再补发；窗口在 `active: false` **之前**补一条 `historyReplaced`，页面先同步当前落盘的压缩记录再收排队那条，顺序不能反。
-- 迭代重写句柄的 `compact(messages, options)` 只压传入的请求历史副本；`compactIdleHistory` 与 `turn:prepare` 的 `compactHistory` 则将当前压缩结果落盘并同步 `conversationMessages`，展示与持久化记录一致。压缩失败只回一句可读的提示，不中断任何 turn。
+- 迭代重写句柄的 `compact(messages, options)` 只压传入的请求历史副本；`compactIdleHistory` 与 `turn:prepare` 的 `compactHistory` 则将当前压缩结果落盘并同步 `conversationMessages`，展示与持久化记录一致。
+- 写盘被拒不算压缩成功：`compactIdleSessionHistory` 把 `saveCurrent` 返回 false（或写盘抛错）当失败——先退回压缩前的快照，再把错误交出去。否则内存里是压过的历史、磁盘上还是旧的，下一轮 `refreshFromStore()` 照磁盘把压缩结果整份丢掉，看起来就是「压了又回去」。
+- 压缩失败只提示、不牵动这一轮：轮次之外的菜单动作把错误折成一句 `message`；轮前的 `turn:prepare` 处理器自己 catch（`failPolicy: 'continue'` 会把异常吞成一条插件日志，用户只看到「什么都没发生」），写一条 `variant: 'compact'` 的 warning notice 说明原因，这一轮照常发送；被这一轮的中止带出的 `AbortError` / `AgentAbortError` 不算压缩失败，不写 notice。跳过的原因（`empty`：没有可清理的工具过程）只进插件日志 `compact.turn-prepare`，不打扰对话。
 - 所有压缩保留 usage 记账；需要模型的 compact / review 走 subagent 或 exclusive task，不污染运行中的主 turn。插件自带摘要请求时（`compact(..., { summarize })`）走 `ctx.llm`，用量以 `origin: 'plugin'` 记进同一份 `subagentUsageHistory`。
 - 会话笔记存在快照里，compact 改不到它，每轮由 `buildSystemPrompt()` 追加；rewind 随 checkpoint 回滚。
 

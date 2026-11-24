@@ -432,6 +432,53 @@ describe('composer completions', () => {
     expect(options.map((option) => option.kind)).toEqual(['mcp', 'skill', 'prompt'])
   })
 
+  // 按需文档是「用到再读」：插进去的只有链接本身。把文档正文提前塞进输入框等于又注入了一次，
+  // 前面这些条目存在的意义就没了。
+  it('按需 URI 文档插入链接本身，不插入正文', () => {
+    const uriApis = [
+      {
+        name: 'notebook',
+        description: '笔记本的机读接口文档',
+        uri: '/plugin/notebook/api',
+        pluginId: 'notebook',
+        source: { kind: 'plugin', label: 'notebook' }
+      },
+      {
+        name: 'notes-site',
+        description: '线上笔记站的接口文档',
+        uri: 'https://mica.qirong77.com/plugin/notebook/api',
+        pluginId: 'notebook',
+        source: { kind: 'plugin', label: 'notebook' }
+      }
+    ]
+    const options = slashCompletionOptions({ uriApis }, 'note')
+    expect(options.map((option) => option.kind)).toEqual(['uri-api', 'uri-api'])
+    expect(options[0]).toMatchObject({
+      label: 'api:notebook',
+      uri: '/plugin/notebook/api',
+      // 来源原样留着：悬停提示用它说明是哪家插件给的文档
+      source: { kind: 'plugin', label: 'notebook' }
+    })
+    expect(completionInsertText(options[0])).toBe('/plugin/notebook/api ')
+    // 完整的 http 地址原样插入，不拼当前端口
+    expect(completionInsertText(options[1])).toBe('https://mica.qirong77.com/plugin/notebook/api ')
+  })
+
+  it('按插件名也能搜到它给的 API 文档', () => {
+    const uriApis = [
+      {
+        name: 'session-api',
+        description: '',
+        uri: '/plugin/demand-dev/api',
+        pluginId: 'user.demand-dev',
+        source: { kind: 'plugin', label: 'demand-dev', detail: 'user.demand-dev' }
+      }
+    ]
+    expect(slashCompletionOptions({ uriApis }, 'dema').map((option) => option.name)).toEqual([
+      'session-api'
+    ])
+  })
+
   // 用户记不住那 7 个入口叫什么，只会敲插件名（`/dema`）——来源标记必须参与匹配，
   // 否则这个入口只能靠逐字背下 `/claim`、`/desc` 才用得上。
   it('按插件名也能搜到它声明的条目', () => {

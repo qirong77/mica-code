@@ -1,7 +1,7 @@
 import {createHeadlessEditor} from '@lexical/headless';
 import {$isHeadingNode, HeadingNode} from '@lexical/rich-text';
 import {$createParagraphNode, $createTextNode, $getRoot} from 'lexical';
-import {beforeAll, describe, expect, it, vi} from 'vitest';
+import {afterEach, beforeAll, describe, expect, it, vi} from 'vitest';
 
 let NotebookSession: typeof import('../src/workspace/NotebookBridge').NotebookSession;
 
@@ -9,6 +9,8 @@ beforeAll(async () => {
   vi.stubGlobal('window', {location: {hash: '#test-nonce'}, parent: {postMessage: vi.fn()}});
   ({NotebookSession} = await import('../src/workspace/NotebookBridge'));
 });
+
+afterEach(() => vi.useRealTimers());
 
 describe('notebook persistence boundary', () => {
   it('publishes modal visibility with the current document identity only while attached', async () => {
@@ -48,6 +50,7 @@ describe('notebook persistence boundary', () => {
   });
 
   it('reports failed content snapshots with their load identity instead of silently dropping the last input', async () => {
+    vi.useFakeTimers();
     const post = vi.mocked(window.parent.postMessage);
     post.mockClear();
     const session = new NotebookSession('a', {version: 1, editorState: null}, 'load-failed');
@@ -59,7 +62,7 @@ describe('notebook persistence boundary', () => {
     } as never);
     await Promise.resolve();
     session.dirty();
-    await Promise.resolve();
+    vi.advanceTimersByTime(NotebookSession.CHANGE_SNAPSHOT_DELAY_MS);
     expect(post).toHaveBeenLastCalledWith(expect.objectContaining({
       type: 'error', loadId: 'load-failed', noteId: 'a', message: 'Error: invalid node',
     }), '*');
@@ -123,6 +126,7 @@ describe('notebook persistence boundary', () => {
   });
 
   it('tags loaded, outline and content messages with the mounted load identity and stops after detach', async () => {
+    vi.useFakeTimers();
     const post = vi.mocked(window.parent.postMessage);
     post.mockClear();
     const session = new NotebookSession('a', {version: 1, editorState: null}, 'load-current');
@@ -137,15 +141,37 @@ describe('notebook persistence boundary', () => {
     await Promise.resolve();
     session.publishOutline({items: [], activeKey: null, blocks: {table: false, code: false, mermaid: false, image: false}});
     session.dirty();
-    await Promise.resolve();
+    vi.advanceTimersByTime(NotebookSession.CHANGE_SNAPSHOT_DELAY_MS);
     expect(post.mock.calls.map(([message]) => message)).toEqual([
       expect.objectContaining({type: 'loaded', noteId: 'a', requestId: 'load-current', loadId: 'load-current'}),
       expect.objectContaining({type: 'outline', noteId: 'a', loadId: 'load-current'}),
+      expect.objectContaining({type: 'dirty', noteId: 'a', loadId: 'load-current'}),
       expect.objectContaining({type: 'change', noteId: 'a', loadId: 'load-current'}),
     ]);
     detach();
     session.dirty();
+    vi.advanceTimersByTime(NotebookSession.CHANGE_SNAPSHOT_DELAY_MS);
+    expect(post).toHaveBeenCalledTimes(4);
+  });
+
+  it('coalesces rapid dirty notifications while a synchronous snapshot still sees the latest input', async () => {
+    vi.useFakeTimers();
+    const post = vi.mocked(window.parent.postMessage);
+    post.mockClear();
+    const editor = createHeadlessEditor({namespace: 'notebook-coalesced', nodes: [HeadingNode], onError(error) {throw error;}});
+    const session = new NotebookSession('a', {version: 1, editorState: null}, 'coalesced-load');
+    const detach = session.attach(editor);
     await Promise.resolve();
-    expect(post).toHaveBeenCalledTimes(3);
+    post.mockClear();
+    editor.update(() => $getRoot().append($createParagraphNode().append($createTextNode('最后一次输入'))), {discrete: true});
+    session.dirty();
+    session.dirty();
+    vi.advanceTimersByTime(NotebookSession.CHANGE_SNAPSHOT_DELAY_MS - 1);
+    expect(post).not.toHaveBeenCalled();
+    const snapshot = session.snapshot();
+    expect(snapshot.editorState).toContain('最后一次输入');
+    vi.advanceTimersByTime(NotebookSession.CHANGE_SNAPSHOT_DELAY_MS);
+    expect(post).not.toHaveBeenCalled();
+    detach();
   });
 });

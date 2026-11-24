@@ -2,14 +2,22 @@
   "id": "schedule",
   "name": "Schedule",
   "icon": "calendar",
-  "version": "3.0.0",
-  "description": "本地排期：任务平铺在甘特图上，同色一行。点空白新建、拖条改期、点条编辑；在页面里改，或者直接跟模型说一句。",
+  "version": "3.1.0",
+  "description": "本地排期：任务平铺在甘特图上，同色一行。点空白新建、拖条改期、点条编辑；也可以跟模型说一句，让它读接口文档后照做。",
   "author": "Mica Code",
   "main": "index.ts",
   "assets": ["README.md"],
   "priority": 35,
   "mica": { "apiVersion": 1 },
-  "requires": ["tools"],
+  "requires": [],
+  "api": true,
+  "uriApis": [
+    {
+      "name": "schedule",
+      "description": "本地排期：读/建/改/删任务，先读文档再照它调",
+      "uri": "/plugin/schedule/api"
+    }
+  ],
   "desktop": {
     "entry": { "label": "Schedule", "placement": "header" },
     "page": { "title": "排期" }

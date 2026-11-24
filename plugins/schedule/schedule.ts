@@ -8,7 +8,7 @@ import { COLOR_KEYS, isScheduleColor, normalizeColor, type ScheduleColor } from 
  * 一份排期就是一串任务：每条有名字、起止日期、颜色和 Markdown 备注。同色的任务在页面里
  * 排成同一行，所以颜色也是数据的一部分，而不是显示时从名字临时猜出来的。
  *
- * 界面拖拽与模型经 `schedule` 工具改的都是同一份 `data.json`，改法都是这里的几条操作——
+ * 界面拖拽与模型经 `/plugin/schedule/api` 改的都是同一份 `data.json`，改法都是这里的几条操作——
  * 两边各写一套迟早会写出两种语义。
  *
  * 这个文件也被渲染层直接用，所以不能 import 任何 node 模块。
@@ -236,7 +236,7 @@ function invalidStoredData(): Error {
 /**
  * 一次改动。
  *
- * 界面与工具都把它交给同一条写盘路径：按 id 定位、只改这一条，别的条（可能是另一个窗口
+ * 界面与接口都把它交给同一条写盘路径：按 id 定位、只改这一条，别的条（可能是另一个窗口
  * 或模型刚改的）原样保留。所以操作里带的是「目标改成什么」，不是「整份数据长什么样」。
  */
 export type ScheduleOperation =
@@ -309,7 +309,7 @@ function normalizeTasks(tasks: ScheduleTask[]): ScheduleTask[] {
 /**
  * 把一次操作应用到数据上，返回新数据；不修改入参。
  *
- * 任务已经不在时抛错而不是静默跳过：界面上是「刚被别的窗口删了」，工具那边是
+ * 任务已经不在时抛错而不是静默跳过：界面上是「刚被别的窗口删了」，接口那边是
  * 「你手里的 id 过期了」，两种都该让人看见，而不是改了个寂寞。
  */
 export function applyOperation(data: ScheduleData, operation: ScheduleOperation): ScheduleData {
@@ -431,7 +431,7 @@ function noteLine(note: string): string {
   return `\n   备注：${flat.length > 120 ? `${flat.slice(0, 120)}…` : flat}`;
 }
 
-/** 工具回复里的排期：id 与日期都写全，模型下一句话就能直接拿 id 去改。 */
+/** `/overview` 的 `text`：id 与日期都写全，模型下一句话就能直接拿 id 去改。 */
 export function formatSchedule(data: ScheduleData, today: string = todayOf()): string {
   if (data.tasks.length === 0) return `今天 ${today}\n排期「${data.title}」是空的（还没有任何任务）。`;
   const lines = [`今天 ${today}`, `排期「${data.title}」 · ${data.tasks.length} 个任务`];

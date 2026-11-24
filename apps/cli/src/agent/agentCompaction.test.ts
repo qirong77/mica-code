@@ -81,7 +81,7 @@ describe('compactIdleSessionHistory display history', () => {
       afterTokenEstimate: 10,
       savedTokenEstimate: 90,
     } as CompactResult);
-    const saveCurrent = vi.fn();
+    const saveCurrent = vi.fn((_options?: unknown) => true);
     await compactIdleSessionHistory({
       agent: {
         getSnapshot: () => snapshot,
@@ -122,12 +122,59 @@ describe('compactIdleSessionHistory display history', () => {
         getSubagentUsageHistory: () => [],
         estimateRequestOverheadTokens: () => 0,
       } as unknown as AgentRuntime,
-      sessionController: { saveCurrent: vi.fn() } as unknown as SessionController,
+      sessionController: { saveCurrent: () => true } as unknown as SessionController,
       mode: 'model',
       summarize: async () => 'summary',
     });
 
     expect(compact).toHaveBeenCalledOnce();
+  });
+
+  it('refuses to report a compaction whose save was dropped', async () => {
+    let snapshot: { messageFormat: string; messages: Message[] } = {
+      messageFormat: 'pi-ai-v1',
+      messages: [piUser('old'), piAssistant('answer')],
+    };
+    const before = snapshot.messages;
+    vi.spyOn(micaContext.CompactionService.prototype, 'compact').mockResolvedValue({
+      messages: [piUser('summary')],
+      beforeCount: 2,
+      afterCount: 1,
+      beforeTokenEstimate: 100,
+      afterTokenEstimate: 10,
+      savedTokenEstimate: 90,
+    } as CompactResult);
+    const agent = {
+      getSnapshot: () => snapshot,
+      loadSnapshot: (next: typeof snapshot) => {
+        snapshot = next;
+      },
+      getSubagentUsageHistory: () => [],
+      estimateRequestOverheadTokens: () => 0,
+    };
+
+    // 宿主拒绝了这次写入：内存里已经是压过的历史，磁盘上还是旧的。报成功等于骗人——
+    // 下一轮 refreshFromStore() 会把这份压缩结果整份丢掉。
+    await expect(
+      compactIdleSessionHistory({
+        agent: agent as unknown as AgentRuntime,
+        sessionController: { saveCurrent: () => false } as unknown as SessionController,
+      }),
+    ).rejects.toThrow('压缩结果没能写入会话文件');
+    expect(snapshot.messages).toEqual(before);
+
+    // 写盘自己抛错也一样：先退回压缩前那份，再把错误交出去。
+    await expect(
+      compactIdleSessionHistory({
+        agent: agent as unknown as AgentRuntime,
+        sessionController: {
+          saveCurrent: () => {
+            throw new Error('disk full');
+          },
+        } as unknown as SessionController,
+      }),
+    ).rejects.toThrow('disk full');
+    expect(snapshot.messages).toEqual(before);
   });
 });
 

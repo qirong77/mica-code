@@ -6,13 +6,13 @@ import { emptyData, parseStoredData, stamp, type ScheduleData } from './schedule
 /**
  * `data.json` 的读写。
  *
- * 写它的有三个来源：桌面端页面（经宿主 `plugin-host:write-data`）、`schedule` 工具（就在这里）、
- * 配置页的动作（也可以算页面那一路）。三者互不相识，只共用两样东西：
+ * 写它的有两处：桌面端页面（经宿主 `plugin-host:write-data`）与 `/plugin/schedule/api`
+ * （经宿主的 `context.data`，同一把锁、同一个内容版本）。两处互不相识，只共用两样东西：
  *
  * - **同一个锁文件** `${data}.lock`（宿主的写入口用的也是这个路径）；
  * - **先写临时文件再 rename**，页面随时在读，不能让它读到半份 JSON。
  *
- * 所以工具这边拿到锁之后是「现读 → 改一条 → 原子写」，而不是把内存里那份整份盖回去：
+ * 所以这里拿到锁之后是「现读 → 改一条 → 原子写」，而不是把内存里那份整份盖回去：
  * 用户可能刚拖过另一条任务。
  */
 

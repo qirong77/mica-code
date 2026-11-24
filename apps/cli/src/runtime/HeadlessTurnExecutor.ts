@@ -523,7 +523,11 @@ export class HeadlessTurnExecutor {
             const result = await compactIdleSessionHistory({
               agent,
               sessionController: this.options.sessionController,
-              conversationMessages: () => agent.toConversationMessages(),
+              // 与轮次之外那条手动通路同一份展示记录：provider 投影 + 会话 notice。
+              // 只写投影会把 notice（重试提示、命令结果、插件提问）从这次落盘里抹掉，
+              // 而它们要等的下一轮保存才回来——中途崩溃就真丢了。
+              conversationMessages: () =>
+                this.options.getConversationMessages?.() ?? agent.toConversationMessages(),
               ...options,
             });
             this.throwIfTurnStopped(signal);

@@ -4,6 +4,11 @@ import type { OperationOutcome } from '@packages/mica-diagnostics/operation.js';
 
 type CompactHistory = NonNullable<NonNullable<PluginContext['agent']>['compactIdleHistory']>;
 
+/** 这一轮被中止（或宿主在准备期取消）：不算压缩失败，不该往对话里写红条。 */
+function isCancellation(error: unknown): boolean {
+  return error instanceof Error && ['AbortError', 'AgentAbortError'].includes(error.name);
+}
+
 /**
  * 会话压缩：右键菜单手动压缩，模型配置变更后下一轮快速压缩。
  *
@@ -34,7 +39,25 @@ export default function setup(ctx: PluginContext): void {
 
   const prepare = ctx.hooks.on<PluginTurnPrepareEvent>('turn:prepare', async ({ previous, current, compactHistory }) => {
     if (previous.providerId === current.providerId && previous.model === current.model) return;
-    await compactHistory({ mode: 'quick' });
+    try {
+      const outcome = await compactHistory({ mode: 'quick' });
+      // 轮前这条路没有菜单可以回话：跳过（干净的会话、纯对话会话）是常态，留一行日志就
+      // 够，别往对话里塞噪音；压掉了多少也记在这里，事后能对上「这一轮为什么变小了」。
+      ctx.logger.info('compact.turn-prepare', {
+        status: outcome.status,
+        ...(outcome.status === 'skipped' ? { reason: outcome.reason } : { savedTokens: outcome.savedTokens }),
+      });
+    } catch (error) {
+      // 压缩失败只提示、不牵动这一轮（宿主的 failPolicy 也会吞掉异常，那样连原因都看不见）。
+      // 中止属于这一轮自己的事，不是压缩失败。
+      if (isCancellation(error)) return;
+      const message = error instanceof Error ? error.message : String(error);
+      ctx.logger.warn('compact.turn-prepare-failed', { message });
+      ctx.ui?.notice(`切换模型后的自动快速压缩没做成：${message}。这一轮照常发送。`, {
+        status: 'warning',
+        variant: 'compact',
+      });
+    }
   });
   ctx.onDispose(() => prepare.dispose());
 
@@ -83,7 +106,7 @@ async function report(
   try {
     outcome = await run();
   } catch (error) {
-    const cancelled = error instanceof Error && ['AbortError', 'AgentAbortError'].includes(error.name);
+    const cancelled = isCancellation(error);
     return { outcome: cancelled ? 'cancelled' : 'error', code: cancelled ? 'aborted' : 'compact_failed', message: `${label}失败：${error instanceof Error ? error.message : String(error)}` };
   }
   if (outcome.status === 'skipped')

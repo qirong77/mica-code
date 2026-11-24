@@ -72,7 +72,7 @@ export default function ComposerCompletionPalette({
             {[
               ['skill', 'skill'],
               ['mcp', 'MCP'],
-              ['prompt', 'plugins']
+              ['uri-api', 'API 文档']
             ].map(([kind, label]) => (
               <button
                 key={kind}
@@ -123,13 +123,12 @@ export default function ComposerCompletionPalette({
 /**
  * 候选的类型标记。
  *
- * 只认 `/` 浮层里的三类：skill、MCP server 与插件声明的条目（`prompt`）。`@` 文件补全的
- * `file` 不画标记——那里一整屏都是文件，标一排「file」只是噪声。
+ * 只认 `/` 浮层里的四类：skill、MCP server、插件声明的条目（`prompt`）与按需文档
+ * （`uri-api`）。`@` 文件补全的 `file` 不画标记——那里一整屏都是文件，标一排「file」只是噪声。
  */
-// 这三枚说明「这一条是什么」：skill、MCP server、插件声明的一段提示词。来源（`mica · plugin ·`
-// 那枚）已经在右边说清归属，这里不必再写一遍 `plugin`；顶部筛选按钮叫 `plugins`，它筛的是
-// 「清单声明的条目」这一整类。
-const COMPLETION_KIND_LABELS = { skill: 'skill', mcp: 'MCP', prompt: 'prompt' }
+// 标签只管「这一条是什么」：来源（`mica · plugin ·`）在悬停提示里说清归属，所以不另设一枚
+// `plugin` 筛选——插件声明的提示词与按需文档本来就分属两个类型。
+const COMPLETION_KIND_LABELS = { skill: 'skill', mcp: 'MCP', prompt: 'prompt', 'uri-api': 'API' }
 
 function CompletionKindTag({ kind }) {
   const label = COMPLETION_KIND_LABELS[kind]

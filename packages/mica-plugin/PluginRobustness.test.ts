@@ -98,6 +98,7 @@ function manifest(requires: string[]) {
     skills: [],
     roles: [],
     completions: [],
+    uriApis: [],
   };
 }
 
