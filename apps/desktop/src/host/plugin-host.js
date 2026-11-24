@@ -3,7 +3,7 @@ import { resolveMicaHome } from '@packages/mica-config/index.js'
 import { runPluginAction } from '@mica-config-ui/plugin-action'
 import { probeRuntime } from './runtime-probe-core'
 import { isValidPluginId } from './plugin-data-core'
-import { readPluginData, readPluginDataVersion, writePluginData } from './plugin-data-store.js'
+import { readPagePluginData, readPluginDataVersion, writePluginData } from './plugin-data-store.js'
 import { applyRemoteAccessPatch, describeRemoteAccess } from './remote-access.js'
 import { resolveMicaExecutable } from './mica-cli'
 import { readAnnotationOptions, replaceAnnotationOptions } from './session-annotations.js'
@@ -106,7 +106,7 @@ export function registerPluginHostIpc() {
   ipcMain.handle('plugin-host:read-data', (_event, payload) => {
     const options = Object.hasOwn(payload ?? {}, 'key') ? { key: payload.key } : {}
     return observePluginOperation({ plugin: isValidPluginId(payload?.pluginId) ? payload.pluginId : 'unknown', pluginVersion: officialPluginManifests.find((item) => item.id === payload?.pluginId)?.version, operation: 'data.read', surface: 'page' },
-      () => readPluginData(micaHome(), payload?.pluginId, options))
+      () => readPagePluginData(micaHome(), payload?.pluginId, options, payload?.ifVersion))
   })
 
   ipcMain.handle('plugin-host:data-version', (_event, payload) => {

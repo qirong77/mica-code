@@ -75,6 +75,10 @@ async function invoke(channel, payload) {
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ channel, payload })
   })
+  return readInvokeResponse(response, channel)
+}
+
+async function readInvokeResponse(response, channel) {
   if (response.status === 401) throw new AccessDeniedError('服务端拒绝了这次请求', { status: 401 })
   if (response.status === 403)
     throw new AccessDeniedError('跨源请求被拒绝（请用运行时打印的地址打开页面）', { status: 403 })
@@ -85,6 +89,39 @@ async function invoke(channel, payload) {
     throw new Error(message)
   }
   return body.result
+}
+
+function takeEarlyRequest(key) {
+  const boot = (window.__micaRuntimeBootV2 ??= {})
+  const pending = boot[key]
+  delete boot[key]
+  return pending
+}
+
+async function readEarlyResponse(pending) {
+  const result = await pending
+  if (result.failed) throw result.error
+  return result.response
+}
+
+const webUiState = {
+  get: () => invoke('ui-state:get'),
+  patch: (patch) => invoke('ui-state:patch', patch),
+  onChanged: (callback) => subscribe('ui-state:changed', callback)
+}
+
+/** Read the initial snapshot without waiting for /api/env; later reads use the usual RPC. */
+export function startupUiStateApi() {
+  if (window.mica) return window.mica.uiState
+  return {
+    ...webUiState,
+    get: () => {
+      const early = takeEarlyRequest('uiState')
+      return early
+        ? readEarlyResponse(early).then((response) => readInvokeResponse(response, 'ui-state:get'))
+        : webUiState.get()
+    }
+  }
 }
 
 /** `navigator.clipboard` 只在 https / localhost 下可用，局域网 http 访问时回退到 execCommand */
@@ -282,6 +319,7 @@ function createWebApi(env) {
         invoke('chat:btw-compact', { id, threadId, sessionId, cwd }),
       history: (sessionId) => invoke('chat:history', { sessionId }),
       historyPage: (sessionId, options = {}) => invoke('chat:history-page', { sessionId, ...options }),
+      restore: ({ id, sessionId, from }) => invoke('chat:restore', { id, sessionId, from }),
       inputHistory: {
         read: () => invoke('chat:input-history:read'),
         append: (text) => invoke('chat:input-history:append', { text })
@@ -426,11 +464,7 @@ function createWebApi(env) {
 
     // 界面状态的唯一事实来源在运行时（草稿 / 工作区 / 面板布局），页面返回的就是
     // 所有窗口共享的那一份；`ui-state:changed` 会把变更推给每一个已连接页面。
-    uiState: {
-      get: () => invoke('ui-state:get'),
-      patch: (patch) => invoke('ui-state:patch', patch),
-      onChanged: (callback) => subscribe('ui-state:changed', callback)
-    },
+    uiState: webUiState,
 
     notify: {
       list: () => invoke('notify:list'),
@@ -682,17 +716,8 @@ export async function ensureMicaApi() {
   if (typeof window === 'undefined') return null
   if (window.mica) return window.mica
 
-  // 早期脚本可能仍在加载：先认领启动权，避免它随后再发一次请求。
-  const boot = window.__micaEnvBootV1
-  window.__micaEnvBootV1 = { claimed: true }
-  let response
-  if (boot?.result) {
-    const result = await boot.result
-    if (result.failed) throw result.error
-    response = result.response
-  } else {
-    response = await fetch('/api/env', { cache: 'no-store' })
-  }
+  const early = takeEarlyRequest('env')
+  const response = await (early ? readEarlyResponse(early) : fetch('/api/env', { cache: 'no-store' }))
   if (response.status === 403)
     throw new AccessDeniedError('跨源请求被拒绝（请用运行时打印的地址打开页面）', { status: 403 })
   if (!response.ok) throw new Error('无法连接 Mica Code 服务端')

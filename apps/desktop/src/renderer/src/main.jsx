@@ -10,7 +10,7 @@ import { NotificationHost } from './NotificationHost'
 import { ErrorBoundary } from './ErrorBoundary'
 import '../assets/app.css'
 import { LocalJsonEditor } from './config-web-editor'
-import { ensureMicaApi } from './transport'
+import { ensureMicaApi, startupUiStateApi } from './transport'
 import { ensureUiState, subscribeUiState, uiStateKeys } from './ui-state'
 import {
   THEME_UI_STATE_KEY,
@@ -152,14 +152,13 @@ if (!quickButtonsDemo) {
   void loadView(expectedView)
 
   void (async () => {
+    // Subscribe before connecting SSE. Both private reads can finish independently of one another.
+    const uiStateReady = ensureUiState(startupUiStateApi()).catch((error) => {
+      console.error('初始化界面状态失败', error)
+    }).then(() => startup.mark('uiState'))
     const api = await ensureMicaApi()
     startup.mark('api')
-    try {
-      await ensureUiState()
-    } catch (error) {
-      console.error('初始化界面状态失败', error)
-    }
-    startup.mark('uiState')
+    await uiStateReady
     syncThemeFromUiState(uiStateKeys()[THEME_UI_STATE_KEY])
     subscribeUiState(() => syncThemeFromUiState(uiStateKeys()[THEME_UI_STATE_KEY]))
 

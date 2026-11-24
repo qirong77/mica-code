@@ -276,6 +276,8 @@ macOS 浮窗只取键盘焦点、不连带唤起主应用；原生窗口策略�
 
 前端 `api.documents.read(key)` / `write(key,value,{expectedVersion})` 使用现有 plugin-host 数据通道的可选 `key`，落在插件 `documents/<key>.json`（6 MiB，严格损坏检查、路径标识校验、CAS 与原子写）；无 `key` 的 `data.json` 保持 256 KiB。整页 `api.page.beforeClose(handler)` 可在返回前等待保存，`false` 保持页面。
 
+持有精确正文和版本的页面可传 `api.documents.read(key, {ifVersion})`：宿主读取并验证同一份文件，非空版本相同只回 `{unchanged:true, version}`，不相同或缺失则照常回 `{value, version}`。这是 RPC 的条件响应，不是 HTTP 缓存；仍走现有授权和 `no-store`。不影响无条件读、headless API 或写入的 CAS。
+
 `api.documents.version(key)` 经 `plugin-host:data-version` 只返回 `{version}`，与 read/write 的内容哈希一致，缺失为 null，损坏与读取错误显式上报；用于跨窗口更新检查，不能为取版本反复向页面传输全文。存储层仍需读取字节核验内容版本，不能把这个接口称为纯 stat 查询。headless 的 `ctx.data.documents.version(key)` 使用同一实现。
 
 ### 独立 HTTP 接口

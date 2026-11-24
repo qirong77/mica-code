@@ -18,6 +18,8 @@ export interface NotebookReadResult {
   error?: unknown;
 }
 
+type NotebookDocumentReadResult = NotebookReadResult | { unchanged: true; version: string };
+
 export interface NotebookWriteResult {
   ok: boolean;
   conflict?: boolean;
@@ -35,7 +37,7 @@ export interface NotebookHost {
   readData(): Promise<NotebookReadResult>;
   writeData(value: NotebookIndex, options: NotebookWriteOptions): Promise<NotebookWriteResult>;
   documents: {
-    read(key: string): Promise<NotebookReadResult>;
+    read(key: string, options?: { ifVersion: string }): Promise<NotebookDocumentReadResult>;
     write(key: string, value: NotebookDocument, options: NotebookWriteOptions): Promise<NotebookWriteResult>;
   };
 }
@@ -88,7 +90,8 @@ export interface NotebookController {
   /** Retry retained operations in order. A rejected operation is never silently removed. */
   flushIndex(): Promise<NotebookIndex>;
   getPendingIndexCount(): number;
-  readDocument(id: string): Promise<NotebookDocumentSnapshot>;
+  /** A cached snapshot must be a clean, previously validated read/write of this exact id. */
+  readDocument(id: string, cached?: NotebookDocumentSnapshot): Promise<NotebookDocumentSnapshot>;
   /** No merge or conflict retry. Only clear the UI draft after this promise resolves. */
   saveDocument(id: string, value: NotebookDocument, options: NotebookWriteOptions): Promise<string>;
 }
@@ -257,8 +260,17 @@ export function createNotebookController(options: NotebookControllerOptions): No
     return validateNotebookIndex(result);
   }
 
-  async function documentSnapshot(id: string): Promise<NotebookDocumentSnapshot> {
-    const result = checkedRead(await host.documents.read(id), `document ${id}`);
+  async function documentSnapshot(id: string, cached?: NotebookDocumentSnapshot): Promise<NotebookDocumentSnapshot> {
+    const reply = cached?.version
+      ? await host.documents.read(id, { ifVersion: cached.version })
+      : await host.documents.read(id);
+    if (reply && typeof reply === 'object' && 'unchanged' in reply) {
+      if (!cached?.version || reply.unchanged !== true || reply.version !== cached.version || 'error' in reply || 'ok' in reply) {
+        throw new NotebookStorageError(`Notebook document ${id} returned an unexpected cached version`, `document ${id}`);
+      }
+      return cached;
+    }
+    const result = checkedRead(reply, `document ${id}`);
     const missing = result.value === null && result.version === null;
     return {
       value: missing ? emptyDocument() : parseNotebookDocument(result.value),
@@ -310,9 +322,9 @@ export function createNotebookController(options: NotebookControllerOptions): No
     getPendingIndexCount() {
       return pending.length;
     },
-    async readDocument(id) {
+    async readDocument(id, cached) {
       validateNodeId(id);
-      return documentSerial(id, () => report('document', 'loading', id, () => documentSnapshot(id)));
+      return documentSerial(id, () => report('document', 'loading', id, () => documentSnapshot(id, cached)));
     },
     async saveDocument(id, value, writeOptions) {
       let snapshot: NotebookDocument;

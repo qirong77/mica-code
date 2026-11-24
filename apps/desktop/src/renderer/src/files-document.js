@@ -7,6 +7,15 @@
 
 const PREFIX = 'mica-document://'
 
+/** Explicit file open: fetch the body and Monaco together, but keep slow code loading off the error path. */
+export async function readFileWithEditor(read, loadRuntime) {
+  const content = read()
+  const runtime = loadRuntime()
+  // If the file read fails, or the tab is gone, nobody will await the module.
+  void runtime.catch(() => {})
+  return { result: await content, runtime }
+}
+
 /**
  * 文档在编辑器里的唯一标识。
  *

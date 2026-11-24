@@ -461,7 +461,7 @@ const SOURCE_SECTION_HINTS = {
  * 用量页签讲三件事，顺序就是从「总量」到「明细」：多少 token、花在谁身上、哪几次请求
  * 最贵。前两件靠数字和占比条，第三件靠逐次请求的柱状图——三个表格并排放着谁也不想读。
  */
-export function SessionDetailModal({ sessionId, onClose }) {
+function SessionUsagePane({ sessionId }) {
   const [detail, setDetail] = useState(null)
   const [error, setError] = useState(null)
 
@@ -522,93 +522,103 @@ export function SessionDetailModal({ sessionId, onClose }) {
     return { used, windowSize, ratio: Math.min(1, used / windowSize) }
   }, [detail])
 
-  const usageTab = useMemo(
-    () => ({
-      id: 'usage',
-      label: '用量',
-      content: (
-        <div className="flex flex-col gap-4">
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
-            <StatCard
-              label="请求"
-              primary={`${series.totals.requests} req`}
-              secondary={`主对话 ${mainRequests} · 其它 ${series.totals.requests - mainRequests}`}
-            />
-            <StatCard
-              label="输入"
-              primary={fmtTokens(series.totals.input)}
-              secondary={`缓存 ${fmtTokens(series.totals.cached)}`}
-            />
-            <StatCard
-              label="输出"
-              primary={fmtTokens(series.totals.output)}
-              secondary={`每次 ${fmtTokens(series.totals.requests > 0 ? series.totals.output / series.totals.requests : 0)}`}
-            />
-            <StatCard
-              label="合计"
-              primary={fmtTokens(series.totals.total)}
-              secondary={`${series.totals.input.toLocaleString()} in · ${series.totals.output.toLocaleString()} out`}
-            />
-            <StatCard
-              label="缓存率"
-              primary={pct(series.totals.cacheRate)}
-              secondary={`${series.totals.cached.toLocaleString()} cached`}
-            />
-            <StatCard
-              label="上下文占用"
-              title="最后一次请求的输入量 / 这个会话的上下文窗口"
-              primary={occupancy ? pct(occupancy.ratio, 0) : '—'}
-              secondary={
-                occupancy
-                  ? `${fmtTokens(occupancy.used)} / ${fmtTokens(occupancy.windowSize)}`
-                  : '没有记录'
-              }
-            />
-          </div>
-          <SourceShareCard series={series} />
-          <RequestChartCard series={series} />
-          <UsageTable
-            rows={series.requests}
-            title="逐条请求（主对话 + 委派 + 插件 + 内核后台，按时间排序）"
-            showSource
-          />
-
-          {groups.map((group) => (
-            <section key={group.kind}>
-              <h3 className={OVERLINE_CLASS}>{SOURCE_SECTION_TITLES[group.kind]}</h3>
-              <p className="mt-1 text-[10px] text-fg-ghost">{SOURCE_SECTION_HINTS[group.kind]}</p>
-              <div className="mt-2 flex flex-col gap-2">
-                {group.items.map(({ record, source }) => (
-                  <UsageRecordCard
-                    key={`${source.kind}-${source.id}-${record.taskId || record.startedAt}`}
-                    record={record}
-                    source={source}
-                  />
-                ))}
-              </div>
-            </section>
-          ))}
-        </div>
-      )
-    }),
-    [groups, mainRequests, occupancy, series]
-  )
+  if (error) {
+    return (
+      <div
+        role="alert"
+        className="rounded-[4px] border border-danger/30 bg-danger/8 px-3 py-2 text-xs text-danger-soft"
+      >
+        {error}
+      </div>
+    )
+  }
+  if (!detail) return <div className="page-loading">正在读取用量…</div>
 
   return (
+    <div className="flex flex-col gap-4">
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
+        <StatCard
+          label="请求"
+          primary={`${series.totals.requests} req`}
+          secondary={`主对话 ${mainRequests} · 其它 ${series.totals.requests - mainRequests}`}
+        />
+        <StatCard
+          label="输入"
+          primary={fmtTokens(series.totals.input)}
+          secondary={`缓存 ${fmtTokens(series.totals.cached)}`}
+        />
+        <StatCard
+          label="输出"
+          primary={fmtTokens(series.totals.output)}
+          secondary={`每次 ${fmtTokens(series.totals.requests > 0 ? series.totals.output / series.totals.requests : 0)}`}
+        />
+        <StatCard
+          label="合计"
+          primary={fmtTokens(series.totals.total)}
+          secondary={`${series.totals.input.toLocaleString()} in · ${series.totals.output.toLocaleString()} out`}
+        />
+        <StatCard
+          label="缓存率"
+          primary={pct(series.totals.cacheRate)}
+          secondary={`${series.totals.cached.toLocaleString()} cached`}
+        />
+        <StatCard
+          label="上下文占用"
+          title="最后一次请求的输入量 / 这个会话的上下文窗口"
+          primary={occupancy ? pct(occupancy.ratio, 0) : '—'}
+          secondary={
+            occupancy
+              ? `${fmtTokens(occupancy.used)} / ${fmtTokens(occupancy.windowSize)}`
+              : '没有记录'
+          }
+        />
+      </div>
+      <SourceShareCard series={series} />
+      <RequestChartCard series={series} />
+      <UsageTable
+        rows={series.requests}
+        title="逐条请求（主对话 + 委派 + 插件 + 内核后台，按时间排序）"
+        showSource
+      />
+
+      {groups.map((group) => (
+        <section key={group.kind}>
+          <h3 className={OVERLINE_CLASS}>{SOURCE_SECTION_TITLES[group.kind]}</h3>
+          <p className="mt-1 text-[10px] text-fg-ghost">{SOURCE_SECTION_HINTS[group.kind]}</p>
+          <div className="mt-2 flex flex-col gap-2">
+            {group.items.map(({ record, source }) => (
+              <UsageRecordCard
+                key={`${source.kind}-${source.id}-${record.taskId || record.startedAt}`}
+                record={record}
+                source={source}
+              />
+            ))}
+          </div>
+        </section>
+      ))}
+    </div>
+  )
+}
+
+export function SessionDetailModal({ sessionId, onClose }) {
+  // SessionDetailView mounts only the selected tab. Keep request-level usage off the
+  // conversation's opening path, and read fresh data each time Usage is opened.
+  return (
     <ModalShell bare onClose={onClose} className="chat-modal-session-detail">
-      {error ? (
-        <div className="rounded-[4px] border border-danger/30 bg-danger/8 px-3 py-2 text-xs text-danger-soft">
-          {error}
-        </div>
-      ) : (
-        <div className="mica-config-ui is-embed session-detail-embed">
-          <SessionDetailView
-            sessionId={sessionId}
-            defaultTab="conversation"
-            extraTabs={[usageTab]}
-          />
-        </div>
-      )}
+      <div className="mica-config-ui is-embed session-detail-embed">
+        <SessionDetailView
+          key={sessionId}
+          sessionId={sessionId}
+          defaultTab="conversation"
+          extraTabs={[
+            {
+              id: 'usage',
+              label: '用量',
+              content: <SessionUsagePane key={sessionId} sessionId={sessionId} />
+            }
+          ]}
+        />
+      </div>
     </ModalShell>
   )
 }

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import Statistic from '@arco-design/web-react/es/Statistic'
 import { Button, Empty, Segmented } from '@mica-config-ui/web'
 import { StatsPanel } from './StatsPanel'
-import { DonutChart, TrendChart } from './usage-charts'
+import { DonutChart, TrendChart } from './lazy-usage-charts'
 import { USAGE_TOKEN_PARTS } from './usage-series'
 
 const TOKEN_FIELDS = {

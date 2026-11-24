@@ -27,6 +27,25 @@ export function updateNotebookDraft(draft: NotebookDraft, document: NotebookDocu
   draft.dirty = draft.unconfirmed || JSON.stringify(document) !== draft.saved;
 }
 
+/** Retain only a few recent clean notes in memory. Active or unsaved drafts are never evicted. */
+export function rememberNotebookDraft(drafts: Map<string, NotebookDraft>, active: NotebookDraft): void {
+  const maxIdleNotes = 5;
+  const maxIdleCharacters = 6 * 1024 * 1024;
+  drafts.delete(active.id);
+  drafts.set(active.id, active);
+  let count = 0;
+  let characters = 0;
+  for (const [id, draft] of [...drafts].reverse()) {
+    if (draft === active || draft.dirty || draft.unconfirmed) continue;
+    if (count >= maxIdleNotes || characters + draft.saved.length > maxIdleCharacters) {
+      drafts.delete(id);
+    } else {
+      count++;
+      characters += draft.saved.length;
+    }
+  }
+}
+
 /** Autosave, navigation and close may all save at once. Advance each draft's CAS version in one queue. */
 export function createNotebookWriter(controller: Pick<NotebookController, 'saveDocument'>) {
   let tail: Promise<void> = Promise.resolve();

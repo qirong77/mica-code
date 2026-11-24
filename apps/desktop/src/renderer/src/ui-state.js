@@ -199,11 +199,11 @@ export function useUiStateValue(key, fallback) {
   return value === undefined ? fallback : value
 }
 
-async function refreshUiState() {
+async function refreshUiState(api) {
   const generation = ++snapshotGeneration
   const versions = new Map(keyVersions)
   const writing = new Set([...Object.keys(pending), ...inFlight.keys()])
-  const snapshot = await window.mica.uiState.get()
+  const snapshot = await api.get()
   if (generation !== snapshotGeneration || !snapshot || typeof snapshot !== 'object' || Array.isArray(snapshot)) return
   const patch = {}
   for (const key of new Set([...Object.keys(keys), ...Object.keys(snapshot)])) {
@@ -215,15 +215,15 @@ async function refreshUiState() {
 }
 
 /** 挂载前先把运行时的界面状态取回来，页面第一帧就是正确的值（避免闪一下再对齐）。 */
-export async function ensureUiState() {
+export async function ensureUiState(api = window.mica.uiState) {
   if (booted) return booted
   booted = (async () => {
-    window.mica.uiState.onChanged((payload) => applyRemote(payload?.keys || {}))
+    api.onChanged((payload) => applyRemote(payload?.keys || {}))
     window.addEventListener('mica:transport-resync', () => {
       // 初始快照必须先落地，才能让 ensureUiState 结束并挂载输入框。
-      void booted.then(() => refreshUiState()).catch((error) => console.error('[mica] 同步界面状态失败', error))
+      void booted.then(() => refreshUiState(api)).catch((error) => console.error('[mica] 同步界面状态失败', error))
     })
-    await refreshUiState()
+    await refreshUiState(api)
   })()
   return booted
 }

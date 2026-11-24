@@ -155,6 +155,13 @@ describe('plugin host read-only web API', () => {
 })
 
 describe('plugin host local data API', () => {
+  test('forwards only the explicit document key and cached read version', async () => {
+    const api = createPluginHostApi('sample')
+    snapshot = { unchanged: true, version: 'existing' }
+    expect(await api.documents.read('page', { ifVersion: 'existing', key: 'other', pluginId: 'other' })).toEqual(snapshot)
+    expect(calls).toEqual([['read', 'sample', { key: 'page', ifVersion: 'existing' }]])
+  })
+
   test('binds version requests to the plugin and document key, returning only the version', async () => {
     const api = createPluginHostApi('sample')
     expect(await api.documents.version('page')).toEqual({ version: 'current-version' })

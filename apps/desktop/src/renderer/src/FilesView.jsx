@@ -57,6 +57,7 @@ import {
   isDocumentKey,
   isMarkdownFile,
   planDocumentOpen,
+  readFileWithEditor,
   saveDocumentTab,
   uniqueDocumentTitle,
   writeModelText
@@ -579,11 +580,11 @@ export const FilesView = forwardRef(function FilesView(
    * 首次真正需要编辑器时才加载 monaco 并建实例（启动路径完全不碰它）。
    * 返回 monaco 本体，供 createModel / Uri 使用；已建好时立即 resolve。
    */
-  const ensureEditor = useCallback(() => {
+  const ensureEditor = useCallback((runtime) => {
     if (!editorReadyRef.current) {
       const generation = lifecycleRef.current
       editorReadyRef.current = (async () => {
-        const monaco = await loadMonaco()
+        const monaco = await (runtime ?? loadMonaco())
         // 等待期间卸载/重挂过就不要往旧 host 上建
         if (generation !== lifecycleRef.current || !editorHostRef.current) return monaco
         const editor = monaco.editor.create(editorHostRef.current, {
@@ -780,10 +781,9 @@ export const FilesView = forwardRef(function FilesView(
         displayFile(path)
         const generation = lifecycleRef.current
         try {
-          const result = await window.mica.files.read(path)
+          const { result, runtime } = await readFileWithEditor(() => window.mica.files.read(path), loadMonaco)
           if (generation !== lifecycleRef.current || !tabsRef.current.includes(tab)) return
-          // 首次打开文件时这里才真正装载 monaco。
-          const monaco = await ensureEditor()
+          const monaco = await ensureEditor(runtime)
           if (generation !== lifecycleRef.current || !tabsRef.current.includes(tab)) return
           const model = monaco.editor.createModel(
             result.content,

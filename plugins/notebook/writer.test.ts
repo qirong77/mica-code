@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createNotebookController, NotebookConflictError } from './controller';
 import type { NotebookHost, NotebookWriteResult } from './controller';
-import { createNotebookDraft, createNotebookWriter, updateNotebookDraft } from './writer';
+import { createNotebookDraft, createNotebookWriter, rememberNotebookDraft, updateNotebookDraft } from './writer';
 import type { NotebookDraft } from './writer';
 
 function draft(id = 'a'): NotebookDraft {
@@ -26,6 +26,22 @@ function deferred<T = string>() {
 }
 
 describe('Notebook autosave queue', () => {
+  it('limits clean inactive drafts by count and size without dropping unsaved drafts', () => {
+    const pending = { ...draft('pending'), dirty: false, unconfirmed: true };
+    const unsaved = draft('unsaved');
+    const drafts = new Map([[pending.id, pending], [unsaved.id, unsaved]]);
+    const clean = (id: string) => ({ ...draft(id), dirty: false });
+    for (let i = 0; i < 9; i++) rememberNotebookDraft(drafts, clean(`note-${i}`));
+    expect([...drafts.keys()]).toEqual(['pending', 'unsaved', 'note-3', 'note-4', 'note-5', 'note-6', 'note-7', 'note-8']);
+    const large = { ...clean('large'), saved: 'x'.repeat(6 * 1024 * 1024 + 1) };
+    rememberNotebookDraft(drafts, large);
+    expect(drafts.get('large')).toBe(large);
+    rememberNotebookDraft(drafts, clean('next'));
+    expect(drafts.has('large')).toBe(false);
+    expect(drafts.get('pending')).toBe(pending);
+    expect(drafts.get('unsaved')).toBe(unsaved);
+  });
+
   it('shares one drain across concurrent autosave, navigation and close, including edits made in flight', async () => {
     const first = deferred();
     const second = deferred();

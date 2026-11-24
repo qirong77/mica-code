@@ -1466,7 +1466,7 @@ function handleHostNotification(id, run, notification) {
   } else if (method === 'mica/ask/updated') {
     // 插件（工具）抛出了一道选择题，或者这道题已经有答案（ask 变成 null）。和 btw /
     // 背景任务一样活得比一轮长、只在当下有意义，所以不进事件缓冲；但要在 run 上留一份，
-    // 页面切走再切回来时（restore 走 chat:is-running）能把卡片补回来。
+    // 页面切走再切回来时能从运行态快照把卡片补回来。
     run.ask = normalizeAsk(params.ask)
     // 侧栏那一行的提醒也靠它立刻亮：等待期间会话文件头部带着 awaitingInput，但页面
     // 只按 10 秒轮询读列表，不叫醒它就会晚十秒才看见。
@@ -2395,15 +2395,19 @@ export function registerChatIpc() {
     })
   })
 
-  ipcMain.handle('chat:history-page', async (event, { sessionId, id, ...options } = {}) => {
-    rememberChatSender(event)
+  async function readChatHistoryPage({ sessionId, id, ...options } = {}, snapshot) {
     if (!sessionId) return historyPage([])
-    const result = await readSessionAsync(sessionFile(sessionId))
+    const result = await (snapshot ?? readSessionAsync(sessionFile(sessionId)))
     const provider = readMicaConfig().providers.find((item) => item.id === result.meta?.providerId)
     const run = runs.get(id || liveRunIdForSession(sessionId)) || (id ? completedRuns.get(id) : null)
     return historyPage(filterCurrentThinking(result.history, provider), {
       ...options, replayPrompt: runSessionId(run) === sessionId ? run.prompt : null
     })
+  }
+
+  ipcMain.handle('chat:history-page', (event, payload) => {
+    rememberChatSender(event)
+    return readChatHistoryPage(payload)
   })
 
   /**
@@ -2571,10 +2575,9 @@ export function registerChatIpc() {
 
   ipcMain.handle('chat:input-history:append', (_event, { text } = {}) => appendInputHistory(text))
 
-  ipcMain.handle('chat:meta', (_event, { sessionId } = {}) => {
-    rememberChatSender(_event)
+  function readChatMeta({ sessionId } = {}, snapshot) {
     if (!sessionId) return readDefaultMeta()
-    return readSessionAsync(sessionFile(sessionId)).then(({ meta }) =>
+    return (snapshot ?? readSessionAsync(sessionFile(sessionId))).then(({ meta }) =>
       meta
         ? {
             ...meta,
@@ -2593,6 +2596,11 @@ export function registerChatIpc() {
           }
         : null
     )
+  }
+
+  ipcMain.handle('chat:meta', (event, payload) => {
+    rememberChatSender(event)
+    return readChatMeta(payload)
   })
 
   /**
@@ -2630,7 +2638,7 @@ export function registerChatIpc() {
     return true
   })
 
-  ipcMain.handle('chat:is-running', (event, { id, sessionId } = {}) => {
+  function readChatState(event, { id, sessionId } = {}) {
     rememberChatSender(event)
     const run = runs.get(id)
     if (run?.child) run.sender = event.sender
@@ -2695,6 +2703,35 @@ export function registerChatIpc() {
       prompt: run.prompt,
       startedAt: run.startedAt
     }
+  }
+
+  ipcMain.handle('chat:is-running', readChatState)
+
+  // Uses the same HTTP invoke access policy as the legacy readers.
+  ipcMain.handle('chat:restore', async (event, { id, sessionId, from } = {}) => {
+    rememberChatSender(event)
+    const errors = {}
+    const read = async (field, load) => {
+      try {
+        return await load()
+      } catch (error) {
+        errors[field] = error instanceof Error ? error.message : String(error)
+        return null
+      }
+    }
+
+    // Both projections use one version of the cached session read. A failed
+    // projection must not hide the other fields (initial restore is best effort).
+    const snapshot = sessionId
+      ? Promise.resolve().then(() => readSessionAsync(sessionFile(sessionId)))
+      : null
+    const [page, meta] = await Promise.all([
+      sessionId ? read('page', () => readChatHistoryPage({ id, sessionId, from }, snapshot)) : null,
+      read('meta', () => readChatMeta({ sessionId }, snapshot))
+    ])
+    // Sample after both reads: a run can start or finish while history is loading.
+    const state = await read('state', () => readChatState(event, { id, sessionId }))
+    return { page, meta, state, ...(Object.keys(errors).length ? { errors } : {}) }
   })
 
   // 用户点了插件抛出的选择题：转成 `mica/ask/answer` 交给 host 里的 broker，

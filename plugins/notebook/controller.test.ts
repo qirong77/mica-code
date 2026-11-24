@@ -224,6 +224,23 @@ describe('Notebook index controller', () => {
 });
 
 describe('Notebook document controller', () => {
+  it('reuses a known clean snapshot only after exact-version confirmation', async () => {
+    const { host } = memoryHost(null, body('cached'));
+    const controller = createNotebookController({ host });
+    const cached = await controller.readDocument('n');
+    vi.mocked(host.documents.read).mockResolvedValueOnce({ unchanged: true, version: cached.version! });
+    expect(await controller.readDocument('n', cached)).toBe(cached);
+    expect(host.documents.read).toHaveBeenLastCalledWith('n', { ifVersion: cached.version });
+    vi.mocked(host.documents.read).mockResolvedValueOnce({ unchanged: true, version: 'wrong-version' });
+    await expect(controller.readDocument('n', cached)).rejects.toBeInstanceOf(NotebookStorageError);
+    vi.mocked(host.documents.read).mockResolvedValueOnce({ value: body('changed by another window'), version: 'new-version' });
+    expect(await controller.readDocument('n', cached)).toEqual({
+      value: body('changed by another window'), version: 'new-version', missing: false,
+    });
+    vi.mocked(host.documents.read).mockResolvedValueOnce({ value: null, version: null });
+    expect(await controller.readDocument('n', cached)).toMatchObject({ version: null, missing: true });
+  });
+
   it('returns an explicit missing blank document and does not create it on read', async () => {
     const { host } = memoryHost();
     const controller = createNotebookController({ host });

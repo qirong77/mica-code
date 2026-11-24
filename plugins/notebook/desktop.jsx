@@ -55,7 +55,7 @@ import {
 } from './model';
 import { notebookDropPosition, resolveNotebookDrop } from './tree-dnd';
 import { createEditorBridge } from './bridge';
-import { createNotebookDraft, createNotebookWriter, updateNotebookDraft } from './writer';
+import { createNotebookDraft, createNotebookWriter, rememberNotebookDraft, updateNotebookDraft } from './writer';
 import { createNotebookLifecycle } from './lifecycle';
 import './notebook.css';
 
@@ -808,11 +808,18 @@ export default function NotebookPage({ api }) {
           async () => {
             if (!(await flush(false)) || lifecycle.closing) return null;
             const draft = drafts.current.get(id);
-            return draft?.dirty ? draft : createNotebookDraft(id, await controller.readDocument(id));
+            if (draft?.dirty || draft?.unconfirmed) return draft;
+            // Revalidate only inactive clean notes after the outgoing save, so a concurrent edit
+            // made during that save cannot be hidden by an earlier version check.
+            const cached = draft?.version && draft !== current.current
+              ? { value: draft.document, version: draft.version, missing: false }
+              : undefined;
+            const snapshot = await controller.readDocument(id, cached);
+            return snapshot === cached ? draft : createNotebookDraft(id, snapshot);
           },
           async (draft) => {
             if (!draft) return;
-            drafts.current.set(id, draft);
+            rememberNotebookDraft(drafts.current, draft);
             current.current = draft;
             setActiveId(id);
             setSelectedId(id);
@@ -1197,7 +1204,7 @@ export default function NotebookPage({ api }) {
         },
         async (latest) => {
           if (!latest) return;
-          drafts.current.set(draft.id, latest);
+          rememberNotebookDraft(drafts.current, latest);
           current.current = latest;
           await loadEditor(latest);
           setError('');

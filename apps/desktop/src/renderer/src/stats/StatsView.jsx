@@ -9,7 +9,7 @@ import { StatsPanel } from './StatsPanel'
 import { buildOverview } from './overview'
 import { SessionDetailModal } from './SessionDetailModal'
 import { bucketByDay, isDayRange, modelSpeed, scopeSession } from './scope'
-import { ProjectChart } from './usage-charts'
+import { ProjectChart, preloadUsageCharts } from './lazy-usage-charts'
 import {
   USAGE_KIND_COLORS as SOURCE_COLORS,
   USAGE_KIND_ORDER as SOURCE_ORDER
@@ -740,6 +740,8 @@ export function StatsView({ visible }) {
 
   useEffect(() => {
     if (!visible) return undefined
+    // Start ECharts alongside the first stats read; chart slots handle loading/errors locally.
+    void preloadUsageCharts().catch(() => {})
     const reads = createReadQueue(
       async (isCurrent) => {
         const data = await window.mica.stats.read()

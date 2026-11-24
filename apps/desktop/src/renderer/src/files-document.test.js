@@ -10,6 +10,7 @@ import {
   isMarkdownFile,
   planDocumentOpen,
   planTextReplacement,
+  readFileWithEditor,
   saveDocumentTab,
   uniqueDocumentTitle,
   writeModelText
@@ -18,6 +19,30 @@ import {
 function tabFor(id, content = '') {
   return { path: documentKey(id), model: { getValue: () => content, setValue: () => {} } }
 }
+
+describe('readFileWithEditor', () => {
+  it('starts the file read and Monaco before either has finished', async () => {
+    let finishRead, finishRuntime
+    const waiting = readFileWithEditor(
+      () => new Promise((resolve) => { finishRead = resolve }),
+      () => new Promise((resolve) => { finishRuntime = resolve })
+    )
+    expect(typeof finishRead).toBe('function')
+    expect(typeof finishRuntime).toBe('function')
+    finishRead({ content: 'ready' })
+    const { result, runtime } = await waiting
+    expect(result.content).toBe('ready')
+    finishRuntime('module')
+    expect(await runtime).toBe('module')
+  })
+
+  it('reports an invalid file without waiting for the speculative runtime', async () => {
+    await expect(readFileWithEditor(
+      async () => { throw new Error('file unavailable') },
+      () => new Promise(() => {})
+    )).rejects.toThrow('file unavailable')
+  })
+})
 
 describe('documentKey', () => {
   it('keeps ids that contain path characters inside one segment', () => {

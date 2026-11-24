@@ -13,7 +13,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { acquireProcessLock } from '@packages/mica-common/processLock.js'
 import { pluginDataPath, PLUGIN_DATA_MAX_BYTES, PLUGIN_DOCUMENT_MAX_BYTES } from './plugin-data-core.js'
-import { readPluginData, readPluginDataVersion, writePluginData } from './plugin-data-store.js'
+import { readPagePluginData, readPluginData, readPluginDataVersion, writePluginData } from './plugin-data-store.js'
 
 let home
 beforeEach(() => {
@@ -165,6 +165,22 @@ describe('plugin data versioned persistence', () => {
 describe('plugin documents versioned persistence', () => {
   const pluginId = 'sample'
   const key = 'c461ba5a-1c23-4e11-aab4-e276ff350e74'
+
+  test('only suppresses a validated document body for its exact nonempty version', () => {
+    const options = { key }
+    const original = writePluginData(home, pluginId, { text: 'before' }, options)
+    expect(readPagePluginData(home, pluginId, options)).toEqual({ value: { text: 'before' }, version: original.version })
+    expect(readPagePluginData(home, pluginId, options, original.version)).toEqual({ unchanged: true, version: original.version })
+    const changed = writePluginData(home, pluginId, { text: 'changed elsewhere' }, options)
+    expect(readPagePluginData(home, pluginId, options, original.version)).toEqual({ value: { text: 'changed elsewhere' }, version: changed.version })
+    const config = writePluginData(home, pluginId, { tree: [key] })
+    expect(readPagePluginData(home, pluginId, {}, config.version)).toEqual({ value: { tree: [key] }, version: config.version })
+    const file = pluginDataPath(home, pluginId, options)
+    writeFileSync(file, '{corrupt')
+    expect(() => readPagePluginData(home, pluginId, options, changed.version)).toThrow('JSON 损坏')
+    rmSync(file)
+    expect(readPagePluginData(home, pluginId, options, changed.version)).toEqual({ value: null, version: null })
+  })
 
   test('keeps each document and config independent, with per-document CAS versions', () => {
     expect(readPluginData(home, pluginId, { key })).toEqual({ value: null, version: null })

@@ -246,7 +246,10 @@ export function createPluginHostApi(pluginId, session = null, { createSession, b
     writeData: (value, options) => host.writeData(pluginId, value, options),
     /** 独立本地文档，共享版本 CAS 语义，不占用小配置 data.json 的额度。 */
     documents: {
-      read: async (key) => host.readData(pluginId, documentOptions(key)),
+      read: async (key, { ifVersion } = {}) => host.readData(pluginId, {
+        ...documentOptions(key),
+        ...(typeof ifVersion === 'string' && ifVersion ? { ifVersion } : {})
+      }),
       version: async (key) => {
         const result = await host.dataVersion(pluginId, documentOptions(key))
         if (!result || (result.version !== null && typeof result.version !== 'string'))

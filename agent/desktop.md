@@ -55,6 +55,7 @@
 
 - 运行时只有一份 workspace / drafts / layout / rightTerms / terminalOpenByChat / cwd / Git 偏好，落盘 `userData/ui-state.json`；语义在 `mica-web-shared/ui-state.ts`。老版本单独存的 `workspace.json` 只在 ui-state 还不存在时导入一次、落盘后删除；ui-state 已存在就不再读它（否则用户清空过的工作区会被搬回来）。
 - Web 事件流没有断线补放：页面从隐藏恢复、SSE 重连或桥报告事件缺口时，`transport.js` 发 `mica:transport-resync`，聊天视图重读历史和运行态并合并读取期间的事件，`ui-state.js` 重读共享状态并保护本地待写与并发广播。恢复请求可合并，不能用旧快照覆盖恢复期间的新事件。
+- 首屏的 `/api/env` 与只读 `ui-state:get` 没有数据依赖，由 `runtime-boot-v2.js` 提前并发发起，主模块认领在途请求；脚本未到时由主模块并发发送。界面仍等初始共享状态，事件订阅先于 SSE 建连，重连走新快照，不再消费启动响应。两个请求沿用原来的权限和 `no-store` 响应。
 - 普通终端恢复用 `terminal:snapshot` 只读现存 PTY 的输出尾部和全局序号，不创建新进程；`terminal:data` / `terminal:exit` 带序号，渲染层回放快照并合并快照之后的事件。尾部长度有限，不是完整屏幕快照，恢复不主动调整 PTY 尺寸。
 - 条目补丁用 `setUiStateEntries`，null 表示删除；回声在 store 的 `applyRemote` 认领一次，组件不得各自认领。By The Way 抽屉开关按会话以独立 `btwOpen:<sessionId>` 键保存，多窗口共享，关闭时删除键；线程内容仍由自身落盘，空线程不持久化。
 - 同一 session 在所有页面是同一 node、run、终端；`dedupeSessionNodes` 合并重复页签。
@@ -83,7 +84,7 @@
 - `mica/queue/hold` 冻结待撤回条目，结果由 `chat-recall.js.resolveQueueRecall` 判定为回输入框 / 已发送 / 保留。
 - `run.events` / `run.prompt` 每轮重置；恢复先用 `historyBeforeRunReplay` 裁掉本轮已保存回答再重放。
 - 每次模型请求后立即转发 usage；实时 usage 不改 turnState / updatedAt。
-- 正常恢复用 `chat:history-page`（`transport.historyPage`），默认最近约 80 条并按用户轮次边界扩展；宿主用当前 run 的原始 prompt 覆盖同轮多次 steer 的情况。响应包含 rows/start/end/total/noticeOffset/startCursor/nextBefore/reset，游标校验历史前缀哈希，追加兼容、改写失效。顶部按页前插并补偿高度，实时尾部不替换；缓存只额外交接范围元信息。重连/结束补读刷新已加载范围，`session_history_replaced` 事件也只携带 `historyPage`；全文查找显式补齐缺失历史后才显示结果。全量 `chat:history` 留给确实需要完整内容的调用，不作为分页失败回退。底层仍复用 session reader 的完整 JSON 解析与缓存，没有改存储格式。
+- 普通会话首开 / SSE 恢复由 `chat:restore` 一次回历史页、元数据和运行态：历史与元数据复用同一份会话读取，先投影历史，再取运行态，页面仍按序合并读取期间的事件。Share 视图、分页与特殊补读保留独立读接口。`chat:history-page` 默认最近约 80 条并按用户轮次边界扩展；宿主用当前 run 的原始 prompt 覆盖同轮多次 steer 的情况。响应包含 rows/start/end/total/noticeOffset/startCursor/nextBefore/reset，游标校验历史前缀哈希，追加兼容、改写失效。顶部按页前插并补偿高度，实时尾部不替换；缓存只额外交接范围元信息。重连/结束补读刷新已加载范围，`session_history_replaced` 事件也只携带 `historyPage`；全文查找显式补齐缺失历史后才显示结果。全量 `chat:history` 留给确实需要完整内容的调用，不作为分页失败回退。没有改存储格式。
 - 部分页中收到带 command 的 notice 替换时主动合并一次 resync：删除可能发生在未加载前缀，必须从持久化重建全局 noticeIndex。等待重读期间的同槽位更新也不能覆盖另一个 command 的通知。
 - 会话读取只消费 pi-ai `toolCall` / `toolResult` 历史，所有协议的思考 checkpoint 都可恢复；未知退出后的补读不再只限 Responses。
 - 阶段文案与计时读 `statusLinePhase`；`mica/turn/retrying` 让状态行显示 `retrying n/5`。
@@ -131,6 +132,8 @@
 
 ## 统计页
 
+- 当前 Stats 视图可见时才加载 ECharts，和首个 `stats:read` 并行。KPI 和明细表不等待图表模块，失败留在各自的图表局部。共享的会话详情默认打开「对话记录」，逐请求统计只在打开「用量」时读取，失败不影响其它页签。
+
 - 统计页和编辑器一样是**整窗的一层**（`App.jsx` 的 `viewOwnsWindow`）：进页面时会话列表整个让出（侧栏宽度归 0、左上留出红绿灯的位置、侧栏开关不画、手机抽屉收起），返回只走主区顶栏最左的「返回对话」，⌘K 在这两页里也是先回对话再聚焦搜索框。视图本身不写进 layout 的折叠偏好，退出后按用户原来那份复原。
 
 - Stats 页（`renderer/src/stats/StatsView.jsx`）默认区间是**近 7 天**（只看今天会让日历与模型速度大半空着，要精确到某一轮就切「今天」），采用方案 A「用量全景」：四项 KPI（真实 Arco Card / Statistic）→ **活跃日历**（经 `OverviewVisuals` 的 `afterMetrics` 槽插在 KPI 条下面，和四项 KPI 同属「区间总量」这一层，不要压到页面下半部分）→ 每日用量趋势与 Token 环形构成 → 模型排行（宽卡片里排两列：单列时模型名贴卡片左边、数值贴右边，中间空出一千多像素，六个模型就占满一屏）。之后是三个各自独立的模块（`.stats-modules`，与 banner 同一条容器查询）：**模型速度 → 项目明细 → 来源明细**——它们原先挤在「精确明细」的页签里，点一下才看得见一个。项目明细是「上图下表」：上按来源堆叠的横条（`ProjectChart`，取用量最高的 12 个项目，高度按条数算而不是固定 216px——项目只有两三个时固定高度会把它们摊在一大片空白里），下是完整可排序的表；项目贡献图不再出现在 banner 里，同一份数据画两次会让人以为看漏了什么。最下面的「精确明细」只留会话明细与模型明细两个页签，会话行可打开原有共享详情。日历按近 12 个月 / 所选年份独立展示，点某日才改变顶部区间；其余模块与明细均与顶部区间一致。点项目＝把它下面的会话筛出来，再点同一行取消；筛选只作用于会话表，不改上方总量。
@@ -177,6 +180,7 @@
 - 资源管理器由 `FileExplorerTree.jsx` 渲染，选择/排序/导航规则在 `files-explorer.js`；树内新建与重命名按 Enter 提交、Esc 取消，失焦提交不抢回用户焦点，错误保留输入。顶栏新建按所选目录（选中文件则取父目录，未选择则根目录）落点；支持相对嵌套路径并逐级展开。方向键、Home/End、F2、字母定位与平台回收站快捷键只作用于树焦点，删除仍确认。创建/改名校验在 `host/file-entry-operations.js`：不接受绝对路径或 `.`/`..`，新建中间目录不跟随符号链接、已有同名叶节点拒绝，重命名先检查目标冲突。
 - 文件操作只重读受影响的父目录；目录结果合并到最新树状态，保留未变节点、子树与展开状态。手动刷新/恢复可见时保留已有树，目录请求按根与目录校验，过期结果不能恢复已删除或折叠的分支（`renderer/src/files-tree.js`）。
 - 编辑器工作区由 `EditorWorkspace.jsx` 持有自己的目录与 Git 状态，底栏目录选择只更新该页面，不写 session cwd、聊天默认目录或 workspace 节点；顶栏的编辑器图标（`toggleFilesView`）与对话里的路径链接、插件评审都落到主窗口这同一个 files 视图，再点一次图标或顶栏左侧的「返回对话」回到对话。文件树向上导航、打开目录也通过 `onRootChange` 同步页面目录，文件搜索读取编辑器 `getRoot()`。
+- 实际打开新文件时，在旧页签同步输入之后并发请求正文和 Monaco chunk；读失败不等 Monaco，只有文件与编辑器都就绪且页签仍有效才建模型。不因进入空编辑器或聊天页提前下载 Monaco。
 - **编辑器窗口**（`?editor=<绝对路径>`）是「一个文件一扇窗」：`main/editor-window.js` 建窗（与主窗口同一套 preload 与外观，同路径只留一扇、关掉即销毁，**不进**主窗口的 `windows` 集合，不参与未读徽标 / 标题后缀 / 切服务器），地址是**本机页面**加这个参数——要打开的文件在这台机器上，窗口就算正连着另一台运行时也必须落本机。`main.jsx` 按参数选 `EditorWindow` 视图：一条可拖动的 h-8 标题条 + `EditorWorkspace`（`showFilePath`），底栏左下 Git 分支、右下当前文件路径。入口有两条：文件树右键「在新窗口打开」（`micaClient.openEditorWindow(path)` → `mica:editor-window`，sender 必须是自家窗口），以及插件启动器的 `openPath`（全局搜索第二行的 Mica 入口）——所以**用全局搜索打开默认落在新窗口**，当前窗口不动。浏览器宿主没有窗口，右键菜单里不出现这一项。
 - 对话与编辑器底栏的分支名、目录共用 `StatusBarAction`（基于共享 `ArcoAction`）：允许原生拖选与复制；选区涉及当前按钮时忽略鼠标点击，避免拖选结束误开选择器，键盘触发不受影响。
 - 编辑器底部终端 `EditorTerminal.jsx` 复用 `TerminalHost`（`pane: 'terminal'`，一个标签页就是它的一个节点，PTY id 为 `<标签 id>:terminal`），不另写一套 xterm/PTY 装配：回放、失败重试、文件链接与对话底部终端完全同一份行为。开关与高度存 ui-state 的 `editorTerminal`，标签与 PTY 只属于页面。Ctrl+`与顶栏终端图标按视图分工——对话视图管会话终端、编辑器视图管编辑器终端，两处各装各的监听，不在同一处判断该切谁；统计页两者都没有——会话终端的显隐由 `chatTerminalVisible` 收窄成「只在对话视图」，那页不装 Ctrl+` 监听、也不出顶栏图标，否则按会话记住的展开状态会把终端默认带进整窗的统计页；右键文件树 / 资源管理器根节点的「在终端中打开」把目录递给面板，一个标签一个目录。关闭标签前用 `terminal:foreground` 问一次前台在跑什么（`processRunning` 是轮询出来的滞后标记，实时 `ps` 才拦得住刚起的命令），命中就二次确认。外壳原有主窗口点关闭只隐藏、保留页面和 PTY，不触发标签关闭确认；Connections 创建的普通窗口不适用这套保活规则。页面卸载 / 刷新时把 PTY 一并 dispose——PTY 活在运行时里，页面没了它不会自己结束。

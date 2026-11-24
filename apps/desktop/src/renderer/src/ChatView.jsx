@@ -3261,6 +3261,46 @@ export function mergeReplayEvents(buffered = [], pending = []) {
   return events
 }
 
+function restoreRead(request, strict) {
+  return strict ? request : request.catch(() => null)
+}
+
+// Keep the existing share-view request sequence for compatibility, not authorization.
+async function readSharedChatRestore(chat, { id, sessionId, from }, { resync, isCurrent, getSessionId }) {
+  const [page, meta] = await Promise.all([
+    sessionId ? restoreRead(chat.historyPage(sessionId, { id, from }), resync) : null,
+    restoreRead(chat.meta(sessionId))
+  ])
+  if (!isCurrent()) return null
+  const state = await restoreRead(chat.isRunning(id, sessionId || getSessionId() || null), resync)
+  return { page, meta, state }
+}
+
+export async function readChatRestore(api, payload, options) {
+  const { resync, isCurrent, getSessionId } = options
+  const result = await (api.shareView
+    ? readSharedChatRestore(api.chat, payload, options)
+    : restoreRead(api.chat.restore(payload), resync))
+  if (!isCurrent()) return null
+
+  const { page = null, meta = null, state: sampledState = null, errors } = result ?? {}
+  if (resync && errors?.page != null) throw new Error(errors.page)
+  if (resync && errors?.state != null) throw new Error(errors.state)
+  if (resync && !api.shareView && payload.sessionId && !page) {
+    throw new Error('Chat history unavailable during resync')
+  }
+  let state = sampledState
+  // The host can use the run's binding for an unbound draft. Only recheck the
+  // lease if the renderer has since learned a binding not reflected in the reply.
+  const boundSessionId = !api.shareView && !payload.sessionId && getSessionId()
+  if (boundSessionId && state && state.sessionId !== boundSessionId) {
+    state = await restoreRead(api.chat.isRunning(payload.id, boundSessionId), resync)
+    if (!isCurrent()) return null
+  }
+  if (resync && !state) throw new Error('Chat state unavailable during resync')
+  return { page, meta, state }
+}
+
 export function historyMessages(rows, key, noticeOffset = 0) {
   let noticeIndex = noticeOffset
   // 压缩留下的 boundary（内部 JSON）与 checkpoint（摘要长文）先合成一块，压缩折叠
@@ -5443,7 +5483,7 @@ export function ChatView({
     })
     const offRunStarted = window.mica.chat.onRunStarted((payload) => {
       if (payload.id !== currentRunKey()) return
-      // 恢复过程中先丢弃：restore() 自己会按 chat:is-running 的 prompt 补这一行，
+      // 恢复过程中先丢弃：restore() 自己会按运行态快照的 prompt 补这一行，
       // 而且它要等磁盘历史读完才能确定位置（定时任务每轮文本相同，末尾那条用户行
       // 未必是本轮的）。
       if (restoringRef.current) {
@@ -5639,24 +5679,18 @@ export function ChatView({
       return true
     }
 
+    const isCurrentRestore = () => generation === restoreGenerationRef.current && nodeIdRef.current === nodeId
     const restore = async (resync = false) => {
       const sessionId = sessionIdRef.current
       const liveStateVersion = { ...liveStateVersionRef.current }
       restoreQueueVersion = liveStateVersion.queue
-      const pageRequest = sessionId
-        ? window.mica.chat.historyPage(sessionId, { id: nodeId, from: historyPageRef.current?.startCursor })
-        : Promise.resolve(null)
-      const [page, sessionMeta] = await Promise.all([
-        resync ? pageRequest : pageRequest.catch(() => null),
-        sessionId
-          ? window.mica.chat.meta(sessionId).catch(() => null)
-          : window.mica.chat.meta(null).catch(() => null)
-      ])
-      if (generation !== restoreGenerationRef.current || nodeIdRef.current !== nodeId) return
-      const stateRequest = window.mica.chat.isRunning(nodeId, sessionId || sessionIdRef.current || null)
-      const state = await (resync ? stateRequest : stateRequest.catch(() => null))
-      if (generation !== restoreGenerationRef.current || nodeIdRef.current !== nodeId) return
-      if (resync && !state) throw new Error('Chat state unavailable during resync')
+      const result = await readChatRestore(
+        window.mica,
+        { id: nodeId, sessionId, from: historyPageRef.current?.startCursor },
+        { resync, isCurrent: isCurrentRestore, getSessionId: () => sessionIdRef.current }
+      )
+      if (!result || !isCurrentRestore()) return
+      const { page, meta: sessionMeta, state } = result
       const selectedModel = overridesRef.current.get(nodeId)?.model
       updateHistoryPage(page)
       setHistoryPageError('')
@@ -5686,7 +5720,7 @@ export function ChatView({
       // 中途附着上来的页面同样要看到那道还没答的选择题（它不进事件缓冲）。
       if (liveStateVersion.ask === liveStateVersionRef.current.ask) setPendingAsk(state?.ask || null)
       // host 的任务快照（后台 shell 任务 / 运行中 subagent）刻意不进事件缓冲，而是随
-      // is-running 单独回传：重放前先补上，中途附着上来的窗口才不会漏掉这一轮已经推过
+      // 运行态单独回传：重放前先补上，中途附着上来的窗口才不会漏掉这一轮已经推过
       // 的那次快照（dock 一直空着）。
       const replayEventsOf = (events, pending) => [
         ...(Array.isArray(state?.snapshots) ? state.snapshots : []),
@@ -5727,6 +5761,11 @@ export function ChatView({
           restoringRef.current = false
           setRunning(false)
           finishedRef.current = true
+          // An unbound draft can finish without a final session read to drain this exit.
+          if (pendingExitRef.current) {
+            processExitRef.current(pendingExitRef.current)
+            pendingExitRef.current = null
+          }
         }
         if (!replayFinished && state.exit?.error) {
           appendNotice(compactLine(state.exit.error, 1000), 'error')
@@ -5754,7 +5793,7 @@ export function ChatView({
       // 内容：重放前必须先裁掉本轮已持久化的 assistant 输出，否则切换节点
       // 回来会看到同一条消息渲染两遍。
       const trimActiveTurn = (messages) =>
-        replayEvents.length > 0 ? historyBeforeRunReplay(messages, state.prompt) : messages
+        replayEvents.length > 0 ? historyBeforeRunReplay(messages, state?.prompt) : messages
 
       if (state?.running) {
         if (state.sessionId && !sessionIdRef.current) {
