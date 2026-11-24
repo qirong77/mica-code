@@ -236,17 +236,17 @@ const TOKEN_THRESHOLDS = [80_000, 120_000, 200_000, 300_000]
 const RATIO_THRESHOLDS = [40, 50, 60, 70]
 const TOKEN_LEVEL_CLASS = [
   '',
-  'chat-status-warn',
-  'chat-status-warn',
-  'chat-status-hot',
-  'chat-status-error'
+  'chat-status-blue',
+  'chat-status-yellow',
+  'chat-status-red',
+  'chat-status-red'
 ]
 const RATIO_LEVEL_CLASS = [
   '',
-  'chat-status-warn',
-  'chat-status-hot',
-  'chat-status-error',
-  'chat-status-error'
+  'chat-status-blue',
+  'chat-status-yellow',
+  'chat-status-red',
+  'chat-status-red'
 ]
 
 function levelFor(value, thresholds) {
