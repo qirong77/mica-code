@@ -56,6 +56,10 @@ export default function Editor(): JSX.Element {
       : '写下你的文字…';
   const [floatingAnchorElem, setFloatingAnchorElem] = useState<HTMLDivElement | null>(null);
   const [isSmallWidthViewport, setIsSmallWidthViewport] = useState<boolean>(false);
+  // The block gutter belongs to pointing devices, not to wide windows: the
+  // notebook hosts this editor in a pane that is usually narrower than the
+  // toolbar breakpoint, and Yuque still shows the grip there.
+  const [canUseBlockHandle, setCanUseBlockHandle] = useState<boolean>(false);
   const [editor] = useLexicalComposerContext();
   const notebookSession = useNotebookSession();
   const [activeEditor, setActiveEditor] = useState(editor);
@@ -95,6 +99,14 @@ export default function Editor(): JSX.Element {
     updateViewPortWidth();
     return registerEventListener(window, 'resize', updateViewPortWidth);
   }, [isSmallWidthViewport]);
+
+  useEffect(() => {
+    const query = window.matchMedia('(hover: hover) and (pointer: fine)');
+    const update = () => setCanUseBlockHandle(query.matches);
+    update();
+    query.addEventListener('change', update);
+    return () => query.removeEventListener('change', update);
+  }, []);
 
   return (
     <>
@@ -137,9 +149,11 @@ export default function Editor(): JSX.Element {
                 />
               </>
             )}
+            {floatingAnchorElem && canUseBlockHandle && (
+              <DraggableBlockPlugin anchorElem={floatingAnchorElem} protectFirstBlock={Boolean(notebookSession)} />
+            )}
             {floatingAnchorElem && !isSmallWidthViewport && (
               <>
-                <DraggableBlockPlugin anchorElem={floatingAnchorElem} protectFirstBlock={Boolean(notebookSession)} />
                 <FloatingTextFormatToolbarPlugin
                   anchorElem={floatingAnchorElem}
                   setIsLinkEditMode={setIsLinkEditMode}

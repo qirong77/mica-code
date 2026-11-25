@@ -260,4 +260,41 @@ describe('Notebook iframe boundary', () => {
     await expect(bridge.flush()).rejects.toThrow('已关闭');
     expect(vi.getTimerCount()).toBe(0);
   });
+
+  it('writes the system clipboard for a sandboxed block copy and answers the frame', async () => {
+    const f = fixture();
+    await f.load('a');
+    const write = vi.fn().mockResolvedValue(undefined);
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    class FakeClipboardItem {
+      constructor(readonly items: Record<string, Blob>) {}
+    }
+    vi.stubGlobal('ClipboardItem', FakeClipboardItem);
+    vi.stubGlobal('navigator', { clipboard: { write, writeText } });
+    try {
+      f.receive({ type: 'clipboard', requestId: 'copy-1', html: '<p>块</p>', text: '块' });
+      await vi.waitFor(() => expect(f.last('clipboardResult')).toMatchObject({ requestId: 'copy-1', ok: true }));
+      const [[items]] = write.mock.calls as [[Record<string, FakeClipboardItem>]];
+      expect(Object.keys(items[0].items).sort()).toEqual(['text/html', 'text/plain']);
+      expect(writeText).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+      f.bridge.dispose();
+    }
+  });
+
+  it('falls back to plain text and reports a failed clipboard write', async () => {
+    const f = fixture();
+    await f.load('a');
+    const write = vi.fn().mockRejectedValue(new Error('denied'));
+    vi.stubGlobal('ClipboardItem', undefined);
+    vi.stubGlobal('navigator', { clipboard: { write, writeText: undefined } });
+    try {
+      f.receive({ type: 'clipboard', requestId: 'copy-2', html: '', text: '只有文本' });
+      await vi.waitFor(() => expect(f.last('clipboardResult')).toMatchObject({ requestId: 'copy-2', ok: false }));
+    } finally {
+      vi.unstubAllGlobals();
+      f.bridge.dispose();
+    }
+  });
 });

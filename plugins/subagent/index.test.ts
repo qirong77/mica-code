@@ -25,6 +25,7 @@ function harness(options: { session?: { id: string; cwd: string } | null } = {})
   const disposers: (() => void)[] = [];
   const sections: { id: string; render: () => string }[] = [];
   const background: { id: string; every: number }[] = [];
+  const hooks: { name: string; handler: (event?: unknown) => void; options?: unknown }[] = [];
   const home = tempHome();
   const ctx = {
     pluginId: 'subagent',
@@ -56,11 +57,17 @@ function harness(options: { session?: { id: string; cwd: string } | null } = {})
         return { dispose() {} };
       },
     },
+    hooks: {
+      on: (name: string, handler: (event?: unknown) => void, options?: unknown) => {
+        hooks.push({ name, handler, options });
+        return { dispose() {} };
+      },
+    },
     health: { report: (report: { level: string; message: string; hint?: string }) => health.push(report) },
     logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
     onDispose: (disposer: () => void) => disposers.push(disposer),
   } as unknown as PluginContext;
-  return { ctx, home, skills, tools, health, disposers, sections, background };
+  return { ctx, home, skills, tools, health, disposers, sections, background, hooks };
 }
 
 describe('materializeSkill', () => {
@@ -139,5 +146,11 @@ describe('setup', () => {
     setup(ctx);
     // 停滞/回收/预算都要一个钟；交给宿主调度才随插件生命周期一起停。
     expect(background.map((task) => task.id)).toContain('subagent-watch');
+  });
+
+  it('watches turn boundaries for the wake-up and the “still running” notice', () => {
+    const { ctx, hooks } = harness({ session: { id: 'parent-1', cwd: '/tmp' } });
+    setup(ctx);
+    expect(hooks.map((entry) => entry.name)).toEqual(expect.arrayContaining(['turn:before', 'turn:after']));
   });
 });

@@ -360,9 +360,9 @@ export class PiModelClient extends BaseAgent<ModelClientOptions, Message, AgentU
           {
             signal: options?.signal,
             maxRetries: MAX_PROVIDER_RETRIES,
-            delayMs: 2000,
+            delayMs: 15_000,
             backoffFactor: 2,
-            maxDelayMs: 30_000,
+            maxDelayMs: 180_000,
             shouldRetry: (error) =>
               (rollback ? !hadThinking || this.canRollbackThinking : !hadOutput && !hadThinking) &&
               isRetryableError(error),

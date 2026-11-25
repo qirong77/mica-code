@@ -33,6 +33,7 @@ const token = decodeURIComponent(window.location.hash.slice(1));
 const post = (message: Record<string, unknown>) =>
   window.parent.postMessage({channel: CHANNEL, token, ...message}, '*');
 let mountSequence = 0;
+let clipboardSequence = 0;
 
 export class NotebookSession {
   static readonly CHANGE_SNAPSHOT_DELAY_MS = 50;
@@ -53,6 +54,7 @@ export class NotebookSession {
   private navigateOutline: ((navigation: NotebookNavigation) => void) | null = null;
   private titleNeedsAlignment: boolean;
   private unregisterTitle: (() => void) | null = null;
+  private clipboardWaiters = new Map<string, (ok: boolean) => void>();
 
   constructor(
     readonly noteId: string,
@@ -112,6 +114,35 @@ export class NotebookSession {
     if (this.active && !this.frozen && this.editor) {
       this.editor.dispatchCommand(NOTEBOOK_ACTION_COMMAND, action);
     }
+  }
+
+  /**
+   * Block copy/cut: this frame is sandboxed without a same-origin, so its own
+   * `execCommand('copy')` is rejected. The host page writes the system
+   * clipboard instead and answers with `clipboardResult`.
+   */
+  copyBlock(html: string, text: string): Promise<boolean> {
+    if (!this.active || !this.loaded) return Promise.resolve(false);
+    const requestId = `clipboard-${++clipboardSequence}`;
+    return new Promise<boolean>((resolve) => {
+      const timer = window.setTimeout(() => {
+        this.clipboardWaiters.delete(requestId);
+        resolve(false);
+      }, 3000);
+      this.clipboardWaiters.set(requestId, (ok) => {
+        window.clearTimeout(timer);
+        resolve(ok);
+      });
+      post({type: 'clipboard', loadId: this.requestId, noteId: this.noteId, requestId, html, text});
+    });
+  }
+
+  resolveClipboard(requestId: unknown, ok: unknown): void {
+    if (typeof requestId !== 'string') return;
+    const waiter = this.clipboardWaiters.get(requestId);
+    if (!waiter) return;
+    this.clipboardWaiters.delete(requestId);
+    waiter(ok === true);
   }
 
   private restoreEditor(editor: LexicalEditor): void {
@@ -392,6 +423,8 @@ export function NotebookFrame({children}: {children: ReactNode}) {
         const active = current.current;
         if (!active || message.noteId !== active.noteId || message.loadId !== active.requestId) return;
         active.setTitle(message.title);
+      } else if (message.type === 'clipboardResult') {
+        current.current?.resolveClipboard(message.requestId, message.ok);
       }
     };
     // Portalled menus and native inputs do not all consult Lexical editability.

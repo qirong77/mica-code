@@ -360,6 +360,9 @@ export class SubagentTranscript {
         const turn = asRecord(params.turn);
         const status = asString(turn?.status);
         const error = asRecord(turn?.error);
+        // 宿主的终态可能先于 `turn/started` 到达（第一轮在请求前就失败时尤其常见）：
+        // 没有当前轮次就补一条占位，否则这条终态被丢掉，父会话永远等不到「跑完」。
+        this.ensureTurn();
         this.finishCurrent(
           status === 'completed' ? 'completed' : status === 'interrupted' ? 'interrupted' : 'failed',
           asString(error?.message) || undefined,
@@ -395,6 +398,15 @@ export class SubagentTranscript {
         const error = asRecord(params.error);
         const message = asString(error?.message);
         if (message) this.lastWarning = message;
+        // `turn/start` 本身失败（模型不存在、鉴权失败）时，子宿主只发 error、不发
+        // `turn/completed`：不收尾的话这一轮永远挂在 running，父会话既等不到结果，
+        // 也收不到「跑完了」事件——自动唤醒就永远不会发生。
+        // 只对「正在跑的轮次」或「已投出去、还没被消费的第一句话」收尾，启动期的
+        // MCP 警告不会凭空长出一条失败轮次。
+        if (this.current?.status === 'running' || this.pendingInputCount > 0) {
+          this.ensureTurn();
+          this.finishCurrent('failed', message || undefined);
+        }
         return true;
       }
       default:

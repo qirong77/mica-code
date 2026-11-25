@@ -3,6 +3,33 @@ import type { NotebookDocument } from './model';
 
 export const NOTEBOOK_CHANNEL = 'mica-notebook';
 
+/**
+ * The editor lives in an opaque sandbox, where `execCommand('copy')` is
+ * rejected — only this page may touch the system clipboard. Block copy/cut
+ * therefore asks the host to do the write, HTML first so pasting back keeps
+ * the block's formatting.
+ */
+async function writeClipboard(html: string, text: string): Promise<boolean> {
+  try {
+    if (html && typeof ClipboardItem !== 'undefined' && navigator.clipboard?.write) {
+      await navigator.clipboard.write([
+        new ClipboardItem({
+          'text/html': new Blob([html], { type: 'text/html' }),
+          'text/plain': new Blob([text || html], { type: 'text/plain' }),
+        }),
+      ]);
+      return true;
+    }
+    if (text && navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
 export interface NotebookOutline {
   items: { key: string; text: string; level: number; parentKey?: string | null }[];
   activeKey: string | null;
@@ -117,6 +144,14 @@ export function createEditorBridge(options: {
       if (ready) return;
       ready = true;
       options.onReady();
+      return;
+    }
+    if (data.type === 'clipboard') {
+      const requestId = typeof data.requestId === 'string' ? data.requestId : '';
+      const html = typeof data.html === 'string' ? data.html : '';
+      const text = typeof data.text === 'string' ? data.text : '';
+      if (!requestId || (!html && !text)) return;
+      void writeClipboard(html, text).then((ok) => send('clipboardResult', { requestId, ok }));
       return;
     }
     if (data.type === 'error') {

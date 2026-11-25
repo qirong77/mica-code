@@ -231,6 +231,16 @@ export class SubagentRegistry {
     return this.eventLog.take();
   }
 
+  /** 还没送达的事件：自动唤醒先读一遍，提交成功才摘掉。 */
+  peekEvents(): SubagentEvent[] {
+    return this.eventLog.peek();
+  }
+
+  /** 自动唤醒已经送达的那几条，不再跟着下一轮 prompt 重复出现。 */
+  dropEvents(ids: readonly number[]): void {
+    this.eventLog.drop(ids);
+  }
+
   /** 工具刚读过某个子会话：空闲回收据此判断「结果已经有人看过」。 */
   markRead(id: string): void {
     const entry = this.get(id);
@@ -632,6 +642,11 @@ export class SubagentRegistry {
   /** 还活着的子会话：数目只看登记表，进程已退出的空壳不算。 */
   liveEntries(): SubagentEntry[] {
     return this.list().filter((entry) => !entry.process.closed);
+  }
+
+  /** 还活着的、正在跑一轮的子会话：turn 结束时用它说「还有几个在跑」。 */
+  liveRunning(): SubagentEntry[] {
+    return this.liveEntries().filter((entry) => entry.process.transcript.busy);
   }
 
   /** 摘掉多余的死条目，只留最近的 `MAX_DEAD_ENTRIES` 条供回看。 */

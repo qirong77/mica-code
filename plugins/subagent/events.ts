@@ -75,6 +75,18 @@ export class SubagentEventLog {
     return taken;
   }
 
+  /**
+   * 摘掉已经被送达的几条。
+   *
+   * 自动唤醒走的是 `ctx.runtime.submit`（一次系统输入），送达失败时事件必须原样留着；
+   * 所以这里不能用 `take()` 一把清空——先读完、提交成功、再按 id 摘掉。
+   */
+  drop(ids: readonly number[]): void {
+    if (!ids.length) return;
+    const dropped = new Set(ids);
+    this.events = this.events.filter((event) => !dropped.has(event.id));
+  }
+
   /** 会话被关掉时顺手清掉它的事件：进程都没了，再提示「它跑完了」只会让人去找一个不存在的东西。 */
   dropSession(sessionId: string): void {
     this.events = this.events.filter((event) => event.sessionId !== sessionId);

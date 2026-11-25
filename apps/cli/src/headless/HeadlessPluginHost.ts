@@ -152,7 +152,9 @@ export async function startAsSubmit(
   text: string,
   options?: SubmitOptions,
 ): Promise<SubmitResult> {
-  const result = await start(micaRuntime.createRuntimeInput(text, 'plugin', options));
+  // 插件可以声明自己是系统输入（`source: 'system'`）：自动唤醒、后台任务回报这类
+  // 消息不该在会话记录里长成一个「用户说的话」，但模型必须看得到。
+  const result = await start(micaRuntime.createRuntimeInput(text, options?.source ?? 'plugin', options));
   if (result === 'rejected' || result === 'busy-remote') return { ok: false, reason: 'busy' };
   return { ok: true, handled: result === 'queued', queued: result === 'queued' };
 }

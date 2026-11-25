@@ -7,6 +7,7 @@ import SKILL_MD from './skill/SKILL.md' with { type: 'text' };
 import { renderSubagentEvents, type SubagentEvent } from './events.js';
 import { createPanelHandler } from './panel.js';
 import { SubagentRegistry } from './registry.js';
+import { shouldWake, SubagentWaker } from './wake.js';
 import {
   SubagentDriveTool,
   SubagentInspectTool,
@@ -130,6 +131,18 @@ const plugin: MicaPlugin = {
 
     // 插件设置：两项阈值都从设置里读，改完立刻生效（不走重启）。
     const readSettings = () => (ctx.settings?.get?.() ?? {}) as Record<string, unknown>;
+    // 自动唤醒：默认开。关掉它，事件仍然会进下一轮的 prompt 段落，只是父会话空闲时
+    // 不会自己起来处理——用户得自己回来问一句。
+    const wakeEnabled = () => readSettings().wake !== 'false';
+    // 当前是不是父会话的一轮在跑。轮中不提交新输入：事件等 turn:after 再送，
+    // 不打断正在跑的活。turn:before / turn:after 在所有常驻宿主里都会发。
+    let inTurn = false;
+    // 上一次「还有 N 个在跑」提示的会话集合：同一批只提示一次，收掉一个才更新。
+    let lastRunningKey = '';
+    // 插件面向宿主时用会话 owner 隔离队列：TUI 里有多个 agent，空对象会永远判成空闲。
+    const queueOwner = () => (ctx.session?.captureOwner?.() ?? null) as object | null;
+    const canWake = () =>
+      wakeEnabled() && ctx.agent?.mode !== 'one-shot' && typeof ctx.runtime?.submit === 'function';
     const registry = new SubagentRegistry(ctx, parentSessionId, defaultCwd, currentRole, {
       limits: () => {
         const values = readSettings();
@@ -139,6 +152,9 @@ const plugin: MicaPlugin = {
         };
       },
       onEvent: (event) => {
+        // 自动唤醒与「用户可见的提醒」是两件事：notify 关掉只少一条 notice，
+        // 不该让父会话在空闲时收不到结果。轮中的事件先攒着，turn:after 再送。
+        if (canWake() && shouldWake(event)) waker.schedule();
         // 用户看的那一条：只在「结果变了」的时候发，每一轮都发会把对话淹掉。
         if (readSettings().notify === 'false') return;
         if (!shouldNotify(event)) return;
@@ -151,11 +167,69 @@ const plugin: MicaPlugin = {
         );
       },
     });
+    // 唤醒器单独一层：「记录事件」永远发生，「送达」要父会话有空、用户在等。
+    // 提交走 `source: 'system'`：模型看到的是系统事件，不会被伪装成用户发言；
+    // 用户在界面上看到的是下面那条 notice + 模型的新一轮回答。
+    const waker = new SubagentWaker({
+      inTurn: () => inTurn,
+      busy: () => {
+        const owner = queueOwner();
+        return owner ? Boolean(ctx.runtime?.queue?.isBusy?.(owner)) : false;
+      },
+      draft: () => ctx.ui?.input?.getText?.() ?? '',
+      queued: () => {
+        const owner = queueOwner();
+        return owner ? (ctx.runtime?.queue?.list?.(owner)?.length ?? 0) : 0;
+      },
+      peek: () => registry.peekEvents(),
+      consume: (ids) => registry.dropEvents(ids),
+      submit: async (text, displayText) => {
+        if (!ctx.runtime?.submit) return false;
+        const result = await ctx.runtime.submit(text, { source: 'system', displayText });
+        return result.ok;
+      },
+      notice: (text) => ctx.ui?.notice(text, { command: 'subagent', status: 'info', surface: 'conversation' }),
+    });
+
+    // 一轮结束时做两件事：撤掉「这一轮在跑」标记并把攒下的事件送出去；还有子会话在跑
+    // 就留一条提示——用户才知道本轮不是最终交付，跑完会自动回来。
+    const turnBefore = ctx.hooks?.on?.(
+      'turn:before',
+      () => {
+        inTurn = true;
+      },
+      { pluginId: ctx.pluginId },
+    );
+    const turnAfter = ctx.hooks?.on?.(
+      'turn:after',
+      () => {
+        inTurn = false;
+        if (readSettings().notify !== 'false') {
+          const running = registry.liveRunning();
+          const key = running.map((entry) => entry.id).sort().join(',');
+          if (!running.length) {
+            lastRunningKey = '';
+          } else if (key !== lastRunningKey) {
+            lastRunningKey = key;
+            const titles = running.map((entry) => `「${entry.title}」`).join('、');
+            ctx.ui?.notice(
+              `这一轮结束，还有 ${running.length} 个子会话在跑：${titles}。` +
+                '它们跑完/卡住会自动回到对话；关掉会话会连同它们一起中断。',
+              { command: 'subagent', status: 'info', surface: 'conversation' },
+            );
+          }
+        }
+        // 0ms 之后再送：headless 宿主的 `running` 要等这一轮退出循环才清，
+        // 在 turn:after 里直接 submit 会被排进单槽；失败/中止的轮次不会 drain 队列。
+        if (canWake()) waker.flushSoon();
+      },
+      { pluginId: ctx.pluginId },
+    );
     // primaryAgentOnly：子代理不该再派生会话，否则会变成没人收的进程树。
     // 图标整族一个（同 background_tasks_*）：它们说的是同一件事——一条被派出去的子会话。
     // 四个动词，一个主语：给活 / 看 / 等 / 停。同一件事的不同力度用参数表达，
     // 不再一档一个工具名——工具 schema 进每次请求的前缀，名字越少越省。
-    const options = { icon: '🧵', primaryAgentOnly: true } as const;
+    const options = { icon: '🤖', primaryAgentOnly: true } as const;
     const tools = [
       ctx.tools.register(new SubagentDriveTool(registry), options),
       ctx.tools.register(new SubagentInspectTool(registry), options),
@@ -183,6 +257,9 @@ const plugin: MicaPlugin = {
     // 面板：看得见也按得动（打断 / 收掉 / 看详情）。CLI 宿主没有桌面能力面，这里自然为空。
     const panel = ctx.desktop?.panel?.(createPanelHandler({ registry }));
     ctx.onDispose(async () => {
+      waker.dispose();
+      turnBefore?.dispose();
+      turnAfter?.dispose();
       for (const tool of tools) tool.dispose();
       section?.dispose();
       guard?.dispose();

@@ -398,7 +398,7 @@ export class SubagentWaitTool extends MicaTool {
       'subagent_wait',
       '等子会话满足一个条件，然后返回它的状态。默认等「这一轮跑完」。' +
         '这是阻塞等待（可以与同一条消息里的其它工具并行），不要在它后面再补 sleep。' +
-        '并行开了几个就传 session_ids（默认等全部满足；any: true 表示任意一个满足就返回）。' +
+        '并行开了几个就传 session_ids（默认任意一个满足就返回；要等全部传 all: true）。' +
         '超时不会白等：它会转成后台提醒，条件成立时你下一轮会自动收到，不必再查。',
       {
         type: 'object' as const,
@@ -407,9 +407,9 @@ export class SubagentWaitTool extends MicaTool {
           session_ids: {
             type: 'array',
             items: { type: 'string' },
-            description: '一次等多个：默认等全部满足，配 any: true 表示任意一个满足就返回。',
+            description: '一次等多个：默认任意一个满足就返回，配 all: true 才等全部满足。',
           },
-          any: { type: 'boolean', description: 'true 时任意一个满足就返回（配合 session_ids）。' },
+          all: { type: 'boolean', description: 'true 时等全部满足（必须全齐才能继续时用）。' },
           until: {
             type: 'string',
             enum: ['idle', 'text', 'turn'],
@@ -428,7 +428,7 @@ export class SubagentWaitTool extends MicaTool {
     input: {
       session_id?: string;
       session_ids?: string[];
-      any?: boolean;
+      all?: boolean;
       until?: string;
       pattern?: string;
       timeout_ms?: number;
@@ -447,7 +447,12 @@ export class SubagentWaitTool extends MicaTool {
     const missing = ids.filter((_, index) => !entries[index]);
     if (missing.length) return `找不到子会话：${missing.join('、')}`;
     const targets = entries.map((entry) => entry!);
-    const any = input.any === true;
+    // 默认「任意一个满足就返回」：并行派三个时，第一个跑完/失败/退出就该让模型
+    // 有机会判断（重启它还是继续等剩下的）。等全部才继续的场景显式传 all: true。
+    //
+    // 不提供 `any` 反向参数：真实链路里模型会把 schema 字段全部填满，`any: false`
+    // 会把默认值覆盖回去——同一个意思只留一个开关，默认值不能靠模型不填。
+    const any = input.all !== true;
     const until = input.until === 'text' || input.until === 'turn' ? input.until : 'idle';
     let pattern: RegExp | null = null;
     if (until === 'text') {
@@ -494,7 +499,7 @@ export class SubagentWaitTool extends MicaTool {
         if (done) {
           // 多个的时候给一份齐平的摘要（每个全长投影会一次吃掉几万字符）。
           const header = any
-            ? '有一个子会话已经满足条件：'
+            ? '有一个子会话已经满足条件（默认任意一个就返回；要等全部传 all: true）：'
             : `${targets.length} 个子会话都满足了条件：`;
           return `${header}\n${describe()}\n\n${renderCollect(targets)}\n\n需要某一个的全文时用 subagent_inspect <id>。`;
         }

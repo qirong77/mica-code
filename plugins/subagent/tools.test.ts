@@ -60,6 +60,64 @@ describe('subagent tool boundaries', () => {
     expect(await waiting).toContain('已取消等待');
     expect(Date.now()).toBe(started);
   });
+
+  it('returns on the first finished child by default and names the rest', async () => {
+    const idle = new SubagentTranscript();
+    const running = new SubagentTranscript();
+    running.apply({ method: 'turn/started', params: { turn: { id: 'turn-1' } } });
+    const entries: Record<string, unknown> = {
+      a: {
+        id: 'a',
+        title: '先跑完的',
+        cwd: '/tmp',
+        createdAt: Date.now(),
+        process: { transcript: idle, closed: false, waitForChange: vi.fn(async () => false) },
+      },
+      b: {
+        id: 'b',
+        title: '还在跑的',
+        cwd: '/tmp',
+        createdAt: Date.now(),
+        process: { transcript: running, closed: false, waitForChange: vi.fn(async () => false) },
+      },
+    };
+    const tool = new SubagentWaitTool({ get: (id: string) => entries[id] } as unknown as SubagentRegistry);
+    const text = await tool.execute({ session_ids: ['a', 'b'] });
+    // 并行派三个时不该等齐才回来：第一个结束就要把结果交给模型判断。
+    expect(text).toContain('有一个子会话已经满足条件');
+    expect(text).toContain('先跑完的');
+    expect(text).toContain('还在跑的');
+  });
+
+  it('still waits for every child when all: true is explicit', async () => {
+    const idle = new SubagentTranscript();
+    const running = new SubagentTranscript();
+    running.apply({ method: 'turn/started', params: { turn: { id: 'turn-1' } } });
+    const entries: Record<string, unknown> = {
+      a: {
+        id: 'a',
+        title: '先跑完的',
+        cwd: '/tmp',
+        createdAt: Date.now(),
+        process: { transcript: idle, closed: false, waitForChange: vi.fn(async () => false) },
+      },
+      b: {
+        id: 'b',
+        title: '还在跑的',
+        cwd: '/tmp',
+        createdAt: Date.now(),
+        process: { transcript: running, closed: false, waitForChange: vi.fn(async () => false) },
+      },
+    };
+    const registerWatcher = vi.fn();
+    const tool = new SubagentWaitTool({
+      get: (id: string) => entries[id],
+      registerWatcher,
+    } as unknown as SubagentRegistry);
+    const text = await tool.execute({ session_ids: ['a', 'b'], all: true, timeout_ms: 5 });
+    expect(text).toContain('等待超时');
+    expect(registerWatcher).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe('subagent_drive: 新建、接管、追加是同一个动作', () => {

@@ -311,3 +311,13 @@ body.mica-arco-theme .notebook-workbench .editor-image .image-caption-container 
     padding: 7px 9px;
   }
 }
+
+/* The block handle lives in the left gutter. A narrow desktop pane (the
+   notebook keeps a 512px-wide frame when its directory is open) must still
+   leave room for it; phones keep the tighter gutters above, and get no handle
+   because they have no hover. */
+@media (max-width: 900px) and (hover: hover) and (pointer: fine) {
+  .notebook-workbench {
+    --notebook-body-gutter: 32px;
+  }
+}

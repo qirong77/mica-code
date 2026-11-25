@@ -274,7 +274,7 @@ describe('pi iteration boundaries', () => {
     const end = vi.fn();
     const client = new PiModelClient({ ...options(), toolFilter: (name) => name === 'allowed' });
     const query = client.query('current', { onRequestStart: start, onRequestEnd: end });
-    await vi.advanceTimersByTimeAsync(2000);
+    await vi.advanceTimersByTimeAsync(15_000);
     await expect(query).resolves.toBe('done');
     expect(requests[0]!.context.tools?.map((definition) => definition.name)).toEqual(['allowed']);
     expect(requests[1]!.context.tools).toEqual(requests[0]!.context.tools);
@@ -483,7 +483,7 @@ describe('pi retries and display rollback', () => {
       display = checkpoint;
     });
     const query = client.query('question');
-    await vi.advanceTimersByTimeAsync(2000);
+    await vi.advanceTimersByTimeAsync(15_000);
     await expect(query).resolves.toBe('before\n\nafter');
     expect(display).toBe('before\n\nafter');
     expect(client.onTextAttemptStart).toHaveBeenCalledTimes(3);
@@ -508,9 +508,9 @@ describe('pi retries and display rollback', () => {
     );
     const retry = vi.fn();
     const query = new PiModelClient(options()).query('question', { onRetry: retry });
-    await vi.advanceTimersByTimeAsync(2000);
+    await vi.advanceTimersByTimeAsync(15_000);
     await expect(query).resolves.toBe('done');
-    expect(retry).toHaveBeenCalledExactlyOnceWith({ attempt: 1, delayMs: 2000, error });
+    expect(retry).toHaveBeenCalledExactlyOnceWith({ attempt: 1, delayMs: 15_000, error });
     expect(execute).toHaveBeenCalledTimes(1);
     expect(requests[2]!.context.messages).toEqual(requests[1]!.context.messages);
   });
@@ -533,7 +533,7 @@ describe('pi retries and display rollback', () => {
         (value) => ({ value }),
         (error: Error) => ({ error }),
       );
-      await vi.advanceTimersByTimeAsync(2000);
+      await vi.advanceTimersByTimeAsync(15_000);
       if (canRollbackThinking) {
         expect(await result).toEqual({ value: 'done' });
         expect(client.onTextRollback).toHaveBeenCalledTimes(1);
@@ -659,12 +659,12 @@ describe('pi thinking and usage', () => {
     );
     const client = new PiModelClient(options());
     const query = client.query('question');
-    await vi.advanceTimersByTimeAsync(2000);
+    await vi.advanceTimersByTimeAsync(15_000);
     await expect(query).resolves.toBe(first + last);
     expect(client.lastUsage).toMatchObject({
       firstTokenMs: 20,
-      responseWaitMs: 2120,
-      durationMs: 3820,
+      responseWaitMs: 15120,
+      durationMs: 16820,
       generationDurationMs: 600,
       generationOutputTokens: 63,
       outputTokens: 104,
@@ -807,7 +807,7 @@ describe('pi timeout and terminal guards', () => {
       () => text('after timeout'),
     );
     const query = new PiModelClient(options()).query('question');
-    await vi.advanceTimersByTimeAsync(62_000);
+    await vi.advanceTimersByTimeAsync(75_000);
     await expect(query).resolves.toBe('after timeout');
     expect(closed).toBe(true);
     expect(requests).toHaveLength(2);
@@ -1009,7 +1009,7 @@ describe('pi retry termination regressions', () => {
     client.onTextAttemptStart = vi.fn();
     client.onTextRollback = vi.fn();
     const result = client.query('question');
-    await vi.advanceTimersByTimeAsync(2000);
+    await vi.advanceTimersByTimeAsync(15_000);
     await expect(result).resolves.toBe('final');
     expect(execute).not.toHaveBeenCalled();
     expect(client.onTextRollback).toHaveBeenCalledTimes(1);

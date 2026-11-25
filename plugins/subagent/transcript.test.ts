@@ -146,6 +146,35 @@ describe('SubagentTranscript', () => {
     expect(transcript.takeWarning()).toBe('');
   });
 
+  it('fails the running turn when the host reports an error instead of turn/completed', () => {
+    const transcript = new SubagentTranscript();
+    transcript.apply(turnStarted());
+    transcript.apply({ method: 'error', params: { error: { message: 'no route available for the requested model' } } });
+    // 子宿主在 turn/start 本身失败时只发 error：不收尾的话父会话永远等不到「跑完」。
+    expect(transcript.busy).toBe(false);
+    expect(transcript.finishedTurnCount).toBe(1);
+    expect(transcript.allTurns().at(-1)).toMatchObject({
+      status: 'failed',
+      error: 'no route available for the requested model',
+    });
+  });
+
+  it('does not invent a failed turn for a startup error with nothing in flight', () => {
+    const transcript = new SubagentTranscript();
+    transcript.apply({ method: 'error', params: { error: { message: 'MCP init failed' } } });
+    expect(transcript.finishedTurnCount).toBe(0);
+    expect(transcript.allTurns()).toHaveLength(0);
+    expect(transcript.takeWarning()).toBe('MCP init failed');
+  });
+
+  it('records a terminal turn/completed even when turn/started never arrived', () => {
+    const transcript = new SubagentTranscript();
+    transcript.apply(turnCompleted('failed', '请求失败'));
+    // 第一轮在 turn/started 之前就失败时，终态不能因为「没有当前轮」被丢掉。
+    expect(transcript.finishedTurnCount).toBe(1);
+    expect(transcript.allTurns().at(-1)).toMatchObject({ status: 'failed', error: '请求失败' });
+  });
+
   it('caps the tool list so a long turn cannot pile outputs up in memory', () => {
     const transcript = new SubagentTranscript();
     transcript.apply(turnStarted());

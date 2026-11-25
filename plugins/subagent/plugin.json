@@ -36,6 +36,13 @@
       "type": "switch",
       "default": "true",
       "description": "子会话退出或卡住时，在当前会话里留一条提示。"
+    },
+    {
+      "key": "wake",
+      "label": "跑完自动回来",
+      "type": "switch",
+      "default": "true",
+      "description": "子会话跑完一轮、退出或卡住时，如果当前会话空闲，就自动开一轮把结果带回来（会消耗一次模型请求）。关掉则只在下一次对话里提示。"
     }
   ],
   "desktop": {
