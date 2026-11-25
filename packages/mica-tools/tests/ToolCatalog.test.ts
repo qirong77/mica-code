@@ -104,7 +104,7 @@ describe('tool catalog', () => {
 
 it('groups registered plugin tools by owner regardless of their names', () => {
   const group = { key: 'plugin:example', label: 'Example' };
-  const tools = ['sidecar_spawn', 'unrelated_action'].map((name) =>
+  const tools = ['subagent_open', 'unrelated_action'].map((name) =>
     registerRuntimeTool(
       {
         name,

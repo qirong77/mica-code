@@ -167,6 +167,9 @@ export class Application {
       useBuiltinPlugins(this, agent, sessionController);
       // TUI 也装配插件：工具目录以注册表为准，关掉配置页那套静态兜底。
       micaTools.setRuntimeToolFallback(false);
+      // 目录投影：配置页 / 桌面设置页不加载插件，靠 `$MICA_HOME/plugin-tools.json` 列出
+      // 插件自己注册的工具（`subagent_*` 这类没法在静态表里逐条维护）。
+      micaTools.publishCatalog(pluginPaths.config);
       await plugins.setupAll({
         paths: pluginPaths,
         // 启停跟着 `plugins-state.json` 走：每轮开始前对齐一次，改完不必重开 TUI。

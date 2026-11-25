@@ -8,6 +8,7 @@ import {
   emptyDocument,
   emptyIndex,
   flattenVisibleTree,
+  inspectNotebookEditorState,
   moveNode,
   parseNotebookDocument,
   parseNotebookIndex,
@@ -91,6 +92,33 @@ describe('Notebook index validation', () => {
   it('rejects index growth beyond the host byte cap (including UTF-8 titles)', () => {
     const nodes = Array.from({ length: 1600 }, (_, index) => node(`node-${index}`, { title: '笔记'.repeat(40) }));
     expect(() => parseNotebookIndex({ version: 1, nodes })).toThrow('exceeds');
+  });
+});
+
+describe('Notebook editor state inspection', () => {
+  it('summarizes images without exposing their payload and rejects unknown node types', () => {
+    const result = inspectNotebookEditorState(JSON.stringify({
+      root: {
+        type: 'root',
+        children: [
+          { type: 'paragraph', children: [{ type: 'text', text: '正文' }] },
+          { type: 'image', src: 'data:image/png;base64,abcd', altText: '截图', width: 640 },
+          { type: 'mystery-node', children: [] },
+        ],
+      },
+    }));
+    expect(result.valid).toBe(false);
+    expect(result.summary).toMatchObject({ images: 1, inline_images: 1, remote_images: 0 });
+    expect(result.issues).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: 'unsupported_type', path: 'root.children[2].type' }),
+    ]));
+  });
+
+  it('returns a safe invalid result for broken JSON', () => {
+    expect(inspectNotebookEditorState('{broken')).toMatchObject({
+      valid: false,
+      issues: [expect.objectContaining({ code: 'invalid_json' })],
+    });
   });
 });
 

@@ -49,7 +49,7 @@ function createHandler() {
   const data = memoryData();
   const handler = createApi({
     pluginId: 'notebook',
-    pluginVersion: '1.6.0',
+    pluginVersion: '1.7.0',
     data: data as unknown as PluginDataApi,
     settings: { get: () => ({}) },
   });
@@ -238,7 +238,7 @@ describe('Notebook plugin API', () => {
     const rootNote = (await request(handler, 'POST', '/notes', { body: { title: '根笔记' } })).node;
 
     const overview = await request(handler, 'GET', '/overview');
-    expect(overview.notebook).toEqual({ name: 'Notebook', version: '1.6.0', api: '/plugin/notebook/api' });
+    expect(overview.notebook).toEqual({ name: 'Notebook', version: '1.7.0', api: '/plugin/notebook/api' });
     expect(overview.today).toMatch(/^\d{4}-\d{2}-\d{2}$/);
     expect(overview.counts).toEqual({ folders: 1, notes: 2, trashed: 0 });
     expect(overview.tree).toMatchObject([
@@ -279,6 +279,38 @@ describe('Notebook plugin API', () => {
     expect(afterTrash.trashed).toMatchObject([{ id: rootNote.id, title: '根笔记', trashed: true }]);
     expect(typeof afterTrash.trashed[0].trashed_at).toBe('string');
     expect(afterTrash.tree.map((node: Record<string, any>) => node.id)).toEqual([folder.id]);
+  });
+
+  it('clones a rich note without round-tripping Markdown, and exposes image metadata separately', async () => {
+    const { handler } = createHandler();
+    const source = (await request(handler, 'POST', '/notes', { body: { title: '原稿' } })).node;
+    const editorState = JSON.stringify({
+      root: {
+        type: 'root',
+        children: [
+          { type: 'heading', tag: 'h1', children: [{ type: 'text', text: '原稿' }] },
+          { type: 'image', src: 'data:image/png;base64,iVBORw0KGgo=', altText: '截图', width: 640, maxWidth: 720, showCaption: true },
+          { type: 'paragraph', children: [{ type: 'text', text: '正文' }] },
+        ],
+      },
+    });
+    const written = await request(handler, 'POST', `/notes/${source.id}/content`, {
+      body: { mode: 'set_editor_state', editor_state: editorState, expected_version: null },
+    });
+
+    const assets = await request(handler, 'GET', `/notes/${source.id}/assets`);
+    expect(assets).toMatchObject({ version: written.version, summary: { images: 1, inline_images: 1 } });
+    expect(assets.assets).toEqual([
+      expect.objectContaining({ asset_id: 'image:1', path: [1], kind: 'inline', alt_text: '截图', width: 640 }),
+    ]);
+    const validation = await request(handler, 'GET', `/notes/${source.id}/validate`);
+    expect(validation).toMatchObject({ valid: true, version: written.version, summary: { images: 1 } });
+
+    const clone = await request(handler, 'POST', `/notes/${source.id}/clone`, { body: { title: '整理版' } });
+    expect(clone).toMatchObject({ node: { title: '整理版' }, source: { id: source.id }, missing: false });
+    expect(clone.version).toBeTypeOf('string');
+    const cloned = await request(handler, 'GET', `/notes/${clone.node.id}`, { query: { format: 'lexical' } });
+    expect(JSON.parse(cloned.editor_state)).toEqual(JSON.parse(editorState));
   });
 
   it('runs the whole read/write/edit/organize flow through the documented endpoints', async () => {
@@ -601,6 +633,15 @@ describe('Notebook plugin API', () => {
       'invalid_request',
     );
     expect(badMode.message).toContain('set_markdown');
+
+    const malformedEditorState = await expectFailure(
+      request(handler, 'POST', `/notes/${note.id}/content`, {
+        body: { mode: 'set_editor_state', editor_state: JSON.stringify({ root: { children: 'not-an-array' } }), expected_version: null },
+      }),
+      400,
+      'invalid_request',
+    );
+    expect(malformedEditorState.message).toContain('children');
 
     const first = await request(handler, 'POST', `/notes/${note.id}/content`, {
       body: { mode: 'set_text', text: '本地', expected_version: null },

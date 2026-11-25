@@ -19,9 +19,9 @@
 
 所有插件（含用户插件和一次性动作）自动接入宿主的 `operation.start/finish` 元数据日志， 新信封绑定装载版本及 pid/generation，后台重复 success/skipped/waiting合并为每分钟心跳计数；首次终态、失败、取消与状态转换不采样。覆盖工具/命令、面板/动作、菜单、后台 tick、数据、hook 与装配/释放；独立 MCP/launcher 不依赖主对话轨迹。内部步骤可调用 `ctx.operations?.run('固定操作名', task, { signal })`。禁止传正文、命令、路径、地址或异常原文；处理器完成不代表业务验收。随包页面/卡片/启动器的实际曝光与点击由共享容器记录，预取和轮询不算曝光。
 
-[Subagent](subagent/README.md) 的文件租约限定文件工具的写入路径；shell 可从工作区内包含租约的目录执行，文件租约也能运行测试。外部 checkout 的祖先以最近 `.git` 为界，独立外部路径只放行到直接父目录；cwd 检查不是 shell 沙箱，命令仍须遵守写策略。
+[Subagent Legacy](subagent-legacy/README.md) 是旧的进程内委派（7 种内置子代理类型 + `agent` 工具 + 委派 prompt 段落）：子代理活在父会话的进程里，共享父会话的模型与工具。它的文件租约限定文件工具的写入路径；shell 可从工作区内包含租约的目录执行，文件租约也能运行测试。外部 checkout 的祖先以最近 `.git` 为界，独立外部路径只放行到直接父目录；cwd 检查不是 shell 沙箱，命令仍须遵守写策略。
 
-[Sidecar](sidecar/README.md) 派一个独立的 mica 会话去干活并观测它：子会话是常驻的 `mica app-server` 进程，工具面按成本分层（`sidecar_turns` → `sidecar_grep` → `sidecar_transcript`），一个 `sidecar_collect` 收齐全部结论。它还**反向汇报**：轮次结束、进程退出、停滞都记成一条动态，父会话下一轮开工时由 prompt 段落注入一次、读后即清；`sidecar_wait` 超时会把条件登记成后台提醒，所以长任务不必把父会话钉在阻塞等待上。桌面端右侧面板与输入框上方的状态行让用户能直接看住、打断、收掉这些进程；空闲回收与 `sidecar_attach`（`thread/resume` 接管已有会话，历史从会话文件补）负责让它们既不常驻烧内存，也不至于丢了线索。
+[Subagent](subagent/README.md) 派一个独立的 mica 会话去干活并观测它：子会话是常驻的 `mica app-server` 进程，六个动词一个主语（`subagent_open` / `send` / `wait` / `status` / `read` / `stop`），读内容按成本分三档（`read` 的 `turns` → `grep` → `transcript`），`status({ full: true })` 一次收齐全部结论。它还**反向汇报**：轮次结束、进程退出、停滞都记成一条动态，父会话下一轮开工时由 prompt 段落注入一次、读后即清；`subagent_wait` 超时会把条件登记成后台提醒，所以长任务不必把父会话钉在阻塞等待上。桌面端右侧面板与输入框上方的状态行让用户能直接看住、打断、收掉这些进程；空闲回收与 `subagent_open`（`thread/resume` 接管任意已落盘会话——用户自己的会话、别处收掉的子会话都行——历史从会话文件补）负责让它们既不常驻烧内存，也不至于丢了线索。
 
 面板视图可返回 `cards`（每插件最多 3 张）：`{ id, title, summary?, detail?, tone?, revision, actions?, impressionAction? }`。卡片动作 `{ id, label, key?, tone? }` 复用面板动作通道；`key` 应携带版本并由插件校验，拒绝旧界面执行新内容。`impressionAction` 仅用于记录实际展示，不应产生用户可见操作。清单声明 `desktop.panel.dynamicShortcuts: true` 让快捷区获取卡片视图。卡片里显示摘要，详细清单仍放 `sections`。
 
@@ -1112,7 +1112,7 @@ ctx.desktop.sessionMenu({
 插件日志复用 `mica-diagnostics` 的有界批量队列， writer-health 使用独立检查点持久保存每世代累计丢弃/溢出/序列化/写失败与级别、关闭策略；检查点失败不会递归填满队列。生产者不再每行同步扫描/写盘；信封为 `at/scope/pluginId/plugin/level/event/data`。单文件超过 2 MiB 分片，7 天与目录总容量由共享 writer 兜底；`MICA_PLUGIN_LOG=0` 关闭。`stats()` 可见溢出、序列化与写失败计数，不能把丢失样本当成功。
 排查插件问题时先看这里，配置页插件详情里也会显示当前日志路径。
 
-## 派生一个子会话（sidecar）
+## 派生一个子会话（subagent）
 
 等待条件：`idle` 等当前轮次及已投递消息全部结束；`turn` 等至少一轮在调用后结束，包含调用时
 正在运行的轮次；`text` 匹配最新一轮的完整正文，调用前已出现的目标文字也会立即命中。
@@ -1129,22 +1129,22 @@ const child = spawn(micaExecutable, ['app-server', '--dir', cwd, '--parent', thi
   下面。子会话是独立进程、独立上下文，关掉父会话时由 `ctx.onDispose()` 一并结束。
 - **事件是结构化的**：正文 delta、工具调用与结果、用量、轮次终态都在同一条 stdout 上，
   不需要读 DOM，也不需要轮询会话文件。
-- **会话 MCP 随委派继承**：sidecar 继承父 CLI 显式的 `--mcp-config`、strict 与初始化超时，
+- **会话 MCP 随委派继承**：派生的子会话继承父 CLI 显式的 `--mcp-config`、strict 与初始化超时，
   配置路径按父启动目录固定，不随父之后换目录或子 cwd 改变；引用原配置、沿用父 owner，
   不复制凭据、不写用户配置，也不提供桌面插件能力面。并行任务只清理各自创建的控制资源。
 - **会话仍然落盘**：子会话写完第一轮就在 `$MICA_HOME/sessions/` 下出现，桌面侧栏（10s 轮询）
   和 `/resume` 都能直接打开它——用户能看到，但不必为了看到而操作界面。
 - **一次 spawn 就是一个会话**，不要给一个子进程投两轮以上之外的期望：`turn/start` 在忙时
   会报错，需要排队就用 `turn/steer`（等价的用户操作是按回车）。
-- `sidecar_spawn` **没有**迭代或 token 参数：不限轮数、不限 token、不限并发、不限嵌套层数。插件里不存在会在会话干到一半时自动中止它的机制（停滞只提醒、空闲回收默认关），要停只能显式 `sidecar_abort` / `sidecar_close`。
+- `subagent_open` **没有**迭代或 token 参数：不限轮数、不限 token、不限并发、不限嵌套层数。插件里不存在会在会话干到一半时自动中止它的机制（停滞只提醒、空闲回收默认关），要停只能显式 `subagent_stop`（`interrupt` 打断这一轮、`close` 收进程）。
 
-`plugins/sidecar` 是完整示例：`sidecarProcess.ts` 负责协议与进程，`transcript.ts` 把事件投影
-成轮次（纯函数，可单测），`tools.ts` 把它包成 `sidecar_*` 工具。
+`plugins/subagent` 是完整示例：`subagentProcess.ts` 负责协议与进程，`transcript.ts` 把事件投影
+成轮次（纯函数，可单测），`tools.ts` 把它包成 `subagent_*` 工具。
 
 **反向汇报同样是插件的事**。子会话跑完不会有人来问，父会话也可能正忙：`registry.ts` 在
 每个子进程的变化上挂一个观察者，把轮次终态、进程退出、停滞记成一条事件，父会话
 下一轮开工时由 `ctx.prompt.section()` 注入一次、读后即清（没有事件时渲染空串，prompt 前缀
-不变）。`sidecar_wait` 超时也走同一条通路：条件登记成后台提醒，成立时变成事件，所以长任务
+不变）。`subagent_wait` 超时也走同一条通路：条件登记成后台提醒，成立时变成事件，所以长任务
 不必把父会话钉在阻塞等待上。停滞/空闲回收/预算这些要有钟的判断交给 `ctx.background`，
 注册的循环随插件 `dispose` 一起停，不留后台残留。
 
@@ -1152,13 +1152,13 @@ const child = spawn(micaExecutable, ['app-server', '--dir', cwd, '--parent', thi
 退回新建一条，而 attach 的意义是「接的就是那一条」，接不到必须报错。resume 不发通知，
 历史要自己从 `$MICA_HOME/sessions/<id>.json` 的 `snapshot.conversationMessages` 补进投影。
 
-**读对话要分层，不要一步到位**。`sidecar_turns`（每轮一行）→ `sidecar_grep`（命中行）→
-`sidecar_transcript`（正文，按字符预算截断）成本差一个数量级。`sidecar_transcript` 只给用户与助手的
+**读对话要分层，不要一步到位**。`subagent_read` 的 `view` 三档：`turns`（每轮一行）→ `grep`（命中行）→
+`transcript`（正文，按字符预算截断），成本差一个数量级。`transcript` 只给用户与助手的
 正文、不含工具与思考；预算不够时丢最早轮次并写明丢了几轮。
 
-`sidecar_grep` 默认只搜对话正文，命令输出与测试报错在工具输出里，需要 `scope: "tools"`
+`read` 的 `grep` 默认只搜对话正文，命令输出与测试报错在工具输出里，需要 `scope: "tools"`
 （或 `"all"`）；默认档下若工具输出里有命中，结果会明确告诉你「那边有几处」并指向这个参数。
-收尾别写一串 wait + transcript：`sidecar_collect` 一次给出每个子会话的状态、结论、失败的工具
+收尾别写一串 wait + transcript：`subagent_status({ full: true })` 一次给出每个子会话的状态、结论、失败的工具
 与用量，`close: true` 顺手收掉已经跑完的。
 
 **用户消息只能本地记，但它落在哪一轮要等宿主消费才能定**。`turn/steer` 在宿主里是

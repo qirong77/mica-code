@@ -170,8 +170,9 @@ body:has(.notebook-workbench) {
 .notebook-workbench .PlaygroundEditorTheme__tableScrollableWrapper {
   min-width: 0;
   max-width: 100%;
-  /* Leave room for the 40px context toolbar and the separate delete button. */
-  margin: 60px 0 25px;
+  /* The table toolbar is fixed and only appears while the table is selected;
+     it must not reserve an empty row in the document when the table is idle. */
+  margin: 8px 0 24px;
 }
 
 .notebook-workbench .PlaygroundEditorTheme__hr {

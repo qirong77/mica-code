@@ -31,6 +31,7 @@ import TableClipboardPlugin from './plugins/TableClipboardPlugin';
 import TableFeaturesGate from './plugins/TableFeaturesGate';
 import ToolbarPlugin from './plugins/ToolbarPlugin';
 import ContentEditable from './ui/ContentEditable';
+import {useNotebookSession} from '../workspace/NotebookBridge';
 
 export default function Editor(): JSX.Element {
   const {
@@ -56,6 +57,7 @@ export default function Editor(): JSX.Element {
   const [floatingAnchorElem, setFloatingAnchorElem] = useState<HTMLDivElement | null>(null);
   const [isSmallWidthViewport, setIsSmallWidthViewport] = useState<boolean>(false);
   const [editor] = useLexicalComposerContext();
+  const notebookSession = useNotebookSession();
   const [activeEditor, setActiveEditor] = useState(editor);
   // The link edit mode state lives on the ShortcutsExtension output so the
   // insert-link keyboard shortcut can set it without any React coupling
@@ -137,7 +139,7 @@ export default function Editor(): JSX.Element {
             )}
             {floatingAnchorElem && !isSmallWidthViewport && (
               <>
-                <DraggableBlockPlugin anchorElem={floatingAnchorElem} />
+                <DraggableBlockPlugin anchorElem={floatingAnchorElem} protectFirstBlock={Boolean(notebookSession)} />
                 <FloatingTextFormatToolbarPlugin
                   anchorElem={floatingAnchorElem}
                   setIsLinkEditMode={setIsLinkEditMode}

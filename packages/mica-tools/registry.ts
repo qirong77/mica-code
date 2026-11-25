@@ -20,6 +20,10 @@ import { ToolReadImage } from './ToolReadImage.js';
 import { ToolWaitFor } from './ToolWaitFor.js';
 import type { ToolExecuteCallbacks, ToolInput, ToolSource } from './MicaTool.js';
 import { RUNTIME_TOOL_DESCRIPTORS } from './runtimeToolDescriptors.js';
+import {
+  writeToolCatalogProjection,
+  type ToolCatalogProjectionEntry,
+} from './toolCatalogProjection.js';
 import { toolIcon } from '@packages/mica-common/toolIcons.js';
 import type { ToolIconCatalog } from './toolIconCatalog.js';
 import { writeToolIconCatalog } from './toolIconCatalog.js';
@@ -146,6 +150,14 @@ const executionObservers = new Set<ToolExecutionObserver>();
  */
 let iconCatalogDir: string | null = null;
 let iconCatalogQueued = false;
+/**
+ * 目录投影目录：与图标投影同一个打开时机（`publishToolCatalog()`），此后工具增减都会
+ * 重写 `plugin-tools.json`（同一 tick 内与图标合并成一次）。没有装配过插件的宿主不写。
+ */
+let catalogProjectionDir: string | null = null;
+let catalogProjectionQueued = false;
+/** 本进程发布过、需要整组替换的插件：插件停用后它那一组条目要跟着消失。 */
+const catalogPublishedPluginIds = new Set<string>();
 
 export function observeToolExecution(observer: ToolExecutionObserver): Disposable {
   executionObservers.add(observer);
@@ -181,6 +193,7 @@ export function registerRuntimeTool(
   runtimeTools = [...runtimeTools.filter((entry) => entry !== registered), registered];
   runtimeToolOptions.set(registered, options);
   scheduleIconCatalogSync();
+  scheduleCatalogProjectionSync();
   return registered;
 }
 
@@ -190,11 +203,13 @@ export function unregisterRuntimeTool(nameOrTool: string | MicaTool): void {
       ? runtimeTools.filter((tool) => tool.name !== nameOrTool)
       : runtimeTools.filter((tool) => tool !== nameOrTool);
   scheduleIconCatalogSync();
+  scheduleCatalogProjectionSync();
 }
 
 export function unregisterRuntimeTools(): void {
   runtimeTools = [];
   scheduleIconCatalogSync();
+  scheduleCatalogProjectionSync();
 }
 
 /** 装配过插件的宿主关掉静态兜底（见 `runtimeToolFallback`）。 */
@@ -246,6 +261,56 @@ function scheduleIconCatalogSync(): void {
     iconCatalogQueued = false;
     if (!iconCatalogDir) return;
     writeToolIconCatalog(getToolIcons(), iconCatalogDir);
+  });
+}
+
+/**
+ * 插件工具的目录投影：`{ 工具名: 描述 / 入参 / 归属插件 }`。
+ *
+ * 只收带插件归属的工具（`ctx.tools.register()` 时由 PluginManager 注入的 `group`）。
+ * 内核工具与 `session_peers` 这类通用运行期工具在配置页有静态目录，不需要跟着这份缓存走。
+ */
+export function getToolCatalogProjection(): ToolCatalogProjectionEntry[] {
+  const entries: ToolCatalogProjectionEntry[] = [];
+  for (const tool of runtimeTools) {
+    const group = runtimeToolOptions.get(tool)?.group ?? descriptorGroup(tool.name);
+    const pluginId = group?.key.startsWith('plugin:') ? group.key.slice('plugin:'.length) : undefined;
+    if (!pluginId) continue;
+    entries.push({
+      name: tool.name,
+      description: tool.description,
+      readOnly: tool.readOnly,
+      parameters: toolParameters(tool),
+      group,
+      pluginId,
+      ...(tool.icon ? { icon: tool.icon } : {}),
+    });
+  }
+  return entries;
+}
+
+/**
+ * 打开目录投影：装配过插件的常驻宿主（TUI / `mica app-server`）各开一次，此后工具增减
+ * 都会重写 `$MICA_HOME/plugin-tools.json`，供不加载插件的配置页 / 桌面设置页补目录行。
+ */
+export function publishToolCatalog(configDir: string | null): void {
+  catalogProjectionDir = configDir;
+  if (configDir) scheduleCatalogProjectionSync();
+}
+
+/** 同一 tick 里的多次注册 / 卸载合并成一次写盘；写盘按插件合并，不动别的宿主的条目。 */
+function scheduleCatalogProjectionSync(): void {
+  if (!catalogProjectionDir || catalogProjectionQueued) return;
+  catalogProjectionQueued = true;
+  queueMicrotask(() => {
+    catalogProjectionQueued = false;
+    if (!catalogProjectionDir) return;
+    const entries = getToolCatalogProjection();
+    const current = new Set(entries.map((entry) => entry.pluginId).filter((id): id is string => Boolean(id)));
+    const owned = new Set([...catalogPublishedPluginIds, ...current]);
+    writeToolCatalogProjection(entries, catalogProjectionDir, { ownedPluginIds: owned });
+    catalogPublishedPluginIds.clear();
+    for (const id of current) catalogPublishedPluginIds.add(id);
   });
 }
 

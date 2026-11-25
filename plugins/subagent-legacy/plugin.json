@@ -1,0 +1,29 @@
+{
+  "id": "subagent-legacy",
+  "name": "Subagent Legacy",
+  "icon": "bot",
+  "version": "1.1.0",
+  "description": "进程内委派（旧）：7 种内置子代理类型、`agent` 工具与委派 prompt 段落。把活交给一条独立会话的用法改由 subagent 插件提供。",
+  "author": "Mica Code",
+  "main": "index.ts",
+  "assets": ["README.md"],
+  "required": false,
+  "priority": 0,
+  "requires": ["prompt", "settings", "subagents", "tools"],
+  "settings": [
+    {
+      "key": "delegationMode",
+      "label": "委派倾向",
+      "type": "select",
+      "description": "proactive：能拆就拆、优先并行；on-request：只有用户或项目约定要求时才开子代理。",
+      "default": "proactive",
+      "options": [
+        { "value": "proactive", "label": "主动委派" },
+        { "value": "on-request", "label": "仅按要求委派" }
+      ]
+    }
+  ],
+  "mica": {
+    "apiVersion": 1
+  }
+}

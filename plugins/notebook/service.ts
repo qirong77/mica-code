@@ -8,6 +8,7 @@ import {
 import {
   createNode,
   createNodeId,
+  inspectNotebookEditorState,
   moveNode,
   renameNode,
   restoreNode,
@@ -15,6 +16,7 @@ import {
   type NotebookDocument,
   type NotebookIndex,
   type NotebookNode,
+  type NotebookEditorSummary,
 } from './model';
 import { parseNotebookDocument } from './model';
 
@@ -56,6 +58,18 @@ export type NotebookDocumentView = {
   text: string;
   text_truncated: boolean;
   editor_state?: string;
+};
+
+export type NotebookAssetView = {
+  asset_id: string;
+  path: number[];
+  kind: 'inline' | 'remote';
+  mime_type?: string;
+  bytes?: number;
+  alt_text: string;
+  width?: number;
+  max_width?: number;
+  show_caption?: boolean;
 };
 
 export type NotebookSearchMatch = {
@@ -163,6 +177,70 @@ export class NotebookService {
     };
   }
 
+  async inspect(id: string): Promise<{
+    node: NotebookNodeView;
+    version: NotebookStorageVersion;
+    missing: boolean;
+    valid: boolean;
+    issues: ReturnType<typeof inspectNotebookEditorState>['issues'];
+    summary: NotebookEditorSummary;
+  }> {
+    const index = await this.controller.loadIndex();
+    const node = findNode(index, id);
+    if (node.kind !== 'note') throw new Error('文件夹没有正文，不能校验编辑器状态');
+    const snapshot = await this.controller.readDocument(node.id);
+    return { node: nodeView(index, node), version: snapshot.version, missing: snapshot.missing, ...inspectNotebookEditorState(snapshot.value.editorState) };
+  }
+
+  async assets(id: string): Promise<{
+    node: NotebookNodeView;
+    version: NotebookStorageVersion;
+    missing: boolean;
+    assets: NotebookAssetView[];
+    summary: NotebookEditorSummary;
+  }> {
+    const index = await this.controller.loadIndex();
+    const node = findNode(index, id);
+    if (node.kind !== 'note') throw new Error('文件夹没有正文：读取图片资源要指定一篇笔记');
+    const snapshot = await this.controller.readDocument(node.id);
+    const assets: NotebookAssetView[] = [];
+    if (snapshot.value.editorState !== null) {
+      try {
+        const state = JSON.parse(snapshot.value.editorState) as Record<string, unknown>;
+        collectAssets(state.root ?? state, [], assets);
+      } catch {
+        // The validation endpoint reports malformed JSON; the metadata endpoint remains a safe,
+        // read-only probe instead of turning damaged user content into an opaque 500.
+      }
+    }
+    return {
+      node: nodeView(index, node),
+      version: snapshot.version,
+      missing: snapshot.missing,
+      assets,
+      summary: inspectNotebookEditorState(snapshot.value.editorState).summary,
+    };
+  }
+
+  async cloneNote(
+    id: string,
+    title: string,
+    parentId: string | null,
+  ): Promise<{ node: NotebookNodeView; source: NotebookNodeView; version: NotebookStorageVersion; missing: boolean }> {
+    const sourceIndex = await this.controller.loadIndex();
+    const source = findNode(sourceIndex, id);
+    if (source.kind !== 'note') throw new Error('只能复制笔记，文件夹没有可复制的正文');
+    if (source.trashedAt) throw new Error('请先恢复笔记，再复制正文');
+    const snapshot = await this.controller.readDocument(source.id);
+    const newId = createNodeId();
+    const index = await this.controller.mutateIndex((latest) => createNode(latest, { id: newId, kind: 'note', title, parentId }));
+    if (snapshot.missing) {
+      return { node: nodeView(index, findNode(index, newId)), source: nodeView(index, source), version: null, missing: true };
+    }
+    const written = await this.updateDocument(newId, null, () => parseNotebookDocument(snapshot.value));
+    return { node: written.node, source: nodeView(index, source), version: written.version, missing: false };
+  }
+
   async create(kind: NotebookNode['kind'], title: string, parentId: string | null): Promise<NotebookNodeView> {
     const id = createNodeId();
     const now = new Date().toISOString();
@@ -224,6 +302,36 @@ export class NotebookService {
       text_truncated: text.length > MAX_TEXT_RESULT,
     };
   }
+}
+
+function collectAssets(value: unknown, path: number[], assets: NotebookAssetView[]): void {
+  if (Array.isArray(value)) {
+    value.forEach((item, index) => collectAssets(item, [...path, index], assets));
+    return;
+  }
+  if (!value || typeof value !== 'object') return;
+  const node = value as Record<string, unknown>;
+  if (node.type === 'image' && typeof node.src === 'string' && node.src) {
+    const src = node.src;
+    const inline = src.startsWith('data:');
+    const comma = src.indexOf(',');
+    const asset: NotebookAssetView = {
+      asset_id: `image:${path.join('.')}`,
+      path,
+      kind: inline ? 'inline' : 'remote',
+      alt_text: typeof node.altText === 'string' ? node.altText : '',
+      ...(typeof node.width === 'number' ? { width: node.width } : {}),
+      ...(typeof node.maxWidth === 'number' ? { max_width: node.maxWidth } : {}),
+      ...(typeof node.showCaption === 'boolean' ? { show_caption: node.showCaption } : {}),
+    };
+    if (inline) {
+      const mime = /^data:([^;,]+)/i.exec(src)?.[1];
+      if (mime) asset.mime_type = mime;
+      if (comma >= 0) asset.bytes = Math.floor((src.length - comma - 1) * 3 / 4);
+    }
+    assets.push(asset);
+  }
+  if (Array.isArray(node.children)) node.children.forEach((child, index) => collectAssets(child, [...path, index], assets));
 }
 
 function findNode(index: NotebookIndex, id: string): NotebookNode {

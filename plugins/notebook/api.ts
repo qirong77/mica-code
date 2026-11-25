@@ -18,7 +18,12 @@ import {
 } from './component-blocks';
 import { NotebookConflictError, NotebookStorageError, type NotebookStorageVersion } from './controller';
 import { markdownDocument, type MarkdownConversion, type MarkdownMode } from './markdown-document';
-import { NotebookOperationError, NotebookValidationError, type NotebookDocument } from './model';
+import {
+  inspectNotebookEditorState,
+  NotebookOperationError,
+  NotebookValidationError,
+  type NotebookDocument,
+} from './model';
 import {
   appendPlainText,
   createNotebookService,
@@ -218,6 +223,22 @@ const ENDPOINTS: readonly PluginApiEndpoint[] = [
   },
   {
     method: 'GET',
+    path: '/notes/:id/assets',
+    summary: '只读一篇笔记里的图片资源清单，不传输 Base64 正文；适合整理图片笔记前先了解图片数量、位置与大小。',
+    params: [{ name: 'id', in: 'path', type: 'string', required: true, description: '笔记节点 id（node_id）；文件夹没有图片资源。' }],
+    returns: '{ node, version, missing, assets:[{asset_id,path,kind,mime_type?,bytes?,alt_text,width?,max_width?}], summary }。asset_id 是当前正文 version 内稳定的图片路径引用，不是永久资源 id。',
+    example: 'curl -s "$MICA_DESKTOP_ORIGIN/plugin/notebook/api/notes/<note_id>/assets"',
+  },
+  {
+    method: 'GET',
+    path: '/notes/:id/validate',
+    summary: '只读检查正文 JSON 的根节点、children、图片节点等结构，写入前发现编辑器可能无法加载的问题；不执行组件或 HTML 源码。',
+    params: [{ name: 'id', in: 'path', type: 'string', required: true, description: '笔记节点 id（node_id）；文件夹没有正文。' }],
+    returns: '{ node, version, missing, valid, issues:[{path,code,message}], summary }。这是宿主侧结构检查，不替代编辑器运行时渲染。',
+    example: 'curl -s "$MICA_DESKTOP_ORIGIN/plugin/notebook/api/notes/<note_id>/validate"',
+  },
+  {
+    method: 'GET',
     path: '/search',
     summary: '在当前未删除节点里搜标题、路径与笔记正文纯文本，正文命中时给出上下文摘录。',
     params: [
@@ -290,6 +311,18 @@ const ENDPOINTS: readonly PluginApiEndpoint[] = [
     returns:
       '{ node }；给了 markdown 时另带 version、format、blocks、outline、warnings、statistics（转换摘要，不回传整篇正文）。',
     example: `curl -s -X POST "$MICA_DESKTOP_ORIGIN/plugin/notebook/api/notes" -H 'content-type: application/json' -d '{"title":"会议纪要","markdown":"## 结论\\n\\n- 先做 A"}'`,
+  },
+  {
+    method: 'POST',
+    path: '/notes/:id/clone',
+    summary: '复制一篇笔记并保留完整正文结构、图片、链接、表格和组件块；AI 整理笔记时优先复制再改写，避免手动拼装 Lexical JSON 丢素材。',
+    params: [
+      { name: 'id', in: 'path', type: 'string', required: true, description: '源笔记节点 id（node_id）；只能复制未删除的笔记。' },
+      { name: 'title', in: 'body', type: 'string', required: true, description: '新笔记标题，1–100 字符。' },
+      { name: 'parent_id', in: 'body', type: 'string | null', description: '新笔记父文件夹 id；省略或 null 表示放在根目录。' },
+    ],
+    returns: '{ node, source, version, missing }。复制按正文快照进行，图片不会被 Markdown 转换降级为链接。',
+    example: jsonCurl('POST', '/notes/<id>/clone', { title: '整理版', parent_id: null }),
   },
   {
     method: 'PATCH',
@@ -537,6 +570,7 @@ const TREE_GUIDE = [
   '- 需要每篇的 version 与字数时加 ?documents=true；它会读每篇正文，笔记多时更慢。',
   '- 只看一层：GET /notes?parent_id=<folder_id>；include_trash=true 改为看最近删除。',
   '- 读一个节点：GET /notes/:id。文件夹返回 children；笔记返回 text（最多 30000 字）与 version，?format=lexical 另给完整 Lexical JSON。',
+  '- 整理已有笔记：优先 POST /notes/:id/clone 复制完整正文，再在新笔记上用 Markdown 或局部操作改写；这样不会因为 Markdown 远程图片降级而丢图。',
   '',
   '新建与整理：',
   '- POST /folders {title, parent_id?}；POST /notes {title, parent_id?, markdown?}。给了 markdown 就立刻按 set_markdown 写入初稿。',
@@ -556,6 +590,7 @@ const CONTENT_GUIDE = [
   '读取：',
   '- GET /notes/:id → {node, version, missing, text, text_truncated}；text 最多 30000 字符。',
   '- 需要完整结构（图片、表格等）用 ?format=lexical，拿 editor_state；只看块源码用 GET /notes/:id/blocks。',
+  '- 图片笔记先 GET /notes/:id/assets 读取不含 Base64 的图片清单；写入前可 GET /notes/:id/validate 做宿主侧结构检查。',
   '',
   '写入：POST /notes/:id/content，必须带 expected_version：刚读到的 version；新文档传 null（字段必须出现）。',
   'mode：',
@@ -576,6 +611,7 @@ const CONTENT_GUIDE = [
   '- 单篇正文上限 6 MiB；超过会写入失败。',
   '',
   '写作建议：先短摘要，再 H2 分节与要点；表格只用于对比且单元格短；代码标注语言；不要用空段落或空格排版；不要编造事实。',
+  '图片笔记整理建议：先 clone 再改写；不要把带签名的远程图片 URL 当成永久资源，也不要把含大段 Base64 的 lexical 响应直接放进模型上下文。',
 ].join('\n');
 
 const BLOCKS_GUIDE = [
@@ -671,6 +707,7 @@ const MODULES: readonly DocModule[] = [
       ['GET', '/search'],
       ['POST', '/folders'],
       ['POST', '/notes'],
+      ['POST', '/notes/:id/clone'],
       ['PATCH', '/notes/:id'],
       ['DELETE', '/notes/:id'],
       ['POST', '/notes/:id/restore'],
@@ -684,6 +721,8 @@ const MODULES: readonly DocModule[] = [
     guide: CONTENT_GUIDE,
     endpoints: [
       ['GET', '/notes/:id'],
+      ['GET', '/notes/:id/assets'],
+      ['GET', '/notes/:id/validate'],
       ['POST', '/notes/:id/content'],
     ],
     next: ['tree', 'blocks'],
@@ -717,10 +756,20 @@ const CONVENTIONS = [
   '接口只在运行中的 Mica 应用里存在（桌面 / Web），地址形如 http://<mica-host>:<mica-port>/plugin/notebook/api。',
   '组件块没有 JSX、没有 import、读不到笔记数据与宿主 DOM，也不能请求 CDN 以外的接口；块高上限 1200px。',
   '嵌入外站网页会失败：目标站点的 X-Frame-Options / frame-ancestors 会拒绝；遇到这类页面写链接并说明需在浏览器打开。',
+  'POST /notes/:id/clone 会复制完整正文快照，因此是保留图片和复杂节点的首选；GET /notes/:id/assets 只回图片元数据，不回图片内容。',
 ];
 
 const RECIPES: readonly DocRecipe[] = [
   ...BLOCK_RECIPES,
+  {
+    task: '复制并整理一篇带图片的笔记',
+    steps: [
+      'POST /notes/<id>/clone {title,parent_id?}：复制正文快照，图片、链接、表格与组件块原样保留。',
+      'GET /notes/<new_id>/assets：按需查看图片数量、位置与大小，不把 Base64 灌进上下文。',
+      'GET /notes/<new_id> 拿 version，再用 replace_text、append_markdown 或 set_editor_state 做明确改写；写完可 GET /notes/<new_id>/validate。',
+    ],
+    curl: jsonCurl('POST', '/notes/<id>/clone', { title: '整理版', parent_id: null }),
+  },
   {
     task: '给已有笔记追加一段',
     steps: [
@@ -900,6 +949,12 @@ async function route(
   if (request.method === 'GET' && path.length === 2 && head === 'notes') {
     return { body: await readNode(service, id, request) };
   }
+  if (request.method === 'GET' && path.length === 3 && head === 'notes' && action === 'assets') {
+    return { body: await service.assets(id) };
+  }
+  if (request.method === 'GET' && path.length === 3 && head === 'notes' && action === 'validate') {
+    return { body: await service.inspect(id) };
+  }
   if (request.method === 'GET' && path.length === 3 && head === 'notes' && action === 'blocks') {
     return { body: await readBlocks(service, id) };
   }
@@ -915,6 +970,9 @@ async function route(
   }
   if (request.method === 'POST' && path.length === 1 && head === 'notes') {
     return { body: await createNote(service, request) };
+  }
+  if (request.method === 'POST' && path.length === 3 && head === 'notes' && action === 'clone') {
+    return { body: await cloneNote(service, id, request) };
   }
   if (request.method === 'PATCH' && path.length === 2 && head === 'notes') {
     return { body: await updateNode(service, id, request) };
@@ -1095,6 +1153,13 @@ async function createNote(service: NotebookService, request: PluginApiRequest): 
   return { node, version: written.version, ...markdownSummary(conversion) };
 }
 
+async function cloneNote(service: NotebookService, id: string, request: PluginApiRequest): Promise<Record<string, unknown>> {
+  const body = bodyRecord(request.body);
+  const title = requiredText(body, 'title', '笔记标题');
+  const parentId = parentIdField(body) ?? null;
+  return service.cloneNote(id, title, parentId);
+}
+
 function markdownSummary(conversion: MarkdownConversion): Record<string, unknown> {
   return {
     format: conversion.format,
@@ -1144,6 +1209,10 @@ async function writeContent(service: NotebookService, id: string, request: Plugi
   }
   if (mode === 'set_editor_state') {
     const editorState = literalText(body, 'editor_state', 'editor_state');
+    const inspection = inspectNotebookEditorState(editorState);
+    if (!inspection.valid) {
+      throw invalid(`editor_state 结构无效：${inspection.issues[0]?.path ?? 'root'} ${inspection.issues[0]?.message ?? ''}`.trim());
+    }
     return service.updateDocument(id, expectedVersion, () => ({ version: 1, editorState }));
   }
   if (mode === 'set_text' || mode === 'append_text' || mode === 'prepend_text') {
@@ -1298,6 +1367,10 @@ const SERVICE_REFUSALS: Record<string, string> = {
   '只有笔记节点有正文，不能编辑文件夹':
     '文件夹没有正文：写正文要指定一篇笔记，或先 POST /notes 新建一篇（GET /overview 里有节点树）',
   '请先恢复笔记，再编辑正文': '这篇笔记在最近删除里：先 POST /notes/:id/restore 恢复，再写正文',
+  '文件夹没有正文，不能校验编辑器状态': '文件夹没有正文：校验要指定一篇笔记',
+  '文件夹没有正文：读取图片资源要指定一篇笔记': '文件夹没有正文：读取图片资源要指定一篇笔记',
+  '只能复制笔记，文件夹没有可复制的正文': '只能复制笔记：文件夹没有可复制的正文',
+  '请先恢复笔记，再复制正文': '这篇笔记在最近删除里：先 POST /notes/:id/restore 恢复，再复制正文',
 };
 
 const OPERATION_MESSAGES: Record<string, string> = {

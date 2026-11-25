@@ -37,6 +37,16 @@
   gap: 4px;
 }
 
+.mica-link-editor__preview-row {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: 4px;
+  padding: 2px 2px 2px 6px;
+  border-radius: 5px;
+  background: var(--color-canvas, var(--color-bg-1));
+}
+
 .mica-link-editor__label {
   color: var(--color-fg-strong, var(--color-text-1));
   font-weight: 500;
@@ -44,8 +54,9 @@
 
 .mica-link-editor .mica-link-editor__address {
   display: block;
+  flex: 1;
   min-width: 0;
-  width: 100%;
+  width: auto;
   height: auto;
   min-height: 28px;
   padding: 4px 6px;
@@ -54,6 +65,41 @@
   text-align: left;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.mica-link-editor a.mica-link-editor__address {
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, currentColor 45%, transparent);
+  text-underline-offset: 2px;
+}
+
+.mica-link-editor a.mica-link-editor__address:hover {
+  color: var(--color-fg-strong, var(--color-text-1));
+  text-decoration-color: currentColor;
+}
+
+.mica-link-editor__icon-action.ui-button {
+  flex: none;
+  width: 28px;
+  min-width: 28px;
+  height: 28px;
+  padding: 0;
+}
+
+.mica-link-editor__icon {
+  display: block;
+  width: 15px;
+  height: 15px;
+  background: currentColor;
+  mask: center / contain no-repeat;
+}
+
+.mica-link-editor__icon.is-edit {
+  mask-image: url('../../images/icons/pencil-fill.svg');
+}
+
+.mica-link-editor__icon.is-remove {
+  mask-image: url('../../images/icons/trash.svg');
 }
 
 .mica-link-editor__actions {
@@ -68,7 +114,7 @@
 
 .mica-link-editor__preview .mica-link-editor__actions {
   gap: 4px;
-  padding-top: 6px;
+  padding-top: 4px;
 }
 
 .mica-link-editor .arco-btn {

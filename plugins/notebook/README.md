@@ -85,11 +85,13 @@ http://<mica-host>:<mica-port>/plugin/notebook/api
 
 模块页才是完整文档：
 
-- `tree`：`GET /overview`、`GET /notes`、`GET /notes/:id`、`GET /search`、`POST /folders`、`POST /notes`、`PATCH /notes/:id`、`DELETE /notes/:id`、`POST /notes/:id/restore`。
-- `content`：`GET /notes/:id`（`?format=text|lexical`）与 `POST /notes/:id/content`（八种 `mode`、版本冲突、Markdown 转换范围、写作建议）。
+- `tree`：`GET /overview`、`GET /notes`、`GET /notes/:id`、`GET /search`、`POST /folders`、`POST /notes`、`POST /notes/:id/clone`、`PATCH /notes/:id`、`DELETE /notes/:id`、`POST /notes/:id/restore`。
+- `content`：`GET /notes/:id`（`?format=text|lexical`）、`GET /notes/:id/assets`、`GET /notes/:id/validate` 与 `POST /notes/:id/content`（八种 `mode`、版本冲突、Markdown 转换范围、写作建议）。
 - `blocks`：组件块与 HTML 块的契约、能力边界、颜色 token、共享模板，以及 `GET/POST /notes/:id/blocks` 与 `PATCH /notes/:id/blocks/:block_id`。
 
 `GET /plugin/notebook/api/overview` 一次给出 `notebook`、`today`、`counts`（文件夹 / 笔记 / 最近删除）、`tree`、`trashed` 与 `docs`（`guide` 与三个模块的路径）；带 `?documents=true` 时每篇笔记附 `version` 与 `characters`。
+
+整理已有笔记时，优先调用 `POST /notes/:id/clone` 创建副本，再对副本做正文改写。复制按正文快照进行，会保留图片、链接、表格、组件块和 HTML 块，不经过 Markdown 转换，因此不会把远程图片降级成链接。`GET /notes/:id/assets` 只返回图片路径、类型、大小和说明等元数据，不把 Base64 图片灌进模型上下文；`GET /notes/:id/validate` 可在打开或继续改写前做宿主侧结构检查。
 
 成功回包是 `{ ok: true, data }`，失败是 `{ ok: false, code, error }`。正文写入必须带刚读到的精确 `expected_version`（新建的空文档为 `null`）；版本冲突返回 409 `version_conflict`，不会静默覆盖，调用方要重新读取后显式合并。`DELETE` 只是可恢复的最近删除，没有永久删除接口；损坏文档不会当作空文档覆盖。
 

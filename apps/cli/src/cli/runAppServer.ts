@@ -340,7 +340,7 @@ export async function runAppServer(options: AppServerOptions): Promise<void> {
     ]);
     if (pluginHost) {
       await cleanupTask('stop headless plugins', () => pluginHost!.emitRuntimeStop());
-      // 比默认的 2s 宽：插件收尾可能要等子进程退出（sidecar 一路降到 SIGKILL），
+      // 比默认的 2s 宽：插件收尾可能要等子进程退出（subagent 子进程一路降到 SIGKILL），
       // 2s 会在子进程还没死的时候切断，留下没人收的孤儿进程。正常情况几十毫秒就返回。
       await cleanupTask('dispose headless plugins', () => pluginHost!.dispose(), 6_000);
     }
@@ -485,7 +485,7 @@ export async function runAppServer(options: AppServerOptions): Promise<void> {
     if (options.role) {
       // 角色文件被删掉不该让宿主起不来：这是宿主，不是一次性命令。降级成
       // 默认角色 + 一条 warning，与 applyRoleOverride（turn/start 路径）和
-      // resume 的角色回退同一策略。不接住的话 `sidecar_spawn({role})` 写错
+      // resume 的角色回退同一策略。不接住的话 `subagent_open({ role })` 写错
       // 一个名字就得到「app-server 已退出（code 1）」，看不出是角色的问题。
       try {
         agent.setRole(options.role);

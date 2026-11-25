@@ -5,7 +5,7 @@ import { micaMcp } from '@packages/mica-mcp/index.js';
 import { parsePluginManifest } from '@packages/mica-plugin/PluginManifest.js';
 import { loadManifestSkills, readPublishedPluginSkills } from '@packages/mica-plugin/PluginSkills.js';
 import { micaSkills } from '@packages/mica-skills/index.js';
-import { micaTools } from '@packages/mica-tools/index.js';
+import { micaTools, readToolCatalogProjection } from '@packages/mica-tools/index.js';
 import type { ConfigWebCapabilityDefaults } from '../shared/types.js';
 import { getConfigRootPath } from './paths.js';
 import { getPluginsDetails } from './plugins.js';
@@ -16,6 +16,10 @@ import { getPluginsDetails } from './plugins.js';
  * 静态目录合并配置进程的 skills / 工具目录、插件技能索引与清单、MCP 配置文件；
  * 不 setup 插件，也不冒充会话的实际运行时。开关来自 config.json 的 `capabilityDefaults`，
  * 已有会话的开关在各自的 snapshot 里，这里不会改写它们。
+ *
+ * 插件自己 `ctx.tools.register()` 的工具（`subagent_*`、`ask_user` 这类）只在装配了插件的
+ * 宿主里存在，这个进程拿不到注册表，于是读常驻宿主写下的 `plugin-tools.json` 投影补目录行；
+ * 停用的插件在读的时候按 `plugins-state.json` 过滤（见 `readToolCatalogProjection`）。
  */
 export async function getCapabilityDefaultsDetails(): Promise<ConfigWebCapabilityDefaults> {
   const defaults = micaConfig.readCapabilityDefaults();
@@ -67,23 +71,42 @@ export async function getCapabilityDefaultsDetails(): Promise<ConfigWebCapabilit
   for (const skill of [...skills, ...pluginSkills]) {
     if (!byName.has(skill.name)) byName.set(skill.name, skill);
   }
+  const tools: ConfigWebCapabilityDefaults['tools'] = micaTools
+    .getCatalog()
+    .filter((tool) => tool.source !== 'mcp')
+    .map((tool) => ({
+      name: tool.name,
+      ...(tool.name === 'agent' ? { displayName: 'Subagent（委派）' } : {}),
+      description: tool.description,
+      readOnly: tool.readOnly,
+      parameters: tool.parameters,
+      group: tool.group,
+      pluginId: tool.group?.key.startsWith('plugin:') ? tool.group.key.slice('plugin:'.length) : undefined,
+      source: tool.source,
+      inputSchema: tool.inputSchema,
+    }));
+  // 宿主没装配的插件工具只能来自投影：注册表不在这个进程里，静态表也不为插件业务工具逐条维护。
+  const knownTools = new Set(tools.map((tool) => tool.name));
+  for (const entry of readToolCatalogProjection(getConfigRootPath())) {
+    if (knownTools.has(entry.name)) continue;
+    const pluginId = entry.pluginId;
+    if (!pluginId) continue;
+    const plugin = pluginById.get(pluginId);
+    if (!plugin || plugin.state === 'disabled') continue;
+    knownTools.add(entry.name);
+    tools.push({
+      name: entry.name,
+      description: entry.description,
+      readOnly: entry.readOnly,
+      parameters: entry.parameters,
+      group: entry.group ?? { key: `plugin:${pluginId}`, label: plugin.name },
+      pluginId,
+      source: 'builtin',
+    });
+  }
   return {
     skills: [...byName.values()].sort((a, b) => a.name.localeCompare(b.name)),
-    tools: micaTools
-      .getCatalog()
-      .filter((tool) => tool.source !== 'mcp')
-      .map((tool) => ({
-        name: tool.name,
-        ...(tool.name === 'agent' ? { displayName: 'Subagent（委派）' } : {}),
-        description: tool.description,
-        readOnly: tool.readOnly,
-        parameters: tool.parameters,
-        group: tool.group,
-        pluginId: tool.group?.key.startsWith('plugin:') ? tool.group.key.slice('plugin:'.length) : undefined,
-        source: tool.source,
-        inputSchema: tool.inputSchema,
-      }))
-      .sort((a, b) => a.name.localeCompare(b.name)),
+    tools: tools.sort((a, b) => a.name.localeCompare(b.name)),
     mcpServers: Object.keys(mcpConfig).sort((a, b) => a.localeCompare(b)),
     plugins: plugins.map(({ id, name, description, state, source, loadStatus, error }) => ({
       id,

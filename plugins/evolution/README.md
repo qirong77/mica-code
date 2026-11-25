@@ -51,6 +51,7 @@ mica 选后者，这个插件就是「洗」的地方。
 | `notebook-mcp` | 将旧 `notebook_read` / `notebook_write` 工具停用项迁为 `mica-plugin-notebook` MCP 停用项；移除已撤下的 `notebook` skill 选择，其它能力与会话内容不动。 |
 | `notebook-http-api` | Notebook 改为独立 HTTP API 后，移除上一步迁移留下的 `mica-plugin-notebook` MCP 停用项；保留其它 MCP 停用项。 |
 | `session-turn-state` | 给缺失或非法的会话顶层 `turnState` 补为 `completed`；当前桌面读取只把剩余异常当作损坏数据处理，不再把缺失字段当作旧版本能力。 |
+| `subagent-plugin-rename` | `sidecar` 插件改名成 `subagent`、旧的进程内委派插件 `subagent` 改成 `subagent-legacy`（映射表 `pluginRenames.ts`）：用量记录的 `pluginId` 与能力选择里的 `sidecar_*` 工具名 / `sidecar` skill 名跟着改；工具面同时从 11 个收到 6 个，于是旧名按表落进新工具（`sidecar_turns` / `grep` / `transcript` → `subagent_read`，`spawn` / `attach` → `subagent_open`，`abort` / `close` → `subagent_stop`）并去重，已撤下的 `session-control` 从停用名单里去掉。随会话文件变化反复重跑，因此只认能证明旧身份的写法（委派记录带 `origin: 'delegation'` 或 `initiatedByCallId`）。 |
 
 `pi-messages-v1` 只读文档本身：内联图片保留数据与 MIME，远程图片 URL / 文件引用保留为 `[Image](引用)` 文本（pi 图片块只支持内联数据）。Responses reasoning 的完整原项保存到 `thinkingSignature`，正文项的 id / phase 保存到 `textSignature`，函数调用与结果共享 pi 的 `call_id|item_id`。缺失的时间取会话创建时间，缺失的用量填零；现有用量记录的 token 数映射到消息内的 pi usage，不改原账本。无法识别的消息会使该文件转换失败，保留原文，不会把半份历史标成 pi。运行时不再支持旧 wire 历史，必须先经此迁移。
 
@@ -76,6 +77,9 @@ mica 选后者，这个插件就是「洗」的地方。
 | `connections-peer-store` | 将 Connections 旧纯地址数组或缺 `version` 的 `{ peers }` 迁为 version 1 清单；原文归档到 `legacy-connections/` 后原子替换，运行时不再回写旧形态。 |
 | `schedule-plans-stages` | 将 Schedule 旧 `plans/stages` 数据严格迁为扁平 `tasks`；原文归档到 `legacy-schedule/` 后原子替换，损坏或无法安全转换时不改原文件，运行时不再读取旧形态。 |
 | `prompt-contributions` | 历史回查控制从 `plugin:builtin.command-memory/guidance` 迁到 `plugin:memory/history`，保留正文、开关与顺序，已有新控制优先；撤下 Todo / 会话自治 / Video / Web Search 的静态段落前将原控制文件归档到 `legacy-prompt-controls/`。归档 Schedule 随包 skill 索引到 `legacy-schedule-skill/`，不改排期数据、用户 skill 或能力停用选择（同名用户 skill 可能仍存在）。旧入口不再支持。 |
+| `subagent-rename` | 插件改名后把 `$MICA_HOME` 下按 id 命名的数据搬到新名字上：`plugin-settings/<id>.json`（旧 `subagent.json` 先让位给 `subagent-legacy.json`，`sidecar.json` 才落到 `subagent.json`，目标已存在时源文件原样归档）、`plugins-state.json` 启停名单、`prompt-controls.json` 的段键 / `disabledPlugins` / 顺序、`config.json` 的 `capabilityDefaults`、随包 skill 目录 `sidecar/`→`subagent/`，以及 `plugin-skills/sidecar.json`（原样归档后删除，宿主会按新 id 重新发布）。 |
+
+`subagent-rename` 是**唯一一条一次性数据迁移**：改名两头撞在同一个名字上（`sidecar`→`subagent`，旧 `subagent`→`subagent-legacy`），搬完再跑一遍就会把新插件的 `subagent` 当成旧名字继续改成 `subagent-legacy`。所以成功后写 `plugin-data/evolution/subagent-rename.json` 标记，存在即跳过；中途抢不到文件锁的步骤不写标记，下次宿主启动继续（每一步都以「旧的还在」为前提，重复执行没有副作用）。|
 
 | `floatingwindow-favorites`         | 给已有 Floating Window 数据补上 `favoriteUrls` 收藏集合和 `favicons` 图标集合。                                                                                                                 |
 | `floatingwindow-icon-origins`      | 把 Floating Window 的 `favicons` 从按保存的地址存键改为按站点 origin 存键（同一站点的多个地址只留第一个图标）；最近访问 / 收藏里的地址本身不动，已是 origin 键时为 0 改动。                        |

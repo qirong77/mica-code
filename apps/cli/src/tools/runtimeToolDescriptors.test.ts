@@ -4,8 +4,8 @@ import { RUNTIME_TOOL_DESCRIPTORS } from '@packages/mica-tools/runtimeToolDescri
 import { TodoWriteTool } from '@plugins/todo/TodoTool.js';
 import { SessionNotesTool } from '../../../../plugins/session-notes/NotesTool.js';
 import { ToolSessionPeers } from '@packages/mica-builtin-commands/plugins/session-autonomy/SessionAutonomyTools.js';
-import { AgentTool } from '@plugins/subagent/AgentTool.js';
-import { BUILTIN_SUBAGENTS } from '@plugins/subagent/definitions.js';
+import { AgentTool } from '@plugins/subagent-legacy/AgentTool.js';
+import { BUILTIN_SUBAGENTS } from '@plugins/subagent-legacy/definitions.js';
 
 /**
  * 运行期工具在配置页 / 桌面设置页的目录里靠 `RUNTIME_TOOL_DESCRIPTORS` 兜底（那些进程不加载插件）。

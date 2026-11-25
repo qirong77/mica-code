@@ -15,6 +15,7 @@ import { promptContributions } from './prompt-contributions.js';
 import { sessionTagSlots } from './session-tags.js';
 import { schedulePlansStages } from './schedule.js';
 import { sshAuditV2 } from './ssh-audit.js';
+import { subagentRename } from './subagent-rename.js';
 import { subagentTaskFiles } from './subagent-tasks.js';
 import type { DataMigration } from './types.js';
 
@@ -42,4 +43,5 @@ export const DATA_MIGRATIONS: DataMigration[] = [
   notebookMcpData,
   schedulePlansStages,
   promptContributions,
+  subagentRename,
 ];

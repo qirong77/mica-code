@@ -37,12 +37,24 @@
   background-image: url(../../images/icons/plus.svg);
 }
 
+.draggable-block-menu .icon-delete {
+  display: inline-block;
+  border: none;
+  cursor: pointer;
+  background-color: transparent;
+  background-image: url(../../images/icons/trash.svg);
+}
+
 .draggable-block-menu:active {
   cursor: grabbing;
 }
 
 .draggable-block-menu .icon:hover {
   background-color: #efefef;
+}
+
+.draggable-block-menu .icon-delete:hover {
+  background-color: color-mix(in srgb, var(--color-danger, #f53f3f) 12%, transparent);
 }
 
 .draggable-block-target-line {

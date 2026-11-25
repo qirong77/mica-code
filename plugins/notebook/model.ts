@@ -25,6 +25,20 @@ export interface NotebookDocument {
   editorState: string | null;
 }
 
+export type NotebookEditorIssue = {
+  path: string;
+  code: 'invalid_json' | 'invalid_root' | 'invalid_node' | 'unsupported_type' | 'invalid_children' | 'invalid_image';
+  message: string;
+};
+
+export type NotebookEditorSummary = {
+  nodes: number;
+  images: number;
+  inline_images: number;
+  remote_images: number;
+  image_bytes: number;
+};
+
 export class NotebookValidationError extends Error {
   constructor(message: string) {
     super(message);
@@ -190,6 +204,101 @@ export function parseNotebookDocument(value: unknown): NotebookDocument {
   };
   // A detached snapshot prevents later editor changes from changing an in-flight save.
   return JSON.parse(checkSize(result, NOTEBOOK_DOCUMENT_MAX_BYTES, 'Notebook document')) as NotebookDocument;
+}
+
+/**
+ * Validate the JSON shape that the isolated Lexical editor receives without importing Lexical into
+ * the host process. This is deliberately structural: custom nodes remain allowed, while malformed
+ * roots, containers and image nodes are reported before an API client attempts to open the note.
+ */
+export function inspectNotebookEditorState(editorState: string | null): {
+  valid: boolean;
+  issues: NotebookEditorIssue[];
+  summary: NotebookEditorSummary;
+} {
+  const summary: NotebookEditorSummary = {
+    nodes: 0,
+    images: 0,
+    inline_images: 0,
+    remote_images: 0,
+    image_bytes: 0,
+  };
+  if (editorState === null) return { valid: true, issues: [], summary };
+
+  let state: unknown;
+  try {
+    state = JSON.parse(editorState);
+  } catch {
+    return {
+      valid: false,
+      issues: [{ path: 'editor_state', code: 'invalid_json', message: 'editor_state 不是合法 JSON' }],
+      summary,
+    };
+  }
+
+  const issues: NotebookEditorIssue[] = [];
+  if (!state || typeof state !== 'object' || Array.isArray(state)) {
+    issues.push({ path: 'root', code: 'invalid_root', message: 'Lexical 文档根节点必须是对象' });
+  } else {
+    const root = (state as Record<string, unknown>).root;
+    if (!root || typeof root !== 'object' || Array.isArray(root)) {
+      issues.push({ path: 'root', code: 'invalid_root', message: 'Lexical 文档缺少 root 对象' });
+    } else {
+      inspectEditorNode(root, 'root', issues, summary, true);
+    }
+  }
+  return { valid: issues.length === 0, issues, summary };
+}
+
+const EDITOR_NODE_TYPES = new Set([
+  'root', 'paragraph', 'heading', 'list', 'listitem', 'quote', 'code', 'table', 'tablerow', 'tablecell',
+  'text', 'linebreak', 'link', 'autolink', 'image', 'html', 'component', 'horizontalrule', 'hashtag', 'code-highlight',
+  'mark', 'overflow', 'poll', 'sticky', 'mention', 'emoji', 'equation', 'keyword', 'youtube', 'figma',
+  'tweet', 'page-break', 'layout-container', 'layout-item', 'specialText', 'slot-container', 'review',
+  'pullquote', 'card', 'collapsible-container', 'collapsible-content', 'collapsible-title', 'ruby',
+]);
+
+function inspectEditorNode(
+  value: unknown,
+  path: string,
+  issues: NotebookEditorIssue[],
+  summary: NotebookEditorSummary,
+  root = false,
+): void {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    issues.push({ path, code: 'invalid_node', message: '节点必须是对象' });
+    return;
+  }
+  const node = value as Record<string, unknown>;
+  summary.nodes += 1;
+  if (!root && (typeof node.type !== 'string' || !node.type) && typeof node.text !== 'string') {
+    issues.push({ path, code: 'invalid_node', message: '节点缺少 type' });
+  }
+  if (root && node.type !== undefined && node.type !== 'root') {
+    issues.push({ path, code: 'invalid_root', message: 'Lexical 根节点的 type 必须是 root' });
+  }
+  if (typeof node.type === 'string' && !EDITOR_NODE_TYPES.has(node.type)) {
+    issues.push({ path: `${path}.type`, code: 'unsupported_type', message: `编辑器未注册节点类型：${node.type}` });
+  }
+  if (node.type === 'image') {
+    summary.images += 1;
+    if (typeof node.src !== 'string' || !node.src) {
+      issues.push({ path: `${path}.src`, code: 'invalid_image', message: '图片节点缺少 src' });
+    } else if (node.src.startsWith('data:')) {
+      summary.inline_images += 1;
+      const comma = node.src.indexOf(',');
+      summary.image_bytes += comma < 0 ? 0 : Math.floor((node.src.length - comma - 1) * 3 / 4);
+    } else {
+      summary.remote_images += 1;
+    }
+  }
+  if (Object.hasOwn(node, 'children')) {
+    if (!Array.isArray(node.children)) {
+      issues.push({ path: `${path}.children`, code: 'invalid_children', message: '节点 children 必须是数组' });
+      return;
+    }
+    node.children.forEach((child, index) => inspectEditorNode(child, `${path}.children[${index}]`, issues, summary));
+  }
 }
 
 function findNode(index: NotebookIndex, id: string): NotebookNode {

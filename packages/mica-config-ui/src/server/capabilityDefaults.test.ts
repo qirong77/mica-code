@@ -6,7 +6,7 @@ import type { PromptControls } from '@packages/mica-common/promptControls.js';
 import { micaConfig } from '@packages/mica-config/index.js';
 import { micaMcp } from '@packages/mica-mcp/index.js';
 import { micaSkills } from '@packages/mica-skills/index.js';
-import { micaTools } from '@packages/mica-tools/index.js';
+import { micaTools, writeToolCatalogProjection } from '@packages/mica-tools/index.js';
 import type { Skill } from '@packages/mica-skills/types.js';
 import { runConfigWebAction } from './actions.js';
 import { getCapabilityDefaultsDetails } from './capabilityDefaults.js';
@@ -200,6 +200,39 @@ describe('default capability catalog', () => {
         inputSchema,
       },
     ]);
+  });
+
+  it('lists plugin tools from the projection written by a host that assembled plugins', async () => {
+    writeToolCatalogProjection(
+      [
+        {
+          name: 'subagent_open',
+          description: '开一个子会话',
+          readOnly: false,
+          parameters: [{ name: 'prompt', type: 'string', required: false, description: '任务' }],
+          group: { key: 'plugin:subagent', label: 'Subagent' },
+          pluginId: 'subagent',
+        },
+      ],
+      testHome,
+    );
+
+    const details = await getCapabilityDefaultsDetails();
+    expect(details.tools).toEqual([
+      {
+        name: 'subagent_open',
+        description: '开一个子会话',
+        readOnly: false,
+        parameters: [{ name: 'prompt', type: 'string', required: false, description: '任务' }],
+        group: { key: 'plugin:subagent', label: 'Subagent' },
+        pluginId: 'subagent',
+        source: 'builtin',
+      },
+    ]);
+
+    // 停用插件后投影里的条目立即消失，不必等某个宿主再写一次。
+    writeFileSync(join(testHome, 'plugins-state.json'), JSON.stringify({ disabled: ['subagent'] }));
+    expect((await getCapabilityDefaultsDetails()).tools).toEqual([]);
   });
 });
 

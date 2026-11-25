@@ -24,8 +24,9 @@ export function isDevToolsShortcut(input, platform = process.platform) {
 /**
  * 开关某个 webContents 的开发者工具。
  *
- * 开在独立窗口里（`mode: 'detach'`）：主窗口装的就是整套界面，嵌进去会挤压布局，排查时
- * 看到的已经不是用户那一屏了。再按一次关掉。
+ * 停靠在当前窗口里（`mode: 'right'`）：不再弹独立窗口。必须显式给一个停靠位置——
+ * 省略 `mode` 会用上次的停靠状态，上次是 `undocked` / `detach` 时又变成一个独立窗口。
+ * 再按一次关掉。
  */
 export function toggleDevTools(contents) {
   if (!contents || contents.isDestroyed()) return
@@ -33,7 +34,7 @@ export function toggleDevTools(contents) {
     contents.closeDevTools()
     return
   }
-  contents.openDevTools({ mode: 'detach', activate: true })
+  contents.openDevTools({ mode: 'right' })
 }
 
 const attached = new WeakSet()

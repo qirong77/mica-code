@@ -22,9 +22,9 @@ import sessionRenameSetup from '../../plugins/session-rename/index.js';
 import sessionNotesSetup from '../../plugins/session-notes/index.js';
 import sessionCopySetup from '../../plugins/session-copy/index.js';
 import sessionTagsSetup from '../../plugins/session-tags/index.js';
-import sidecarSetup from '../../plugins/sidecar/index.js';
 import sshSetup from '../../plugins/ssh/index.js';
 import subagentSetup from '../../plugins/subagent/index.js';
+import subagentLegacySetup from '../../plugins/subagent-legacy/index.js';
 import todoSetup from '../../plugins/todo/index.js';
 import videoSetup from '../../plugins/video/index.js';
 import webSearchSetup from '../../plugins/web-search/index.js';
@@ -52,9 +52,9 @@ const officialSetups: Record<string, MicaPlugin['setup']> = {
   'session-copy': sessionCopySetup,
   'session-rename': sessionRenameSetup,
   'session-tags': sessionTagsSetup,
-  sidecar: sidecarSetup,
   ssh: sshSetup,
   subagent: subagentSetup,
+  'subagent-legacy': subagentLegacySetup,
   'computer-use': computerUseSetup,
   connections: connectionsSetup,
   'deepseek-harness': deepseekHarnessSetup,

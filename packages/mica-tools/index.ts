@@ -13,6 +13,8 @@ import {
   getToolIcon,
   getToolIcons,
   publishToolIcons,
+  getToolCatalogProjection,
+  publishToolCatalog,
   executeTool,
   getToolDisplayText,
   isToolReadOnly,
@@ -49,6 +51,10 @@ export const micaTools = {
   getIcons: getToolIcons,
   /** 把图标写成 `$MICA_HOME/tool-icons.json` 投影（桌面渲染层读它）。 */
   publishIcons: publishToolIcons,
+  /** 当前注册表里插件工具的目录投影（只有装配过插件的宿主有内容）。 */
+  getCatalogProjection: getToolCatalogProjection,
+  /** 把插件工具目录写成 `$MICA_HOME/plugin-tools.json` 投影（配置页 / 设置页读它）。 */
+  publishCatalog: publishToolCatalog,
   /** 按工具名执行工具，并返回序列化后的执行结果。 */
   execute: executeTool,
   /** 获取工具调用在 UI 日志中的展示文本。 */
@@ -68,6 +74,14 @@ export const micaTools = {
 
 export { MicaTool } from './MicaTool.js';
 export { TOOL_ICON_CATALOG_FILE, readToolIconCatalog, toolIconCatalogPath } from './toolIconCatalog.js';
+export {
+  TOOL_CATALOG_PROJECTION_FILE,
+  readToolCatalogProjection,
+  writeToolCatalogProjection,
+  toolCatalogProjectionPath,
+  type ToolCatalogProjection,
+  type ToolCatalogProjectionEntry,
+} from './toolCatalogProjection.js';
 export type { ToolIconCatalog } from './toolIconCatalog.js';
 export { createPluginTool } from './PluginTool.js';
 export type { PluginToolDescriptor } from './PluginTool.js';

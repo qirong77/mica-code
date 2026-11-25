@@ -75,10 +75,10 @@ function press(contents, input) {
 }
 
 describe('toggleDevTools', () => {
-  test('开在独立窗口，再按一次关掉', () => {
+  test('停靠在当前窗口右侧，再按一次关掉', () => {
     const contents = fakeContents()
     toggleDevTools(contents)
-    expect(contents.opened).toEqual([{ mode: 'detach', activate: true }])
+    expect(contents.opened).toEqual([{ mode: 'right' }])
     toggleDevTools(contents)
     expect(contents.closed).toBe(1)
   })

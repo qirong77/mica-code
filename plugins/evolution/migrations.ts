@@ -1,5 +1,6 @@
 import { isFindingAssessment } from '../harness-review/assessments.js';
 import { migratePiMessages } from './piMessages.js';
+import { renameSkillNameList, renameToolNameList } from './pluginRenames.js';
 
 /**
  * 旧数据迁移：把 mica 某个历史形态的持久化数据就地改成当前形态。
@@ -155,9 +156,10 @@ export const dropRawUsage: Migration = {
  *
  * 这里按当时的实现事实补上提供者，而不是让界面去猜：
  *
- * - 委派的子代理类型由 `subagent` 插件注册。名单只列它当时内置的那几个（见
- *   `plugins/subagent/definitions.ts`）——用户插件自己注册的类型不在名单里，保持原样，
- *   误标比不标更难查；
+ * - 委派的子代理类型由 `subagent` 插件注册（该插件后来改名成 `subagent-legacy`，见
+ *   `subagent-plugin-rename`）。名单只列它当时内置的那几个（现在的
+ *   `plugins/subagent-legacy/definitions.ts`）——用户插件自己注册的类型不在名单里，
+ *   保持原样，误标比不标更难查；
  * - `btw` 的旁问线程、`commit` 的提交说明、`memory-curator` 的记忆整理都是各自插件的
  *   功能，只是更早的宿主没把插件 id 写进记录；
  * - `compact`（`/compact` 与 `mica compact`）是内核自带的命令，没有插件可归属，不动。
@@ -352,6 +354,54 @@ export const notebookHttpApi: Migration = {
   },
 };
 
+/**
+ * `sidecar` 插件改名成 `subagent`，旧的进程内委派插件 `subagent` 改名成 `subagent-legacy`
+ * （映射表在 `pluginRenames.ts`）。会话快照里受影响的有两处：
+ *
+ * - **用量归属**：Stats 的 By source 按 `pluginId` 把请求挂到插件名下。旧的委派记录写着
+ *   `subagent`，不改的话会显示成改名后的那个插件（它做的是另一件事）。
+ * - **能力选择**：用户停用过 `sidecar_*` 工具或 `sidecar` skill 的话，名字改了之后那份
+ *   选择会失效——工具会被悄悄打开。改名的同时把选择搬到新名字上。
+ *
+ * 这条迁移会随会话文件变化反复重跑（`run.ts` 按文件签名记进度），所以两处都必须是
+ * **幂等**的：只认「旧的、能证明身份」的写法。
+ */
+export const subagentPluginRename: Migration = {
+  id: 'subagent-plugin-rename',
+  description:
+    '把 sidecar 插件改名为 subagent（旧的进程内委派插件改为 subagent-legacy）：用量归属与能力选择一起改',
+  apply(document) {
+    const snapshot = document.snapshot;
+    if (!isRecord(snapshot)) return 0;
+    let changed = 0;
+    if (Array.isArray(snapshot.subagentUsageHistory)) {
+      for (const record of snapshot.subagentUsageHistory) {
+        if (!isRecord(record) || typeof record.pluginId !== 'string') continue;
+        if (record.pluginId === 'sidecar') {
+          record.pluginId = 'subagent';
+          changed += 1;
+          continue;
+        }
+        // 只有能证明「这条是父对话经工具委派出去的」才动：改名后的插件也可能写
+        // `pluginId: 'subagent'` 的插件记录，把它们改成 legacy 是错的。
+        const delegated =
+          record.origin === 'delegation' ||
+          (typeof record.initiatedByCallId === 'string' && record.initiatedByCallId.trim() !== '');
+        if (record.pluginId === 'subagent' && delegated) {
+          record.pluginId = 'subagent-legacy';
+          changed += 1;
+        }
+      }
+    }
+    const selection = snapshot.capabilitySelection;
+    if (isRecord(selection)) {
+      if (Array.isArray(selection.disabledTools)) changed += renameToolNameList(selection.disabledTools);
+      if (Array.isArray(selection.disabledSkills)) changed += renameSkillNameList(selection.disabledSkills);
+    }
+    return changed;
+  },
+};
+
 /** 会话顶层 turnState 是必填字段；缺失或非法的旧数据按已完成收敛。 */
 export const sessionTurnState: Migration = {
   id: 'session-turn-state',
@@ -375,4 +425,5 @@ export const MIGRATIONS: Migration[] = [
   notebookMcp,
   notebookHttpApi,
   sessionTurnState,
+  subagentPluginRename,
 ];

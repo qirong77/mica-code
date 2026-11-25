@@ -13,14 +13,17 @@ import {DraggableBlockPlugin_EXPERIMENTAL} from '@lexical/react/LexicalDraggable
 import {
   $createParagraphNode,
   $createTextNode,
+  $getRoot,
   $getNearestNodeFromDOMNode,
   $getNodeByKey,
+  $isElementNode,
   $isParagraphNode,
   $isTextNode,
   getComposedEventTarget,
   type NodeKey,
   registerEventListener,
 } from 'lexical';
+import {$isHeadingNode} from '@lexical/rich-text';
 import {
   type JSX,
   useCallback,
@@ -52,8 +55,10 @@ function isOnMenu(element: HTMLElement): boolean {
 
 export default function DraggableBlockPlugin({
   anchorElem = document.body,
+  protectFirstBlock = false,
 }: {
   anchorElem?: HTMLElement;
+  protectFirstBlock?: boolean;
 }): JSX.Element {
   const [editor] = useLexicalComposerContext();
   const [modal, showModal] = useModal();
@@ -233,6 +238,33 @@ export default function DraggableBlockPlugin({
     setIsPickerOpen(true);
   }
 
+  const deleteBlock = useCallback(() => {
+    if (!draggableElement) return;
+    setIsPickerOpen(false);
+    setPickerState(null);
+    editor.update(() => {
+      const resolved = $getNearestNodeFromDOMNode(draggableElement);
+      const block = resolved?.getTopLevelElement();
+      const root = $getRoot();
+      if (!block || block.getParent() !== root) return;
+      // The notebook title is a fixed first block and must be renamed/cleared,
+      // never removed from the document by the floating block menu.
+      if (protectFirstBlock && $isHeadingNode(block) && block.getTag() === 'h1' && root.getFirstChild()?.is(block)) return;
+
+      const next = block.getNextSibling();
+      const previous = block.getPreviousSibling();
+      block.remove();
+      const focus = next?.isAttached() ? next : previous?.isAttached() ? previous : null;
+      if ($isElementNode(focus)) {
+        focus.selectStart();
+      } else if (root.getChildrenSize() === 0) {
+        const paragraph = $createParagraphNode();
+        root.append(paragraph);
+        paragraph.selectStart();
+      }
+    });
+  }, [draggableElement, editor, protectFirstBlock]);
+
   return (
     <>
       {modal}
@@ -285,6 +317,14 @@ export default function DraggableBlockPlugin({
               onClick={openComponentPicker}
             />
             <div className="icon" />
+            <button
+              type="button"
+              title="删除当前块"
+              aria-label="删除当前块"
+              className="icon icon-delete"
+              onPointerDown={event => event.stopPropagation()}
+              onClick={deleteBlock}
+            />
           </div>
         }
         targetLineComponent={

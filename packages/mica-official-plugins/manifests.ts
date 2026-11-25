@@ -21,9 +21,9 @@ import sessionRenameManifest from '../../plugins/session-rename/plugin.json';
 import sessionNotesManifest from '../../plugins/session-notes/plugin.json';
 import sessionCopyManifest from '../../plugins/session-copy/plugin.json';
 import sessionTagsManifest from '../../plugins/session-tags/plugin.json';
-import sidecarManifest from '../../plugins/sidecar/plugin.json';
 import sshManifest from '../../plugins/ssh/plugin.json';
 import subagentManifest from '../../plugins/subagent/plugin.json';
+import subagentLegacyManifest from '../../plugins/subagent-legacy/plugin.json';
 import todoManifest from '../../plugins/todo/plugin.json';
 import videoManifest from '../../plugins/video/plugin.json';
 import webSearchManifest from '../../plugins/web-search/plugin.json';
@@ -51,9 +51,9 @@ export const officialPluginManifests: PluginManifest[] = [
   readManifest(sessionCopyManifest),
   readManifest(sessionRenameManifest),
   readManifest(sessionTagsManifest),
-  readManifest(sidecarManifest),
   readManifest(sshManifest),
   readManifest(subagentManifest),
+  readManifest(subagentLegacyManifest),
   readManifest(computerUseManifest),
   readManifest(connectionsManifest),
   readManifest(deepseekHarnessManifest),

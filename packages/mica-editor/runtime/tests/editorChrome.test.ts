@@ -7,16 +7,23 @@ const markdownStyles = readSource('src/markdown/markdown.css');
 const linkSource = readSource('src/playground/plugins/FloatingLinkEditorPlugin/index.tsx');
 const linkStyles = readSource('src/playground/plugins/FloatingLinkEditorPlugin/index.css');
 const notebookStyles = readSource('src/workspace/notebook.css');
+const notebookWorkbenchStyles = readSource('src/workspace/notebook-workbench.css');
+const blockSource = readSource('src/playground/plugins/DraggableBlockPlugin/index.tsx');
+const blockStyles = readSource('src/playground/plugins/DraggableBlockPlugin/index.css');
 
 describe('editor chrome style contracts', () => {
-  it('keeps link previews in two rows with shared neutral and danger actions', () => {
+  it('keeps link previews compact with Yuque-style edit and remove actions', () => {
     expect(linkSource).toContain("mica-config-ui/web/components/Ui");
     expect(linkSource).toContain('className="mica-link-editor__preview"');
-    expect(linkSource).toContain('variant="ghost" size="compact" onClick={() => beginEditing(target)}');
-    expect(linkSource).toContain('variant="danger-ghost" size="compact" onClick={remove}');
+    expect(linkSource).toContain('className="mica-link-editor__preview-row"');
+    expect(linkSource).toContain('className="mica-link-editor__icon is-edit"');
+    expect(linkSource).toContain('className="mica-link-editor__icon is-remove"');
+    expect(linkSource).toContain('aria-label="编辑链接"');
+    expect(linkSource).toContain('aria-label="移除链接"');
     expect(linkSource).toContain('variant="accent" onClick={submit}');
     expect(linkStyles).toContain('flex-direction: column;');
     expect(linkStyles).toContain('text-overflow: ellipsis;');
+    expect(linkStyles).toContain('.mica-link-editor__preview-row');
     expect(linkStyles).toContain('.link-editor.mica-link-editor[hidden]');
   });
 
@@ -36,5 +43,17 @@ describe('editor chrome style contracts', () => {
     expect(markdownStyles).toContain('height: 28px; min-width: 28px;');
     expect(notebookStyles).toContain('.ruby-editor :is(.button, .ruby-input):focus-visible');
     expect(notebookStyles).toContain('.image-settings-popover .Input__wrapper { display: flex; flex-direction: column; gap: 6px; }');
+  });
+
+  it('adds a non-dragging delete action to the block handle and keeps the notebook title protected', () => {
+    expect(blockSource).toContain('className="icon icon-delete"');
+    expect(blockSource).toContain('onPointerDown={event => event.stopPropagation()}');
+    expect(blockSource).toContain('protectFirstBlock && $isHeadingNode(block)');
+    expect(blockStyles).toContain('.draggable-block-menu .icon-delete:hover');
+  });
+
+  it('does not reserve the table toolbar as an empty document row', () => {
+    expect(notebookWorkbenchStyles).toContain('margin: 8px 0 24px;');
+    expect(notebookWorkbenchStyles).toContain('must not reserve an empty row');
   });
 });

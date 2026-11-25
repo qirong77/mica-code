@@ -13,7 +13,7 @@ import { readTopLevelParentId } from './session-file-head'
  * 会话树的父子关系：会话文件顶层的 `parentSessionId` 是唯一事实来源。
  *
  * 侧栏里把一个会话拖到另一个会话上写的就是这个字段——它只决定会话树怎么排，
- * 和「谁派生了谁」（sidecar 子会话、fork 分支）共用同一份数据，语义上不再区分。
+ * 和「谁派生了谁」（subagent 派出的子会话、fork 分支）共用同一份数据，语义上不再区分。
  *
  * 活着的宿主每次保存都从盘上读回这个字段（`SessionController` 的 `parentFieldFor`），
  * 不会用内存里的旧值把它顶回去。空闲时独占 turn lease 写，

@@ -91,7 +91,23 @@ body :is(input, textarea)::placeholder { color: var(--color-fg-faint); }
 .notebook-editor .PlaygroundEditorTheme__quote { color: var(--color-fg-faint); background: var(--color-overlay); border-left-color: var(--color-accent); font-size: 15px; }
 .notebook-editor .PlaygroundEditorTheme__textBold { color: inherit; }
 .notebook-editor .PlaygroundEditorTheme__textCode { color: var(--color-fg-strong); background: var(--color-panel-hi); }
-.notebook-editor .PlaygroundEditorTheme__link { color: var(--color-accent); }
+.notebook-editor .PlaygroundEditorTheme__link {
+  color: var(--color-accent);
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, currentColor 45%, transparent);
+  text-underline-offset: 2px;
+  transition: color var(--motion-fast, 90ms) ease, text-decoration-color var(--motion-fast, 90ms) ease;
+}
+.notebook-editor .PlaygroundEditorTheme__link:hover {
+  color: var(--color-fg-strong);
+  text-decoration-color: currentColor;
+}
+.notebook-editor .PlaygroundEditorTheme__link:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
 .notebook-editor .PlaygroundEditorTheme__listItem::marker { color: var(--listitem-marker-color, var(--color-fg-faint)); }
 .notebook-editor .PlaygroundEditorTheme__listItemUnchecked::before { border-color: var(--color-line-strong); }
 .notebook-editor .PlaygroundEditorTheme__listItemChecked::before { background: var(--color-accent); border-color: var(--color-accent); }

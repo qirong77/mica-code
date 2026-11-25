@@ -2,7 +2,7 @@
   "id": "notebook",
   "name": "Notebook",
   "icon": "book-spine",
-  "version": "1.6.0",
+  "version": "1.7.0",
   "description": "本地富文本笔记本：支持表格、图片、代码、公式和可交互的组件块。AI 可通过 HTTP 接口选模板、写笔记、单独修改一个块。",
   "author": "Mica Code",
   "main": "index.ts",

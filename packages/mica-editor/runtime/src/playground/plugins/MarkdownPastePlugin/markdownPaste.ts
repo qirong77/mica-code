@@ -1,5 +1,5 @@
 import {$createCodeNode, $isCodeNode} from '@lexical/code'
-import {$createAutoLinkNode, autoLinkUrlMatcher} from '@lexical/link'
+import {$createAutoLinkNode, autoLinkEmailMatcher, autoLinkUrlMatcher} from '@lexical/link'
 import {$generateNodesFromMarkdownString, type Transformer} from '@lexical/markdown'
 import {$isTableSelection} from '@lexical/table'
 import {
@@ -57,7 +57,10 @@ function carriesOnlyText(root: Element): boolean {
   })
 }
 
-type ClipboardSource = {kind: 'markdown'; text: string} | {kind: 'code'; text: string; language: string | null}
+type ClipboardSource =
+  | {kind: 'markdown'; text: string}
+  | {kind: 'code'; text: string; language: string | null}
+  | {kind: 'links'; text: string}
 
 // Parse HTML once. Only unwrap isolated code or neutral text wrappers; ordinary
 // web/office formatting keeps its normal import path.
@@ -72,7 +75,7 @@ function readClipboardSource(data: DataTransfer): ClipboardSource | null {
     if (typeof DOMParser === 'undefined') return null
     const body = new DOMParser().parseFromString(html, 'text/html').body
     const meaningful = [...body.childNodes].filter(n => n.nodeType !== 8 && (n.nodeType !== 3 || n.textContent?.trim()))
-    const single = meaningful.length === 1 && meaningful[0] instanceof Element ? meaningful[0] : null
+    const single = meaningful.length === 1 && meaningful[0]?.nodeType === 1 ? meaningful[0] as Element : null
     let code = single
     while (code && ['DIV', 'SPAN'].includes(code.tagName) && code.children.length === 1 && code.textContent === code.firstElementChild?.textContent) {
       code = code.firstElementChild as Element
@@ -86,7 +89,8 @@ function readClipboardSource(data: DataTransfer): ClipboardSource | null {
   }
   if (isMarkdownText(text)) return {kind: 'markdown', text}
   const language = detectPastedCodeLanguage(text)
-  return isolatedCode || language ? {kind: 'code', text, language} : null
+  if (isolatedCode || language) return {kind: 'code', text, language}
+  return !text.includes('\n') && hasAutoLink(text) ? {kind: 'links', text} : null
 }
 
 export function getMarkdownClipboardText(data: DataTransfer): string | null {
@@ -130,33 +134,40 @@ export function plainPasteText(markdown: string): string {
   return splitPlainParagraphs(markdown).map(lines => lines.join('\n')).join('\n')
 }
 
-function $createPlainParagraphs(markdown: string): ParagraphNode[] {
+function $createPlainParagraphs(markdown: string, linkUrls = false): ParagraphNode[] {
   return splitPlainParagraphs(markdown).map(lines => {
     const paragraph = $createParagraphNode()
     lines.forEach((line, index) => {
       if (index > 0) paragraph.append($createLineBreakNode())
-      if (line) paragraph.append($createTextNode(line))
+      if (!line) return
+      if (!linkUrls) {
+        paragraph.append($createTextNode(line))
+        return
+      }
+
+      let offset = 0
+      while (offset < line.length) {
+        const rest = line.slice(offset)
+        const urlMatch = autoLinkUrlMatcher(rest)
+        const emailMatch = autoLinkEmailMatcher(rest)
+        const match = [urlMatch, emailMatch]
+          .filter((candidate): candidate is NonNullable<typeof candidate> => candidate !== null)
+          .sort((left, right) => left.index - right.index)[0]
+        if (!match) {
+          paragraph.append($createTextNode(rest))
+          break
+        }
+        if (match.index > 0) paragraph.append($createTextNode(rest.slice(0, match.index)))
+        paragraph.append($createAutoLinkNode(match.url).append($createTextNode(match.text)))
+        offset += match.index + match.length
+      }
     })
     return paragraph
   })
 }
 
-function getBareUrlClipboardText(data: DataTransfer): {text: string; url: string} | null {
-  if (data.files?.length || Array.from(data.types).some(t => /lexical|rtf/i.test(t))) return null
-  if (data.getData('text/markdown') || data.getData('text/x-markdown')) return null
-
-  const text = data.getData('text/plain')
-  if (!text) return null
-  const html = data.getData('text/html')
-  if (html) {
-    if (typeof DOMParser === 'undefined') return null
-    const body = new DOMParser().parseFromString(html, 'text/html').body
-    if (!carriesOnlyText(body) || body.textContent !== text) return null
-  }
-
-  const match = autoLinkUrlMatcher(text)
-  if (!match || match.index !== 0 || match.length !== text.length || match.text !== text) return null
-  return {text, url: match.url}
+function hasAutoLink(text: string): boolean {
+  return autoLinkUrlMatcher(text) !== null || autoLinkEmailMatcher(text) !== null
 }
 
 type FlatText = {text: string; starts: Array<{index: number; key: NodeKey; size: number}>}
@@ -340,18 +351,17 @@ export function registerMarkdownPaste(editor: LexicalEditor, transformers: Trans
         node = node.getParent()!
       }
     }
-    const bareUrl = getBareUrlClipboardText(event.clipboardData)
-    if (bareUrl) {
-      $addUpdateTag(HISTORY_PUSH_TAG)
-      selection.insertNodes([$createAutoLinkNode(bareUrl.url).append($createTextNode(bareUrl.text))])
-      event.preventDefault()
-      return true
-    }
     const source = readClipboardSource(event.clipboardData)
     if (!source) return false
     if (source.kind === 'code') {
       $addUpdateTag(HISTORY_PUSH_TAG)
       selection.insertNodes([$createCodeNode(source.language || undefined).append($createTextNode(source.text))])
+      event.preventDefault()
+      return true
+    }
+    if (source.kind === 'links') {
+      $addUpdateTag(HISTORY_PUSH_TAG)
+      selection.insertNodes($createPlainParagraphs(source.text, true))
       event.preventDefault()
       return true
     }

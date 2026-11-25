@@ -73,6 +73,18 @@ describe('Markdown paste', () => {
       expect($isAutoLinkNode(link) && link.getURL()).toBe('https://www.example.com/docs');
     });
   });
+  it('auto-links URLs pasted alongside ordinary text', () => {
+    const {editor, handled} = paste('参考文档：https://example.com/docs，欢迎查看');
+    expect(handled).toBe(true);
+    editor.getEditorState().read(() => {
+      const target = $getRoot().getLastChild()!;
+      const children = $isElementNode(target) ? target.getChildren() : [];
+      expect(children.map(child => child.getType())).toEqual(['text', 'autolink', 'text']);
+      expect(children.map(child => child.getTextContent()).join('')).toBe('参考文档：https://example.com/docs，欢迎查看');
+      const link = children[1];
+      expect($isAutoLinkNode(link) && link.getURL()).toBe('https://example.com/docs');
+    });
+  });
   it('does not intercept URLs in a code block', () => expect(paste('https://example.com', true).handled).toBe(false));
   it('does not treat Markdown links as bare URLs', () => {
     const {editor, handled} = paste('[文档](https://example.com)');

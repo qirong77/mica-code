@@ -507,7 +507,12 @@ export function createHeadlessPluginHost(options: HeadlessPluginHostOptions): He
   //
   // 只由常驻宿主写：`mica exec` 是回合一结束就退的一次性运行，它写出来的那份会少掉
   // 「那里没装配的插件」（桌面专属的 `ask` 之类），反而让桌面工具行退化成默认图标。
-  if (!options.oneShot) micaTools.publishIcons(paths.config);
+  if (!options.oneShot) {
+    micaTools.publishIcons(paths.config);
+    // 目录投影：配置页 / 桌面设置页不加载插件，靠 `$MICA_HOME/plugin-tools.json` 列出
+    // 插件自己注册的工具（`subagent_*` 这类没法在静态表里逐条维护）。
+    micaTools.publishCatalog(paths.config);
+  }
   const setupPromise = plugins.setupAll(baseContext);
 
   const host: HeadlessPluginHost = {

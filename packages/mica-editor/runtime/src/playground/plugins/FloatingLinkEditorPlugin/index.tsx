@@ -383,13 +383,6 @@ function FloatingLinkEditor({
     );
   };
 
-  const openLink = () => {
-    if (!target) return;
-    const address = browserTarget(target.url, urlStrategy);
-    if (!address) return;
-    getRootOwnerDocument(target.editor.getRootElement()).defaultView?.open(address, '_blank', 'noopener,noreferrer');
-  };
-
   return createPortal(
     <div
       ref={(element) => {
@@ -468,27 +461,42 @@ function FloatingLinkEditor({
           </div>
         ) : (
           <div className="mica-link-editor__preview">
-            <Button
-              variant="ghost"
-              size="compact"
-              className="mica-link-editor__address"
-              aria-label={`编辑链接地址：${target.url}`}
-              title={target.url}
-              onClick={() => beginEditing(target)}>
-              {target.url || '编辑链接地址'}
-            </Button>
-            <div className="mica-link-editor__actions">
-              <Button variant="ghost" size="compact" onClick={() => beginEditing(target)}>
-                编辑链接
-              </Button>
-              {browserTarget(target.url, urlStrategy) && (
-                <Button variant="ghost" size="compact" aria-label="在新窗口打开链接" onClick={openLink}>
-                  打开链接
-                </Button>
+            <div className="mica-link-editor__preview-row">
+              {browserTarget(target.url, urlStrategy) ? (
+                <a
+                  className="mica-link-editor__address"
+                  href={browserTarget(target.url, urlStrategy) ?? undefined}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  title={target.url}
+                  onClick={event => {
+                    event.stopPropagation();
+                  }}>
+                  {target.url || '编辑链接地址'}
+                </a>
+              ) : (
+                <span className="mica-link-editor__address" title={target.url}>
+                  {target.url || '编辑链接地址'}
+                </span>
               )}
-              <Button variant="danger-ghost" size="compact" onClick={remove}>
-                移除链接
-              </Button>
+              <Button
+                variant="ghost"
+                size="compact"
+                className="mica-link-editor__icon-action"
+                icon={<i className="mica-link-editor__icon is-edit" aria-hidden="true" />}
+                aria-label="编辑链接"
+                title="编辑链接"
+                onClick={() => beginEditing(target)}
+              />
+              <Button
+                variant="danger-ghost"
+                size="compact"
+                className="mica-link-editor__icon-action"
+                icon={<i className="mica-link-editor__icon is-remove" aria-hidden="true" />}
+                aria-label="移除链接"
+                title="移除链接"
+                onClick={remove}
+              />
             </div>
             {error && (
               <p className="mica-link-editor__error" role="alert">
