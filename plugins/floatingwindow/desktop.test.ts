@@ -2,7 +2,7 @@ import * as React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { ArcoProvider } from '@mica-config-ui/web';
-import { Launcher, Welcome, faviconSources, iconToRemember, resolveIcon, seedAfterPush, siteFavicon } from './desktop.jsx';
+import { Launcher, Welcome, faviconSources, iconToRemember, resolveIcon, seedAfterPush, siteFavicon, suggestItems } from './desktop.jsx';
 import manifest from './plugin.json';
 
 beforeEach(() => vi.stubGlobal('React', React));
@@ -103,6 +103,20 @@ it('keeps the icon an address announced when a later state carries none', () => 
   // 没见过的地址、没有记录时都只能是空，不能凭空造图标。
   expect(iconToRemember('', 'https://other.example/', seen)).toBe('');
   expect(iconToRemember(undefined as any, 'https://qirong77.com/zencode/?problem=playground', null as any)).toBe('');
+});
+
+it('lists recent addresses in the address bar, filtered by what is typed', () => {
+  const recent = ['https://a.example/deep/page', 'http://b.example:3000/x', 'not a url', ''];
+  // 没在编辑：输入框里是当前页地址，拿它筛等于只剩一条，所以列出全部最近访问。
+  expect(suggestItems(recent, '')).toEqual([
+    { url: 'https://a.example/deep/page' },
+    { url: 'http://b.example:3000/x' },
+  ]);
+  expect(suggestItems(recent, 'B.EXAMPLE')).toEqual([{ url: 'http://b.example:3000/x' }]);
+  expect(suggestItems(recent, 'nope')).toEqual([]);
+  // 下拉只做快速回到刚才那一页，条数有上限。
+  expect(suggestItems(recent, '', 1)).toEqual([{ url: 'https://a.example/deep/page' }]);
+  expect(suggestItems(null as any, '')).toEqual([]);
 });
 
 it('renders a starred toolbar action for the current site', () => {

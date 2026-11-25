@@ -1087,7 +1087,11 @@ app.whenReady().then(async () => {
       socketPath: resolveBrowserSocketPath(app.getPath('userData')),
       cacheDir: join(app.getPath('userData'), 'browser-cookies'),
       isQuitting: () => quitting,
-      theme: currentThemeId
+      theme: currentThemeId,
+      // 顶栏与最近访问浮层的页面由运行时托管（dev 下是 Vite）；运行时比窗口晚起来时
+      // manager 会按空地址重试，所以这里给的是取值函数
+      pageBaseUrl: () => devPageUrl || runtime?.url || '',
+      devPages: () => Boolean(devPageUrl)
     })
     console.log(`[mica-browser] 受控浏览器服务: unix:${browserHost.socketPath}`)
     watchThemeChanges(() => browserHost?.manager.refreshTheme())

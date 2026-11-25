@@ -92,6 +92,9 @@ export default defineConfig({
       alias: {
         '@renderer': resolve('src/renderer/src'),
         '@packages': resolve('../../packages'),
+        // 受控浏览器顶栏只要设置页的那几个 Arco 控件，不要整个配置页（barrel 会把 App 与
+        // 六千行 settings 样式一起拖进来）。这条别名指向同一个 ArcoSettings 模块，控件不变。
+        '@mica-config-ui/arco': resolve('../../packages/mica-config-ui/web/components/ArcoSettings.tsx'),
         // 插件自己的桌面入口（`plugins/<id>/desktop.jsx`）：页面按 id 去插件目录找模块，
         // 宿主因此不需要登记任何具体插件。指向仓库根，glob 才能收录这些文件。
         '@plugins': resolve('../../plugins'),
@@ -119,7 +122,9 @@ export default defineConfig({
       rollupOptions: {
         input: {
           index: resolve('src/renderer/index.html'),
-          terminal: resolve('src/renderer/terminal.html')
+          terminal: resolve('src/renderer/terminal.html'),
+          // 受控浏览器顶栏 / 最近访问浮层：主进程窗口加载的独立入口（运行时托管）
+          browserChrome: resolve('src/renderer/browser-chrome.html')
         }
       },
       // electron-vite 的 renderer 默认 build.minify = false（它只对 main/preload

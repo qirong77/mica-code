@@ -40,6 +40,40 @@
   color: var(--color-fg-muted);
 }
 .floatingwindow-address-favorite:hover, .floatingwindow-address-favorite:focus-visible { color: var(--color-accent); }
+/* 地址栏的最近访问下拉：贴在输入框下沿，自己滚动，不把工具栏撑高。 */
+.floatingwindow-suggest {
+  position: absolute;
+  z-index: 3;
+  top: 100%;
+  right: 0;
+  left: 0;
+  max-height: 216px;
+  margin-top: 4px;
+  padding: 4px;
+  overflow-y: auto;
+  border: 1px solid var(--color-line);
+  border-radius: 6px;
+  background: var(--color-panel, var(--panel));
+  box-shadow: 0 8px 24px rgb(0 0 0 / 24%);
+}
+.floatingwindow-suggest-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  height: 30px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--color-fg);
+  font: inherit;
+  text-align: left;
+  cursor: default;
+}
+.floatingwindow-suggest-item:hover, .floatingwindow-suggest-item.active { background: var(--color-active); }
+.floatingwindow-suggest-item > span { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.floatingwindow-suggest-item > svg { flex: none; opacity: 0.5; }
 .floatingwindow-notice {
   position: absolute;
   z-index: 2;

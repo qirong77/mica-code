@@ -10,6 +10,8 @@
  *   可收藏的地址，页面内容仍是同一份渲染层产物（按路径决定画哪个插件页）
  * - `/terminal-control` —— 终端控制窗口的页面（独立入口 `terminal.html`，窗口由 Electron
  *   主进程创建，页面通过同源 `/remote/terminal/*` 读写真实终端）
+ * - `/browser-chrome` —— 受控浏览器顶栏与最近访问浮层的页面（独立入口 `browser-chrome.html`，
+ *   窗口由主进程创建，状态与动作走页面日志桥，见 `browser-chrome.ts`）
  * - `/remote/control/*` —— 受控浏览器（主进程的窗口服务挂在 Unix socket 上，由运行时转发，
  *   见 apps/desktop/src/host/browser-control-proxy.js）
  * - `/mcp/browser`、`/mcp/terminal` —— 两个受控能力给 agent 的 MCP 端点（单 tool，见
@@ -32,6 +34,12 @@ export const PLUGIN_PAGES_BASE_PATH = '/plugins/pages';
 
 /** 终端控制窗口的页面路径：主进程窗口加载运行时上的这个地址。 */
 export const TERMINAL_PAGE_PATH = '/terminal-control';
+
+/**
+ * 受控浏览器顶栏的页面路径。顶栏（以及它的最近访问浮层，带 `?view=recent`）由主进程的
+ * 窗口加载运行时上的这个地址；`agent/desktop.md` 里说明了为什么它不是 data: URL。
+ */
+export const BROWSER_CHROME_PAGE_PATH = '/browser-chrome';
 
 /**
  * 终端服务的代理前缀：主进程的终端服务挂在 Unix socket 上，运行时在 `/remote/terminal`
@@ -72,6 +80,11 @@ export function isSharePath(pathname: unknown): boolean {
 /** 是不是终端控制窗口的页面。 */
 export function isTerminalPagePath(pathname: unknown): boolean {
   return normalizePathname(pathname) === TERMINAL_PAGE_PATH;
+}
+
+/** 是不是受控浏览器顶栏的页面。 */
+export function isBrowserChromePagePath(pathname: unknown): boolean {
+  return normalizePathname(pathname) === BROWSER_CHROME_PAGE_PATH;
 }
 
 /**

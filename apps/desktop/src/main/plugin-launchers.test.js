@@ -252,9 +252,23 @@ describe('manifest desktop launchers', () => {
     view.backAvailable = view.forwardAvailable = true
     await f.control('web.back'); await f.control('web.forward'); await f.control('web.reload')
     expect([view.wentBack, view.wentForward, view.reloaded]).toEqual([true, true, true])
+    // 地址栏下拉这类页面浮层要盖在网页区域上：`web.cover` 只把原生视图摘下来，
+    // 页面本身不换（`home` 仍是 false），回来时同一个视图挂回去，不重新加载。
+    await f.control('web.cover', { path: { cover: true } })
+    expect(win.view).toBeNull()
+    await f.control('web.cover', { path: { cover: true } })
+    expect(win.view).toBeNull()
+    expect(await f.control('web.state')).toMatchObject({ url: 'https://example.org/', home: false })
+    await f.control('web.cover', { path: { cover: false } })
+    expect(win.view).toBe(view)
+    expect(view.url).toBe('https://example.org/')
     await f.control('web.home')
     expect(win.view).toBeNull()
     expect(await f.control('web.state')).toMatchObject({ url: '', home: true })
+    // 欢迎页本来就没有视图：这时候「挂回来」不能凭空把它挂上去。
+    await f.control('web.cover', { path: { cover: true } })
+    await f.control('web.cover', { path: { cover: false } })
+    expect(win.view).toBeNull()
     f.bindings.get('Alt+Space')()
     expect(win.visible).toBe(false)
     await f.control('show')

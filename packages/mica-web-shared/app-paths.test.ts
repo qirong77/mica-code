@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
   APP_BASE_PATH,
+  BROWSER_CHROME_PAGE_PATH,
   SHARE_BASE_PATH,
   TERMINAL_PAGE_PATH,
   isAppPath,
+  isBrowserChromePagePath,
   isPluginPagePath,
   isPluginPageRoute,
   isSharePath,
@@ -76,6 +78,21 @@ describe('isTerminalPagePath', () => {
     expect(isTerminalPagePath('/mica-web')).toBe(false);
     expect(isTerminalPagePath('/terminal-controls')).toBe(false);
     expect(isTerminalPagePath('/assets/terminal.js')).toBe(false);
+  });
+});
+
+describe('isBrowserChromePagePath', () => {
+  it('matches the browser chrome page', () => {
+    expect(isBrowserChromePagePath('/browser-chrome')).toBe(true);
+    expect(isBrowserChromePagePath('/browser-chrome/')).toBe(true);
+    expect(isBrowserChromePagePath(BROWSER_CHROME_PAGE_PATH)).toBe(true);
+  });
+
+  it('does not match the app, its own asset or a lookalike path', () => {
+    expect(isBrowserChromePagePath('/')).toBe(false);
+    expect(isBrowserChromePagePath('/browser-chrome.html')).toBe(false);
+    expect(isBrowserChromePagePath('/browser-chromes')).toBe(false);
+    expect(isBrowserChromePagePath('/assets/browser-chrome.js')).toBe(false);
   });
 });
 

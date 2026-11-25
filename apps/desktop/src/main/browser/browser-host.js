@@ -34,7 +34,10 @@ export async function startBrowserHost({
   socketPath,
   cacheDir = '',
   isQuitting = () => false,
-  theme = () => 'dark'
+  theme = () => 'dark',
+  // 顶栏 / 最近访问浮层的页面地址来源（运行时地址；dev 下是 Vite）
+  pageBaseUrl = () => '',
+  devPages = () => false
 } = {}) {
   if (!socketPath) throw new Error('startBrowserHost 需要 socketPath')
   let manager = null
@@ -45,7 +48,9 @@ export async function startBrowserHost({
     onChange: () => service.broadcast(),
     onCookieChange: (change) => service.broadcastCookieChange(change),
     isQuitting,
-    theme
+    theme,
+    pageBaseUrl,
+    devPages
   })
 
   await mkdir(dirname(socketPath), { recursive: true }).catch(() => {})

@@ -1,6 +1,12 @@
 import { randomUUID } from 'node:crypto'
 import { BrowserWindow, WebContentsView, clipboard, session } from 'electron'
 import {
+  chromeUpdateScript,
+  isRecentUrl,
+  parseChromeMessage,
+  themeCanvasColor
+} from '@packages/mica-web-shared'
+import {
   BROWSER_PARTITION,
   BrowserRequestError,
   CHROME_HEIGHT,
@@ -25,7 +31,9 @@ import {
   truncateOutput,
   visibilityEventName
 } from './browser-core.js'
-import { chromeDataUrl, chromePalette, parseChromeMessage } from './browser-chrome.js'
+import { chromePageUrl } from './browser-chrome.js'
+import { createRecentWindow } from './browser-recents-window.js'
+import { pushRecent } from './browser-recents.js'
 import {
   BROWSER_IDLE_REAP_MS,
   WINDOW_IDLE_SWEEP_MS,
@@ -62,6 +70,9 @@ const MAX_CONSOLE_ENTRIES = 500
 const MAX_NETWORK_ENTRIES = 400
 const MAX_NETWORK_BODY = 4000
 const SCREENSHOT_TIMEOUT_MS = 20000
+/** 顶栏页面加载：运行时可能比窗口晚起来（首次启动），没拿到地址就等一会儿再试 */
+const CHROME_LOAD_RETRY_MS = 500
+const CHROME_LOAD_RETRIES = 30
 /** `allCookies` 一次最多回多少条：分区里可能有上万条，整份 JSON 会把调用方和 IPC 一起拖住。 */
 const MAX_COOKIE_LIST = 20000
 const DEFAULT_COOKIE_LIST = 2000
@@ -73,6 +84,10 @@ export function createBrowserManager({
   // 当前应用主题 id（ui-state 的 theme 解析后的结果）。外壳每次进来重新读一遍，顶栏
   // 配色和窗口底色都跟着它走，换主题后不需要重启窗口。
   theme = () => 'dark',
+  // 顶栏页面的地址来源：运行时地址（dev 下是 Vite）。运行时比浏览器窗口晚起来时要重试，
+  // 所以是函数而不是字符串，每次加载时再取一次。
+  pageBaseUrl = () => '',
+  devPages = () => false,
   // 隐藏多久之后真正销毁窗口（标签页随之重建）；0 关掉这条回收
   idleReapMs = resolveMs(process.env.MICA_BROWSER_IDLE_REAP_MS, BROWSER_IDLE_REAP_MS),
   idleSweepMs = WINDOW_IDLE_SWEEP_MS
@@ -85,6 +100,11 @@ export function createBrowserManager({
 
   const partition = () => session.fromPartition(BROWSER_PARTITION)
   const cookieStore = partition().cookies
+  // 顶栏 / 浮层页面地址的来源。两个选项都允许直接给值（测试里常见），也允许给函数
+  // （运行时地址要等运行时就绪才知道，每次取最新的）
+  const pageBase = () =>
+    String(typeof pageBaseUrl === 'function' ? pageBaseUrl() : pageBaseUrl || '')
+  const devPage = () => Boolean(typeof devPages === 'function' ? devPages() : devPages)
   const cookieChanged = (_event, cookie, cause, removed) => {
     if (!cookie?.name || !cookie?.domain || cause === 'overwrite') return
     try {
@@ -99,7 +119,7 @@ export function createBrowserManager({
   }
   cookieStore.on('changed', cookieChanged)
 
-  /** 顶栏调色板 + 主题 id：外壳读盘失败时按默认深色处理，不影响窗口本身 */
+  /** 主题 id + 窗口底色：外壳读盘失败时按默认深色处理，不影响窗口本身 */
   function chromeTheme() {
     let id = 'dark'
     try {
@@ -107,7 +127,34 @@ export function createBrowserManager({
     } catch {
       id = 'dark'
     }
-    return { id, palette: chromePalette(id) }
+    // 顶栏自己的颜色在页面 CSS 里（app.css 的 token 拷贝）；主进程只需要窗口底色：
+    // 页面加载中、网页透明处露出来的是这一层。
+    return { id, canvas: themeCanvasColor(id) }
+  }
+
+  /* --------------------------------------------------------------- 最近访问 */
+
+  // 按会话（owner）存：同一个会话的多个窗口共用一份；窗口被回收了地址簿也还在（到应用退出）。
+  // 不落盘——这些窗口本来就是临时现场，地址簿没有跨重启的价值。
+  const recents = new Map()
+
+  function recentKeyOf(record) {
+    return record.owner ? `owner:${record.owner}` : `browser:${record.id}`
+  }
+
+  function recentsFor(record) {
+    return recents.get(recentKeyOf(record)) || []
+  }
+
+  /** 记一次访问。窗口每次状态刷新都会走到这里，没变化就别换数组引用。 */
+  function rememberVisit(record, tab) {
+    const url = String(tab?.url || '').trim()
+    if (!isRecentUrl(url)) return
+    const key = recentKeyOf(record)
+    const list = recents.get(key) || []
+    const title = String(tab?.title || '').trim()
+    if (list[0]?.url === url && list[0]?.title === title) return
+    recents.set(key, pushRecent(list, { url, title }))
   }
 
   function nextId(prefix) {
@@ -223,7 +270,7 @@ export function createBrowserManager({
     if (record.themeId !== chrome.id) {
       record.themeId = chrome.id
       try {
-        record.win.setBackgroundColor(chrome.palette.canvas)
+        record.win.setBackgroundColor(chrome.canvas)
       } catch {
         // 窗口正在销毁：下一次创建会用新的底色
       }
@@ -237,15 +284,10 @@ export function createBrowserManager({
       loading: Boolean(current?.loading),
       canGoBack: canGo(current, 'canGoBack'),
       canGoForward: canGo(current, 'canGoForward'),
-      palette: chrome.palette,
-      tabs: record.tabs.map((tab) => ({
-        id: tab.id,
-        title: tab.title || tab.url || '新标签页',
-        active: tab.id === record.activeTabId
-      }))
+      recents: recentsFor(record)
     }
     record.chrome
-      .executeJavaScript(`window.__micaChrome.update(${JSON.stringify(state)})`)
+      .executeJavaScript(chromeUpdateScript('bar', state))
       .catch(() => {
         // chrome 还在加载或窗口已销毁：下一次状态变化会再推一遍
       })
@@ -284,6 +326,60 @@ export function createBrowserManager({
     })
   }
 
+  /**
+   * 加载顶栏页面（运行时托管；dev 下是 Vite 的 `/browser-chrome.html`）。
+   * 运行时可能比窗口晚起来，拿到地址之前先等着；加载失败也重试，页面自己的状态推送
+   * 会随着 did-finish-load 补上。
+   */
+  function loadChrome(record, attempt = 0) {
+    if (record.win.isDestroyed() || record.destroyRequested) return
+    const url = chromePageUrl(pageBase(), { dev: devPage() })
+    if (!url) {
+      if (attempt < CHROME_LOAD_RETRIES) {
+        setTimeout(() => loadChrome(record, attempt + 1), CHROME_LOAD_RETRY_MS)
+      } else {
+        console.error('[mica-browser] 顶栏页面地址还没就绪（运行时的地址为空）')
+      }
+      return
+    }
+    record.win.loadURL(url).catch((error) => {
+      if (record.win.isDestroyed()) return
+      console.warn('[mica-browser] 顶栏页面加载失败', error?.code || error)
+      if (attempt < CHROME_LOAD_RETRIES) {
+        setTimeout(() => loadChrome(record, attempt + 1), CHROME_LOAD_RETRY_MS * 2)
+      }
+    })
+  }
+
+  /** 最近访问浮层：懒创建，一个浏览器窗口一个，跟着窗口一起销毁。 */
+  function recentWindowFor(record) {
+    if (record.recentWindow) return record.recentWindow
+    record.recentWindow = createRecentWindow({
+      getPageBaseUrl: pageBase,
+      isDevPage: devPage,
+      onHover: (index) => {
+        // 浮层里划过的一行同步回地址框：回车与点选的是同一条
+        record.chrome.executeJavaScript(`window.__micaChrome.highlight(${index})`).catch(() => {})
+      },
+      onPick: (url) => {
+        const current = activeTab(record)
+        if (!current) return
+        // 顶栏还停在筛选词上：先让它退出编辑态，导航后的状态推送才能把新地址写回去
+        record.chrome.executeJavaScript('window.__micaChrome.picked()').catch(() => {})
+        void navigate(current.id, { url }).catch((error) => {
+          console.warn('[mica-browser] 最近访问打开失败:', error?.message || error)
+          pushChrome(record)
+        })
+      }
+    })
+    return record.recentWindow
+  }
+
+  /** 关掉浮层（窗口移动、换标签页、开始导航、隐藏窗口时都要走一遍） */
+  function hideRecentWindow(record) {
+    record?.recentWindow?.hide()
+  }
+
   function createBrowser({
     owner = null,
     url = '',
@@ -307,7 +403,7 @@ export function createBrowserManager({
       show: false,
       autoHideMenuBar: true,
       title: '受控浏览器',
-      backgroundColor: chrome.palette.canvas,
+      backgroundColor: chrome.canvas,
       webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true }
     })
     // 多个窗口时错开一点，别叠成一摞看不出有几个
@@ -335,6 +431,7 @@ export function createBrowserManager({
       win,
       chrome: win.webContents,
       chromeReady: false,
+      recentWindow: null,
       tabs: [],
       activeTabId: null,
       destroyRequested: false
@@ -349,6 +446,8 @@ export function createBrowserManager({
     })
 
     win.on('closed', () => {
+      record.recentWindow?.destroy()
+      record.recentWindow = null
       for (const tab of record.tabs) detachTab(tab)
       record.tabs = []
       browsers.delete(id)
@@ -363,7 +462,14 @@ export function createBrowserManager({
       emit('closed')
     })
 
-    win.on('resize', () => layout(record))
+    win.on('resize', () => {
+      hideRecentWindow(record)
+      layout(record)
+    })
+    // 窗口一挪，浮层的屏幕坐标就不对了：直接收起来（再点一下地址栏会按新位置重开）
+    win.on('move', () => hideRecentWindow(record))
+    win.on('minimize', () => hideRecentWindow(record))
+    win.on('hide', () => hideRecentWindow(record))
     // 聚焦中的窗口一律不回收：用户正看着它，哪怕一小时没动接口也不能在眼前消失。
     // 失焦那一刻把闲置起点推到现在，于是「放着不管」的计时从离开它开始算。
     win.on('focus', () => {
@@ -373,6 +479,10 @@ export function createBrowserManager({
     win.on('blur', () => {
       record.focused = false
       record.lastUsedAt = Date.now()
+      // 点浮层里的条目时，窗口也可能先失焦一秒：延后一点再收，让 mousedown 的选取先落地
+      setTimeout(() => {
+        if (!record.win.isDestroyed() && !record.win.isFocused()) hideRecentWindow(record)
+      }, 150)
     })
     // 显示之前再推一次：窗口可能是在别的主题下建的，用户切主题时它正藏着
     win.on('show', () => pushChrome(record))
@@ -384,23 +494,13 @@ export function createBrowserManager({
       if (message) handleChromeMessage(record, message)
     })
 
-    // 以 did-finish-load 为准：data: URL 的 loadURL 偶尔会以一个假的 ERR_FAILED 结束，
+    // 以 did-finish-load 为准：loadURL 偶尔会以一个假的 ERR_FAILED 结束，
     // 而页面其实已经加载好了（此时再报错只会误导人）。
     win.webContents.on('did-finish-load', () => {
       record.chromeReady = true
       pushChrome(record)
     })
-    win
-      .loadURL(chromeDataUrl())
-      .then(() => {
-        record.chromeReady = true
-        pushChrome(record)
-      })
-      .catch((error) => {
-        if (!record.chromeReady && !record.win.isDestroyed()) {
-          console.error('[mica-browser] chrome 加载失败', error?.code || error)
-        }
-      })
+    loadChrome(record)
 
     addTab(record, url, { activate: true })
     if (show) showBrowser(id, { focus })
@@ -413,14 +513,6 @@ export function createBrowserManager({
       hideBrowser(record.id)
       return
     }
-    if (message.action === 'activateTab') {
-      try {
-        activateTabIn(record, message.tabId)
-      } catch {
-        // 标签页可能在点击与处理之间被关掉
-      }
-      return
-    }
     if (message.action === 'copy') {
       // 顶栏没有 preload，复制统一交给主进程：页面自己复制要过渲染进程的权限判定
       if (typeof message.text === 'string' && message.text) clipboard.writeText(message.text)
@@ -429,6 +521,26 @@ export function createBrowserManager({
     if (message.action === 'paste') {
       // 应用没有原生菜单，⌘V 不一定能走系统编辑命令：页面把按键交回来，这里直接执行
       if (!record.chrome.isDestroyed()) record.chrome.paste()
+      return
+    }
+    // 最近访问浮层：列表由顶栏按输入筛好再送过来（浮层只负责画，不持有输入状态）。
+    // 每条消息都带锚点：同一个动作既定位又更新，地址框变宽、列表变长都不用另开协议。
+    if (message.action === 'recent:show') {
+      const items = Array.isArray(message.items) ? message.items : []
+      const anchor = message.anchor && typeof message.anchor === 'object' ? message.anchor : null
+      if (!anchor || !items.length) {
+        hideRecentWindow(record)
+        return
+      }
+      recentWindowFor(record).show(record.win, {
+        anchor,
+        items,
+        highlight: Number.isInteger(message.highlight) ? message.highlight : -1
+      })
+      return
+    }
+    if (message.action === 'recent:close') {
+      hideRecentWindow(record)
       return
     }
     // 顶栏的前进 / 后退 / 刷新 / 地址导航：与 agent 走同一条 navigate 链路，用户自己
@@ -476,11 +588,14 @@ export function createBrowserManager({
 
     const refresh = () => {
       refreshTabState(tab)
+      rememberVisit(record, tab)
       syncWindowTitle(record)
       pushChrome(record)
       emit('tab')
     }
 
+    // 用户点到网页上：浮层要收起来（面板不抢焦点，收不到这次点击）
+    contents.on('mouse-down', () => hideRecentWindow(record))
     contents.on('did-start-loading', () => {
       tab.loading = true
       refresh()
@@ -538,6 +653,8 @@ export function createBrowserManager({
     record.tabs.push(tab)
     attachTabEvents(record, tab)
     installDebugger(tab)
+    // 一开始就记下目标地址：标题要等页面加载完才有，之后 refresh 会补上
+    rememberVisit(record, { url: target, title: '' })
 
     if (activate || !record.activeTabId) activateTabIn(record, tab.id)
 
@@ -569,6 +686,7 @@ export function createBrowserManager({
     const tab = record.tabs.find((item) => item.id === String(tabId || ''))
     if (!tab) throw notFoundError(`标签页不存在：${tabId}`)
     const previous = activeTab(record)
+    hideRecentWindow(record)
     if (previous && previous.id !== tab.id) {
       try {
         record.win.contentView.removeChildView(previous.view)
@@ -784,6 +902,7 @@ export function createBrowserManager({
 
   function hideBrowser(id) {
     const record = requireBrowser(id)
+    hideRecentWindow(record)
     if (!record.win.isDestroyed() && record.win.isVisible()) record.win.hide()
     applyVisibility(record, false)
     return record
@@ -792,6 +911,8 @@ export function createBrowserManager({
   function destroyBrowser(id) {
     const record = requireBrowser(id)
     record.destroyRequested = true
+    record.recentWindow?.destroy()
+    record.recentWindow = null
     for (const tab of record.tabs) detachTab(tab)
     record.tabs = []
     if (!record.win.isDestroyed()) record.win.destroy()
@@ -804,6 +925,8 @@ export function createBrowserManager({
     cookieStore.removeListener('changed', cookieChanged)
     for (const record of [...browsers.values()]) {
       record.destroyRequested = true
+      record.recentWindow?.destroy()
+      record.recentWindow = null
       for (const tab of record.tabs) detachTab(tab)
       record.tabs = []
       if (!record.win.isDestroyed()) record.win.destroy()
@@ -920,6 +1043,7 @@ export function createBrowserManager({
 
   async function navigate(tabId, { url = '', action = '' } = {}) {
     const { record, tab } = requireTab(tabId)
+    hideRecentWindow(record)
     const verb = String(action || '')
       .trim()
       .toLowerCase()

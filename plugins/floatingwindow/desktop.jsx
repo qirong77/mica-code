@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ArrowLeft, ArrowRight, Globe, GripVertical, House, Star } from 'lucide-react';
 import { ArcoAction, Input } from '@mica-config-ui/web';
+import { compactUrl, filterRecent, isRecentUrl, moveHighlight } from '@packages/mica-web-shared/index.js';
 import { normalizeAddress, persistableAddress, persistableOrigin } from './address.js';
 import './desktop.css';
 
@@ -9,6 +10,20 @@ function check(result) {
   return result;
 }
 function message(error) { return error instanceof Error ? error.message : String(error); }
+
+/** 地址栏下拉默认列几条：再多就要滚动了，这里只做「快速回到刚才那个页面」。 */
+const SUGGEST_LIMIT = 6;
+
+/**
+ * 地址栏下拉要画的行。最近访问在插件数据里是一串完整地址（没有标题），先补成
+ * `{ url }` 再交给共用的筛选逻辑——与受控浏览器顶栏是同一套匹配与按键规则。
+ */
+export function suggestItems(recent, query, limit = SUGGEST_LIMIT) {
+  const items = (Array.isArray(recent) ? recent : [])
+    .filter((url) => isRecentUrl(url))
+    .map((url) => ({ url }));
+  return filterRecent(items, query).slice(0, Math.max(0, limit));
+}
 
 export function faviconSources(url, faviconUrl) {
   const sources = [];
@@ -118,6 +133,9 @@ export function Launcher({ api }) {
   const web = launcher?.web;
   const [state, setState] = useState({ url: '', home: true, canGoBack: false, canGoForward: false, loading: false });
   const [address, setAddress] = useState('');
+  // 地址栏的最近访问下拉：打开时把网页视图临时让出来（web.cover），页面在它上面画列表
+  const [suggestOpen, setSuggestOpen] = useState(false);
+  const [suggestIndex, setSuggestIndex] = useState(-1);
   const [recent, setRecent] = useState([]);
   const [favorites, setFavorites] = useState([]);
   const [favicons, setFavicons] = useState({});
@@ -136,6 +154,16 @@ export function Launcher({ api }) {
   const recentVersion = useRef(0);
   const iconCache = useRef(new Map());
   const seenIcons = useRef(new Map());
+  // 下拉开着时网页视图要让位（它是原生子视图，永远盖在页面上）。记下此刻是否已经让出，
+  // 免得每次重渲染都调一次 `web.cover`，也免得关掉时误把别处让出的视图挂回来。
+  const coverHeld = useRef(false);
+
+  /**
+   * 下拉里列哪些地址：没在编辑时列全部最近访问（这时输入框显示的是当前页地址，
+   * 拿它去筛等于只剩一条），开始输入后按输入筛。
+   */
+  const suggestions = suggestItems(recent, dirty.current ? address : '');
+  const suggestVisible = suggestOpen && suggestions.length > 0;
 
   /**
    * Load one site's stored collections. Every path that shows the welcome page goes
@@ -156,6 +184,44 @@ export function Launcher({ api }) {
       if (mounted.current && currentVersion === recentVersion.current) setSaveNotice(`无法读取最近地址：${message(cause)}`);
     }
   }, [launcher]);
+
+  const closeSuggest = useCallback(() => {
+    setSuggestOpen(false);
+    setSuggestIndex(-1);
+  }, []);
+
+  /**
+   * 打开最近访问下拉。列表原来只在欢迎页读过，这里再读一遍：正浏览着网页时点地址栏，
+   * 看到的必须是此刻的最近访问，而不是切到网页之前那一份。
+   */
+  const openSuggest = useCallback(() => {
+    if (!available) return;
+    setSuggestIndex(-1);
+    setSuggestOpen(true);
+    void loadSites();
+  }, [available, loadSites]);
+
+  /**
+   * 让网页视图临时让出 / 回来。让出的只是那块原生视图，页面本身没换：回来时不会重新
+   * 加载，滚动位置与登录态都还在（见外壳的 `web.cover`）。
+   */
+  const setCover = useCallback((next) => {
+    if (typeof web?.cover !== 'function') return;
+    if (coverHeld.current === next) return;
+    coverHeld.current = next;
+    void Promise.resolve(web.cover(next)).catch(() => { coverHeld.current = !next; });
+  }, [web]);
+
+  useEffect(() => { setCover(suggestVisible); }, [setCover, suggestVisible]);
+  useEffect(() => () => { setCover(false); }, [setCover]);
+
+  // 窗口被隐藏（Esc / 快捷键）时页面收不到键盘事件：下拉得自己合上，否则网页回来时
+  // 还停在「让位」状态，看起来像页面丢了。
+  useEffect(() => {
+    const onVisibility = () => { if (document.visibilityState === 'hidden') closeSuggest(); };
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => document.removeEventListener('visibilitychange', onVisibility);
+  }, [closeSuggest]);
 
   /**
    * Record a site and adopt the list the backend returns. The debounced push path
@@ -290,6 +356,7 @@ export function Launcher({ api }) {
   const open = async (value) => {
     let submittedVersion;
     try {
+      closeSuggest();
       const url = normalizeAddress(value);
       submittedVersion = editVersion.current;
       const startedVersion = version.current;
@@ -337,15 +404,46 @@ export function Launcher({ api }) {
         <ArcoAction iconOnly title="欢迎页" aria-label="欢迎页" disabled={!available || state.home} onClick={() => void run('home')}><House size={15} /></ArcoAction>
         <ArcoAction iconOnly className="floatingwindow-drag" title="拖动窗口" aria-label="拖动窗口"><GripVertical size={15} /></ArcoAction>
         <div className="floatingwindow-address-wrap">
-          <Input className="floatingwindow-address" aria-label="网址" placeholder="输入域名或网址" autoComplete="off" spellCheck={false} disabled={!available} value={address}
+          <Input className="floatingwindow-address" aria-label="网址" aria-expanded={suggestVisible} placeholder="输入域名或网址" autoComplete="off" spellCheck={false} disabled={!available} value={address}
+            onFocus={() => openSuggest()}
+            onClick={() => openSuggest()}
             onKeyDown={(event) => {
+              if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+                if (!suggestions.length) return;
+                event.preventDefault();
+                const step = event.key === 'ArrowDown' ? 1 : -1;
+                if (!suggestOpen) setSuggestOpen(true);
+                setSuggestIndex((index) => moveHighlight(suggestOpen ? index : -1, suggestions.length, step));
+                return;
+              }
               if (event.key !== 'Enter') return;
               event.preventDefault();
-              if (!event.nativeEvent.isComposing && event.keyCode !== 229) void open(address);
+              // 输入法组字中的回车是「确认候选词」，不是「打开这个地址」。
+              if (event.nativeEvent.isComposing || event.keyCode === 229) return;
+              // 高亮的那一行就是回车要打开的那个地址；没有高亮才走输入框里的内容。
+              const picked = suggestVisible && suggestIndex >= 0 ? suggestions[suggestIndex] : null;
+              void open(picked ? picked.url : address);
             }}
-            onBlur={() => { if (!dirty.current) setAddress(latest.current); }}
-            onChange={(value) => { editVersion.current += 1; dirty.current = true; setAddress(value); }} />
+            onBlur={() => { closeSuggest(); if (!dirty.current) setAddress(latest.current); }}
+            onChange={(value) => {
+              editVersion.current += 1;
+              dirty.current = true;
+              setAddress(value);
+              setSuggestOpen(true);
+              setSuggestIndex(-1);
+            }} />
           <ArcoAction iconOnly className="floatingwindow-address-favorite" title={isFavorite ? '取消收藏' : '收藏'} aria-label={isFavorite ? '取消收藏' : '收藏'} disabled={!available || state.home} onClick={() => void toggleFavorite(state.url, !isFavorite)}><Star size={15} fill={isFavorite ? 'currentColor' : 'none'} /></ArcoAction>
+          {suggestVisible ? <div className="floatingwindow-suggest" role="listbox" aria-label="最近访问">
+            {suggestions.map((item, index) => <button key={item.url} type="button" role="option" aria-selected={index === suggestIndex}
+              className={index === suggestIndex ? 'floatingwindow-suggest-item active' : 'floatingwindow-suggest-item'} title={item.url}
+              onMouseEnter={() => setSuggestIndex(index)}
+              // 按下就取：输入框不失焦，也就不会先触发一次 blur 把列表收掉。
+              onMouseDown={(event) => { event.preventDefault(); void open(item.url); }}>
+              <SiteIcon url={item.url} faviconUrl={siteFavicon(favicons, item.url)} loadIcon={loadIcon} />
+              <span>{compactUrl(item.url)}</span>
+              <ArrowRight size={13} aria-hidden="true" />
+            </button>)}
+          </div> : null}
         </div>
       </form>
       {notice ? <div className="floatingwindow-notice" role={error || state.error ? 'alert' : 'status'} title={notice}>

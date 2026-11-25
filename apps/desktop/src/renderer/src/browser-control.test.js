@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'bun:test'
 import {
-  browserIconBadge,
+  browserButtonTitle,
+  browserCountBadge,
   browserIconTitle,
+  browserMenuRow,
+  browserMenuRows,
   browserStatusLabel,
   isOwnedByNode,
   nodeBrowsers
@@ -101,12 +104,79 @@ describe('browserIconTitle', () => {
   })
 })
 
-describe('browserIconBadge', () => {
-  it('numbers the second window onwards', () => {
-    const list = [{ id: 'brw-1' }, { id: 'brw-2' }]
-    expect(browserIconBadge(list, list[0])).toBe('1')
-    expect(browserIconBadge(list, list[1])).toBe('2')
-    expect(browserIconBadge([{ id: 'brw-1' }], { id: 'brw-1' })).toBe('')
-    expect(browserIconBadge(list, { id: 'brw-9' })).toBe('')
+describe('browserCountBadge', () => {
+  it('writes the count only when more than one window is open', () => {
+    expect(browserCountBadge([])).toBe('')
+    expect(browserCountBadge([{ id: 'brw-1' }])).toBe('')
+    expect(browserCountBadge([{ id: 'brw-1' }, { id: 'brw-2' }])).toBe('2')
+    expect(browserCountBadge([{ id: 'brw-1' }, { id: 'brw-2' }, { id: 'brw-3' }])).toBe('3')
+    // 没有 id 的条目点不中，不参与计数
+    expect(browserCountBadge([{ id: 'brw-1' }, {}])).toBe('')
+    expect(browserCountBadge(null)).toBe('')
+  })
+})
+
+describe('browserButtonTitle', () => {
+  it('says there is no window instead of leaving the always-on button silent', () => {
+    expect(browserButtonTitle([])).toBe('浏览器\n当前会话还没有打开的窗口')
+  })
+
+  it('reuses the single-window wording so click and right-click stay explained', () => {
+    const title = browserButtonTitle([
+      { id: 'brw-1', label: '订单页', url: 'https://e.example/a', visible: false }
+    ])
+    expect(title).toContain('订单页')
+    expect(title).toContain('点击唤出')
+    expect(title).toContain('右键关闭')
+  })
+
+  it('explains the dropdown once there is more than one window', () => {
+    const title = browserButtonTitle([
+      { id: 'brw-1', visible: true },
+      { id: 'brw-2', visible: false },
+      { id: 'brw-3', visible: false }
+    ])
+    expect(title).toBe('浏览器 · 3 个窗口（1 个已显示）\n悬停或点击选择窗口 · 行上右键关闭')
+    // 一个都没显示时不写括号，别在 tooltip 里出现「（0 个已显示）」
+    expect(browserButtonTitle([{ id: 'brw-1' }, { id: 'brw-2' }])).toBe(
+      '浏览器 · 2 个窗口\n悬停或点击选择窗口 · 行上右键关闭'
+    )
+  })
+})
+
+describe('browserMenuRows', () => {
+  it('names the window by its label and shows the address without the protocol', () => {
+    const [row] = browserMenuRows([
+      {
+        id: 'brw-1',
+        label: '订单页',
+        title: '订单详情',
+        url: 'https://example.com/order/1?x=1',
+        visible: true,
+        loading: false
+      }
+    ])
+    expect(row).toMatchObject({
+      id: 'brw-1',
+      name: '订单页',
+      detail: 'example.com/order/1?x=1',
+      status: '已显示',
+      visible: true
+    })
+    expect(row.tooltip).toContain('订单详情')
+  })
+
+  it('falls back to the page title when the agent gave no label', () => {
+    expect(browserMenuRow({ id: 'brw-2', title: '新标签页', visible: false })).toMatchObject({
+      name: '新标签页',
+      detail: '',
+      status: '已隐藏'
+    })
+    expect(browserMenuRow({ id: 'brw-3' }).name).toBe('受控浏览器')
+  })
+
+  it('drops entries the list could not point at', () => {
+    expect(browserMenuRows([{ id: 'brw-1' }, null, {}]).map((row) => row.id)).toEqual(['brw-1'])
+    expect(browserMenuRows(null)).toEqual([])
   })
 })

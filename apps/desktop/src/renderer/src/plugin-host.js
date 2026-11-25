@@ -223,6 +223,8 @@ export function createPluginHostApi(pluginId, session = null, { createSession, b
         back: () => launcherControl('web.back'),
         forward: () => launcherControl('web.forward'),
         reload: () => launcherControl('web.reload'),
+        /** 临时让出网页区域（页面要画地址栏下拉这类浮层）；关掉后按需挂回。 */
+        cover: (active) => launcherControl('web.cover', { cover: Boolean(active) }),
         /** 页面本身只允许 data: 图片，站点图标由外壳取回后内联返回。 */
         favicon: (url) => launcherControl('web.favicon', undefined, url),
         subscribe: (callback) => {

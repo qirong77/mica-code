@@ -92,6 +92,7 @@ import {
   DEFAULT_RUNTIME_PORT,
   RUNTIME_PORT_ENV,
   SHARE_BASE_PATH,
+  isBrowserChromePagePath,
   isSharePath,
   isTerminalPagePath,
   parseRuntimePort,
@@ -1200,6 +1201,11 @@ function createRequestHandler({
         // 页面通过同源 /remote/terminal/* 读写终端，所以窗口只需要运行时地址。
         if (isTerminalPagePath(url.pathname)) {
           return await serveStatic(req, res, rendererRoot, '/terminal.html')
+        }
+        // 受控浏览器顶栏 / 最近访问浮层：同样是独立入口（browser-chrome.html）。
+        // 页面不访问任何 HTTP 接口，状态与动作走主进程的日志桥。
+        if (isBrowserChromePagePath(url.pathname)) {
+          return await serveStatic(req, res, rendererRoot, '/browser-chrome.html')
         }
         // 页面产物：`/share` 与 `/mica-web` 都是别名，剥掉服务前缀后走同一份静态资源。
         // 产物里的资源引用是相对的（`./assets/x.js`），从 `/mica-web/`、`/share/` 下取时会

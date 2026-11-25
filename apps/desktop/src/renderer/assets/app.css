@@ -7992,6 +7992,54 @@ html body #root {
   animation: motion-fade-in var(--motion-base) var(--ease-soft) backwards;
 }
 
+/* ------------------------------------------------- 顶栏浏览器的窗口列表
+
+   共享菜单表面（`.mica-menu`）上的两行变体：这里选的是「哪一扇窗口」，名字和地址
+   得同时看得见，单行只放得下其中一个。行本身仍是 `MenuItem`，不另起一套菜单。 */
+.browser-windows-menu {
+  min-width: 248px;
+  max-width: min(380px, calc(100vw - 16px));
+}
+
+.browser-windows-menu .mica-menu-item.arco-btn {
+  height: auto;
+  min-height: 36px;
+  padding: 5px 8px;
+  white-space: normal;
+}
+
+.browser-window-text {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+  line-height: 1.35;
+}
+
+.browser-window-name,
+.browser-window-detail {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.browser-window-detail {
+  color: var(--mica-arco-text-faint);
+  font-size: 11px;
+}
+
+.browser-window-status {
+  flex: none;
+  padding-left: 12px;
+  color: var(--mica-arco-text-faint);
+  font-size: 11px;
+}
+
+.browser-windows-menu .mica-menu-item[aria-checked='true'] :is(.browser-window-detail, .browser-window-status) {
+  color: inherit;
+  opacity: 0.75;
+}
+
 /* 系统要求减少动态效果时一律关掉：包括上面所有入场与按压反馈。
    `animation-duration` 留 1ms 而不是 none —— 靠动画结束回调推进的逻辑（加载指示器等）
    仍然会走到下一帧。 */

@@ -550,10 +550,10 @@ function paramLabel(param) {
  */
 export const BROWSER_GUIDE = [
   '第一次用某个动作前，先不带 action 调用 control：返回的 actions[] 里每个动作都带 params（name / 类型 / 是否必填 / 示例值），一次就能看全，比猜参数名快。',
-  '先 listBrowsers 看本会话有没有对应模式的窗口；没有就 createBrowser（默认隐藏创建，不打断用户）。**窗口彼此独立**：每个窗口在顶栏各有一枚图标，同一个会话可以开多个（普通、无痕都行，不限个数），label 用来说明各是做什么的；同一个站点里的多个页面仍优先在同一个窗口里用 createTab，省一次窗口开销。不活跃的窗口（没被操作、也没焦点）闲置超过 30 分钟会被自动回收，需要时重新创建即可。',
+  '先 listBrowsers 看本会话有没有对应模式的窗口；没有就 createBrowser（默认隐藏创建，不打断用户）。**窗口彼此独立**：同一个会话可以开多个（普通、无痕都行，不限个数），顶栏只有一枚浏览器按钮，窗口多于一个时右下角写数量、悬停展开窗口列表，label 用来说明每一扇是做什么的；同一个站点里的多个页面仍优先在同一个窗口里用 createTab，省一次窗口开销。不活跃的窗口（没被操作、也没焦点）闲置超过 30 分钟会被自动回收，需要时重新创建即可。',
   '无痕模式默认关闭，createBrowser 或不带 browserId 的 createTab 传 incognito: true 才开启。无痕窗口有独立内存分区，不继承普通窗口登录态，也不影响其他标签页的数据；同窗口标签页共享临时数据。新标签页继承目标窗口模式，不能原地切换。隐藏仍保留临时数据，closeBrowser 或关闭最后一个标签页才清理。cookies 按目标标签页分区读取；无标签页的 Cookie 读写、缓存文件与变化推送仅作用于普通分区。',
   '窗口全程保持隐藏：截图、点击、输入、按键、滚动、读页面/cookie/console/network 都在隐藏状态下完成，**不需要先 showBrowser**。显示窗口会让用户眼前弹一个窗，只在用户明确要求「演示给我看」时才调它。',
-  '用户会自己点顶栏那枚浏览器图标唤出窗口查看（也能再点一次收起），这件事不要替用户做；你只需要保证页面状态是对的。',
+  '用户会自己点顶栏那枚浏览器按钮唤出窗口查看（也能再点一次收起；多扇窗口时在那枚按钮的下拉里选），这件事不要替用户做；你只需要保证页面状态是对的。',
   'action 名必须与 actions[].action 完全一致（区分大小写），不要自己起同义词：按键是 keys（不是 press / key / keyboard），点击是 click，读页面是 content 或 evaluate。按标签页/窗口的动作都要带 id：标签页 id 形如 "tab-1"、窗口 id 形如 "brw-1"，取自 listTabs / listBrowsers / createTab 的返回。',
   '缺必填参数会被直接回绝：evaluate 要 expression、type 要 text、keys 要 keys、scroll 要 deltaY，其余看 actions[].params 里的 required。',
   'keys 只接受单个键：Enter / Tab / Escape / Esc / Backspace / Delete / Space / ArrowUp / ArrowDown / ArrowLeft / ArrowRight / PageUp / PageDown / Home / End，或单个可打印字符（"a"、"1"、"/"）。组合键（Cmd / Ctrl / Shift / Alt）不支持，也不要写 KeyB 这类键盘码：要按 Ctrl+S 这种快捷键，改用 evaluate 在页面里 dispatchEvent(new KeyboardEvent("keydown", { key: "s", code: "KeyS", ctrlKey: true, bubbles: true }))，或者直接点页面上那个按钮。',

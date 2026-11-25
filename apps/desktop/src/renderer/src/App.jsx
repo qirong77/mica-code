@@ -15,7 +15,6 @@ import {
   IconSettings,
   IconTerminal,
   IconTerminal2,
-  IconWorld,
   IconX
 } from '@tabler/icons-react'
 import { BranchPicker } from './BranchPicker'
@@ -93,7 +92,8 @@ import {
   runningTerminalSessions,
   sameSessionSnapshot
 } from './session-state'
-import { browserIconBadge, browserIconTitle, isOwnedByNode, nodeBrowsers } from './browser-control'
+import { isOwnedByNode, nodeBrowsers } from './browser-control'
+import { BrowserWindowsButton } from './BrowserWindowsButton'
 import {
   isTerminalOwnedByNode,
   nodeTerminals,
@@ -2961,43 +2961,14 @@ export default function App() {
                   </ArcoAction>
                 )
               })}
-              {activeBrowsers.map((browser) => {
-                const badge = browserIconBadge(activeBrowsers, browser)
-                const title = browserIconTitle(browser)
-                const flashSeq = controlFlashes[`browser:${browser.id}`] || 0
-                return (
-                  <ArcoAction
-                    key={browser.id}
-                    iconOnly
-                    type="button"
-                    title={title}
-                    aria-label={title}
-                    aria-pressed={browser.visible}
-                    {...longPressHandlers(() => closeBrowser(browser))}
-                    onContextMenu={(event) => {
-                      event.preventDefault()
-                      closeBrowser(browser)
-                    }}
-                    onClick={() => toggleBrowser(browser)}
-                    className="relative grid size-6 shrink-0 place-items-center transition-colors"
-                  >
-                    <IconWorld
-                      key={flashSeq}
-                      size={14}
-                      className={
-                        [browser.loading && 'animate-pulse', flashSeq && 'control-icon-flash']
-                          .filter(Boolean)
-                          .join(' ') || undefined
-                      }
-                    />
-                    {badge ? (
-                      <span className="pointer-events-none absolute -bottom-0.5 -right-0.5 text-[8px] leading-none text-fg-muted">
-                        {badge}
-                      </span>
-                    ) : null}
-                  </ArcoAction>
-                )
-              })}
+              {/* 浏览器常驻一枚按钮：多开窗口只在右下角标数量，悬停出窗口列表
+                  （见 BrowserWindowsButton）。终端仍按窗口/会话一枚图标。 */}
+              <BrowserWindowsButton
+                browsers={activeBrowsers}
+                flashes={controlFlashes}
+                onToggle={toggleBrowser}
+                onClose={closeBrowser}
+              />
               {/* 统计页没有终端可切（见 `terminalVisible`）：留着这枚图标只会点了没反应。 */}
               {view !== 'stats' && (
                 <ArcoAction

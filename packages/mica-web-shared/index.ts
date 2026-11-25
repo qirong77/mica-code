@@ -23,11 +23,13 @@ export {
 } from './runtime-address.js';
 export {
   APP_BASE_PATH,
+  BROWSER_CHROME_PAGE_PATH,
   PLUGIN_PAGES_BASE_PATH,
   SHARE_BASE_PATH,
   TERMINAL_CONTROL_PREFIX,
   TERMINAL_PAGE_PATH,
   isAppPath,
+  isBrowserChromePagePath,
   isPluginPageRoute,
   isPluginPagePath,
   isSharePath,
@@ -40,6 +42,15 @@ export {
   terminalControlPath,
   toAssetPath,
 } from './app-paths.js';
+export {
+  CHROME_MESSAGE_PREFIX,
+  chromeUpdateScript,
+  encodeChromeMessage,
+  parseChromeMessage,
+} from './browser-chrome.js';
+export type { ChromeMessage } from './browser-chrome.js';
+export { compactUrl, filterRecent, isRecentUrl, moveHighlight } from './browser-recents.js';
+export type { RecentEntry } from './browser-recents.js';
 export { formatTokens } from './format.js';
 export { DAY_MS, addDays, dayStartMs, localDayKey } from './stats-day.js';
 export {

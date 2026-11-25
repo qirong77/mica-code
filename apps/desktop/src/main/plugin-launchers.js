@@ -464,6 +464,16 @@ export function createPluginLaunchers({
       } else if (action === 'web.reload') {
         if (!record.webHome) wc.reload()
       }
+      else if (action === 'web.cover') {
+        // 页面要在网页区域上画浮层（地址栏的最近访问列表）：临时把网页视图摘下来，
+        // 关掉再挂回去。与 web.home 不同，`webHome` 不变——页面仍是「正在浏览」的那一页，
+        // 只是暂时让位；摘下来的视图还活着，滚动位置与登录态都不受影响。
+        if (path && typeof path === 'object' && path.cover === false) {
+          if (!record.webHome) showWebContent(record)
+        } else {
+          hideWebContent(record)
+        }
+      }
       else if (action === 'web.favicon') {
         if (!allowedWebUrl(url) && !inlineIconDataUrl(url)) throw new Error('只允许有效的 HTTP(S) 图标地址')
         return { dataUrl: (await webIcons(record).load(url)) ?? '' }
