@@ -3180,7 +3180,8 @@ html[data-appearance='light'] .chat-markdown code:not(pre code) {
   display: flex;
   gap: 5px;
   overflow-x: auto;
-  padding: 5px 8px 0;
+  /* 预览条和输入框属于两个视觉层，底部留出一点呼吸空间，避免缩略图贴住输入框边框。 */
+  padding: 5px 8px 6px;
 }
 
 .chat-composer-images button:not(.arco-btn) {
@@ -3742,6 +3743,7 @@ html[data-appearance='light'] .chat-markdown code:not(pre code) {
 
 .chat-todo-dock .chat-todo-toggle.arco-btn {
   display: grid;
+  width: 100%;
   height: auto;
   /* arco 按钮自带 1px 描边：留着会把这一行的内容整体推右 1px，箭头就和上面几行
      差一个像素，看着就是没对齐。描边由整行的 hover 底色代替。 */
