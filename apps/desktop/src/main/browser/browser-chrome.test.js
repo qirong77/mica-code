@@ -22,14 +22,16 @@ const css = readFileSync(CSS_PATH, 'utf8')
 /** 调色板的键 → app.css 里的 token；顺序与 browser-chrome.js 的 PALETTES 无关，只列契约 */
 const TOKENS = {
   panel: '--color-panel',
-  canvas: '--color-canvas',
+  panelHi: '--color-panel-hi',
   active: '--color-active',
   line: '--color-line',
+  lineStrong: '--color-line-strong',
   fg: '--color-fg',
   fgSoft: '--color-fg-soft',
   fgDim: '--color-fg-dim',
-  warn: '--color-warn-soft',
-  overlay: '--color-overlay'
+  fgFaint: '--color-fg-faint',
+  accent: '--color-accent',
+  warn: '--color-warn-soft'
 }
 
 /** 取出某个选择器的声明块（花括号配对，块里没有嵌套规则） */
@@ -82,12 +84,17 @@ describe('chromeHtml', () => {
     expect(html).not.toContain('showWindows')
   })
 
-  it('deduplicates matching titles without losing tab switching or address copying', () => {
+  /** 顶栏页面的最小 DOM：脚本只用到这些节点与事件，够跑完整条状态 → 消息链路 */
+  function createChromeEnv() {
     function element() {
       return {
         children: [],
         listeners: {},
         attributes: {},
+        value: '',
+        disabled: false,
+        selectionStart: 0,
+        selectionEnd: 0,
         set textContent(value) {
           this.text = value
           this.children = []
@@ -103,11 +110,14 @@ describe('chromeHtml', () => {
         },
         setAttribute(name, value) {
           this.attributes[name] = value
+        },
+        select() {
+          this.selected = true
         }
       }
     }
     const elements = Object.fromEntries(
-      ['tabs', 'url', 'loading'].map((id) => [id, element()])
+      ['tabs', 'address', 'loading', 'back', 'forward', 'reload'].map((id) => [id, element()])
     )
     const messages = []
     const document = {
@@ -122,6 +132,11 @@ describe('chromeHtml', () => {
       document,
       console: { log: (message) => messages.push(parseChromeMessage(message)) }
     })
+    return { elements, messages, window, document }
+  }
+
+  it('deduplicates matching titles without losing tab switching or address copying', () => {
+    const { elements, messages, window, document } = createChromeEnv()
     const update = window.__micaChrome.update
     update({
       label: 'Entry',
@@ -134,7 +149,8 @@ describe('chromeHtml', () => {
       ]
     })
     expect(elements.loading.title).toBe('Entry\n用户会话 session-123')
-    expect(elements.url.title).toContain('地址由 Mica 控制，不可编辑；可选中复制')
+    expect(elements.address.value).toBe('https://example.com')
+    expect(elements.address.title).toContain('输入网址后回车导航')
     expect(elements.loading.className).toBe('dot loading')
     const [heading, first, second] = elements.tabs.children
     expect(heading.textContent).toBe('Qirong Entry')
@@ -174,27 +190,83 @@ describe('chromeHtml', () => {
     expect(elements.tabs.children[0].title).toBe('Only tab')
     update({})
     expect(elements.loading.className).toBe('dot')
-    expect(elements.url.textContent).toBe('about:blank')
+    expect(elements.address.value).toBe('about:blank')
     expect(elements.tabs.children).toHaveLength(0)
   })
 
-  it('makes the address selectable and copies it through the host', () => {
+  it('edits the address and drives back, forward and reload', () => {
+    const { elements, messages, window, document } = createChromeEnv()
+    const update = window.__micaChrome.update
+    update({ url: 'https://example.com/a', canGoBack: true, canGoForward: false })
+    expect(elements.back.disabled).toBe(false)
+    expect(elements.forward.disabled).toBe(true)
+    elements.back.listeners.click()
+    elements.forward.listeners.click()
+    elements.reload.listeners.click()
+    expect(messages).toEqual([{ action: 'back' }, { action: 'forward' }, { action: 'reload' }])
+
+    elements.address.listeners.focus()
+    expect(elements.address.selected).toBe(true)
+    elements.address.value = 'example.org'
+    elements.address.listeners.input()
+    // 用户正在输入时，页面自己的重定向 / 状态推送不能把输入改掉
+    update({ url: 'https://example.com/b', canGoBack: true, canGoForward: true })
+    expect(elements.address.value).toBe('example.org')
+    elements.address.listeners.keydown({ key: 'Enter', preventDefault() {} })
+    expect(messages.at(-1)).toEqual({ action: 'navigate', url: 'example.org' })
+    // 回车之后地址跟着真实页面走（可能被重定向）
+    update({ url: 'https://example.org/home' })
+    expect(elements.address.value).toBe('https://example.org/home')
+
+    // Esc 与点走都回到当前页地址
+    elements.address.value = 'typo'
+    elements.address.listeners.input()
+    elements.address.listeners.keydown({ key: 'Escape', preventDefault() {} })
+    expect(elements.address.value).toBe('https://example.org/home')
+    elements.address.value = 'half-typed'
+    elements.address.listeners.input()
+    elements.address.listeners.blur()
+    expect(elements.address.value).toBe('https://example.org/home')
+
+    // 应用没有原生菜单：⌘V 由页面交给主进程执行 paste 编辑命令
+    let prevented = false
+    document.listeners.keydown({
+      metaKey: true,
+      key: 'v',
+      target: elements.address,
+      preventDefault() {
+        prevented = true
+      }
+    })
+    expect(prevented).toBe(true)
+    expect(messages.at(-1)).toEqual({ action: 'paste' })
+  })
+
+  it('makes the address editable and copies it through the host', () => {
     const html = chromeHtml()
     // 地址在窗口拖动区里：不 no-drag + 放开选择，选中就失效
     expect(html).toContain(
       '-webkit-user-select: text; user-select: text; -webkit-app-region: no-drag;'
     )
+    expect(html).toContain('id="address"')
+    expect(html).toContain('type="text"')
+    expect(html).toContain('placeholder="输入域名或网址"')
+    expect(html).toContain("send('navigate', { url: value })")
+    expect(html).toContain("send('paste')")
     expect(html).toContain("send('copy', { text: text })")
     expect(html).toContain("addEventListener('contextmenu'")
-    expect(html).toContain('range.selectNodeContents(url)')
+    // 不提供「回到主页」入口：受控浏览器没有欢迎页
+    expect(html).not.toContain('id="home"')
   })
 
   it('paints every themed surface through the injected variables', () => {
     const html = chromeHtml()
-    // 顶栏底色、地址框、当前标签页都必须走变量，写死颜色就等于主题只对了一半
+    // 顶栏底色、地址框（Arco fill-2 / 焦点 accent）、当前标签页都必须走变量，
+    // 写死颜色就等于主题只对了一半
     expect(html).toContain('background: var(--c-panel)')
-    expect(html).toContain('background: var(--c-canvas)')
+    expect(html).toContain('background: var(--c-panel-hi)')
     expect(html).toContain('background: var(--c-active)')
+    expect(html).toContain('border-color: var(--c-accent)')
     expect(html).toContain('applyPalette(state.palette)')
   })
 })

@@ -92,7 +92,7 @@ export type SubagentProcessOptions = {
   /** 父会话 id：写进会话文件，侧栏据此把子会话嵌套在父会话下面。 */
   parentSessionId?: string;
   /**
-   * 接管一个已经存在的会话（`subagent_open` 传 `session_id`）。
+   * 接管一个已经存在的会话（`subagent_drive` 传 `session_id`）。
    *
    * 与 `parentSessionId` 互斥：resume 的来历以会话文件里记的为准，用启动参数覆盖它
    * 会把一条老会话的父会话悄悄改掉。
@@ -353,7 +353,7 @@ export class SubagentProcess {
   /**
    * 改子会话自己的会话标题。
    *
-   * 会话文件归它自己的宿主写：父进程这边记的 `entry.title` 只影响 `subagent_status`，
+   * 会话文件归它自己的宿主写：父进程这边记的 `entry.title` 只影响 `subagent_inspect`，
    * 侧栏与列表读的是子会话的落盘标题。不改的话，它按第一条消息派生，而 issue 包装
    * 的第一行是 `<context>`——侧栏上就是「<context> 父会话：…」。
    */

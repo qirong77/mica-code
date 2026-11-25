@@ -21,7 +21,7 @@
 
 [Subagent Legacy](subagent-legacy/README.md) 是旧的进程内委派（7 种内置子代理类型 + `agent` 工具 + 委派 prompt 段落）：子代理活在父会话的进程里，共享父会话的模型与工具。它的文件租约限定文件工具的写入路径；shell 可从工作区内包含租约的目录执行，文件租约也能运行测试。外部 checkout 的祖先以最近 `.git` 为界，独立外部路径只放行到直接父目录；cwd 检查不是 shell 沙箱，命令仍须遵守写策略。
 
-[Subagent](subagent/README.md) 派一个独立的 mica 会话去干活并观测它：子会话是常驻的 `mica app-server` 进程，六个动词一个主语（`subagent_open` / `send` / `wait` / `status` / `read` / `stop`），读内容按成本分三档（`read` 的 `turns` → `grep` → `transcript`），`status({ full: true })` 一次收齐全部结论。它还**反向汇报**：轮次结束、进程退出、停滞都记成一条动态，父会话下一轮开工时由 prompt 段落注入一次、读后即清；`subagent_wait` 超时会把条件登记成后台提醒，所以长任务不必把父会话钉在阻塞等待上。桌面端右侧面板与输入框上方的状态行让用户能直接看住、打断、收掉这些进程；空闲回收与 `subagent_open`（`thread/resume` 接管任意已落盘会话——用户自己的会话、别处收掉的子会话都行——历史从会话文件补）负责让它们既不常驻烧内存，也不至于丢了线索。
+[Subagent](subagent/README.md) 派一个独立的 mica 会话去干活并观测它：子会话是常驻的 `mica app-server` 进程，四个动词一个主语（`drive` / `inspect` / `wait` / `stop`），读内容按成本分三档（`inspect` 的 `turns` → `grep` → `transcript`），`inspect({ full: true })` 一次收齐全部结论。它还**反向汇报**：轮次结束、进程退出、停滞都记成一条动态，父会话下一轮开工时由 prompt 段落注入一次、读后即清；`subagent_wait` 超时会把条件登记成后台提醒，所以长任务不必把父会话钉在阻塞等待上。桌面端右侧面板与输入框上方的状态行让用户能直接看住、打断、收掉这些进程；空闲回收与 `subagent_drive`（`thread/resume` 接管任意已落盘会话——用户自己的会话、别处收掉的子会话都行——历史从会话文件补）负责让它们既不常驻烧内存，也不至于丢了线索。
 
 面板视图可返回 `cards`（每插件最多 3 张）：`{ id, title, summary?, detail?, tone?, revision, actions?, impressionAction? }`。卡片动作 `{ id, label, key?, tone? }` 复用面板动作通道；`key` 应携带版本并由插件校验，拒绝旧界面执行新内容。`impressionAction` 仅用于记录实际展示，不应产生用户可见操作。清单声明 `desktop.panel.dynamicShortcuts: true` 让快捷区获取卡片视图。卡片里显示摘要，详细清单仍放 `sections`。
 
@@ -1136,7 +1136,7 @@ const child = spawn(micaExecutable, ['app-server', '--dir', cwd, '--parent', thi
   和 `/resume` 都能直接打开它——用户能看到，但不必为了看到而操作界面。
 - **一次 spawn 就是一个会话**，不要给一个子进程投两轮以上之外的期望：`turn/start` 在忙时
   会报错，需要排队就用 `turn/steer`（等价的用户操作是按回车）。
-- `subagent_open` **没有**迭代或 token 参数：不限轮数、不限 token、不限并发、不限嵌套层数。插件里不存在会在会话干到一半时自动中止它的机制（停滞只提醒、空闲回收默认关），要停只能显式 `subagent_stop`（`interrupt` 打断这一轮、`close` 收进程）。
+- `subagent_drive` **没有**迭代或 token 参数：不限轮数、不限 token、不限并发、不限嵌套层数。插件里不存在会在会话干到一半时自动中止它的机制（停滞只提醒、空闲回收默认关），要停只能显式 `subagent_stop`（`interrupt` 打断这一轮、`close` 收进程）。
 
 `plugins/subagent` 是完整示例：`subagentProcess.ts` 负责协议与进程，`transcript.ts` 把事件投影
 成轮次（纯函数，可单测），`tools.ts` 把它包成 `subagent_*` 工具。
@@ -1152,14 +1152,17 @@ const child = spawn(micaExecutable, ['app-server', '--dir', cwd, '--parent', thi
 退回新建一条，而 attach 的意义是「接的就是那一条」，接不到必须报错。resume 不发通知，
 历史要自己从 `$MICA_HOME/sessions/<id>.json` 的 `snapshot.conversationMessages` 补进投影。
 
-**读对话要分层，不要一步到位**。`subagent_read` 的 `view` 三档：`turns`（每轮一行）→ `grep`（命中行）→
+**读对话要分层，不要一步到位**。`subagent_inspect` 的 `view` 三档：`turns`（每轮一行）→ `grep`（命中行）→
 `transcript`（正文，按字符预算截断），成本差一个数量级。`transcript` 只给用户与助手的
-正文、不含工具与思考；预算不够时丢最早轮次并写明丢了几轮。
+正文、不含工具与思考；预算不够时丢最早轮次并写明丢了几轮。多条一起读给 `session_ids`
+（每条分摊预算），不要把同一个调用按 id 重复一遍。`full: true` 与 `view` 同用时会在
+该视图之外再附一份收尾投影——模型常把两个字段一起填，只按 `view` 返回会让它反复重试。
 
-`read` 的 `grep` 默认只搜对话正文，命令输出与测试报错在工具输出里，需要 `scope: "tools"`
+`inspect` 的 `grep` 默认只搜对话正文，命令输出与测试报错在工具输出里，需要 `scope: "tools"`
 （或 `"all"`）；默认档下若工具输出里有命中，结果会明确告诉你「那边有几处」并指向这个参数。
-收尾别写一串 wait + transcript：`subagent_status({ full: true })` 一次给出每个子会话的状态、结论、失败的工具
-与用量，`close: true` 顺手收掉已经跑完的。
+收尾别写一串 wait + transcript：`subagent_inspect({ full: true })` 一次给出每个子会话的状态、结论、失败的工具
+与用量，`subagent_stop({ action: "close", idle: true })` 顺手收掉已经跑完的（`idle` 只是过滤条件：
+给了 id 就只在那几条里挑，`all` 才是「全部」）。
 
 **用户消息只能本地记，但它落在哪一轮要等宿主消费才能定**。`turn/steer` 在宿主里是
 `queueMode: 'after_iteration'`：同一条消息可能被吞进当前轮的下一迭代，也可能因为这一轮已经结束

@@ -207,7 +207,7 @@ export function renderTranscript(entry: SubagentEntry, options: TranscriptOption
     const omitted = selected.length - count;
     if (omitted > 0) {
       header.push(
-        `（${omitted} 轮更早的对话没放进来：超出 ${budget} 字符预算。用 subagent_read({ view: "turns" }) 定位后再调大 max_chars）`,
+        `（${omitted} 轮更早的对话没放进来：超出 ${budget} 字符预算。用 subagent_inspect({ view: "turns" }) 定位后再调大 max_chars）`,
       );
     }
     return header.join('\n');
@@ -306,7 +306,7 @@ export function grepTranscript(
     if (toolHits > 0) {
       return (
         `在 ${entry.id} 的对话里没有命中 /${pattern.source}/，但**工具输出里有 ${toolHits} 处**。\n` +
-        `用 subagent_read({ view: "grep", scope: "tools" }) 看那几行（命令输出、测试报错通常在这里）。`
+        `用 subagent_inspect({ view: "grep", scope: "tools" }) 看那几行（命令输出、测试报错通常在这里）。`
       );
     }
     return `在 ${entry.id} 的${scope === 'text' ? '对话' : '对话与工具输出'}里没有命中 /${pattern.source}/。`;
@@ -339,14 +339,14 @@ function indent(text: string, prefix: string): string {
 }
 
 /**
- * 一次收掉全部子会话的固定形状摘要（`subagent_status` 的 `full` 视图）。
+ * 一次收掉全部子会话的固定形状摘要（`subagent_inspect` 的 `full` 视图）。
  *
  * 存在的理由：任务收尾时父会话要回答的是「都干完了没有、结论是什么、有没有翻车」。
- * 没有它就只能 `subagent_read` 一档一档读过去——那是几次往返和
+ * 没有它就只能 `subagent_inspect` 一档一档读过去——那是几次往返和
  * 几万字符，而这里是一屏。
  */
 export function renderCollect(entries: readonly SubagentEntry[], options: { now?: number } = {}): string {
-  if (!entries.length) return '当前没有子会话。需要时用 subagent_open 开一个。';
+  if (!entries.length) return '当前没有子会话。需要时用 subagent_drive 开一个。';
   const now = options.now ?? Date.now();
   const running = entries.filter((entry) => entry.process.transcript.busy).length;
   const lines = [`${entries.length} 个子会话（${running} 个在跑 / ${entries.length - running} 个空闲）`];

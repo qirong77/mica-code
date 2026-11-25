@@ -206,7 +206,7 @@ describe('default capability catalog', () => {
     writeToolCatalogProjection(
       [
         {
-          name: 'subagent_open',
+          name: 'subagent_drive',
           description: '开一个子会话',
           readOnly: false,
           parameters: [{ name: 'prompt', type: 'string', required: false, description: '任务' }],
@@ -220,7 +220,7 @@ describe('default capability catalog', () => {
     const details = await getCapabilityDefaultsDetails();
     expect(details.tools).toEqual([
       {
-        name: 'subagent_open',
+        name: 'subagent_drive',
         description: '开一个子会话',
         readOnly: false,
         parameters: [{ name: 'prompt', type: 'string', required: false, description: '任务' }],

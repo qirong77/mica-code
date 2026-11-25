@@ -325,7 +325,7 @@ describe('ownership', () => {
     expect((await call('/browser/tabs', { method: 'POST', body: {} })).status).toBe(400)
   })
 
-  it('allows several windows per owner and only caps the count', async () => {
+  it('allows any number of windows per owner', async () => {
     const first = await call('/browser/tabs', { method: 'POST', body: { owner: 'multi-a' } })
     expect(first.status).toBe(200)
     // 两个窗口是正常用法：顶栏一个窗口一枚图标，各自独立
@@ -345,14 +345,16 @@ describe('ownership', () => {
     expect(
       (await call('/browser/browsers', { method: 'POST', body: { owner: 'multi-b' } })).status
     ).toBe(200)
-    for (let index = 2; index < 8; index += 1) {
+    // 不按会话封顶：超过旧上限（8 个）也照常创建，没人用的窗口由闲置回收兜底
+    for (let index = 2; index < 12; index += 1) {
       expect(
         (await call('/browser/browsers', { method: 'POST', body: { owner: 'multi-a' } })).status
       ).toBe(200)
     }
-    const capped = await call('/browser/browsers', { method: 'POST', body: { owner: 'multi-a' } })
-    expect(capped.status).toBe(409)
-    expect(capped.body.error).toContain('上限')
+    const counted = await call('/browser/browsers', { headers: { 'x-mica-owner': 'multi-a' } })
+    expect(counted.body.browsers).toHaveLength(12)
+    const other = await call('/browser/browsers', { headers: { 'x-mica-owner': 'multi-b' } })
+    expect(other.body.browsers).toHaveLength(1)
   })
 
   it('keeps normal and private windows side by side and inherits the target mode', async () => {

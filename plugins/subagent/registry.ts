@@ -30,7 +30,7 @@ export const DEFAULT_STALL_MS = 5 * 60_000;
  *
  * 默认不回收的理由是「子会话要像一个正常会话一样在」：自动收掉进程会让它突然从
  * 面板里消失，而用户往往隔一阵才回来接着问。要省内存就在插件设置里填分钟数，
- * 收掉的只是进程（会话历史仍在，`subagent_open({ session_id })` 能接回来）。
+ * 收掉的只是进程（会话历史仍在，`subagent_drive({ session_id })` 能接回来）。
  */
 export const DEFAULT_RECYCLE_MS = 0;
 
@@ -93,7 +93,7 @@ type Watcher = {
 /**
  * 角色参数里的「沿用父会话」占位值。
  *
- * 和模型 / 档位一样，可选参数在真实链路里会被模型填满：`subagent_open` 的 `role`
+ * 和模型 / 档位一样，可选参数在真实链路里会被模型填满：`subagent_drive` 的 `role`
  * 收到过 `"当前角色"`，子会话起来先报一句 `Role not found: 当前角色`；写成 `"父会话"`
  * 或 `"inherit"` 同理。它们表达的都是「不覆盖」。
  *
@@ -122,7 +122,7 @@ export function resolveSubagentRole(inputRole: string | undefined, parentRole: s
 /**
  * 模型 / 档位的「沿用父会话」占位值。
  *
- * 可选参数在真实链路里会被模型填满：`subagent_open` 的 `model` 经常收到 `"default"`，
+ * 可选参数在真实链路里会被模型填满：`subagent_drive` 的 `model` 经常收到 `"default"`，
  * 照着传给子进程就是 `--model default`——子会话起得来，第一句话却因为「模型不存在」
  * 直接失败。这类值表达的就是「不覆盖」，和空串一样处理。
  */
@@ -347,7 +347,7 @@ export class SubagentRegistry {
             entry,
             `${Math.round(idleMs / 60_000)} 分钟没有新输出` +
               (tool ? `，当前工具「${clip(tool.title, 80)}」还在跑` : ''),
-            '可能卡在一条命令或等一个外部服务，可以 subagent_status 看一眼，必要时 subagent_stop({ action: "interrupt" })',
+            '可能卡在一条命令或等一个外部服务，可以 subagent_inspect 看一眼，必要时 subagent_stop({ action: "interrupt" })',
           );
         }
         continue;
@@ -364,7 +364,7 @@ export class SubagentRegistry {
         sessionId: entry.id,
         title: entry.title,
         kind: 'recycled',
-        summary: `空闲 ${Math.round(idleMs / 60_000)} 分钟，进程已收掉（会话历史仍在，需要时 subagent_open 接回来）`,
+        summary: `空闲 ${Math.round(idleMs / 60_000)} 分钟，进程已收掉（会话历史仍在，需要时 subagent_drive 接回来）`,
       });
     }
     return { stalled, recycled };
@@ -509,10 +509,10 @@ export class SubagentRegistry {
   }
 
   /**
-   * 接管一条已经存在的会话（`subagent_open` 传 `session_id`）。
+   * 接管一条已经存在的会话（`subagent_drive` 传 `session_id`）。
    *
    * 与 `spawn` 的区别只有两处：会话是**已有的**（历史从会话文件补，不新建一条空会话），
-   * 以及不投第一句话——接管「接着干」的语义是父会话随后自己 `subagent_send`。
+   * 以及不投第一句话——接管「接着干」的语义是父会话随后自己 `subagent_drive`。
    */
   async attach(input: {
     sessionId: string;
@@ -602,7 +602,7 @@ export class SubagentRegistry {
     return closed;
   }
 
-  /** 活着的子会话数：面板状态行与 `subagent_status` 的 `full` 视图都用它。 */
+  /** 活着的子会话数：面板状态行与 `subagent_inspect` 的 `full` 视图都用它。 */
   get liveCount(): number {
     return this.liveEntries().length;
   }

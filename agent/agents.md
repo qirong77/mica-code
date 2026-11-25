@@ -3,8 +3,8 @@
 ## Subagent
 
 - `plugins/subagent` 派生的独立 app-server 会话继承父 CLI 显式的 `--mcp-config`、`--strict-mcp-config` 与 `--mcp-init-timeout-ms`；配置路径按父启动 `--dir`（省略时为启动 cwd）绝对化，不随父会话之后换目录漂移，沿用原配置中的 owner，不生成新授权、不写用户配置。共享控制资源的委派须协调各自创建的窗口与终端；子会话仍不提供桌面专属插件能力面。
-- subagent 不设任何自动限制：`subagent_open` 没有 `max_turns` / `max_tokens` 参数，迭代轮数、token、并发数、嵌套层数都不限（也不写深度标记）。插件里没有会在别人干到一半时自动按下停止键的机制——停滞只提醒、空闲回收默认关（0 = 不收）。要停只能显式 `subagent_stop`（`interrupt` 打断这一轮 / `close` 收进程）；父会话/宿主退出时子进程会被一起收掉，但把 grace 留到 3 秒，让正在跑的那一轮有机会落盘。不设深度标记后，`resolveCliCommand` 只认 `apps/cli/**` 下的入口，避免 dev 下拿探针脚本当入口导致无限自我派生。
-- 工具面是**六个动词、一个主语**（`session_id`）：`subagent_open`（不给 id 新建、给 id 接管任意已落盘会话，可同时投第一句，拒绝接管当前会话自己）/ `send` / `wait` / `status`（含 `full: true` 的收尾视图）/ `read`（`view: turns|grep|transcript`）/ `stop`（`interrupt|close`）。同一件事的不同力度用参数表达，不按实现分层摊成一排工具名——工具 schema 进每次请求的前缀；也没有另一套「按会话 ID 通用控制」的工具族。
+- subagent 不设任何自动限制：`subagent_drive` 没有 `max_turns` / `max_tokens` 参数，迭代轮数、token、并发数、嵌套层数都不限（也不写深度标记）。插件里没有会在别人干到一半时自动按下停止键的机制——停滞只提醒、空闲回收默认关（0 = 不收）。要停只能显式 `subagent_stop`（`interrupt` 打断这一轮 / `close` 收进程）；父会话/宿主退出时子进程会被一起收掉，但把 grace 留到 3 秒，让正在跑的那一轮有机会落盘。不设深度标记后，`resolveCliCommand` 只认 `apps/cli/**` 下的入口，避免 dev 下拿探针脚本当入口导致无限自我派生。
+- 工具面是**四个动词、一个主语**（`session_id`）：`subagent_drive`（不给 id 新建、给 id 接管任意已落盘会话或追加一句，拒绝接管当前会话自己）/ `inspect`（状态与 `full` 收尾视图、`view: turns|grep|transcript` 三档内容；`session_ids` 可批量，`full` 与 `view` 同用时再附一份收尾投影）/ `wait` / `stop`（`interrupt|close`；`interrupt` 等到这一轮真的停下才回报，`close` 里 `all` 选全集、`idle` 只收跑完的，给了 id 就只在那几条里挑）。同一件事的不同力度用参数表达，不按实现分层摊成一排工具名——工具 schema 进每次请求的前缀；也没有另一套「按会话 ID 通用控制」的工具族。真实链路里模型会把 schema 里的字段全部填满（`view` 与 `session_ids` 同传、`full` 与 `view` 同传），所以这些组合必须**可用**而不是被拒：拒绝一次它就会用同样的参数重试。
 
 - 进程内委派是插件 `plugins/subagent-legacy/`：`agent` 工具、7 种内置类型、委派 prompt 段落都在插件里；内核只留机制（`ctx.subagents`，实现在 `apps/cli/src/agents/PluginSubagentHost.ts` + `SubagentTaskManager.ts`）。停用该插件后既没有 `agent` 工具，也没有提示词里的委派指引。要「独立环境 / 长时间盯着 / 反复追问」用 `plugins/subagent`（独立会话），要「拆开一段推理、并行几份只读调研」用这条进程内委派。
 - 内置类型：general-purpose、Explore、Implementer、Reviewer、Tester、Planner、Proposal；`maxTurns` 唯一默认值在 `plugins/subagent-legacy/definitions.ts`（999：截断一次要重做半成品，代价比多跑几轮高）。

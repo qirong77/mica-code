@@ -485,7 +485,7 @@ export async function runAppServer(options: AppServerOptions): Promise<void> {
     if (options.role) {
       // 角色文件被删掉不该让宿主起不来：这是宿主，不是一次性命令。降级成
       // 默认角色 + 一条 warning，与 applyRoleOverride（turn/start 路径）和
-      // resume 的角色回退同一策略。不接住的话 `subagent_open({ role })` 写错
+      // resume 的角色回退同一策略。不接住的话 `subagent_drive({ role })` 写错
       // 一个名字就得到「app-server 已退出（code 1）」，看不出是角色的问题。
       try {
         agent.setRole(options.role);

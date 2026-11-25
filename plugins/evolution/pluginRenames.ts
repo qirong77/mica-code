@@ -14,23 +14,30 @@ const RENAMED_PLUGINS: Record<string, string> = {
 /**
  * 旧工具名 → 现在的名字。
  *
- * 不能按前缀换：改名同时把工具面从 11 个收到 6 个（同一件事的不同力度用参数表达），
- * 所以 `sidecar_turns` / `sidecar_grep` / `sidecar_transcript` 都落到 `subagent_read`，
- * `sidecar_spawn` / `sidecar_attach` 都落到 `subagent_open`，`sidecar_abort` / `sidecar_close`
- * 都落到 `subagent_stop`。
+ * 不能按前缀换：改名同时把工具面从 11 个收到 4 个（同一件事的不同力度用参数表达），
+ * 所以 `sidecar_spawn` / `sidecar_attach` / `sidecar_send` 都落到 `subagent_drive`，
+ * `sidecar_status` / `collect` / `turns` / `grep` / `transcript` 都落到 `subagent_inspect`，
+ * `sidecar_abort` / `sidecar_close` 都落到 `subagent_stop`。
  */
 const RENAMED_TOOLS: Record<string, string> = {
-  'sidecar_spawn': 'subagent_open',
-  'sidecar_attach': 'subagent_open',
-  'sidecar_send': 'subagent_send',
-  'sidecar_status': 'subagent_status',
-  'sidecar_collect': 'subagent_status',
-  'sidecar_turns': 'subagent_read',
-  'sidecar_grep': 'subagent_read',
-  'sidecar_transcript': 'subagent_read',
+  'sidecar_spawn': 'subagent_drive',
+  'sidecar_attach': 'subagent_drive',
+  'sidecar_send': 'subagent_drive',
+  'sidecar_status': 'subagent_inspect',
+  'sidecar_collect': 'subagent_inspect',
+  'sidecar_turns': 'subagent_inspect',
+  'sidecar_grep': 'subagent_inspect',
+  'sidecar_transcript': 'subagent_inspect',
   'sidecar_wait': 'subagent_wait',
   'sidecar_abort': 'subagent_stop',
   'sidecar_close': 'subagent_stop',
+  // 改名过程中出现过、但没进过版本的中间名：本机可能在改到一半时写过盘。按名字查表是幂等的，
+  // 把它们留在这张表里，任何一处残留都会在下次迁移时收敛到现在的名字。
+  'subagent_open': 'subagent_drive',
+  'subagent_send': 'subagent_drive',
+  'subagent_status': 'subagent_inspect',
+  'subagent_collect': 'subagent_inspect',
+  'subagent_read': 'subagent_inspect',
 };
 
 /** 改名后已不存在的工具：用户的停用选择没有意义了，直接从名单里去掉。 */

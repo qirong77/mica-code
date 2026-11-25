@@ -3,14 +3,14 @@ import type { SubagentTurn } from './transcript.js';
 /**
  * 子会话的「动态」：它自己发生的事，父会话不必问就能知道。
  *
- * 没有这一层时，subagent 的一切都靠父会话主动 `subagent_wait` / `subagent_status` 去捞：
+ * 没有这一层时，subagent 的一切都靠父会话主动 `subagent_wait` / `subagent_inspect` 去捞：
  * 父会话这一轮一旦结束（用户去忙别的了），子会话跑完的结果就没人读，只能等用户回来
  * 再问一句「跑完了吗」。事件是反方向的：**子会话结束、卡住、进程退出**都记一条，
  * 父会话下一轮开始时由 prompt 段落注入一次，读后即清。
  *
  * 三条硬约束：
  * - 只留最新的若干条（父会话的上下文比审计日志贵得多）；
- * - 每条一行摘要，细节靠工具按需去取（`subagent_status` / `subagent_read`）；
+ * - 每条一行摘要，细节靠工具按需去取（`subagent_inspect`）；
  * - 读一次就清，否则同一件事会在每一轮里重复进 prompt，既撑上下文又打破 prompt cache。
  */
 
@@ -148,10 +148,13 @@ export function renderSubagentEvents(events: readonly SubagentEvent[]): string {
     '',
     ...events.map((event) => {
       const detail = event.detail ? ` · ${event.detail}` : '';
-      return `- [${clock(event.at)}] ${event.sessionId.slice(0, 8)}「${event.title}」${KIND_LABELS[event.kind]}：${event.summary}${detail}`;
+      // 会话 id 必须以完整形态出现：所有 id 都以 `yyyymmdd` 开头，截断到 8 位之后
+      // 每条事件看起来都叫 "20261125"——既分不出是谁，拿去当 `inspect` 的前缀还会
+      // 同时命中多个会话（`get()` 只在唯一前缀时才返回）。
+      return `- [${clock(event.at)}] ${event.sessionId}「${event.title}」${KIND_LABELS[event.kind]}：${event.summary}${detail}`;
     }),
     '',
-    '要细节用 `subagent_status` / `subagent_read` 按需取；结果已经拿到、不再需要它的进程就用 `subagent_stop({ action: "close" })` 收掉。',
+    '要细节用 `subagent_inspect` 按需取；结果已经拿到、不再需要它的进程就用 `subagent_stop({ action: "close" })` 收掉。',
   ];
   return lines.join('\n');
 }

@@ -76,7 +76,7 @@ describe('renderSubagentEvents', () => {
     expect(renderSubagentEvents([])).toBe('');
   });
 
-  it('lists one line per event with the id prefix and a next step', () => {
+  it('lists one line per event with the full id and a next step', () => {
     const log = new SubagentEventLog();
     log.add({
       sessionId: 'abcdef123456',
@@ -85,7 +85,9 @@ describe('renderSubagentEvents', () => {
       summary: '完成 · 42s · 全部通过',
     });
     const text = renderSubagentEvents(log.take());
-    expect(text).toContain('abcdef12');
+    // 完整 id：真实 id 都以日期开头，截断到 8 位每条都是 "20261125"，
+    // 既分不出是谁，也没法拿去当 `subagent_inspect` 的唯一前缀。
+    expect(text).toContain('abcdef123456');
     expect(text).toContain('跑测试');
     expect(text).toContain('全部通过');
     expect(text).toContain('subagent_stop');

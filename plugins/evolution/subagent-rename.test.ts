@@ -35,13 +35,17 @@ describe('pluginRenames', () => {
     expect(renameSectionId('plugin:sidecar/events')).toBe('plugin:subagent/events');
     expect(renameSectionId('plugin:subagent/delegation')).toBe('plugin:subagent-legacy/delegation');
     expect(renameSectionId('skills')).toBe('skills');
-    // 工具面同时从 11 个收到 6 个：同名的动作落进同一个工具，参数表达力度。
-    expect(renameToolName('sidecar_spawn')).toBe('subagent_open');
-    expect(renameToolName('sidecar_attach')).toBe('subagent_open');
-    expect(renameToolName('sidecar_turns')).toBe('subagent_read');
-    expect(renameToolName('sidecar_transcript')).toBe('subagent_read');
+    // 工具面同时从 11 个收到 4 个：同一个动作的不同力度落进同一个工具，用参数表达。
+    expect(renameToolName('sidecar_spawn')).toBe('subagent_drive');
+    expect(renameToolName('sidecar_attach')).toBe('subagent_drive');
+    expect(renameToolName('sidecar_send')).toBe('subagent_drive');
+    expect(renameToolName('sidecar_turns')).toBe('subagent_inspect');
+    expect(renameToolName('sidecar_grep')).toBe('subagent_inspect');
     expect(renameToolName('sidecar_abort')).toBe('subagent_stop');
     expect(renameToolName('sidecar_close')).toBe('subagent_stop');
+    // 改名过程中写过的中间名同样收敛，迁移重跑也不会把它们留在原地。
+    expect(renameToolName('subagent_open')).toBe('subagent_drive');
+    expect(renameToolName('subagent_read')).toBe('subagent_inspect');
     expect(renameToolName('agent')).toBe('agent');
   });
 });
@@ -76,8 +80,8 @@ describe('会话迁移 subagent-plugin-rename', () => {
       'subagent',
       'btw',
     ]);
-    // 两个旧名落进同一个新工具后要去重：停用 `subagent_open` 一条就够。
-    expect(doc.snapshot.capabilitySelection.disabledTools).toEqual(['subagent_open', 'subagent_read', 'bash']);
+    // 两个旧名落进同一个新工具后要去重：停用 `subagent_drive` 一条就够。
+    expect(doc.snapshot.capabilitySelection.disabledTools).toEqual(['subagent_drive', 'subagent_inspect', 'bash']);
     expect(doc.snapshot.capabilitySelection.disabledSkills).toEqual(['subagent', 'note']);
   });
 
@@ -136,7 +140,7 @@ describe('数据迁移 subagent-rename', () => {
     expect(controls.order).toEqual(['plugin:subagent/events', 'plugin:subagent-legacy/delegation']);
 
     const config = read(join(root, 'config.json'));
-    expect(config.capabilityDefaults.disabledTools).toEqual(['subagent_open', 'subagent_status', 'bash']);
+    expect(config.capabilityDefaults.disabledTools).toEqual(['subagent_drive', 'subagent_inspect', 'bash']);
     expect(config.capabilityDefaults.disabledSkills).toEqual(['subagent']);
 
     expect(existsSync(join(root, 'sidecar'))).toBe(false);

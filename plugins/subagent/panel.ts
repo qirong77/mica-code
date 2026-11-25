@@ -162,12 +162,12 @@ export function createPanelHandler(deps: PanelDeps): PluginPanelHandler {
         case CONTINUE_ACTION: {
           const text =
             input.action === COLLECT_ACTION
-              ? '用 subagent_status({ full: true }) 汇总当前所有子会话的结果（状态、结论、失败的工具），然后 subagent_stop({ action: "close", idle: true }) 收掉已经跑完的。'
+              ? '用 subagent_inspect({ full: true }) 汇总当前所有子会话的结果（状态、结论、失败的工具），然后 subagent_stop({ action: "close", idle: true }) 收掉已经跑完的。'
               : input.action === SPAWN_ACTION
-                ? '用 subagent_open 派一个子会话去干活：'
+                ? '用 subagent_drive 派一个子会话去干活：'
                 : entry
-                  ? `用 subagent_send 让子会话 ${entry.id} 接着干：`
-                  : '用 subagent_status 看看当前有哪些子会话。';
+                  ? `用 subagent_drive 让子会话 ${entry.id} 接着干：`
+                  : '用 subagent_inspect 看看当前有哪些子会话。';
           // 不替用户按发送：这些事由模型带着对话上下文去写提示词，用户先看一眼再发。
           return { compose: text };
         }

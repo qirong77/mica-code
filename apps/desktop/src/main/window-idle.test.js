@@ -105,11 +105,11 @@ describe('resolveMs', () => {
     expect(resolveMs('0', 7)).toBe(0)
   })
 
-  it('默认时长：终端比浏览器短（浏览器窗口重建代价更大）', () => {
+  it('默认时长：终端与浏览器都是 30 分钟', () => {
     expect(TERMINAL_IDLE_REAP_MS).toBe(30 * MINUTE)
-    expect(BROWSER_IDLE_REAP_MS).toBe(60 * MINUTE)
+    expect(BROWSER_IDLE_REAP_MS).toBe(30 * MINUTE)
     expect(WINDOW_IDLE_SWEEP_MS).toBe(MINUTE)
-    expect(BROWSER_IDLE_REAP_MS).toBeGreaterThan(TERMINAL_IDLE_REAP_MS)
+    expect(BROWSER_IDLE_REAP_MS).toBe(TERMINAL_IDLE_REAP_MS)
   })
 })
 

@@ -118,7 +118,7 @@ export class SubagentTranscript {
    * 每有一次可见变化就 +1（不随 `lastWarning` 清空）。
    *
    * 父会话反复查进度是这个能力的常态，而每次渲染都是几千字符的工具输出、直接进
-   * 父会话的上下文。有了这个计数，`subagent_status` 才能认出「什么都没发生」并只回
+   * 父会话的上下文。有了这个计数，`subagent_inspect` 才能认出「什么都没发生」并只回
    * 一行——否则一次 poll 就是一次全量投影，十次就把上下文吃光。
    */
   revision = 0;
@@ -270,7 +270,7 @@ export class SubagentTranscript {
    * 接管一条已有会话时，把落盘的历史填进投影。
    *
    * resume 之后子进程有自己的完整上下文，但它**不会把历史重发一遍通知**。不填的话
-   * `subagent_read` 的 turns 视图会说「还没有任何一轮对话」，而它显然已经干过活。
+   * `subagent_inspect` 的 turns 视图会说「还没有任何一轮对话」，而它显然已经干过活。
    *
    * `totalTurns` 用文件里的真实轮数（可以大于这里留下的条数）：`omittedTurnCount`
    * 会因此如实说出「更早的 N 轮没保留」。

@@ -99,12 +99,10 @@ describe('setup', () => {
     expect(skill.content.length).toBeGreaterThan(200);
     expect(skill.description).toContain('会话');
 
-    // 六个动词，一个主语：开 / 说 / 等 / 看 / 读 / 停。
+    // 四个动词，一个主语：给活 / 看 / 等 / 停。
     expect(tools.map((tool) => tool.name).sort()).toEqual([
-      'subagent_open',
-      'subagent_read',
-      'subagent_send',
-      'subagent_status',
+      'subagent_drive',
+      'subagent_inspect',
       'subagent_stop',
       'subagent_wait',
     ]);

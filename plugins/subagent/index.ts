@@ -8,10 +8,8 @@ import { renderSubagentEvents, type SubagentEvent } from './events.js';
 import { createPanelHandler } from './panel.js';
 import { SubagentRegistry } from './registry.js';
 import {
-  SubagentOpenTool,
-  SubagentReadTool,
-  SubagentSendTool,
-  SubagentStatusTool,
+  SubagentDriveTool,
+  SubagentInspectTool,
   SubagentStopTool,
   SubagentWaitTool,
 } from './tools.js';
@@ -155,15 +153,13 @@ const plugin: MicaPlugin = {
     });
     // primaryAgentOnly：子代理不该再派生会话，否则会变成没人收的进程树。
     // 图标整族一个（同 background_tasks_*）：它们说的是同一件事——一条被派出去的子会话。
-    // 六个动词，一个主语：开 / 说 / 等 / 看 / 读 / 停。同一件事的不同力度用参数表达，
+    // 四个动词，一个主语：给活 / 看 / 等 / 停。同一件事的不同力度用参数表达，
     // 不再一档一个工具名——工具 schema 进每次请求的前缀，名字越少越省。
     const options = { icon: '🧵', primaryAgentOnly: true } as const;
     const tools = [
-      ctx.tools.register(new SubagentOpenTool(registry), options),
-      ctx.tools.register(new SubagentSendTool(registry), options),
+      ctx.tools.register(new SubagentDriveTool(registry), options),
+      ctx.tools.register(new SubagentInspectTool(registry), options),
       ctx.tools.register(new SubagentWaitTool(registry), options),
-      ctx.tools.register(new SubagentStatusTool(registry), options),
-      ctx.tools.register(new SubagentReadTool(registry), options),
       ctx.tools.register(new SubagentStopTool(registry), options),
     ];
     // 推送：子会话自己发生的事（跑完、退出、卡住）下一轮直接出现在 prompt 里。

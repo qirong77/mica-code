@@ -36,7 +36,7 @@ async function flush(): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, 0));
 }
 
-function subagentTool(name = 'subagent_open') {
+function subagentTool(name = 'subagent_drive') {
   return registerRuntimeTool(
     {
       name,
@@ -58,7 +58,7 @@ describe('tool catalog projection', () => {
       execute: async () => 'ok',
     });
 
-    expect(getToolCatalogProjection().map((entry) => entry.name)).toEqual(['subagent_open']);
+    expect(getToolCatalogProjection().map((entry) => entry.name)).toEqual(['subagent_drive']);
     expect(getToolCatalogProjection()[0]).toMatchObject({
       pluginId: 'subagent',
       group: { key: 'plugin:subagent', label: 'Subagent' },
@@ -74,7 +74,7 @@ describe('tool catalog projection', () => {
 
     expect(readToolCatalogProjection(dir)).toEqual([
       {
-        name: 'subagent_open',
+        name: 'subagent_drive',
         description: '开一个子会话',
         readOnly: false,
         parameters: [{ name: 'prompt', type: 'string', required: false, description: '任务' }],
@@ -112,7 +112,7 @@ describe('tool catalog projection', () => {
     subagentTool();
     await flush();
 
-    expect(readToolCatalogProjection(dir).map((entry) => entry.name)).toEqual(['ask_user', 'subagent_open']);
+    expect(readToolCatalogProjection(dir).map((entry) => entry.name)).toEqual(['ask_user', 'subagent_drive']);
   });
 
   it('ignores broken files instead of failing the catalog', () => {

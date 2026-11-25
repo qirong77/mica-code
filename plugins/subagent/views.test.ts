@@ -98,7 +98,7 @@ describe('renderTranscript', () => {
 
     expect(text).toContain('[用户] 跑一遍测试');
     expect(text).toContain('[助手] 三个用例失败：module-a');
-    // 工具行与思考不属于「对话」：要看它们是 subagent_status 的事。
+    // 工具行与思考不属于「对话」：要看它们是 subagent_inspect 的事。
     expect(text).not.toContain('run_shell bun run test');
     expect(text).not.toContain('工具调用');
   });
@@ -247,7 +247,7 @@ describe('grepTranscript', () => {
     // 默认只搜对话：错误串在工具输出里，这次搜不到——但要说清它在哪。
     const textOnly = grepTranscript(entryFor(transcript), { pattern: /Cannot find/ });
     expect(textOnly).toContain('工具输出里有 1 处');
-    expect(textOnly).toContain('subagent_read({ view: "grep", scope: "tools" })');
+    expect(textOnly).toContain('subagent_inspect({ view: "grep", scope: "tools" })');
 
     const tools = grepTranscript(entryFor(transcript), { pattern: /Cannot find/, scope: 'tools' });
     expect(tools).toContain('[第1轮 · 工具]');
@@ -289,6 +289,6 @@ describe('renderCollect', () => {
   });
 
   it('says how to get started when nothing is running', () => {
-    expect(renderCollect([])).toContain('subagent_open');
+    expect(renderCollect([])).toContain('subagent_drive');
   });
 });

@@ -72,7 +72,7 @@ function makeRegistry(
   );
 }
 
-/** 起一个假子会话并返回它的条目与进程；父会话这一侧看到的就是 `subagent_open` 之后的状态。 */
+/** 起一个假子会话并返回它的条目与进程；父会话这一侧看到的就是 `subagent_drive` 之后的状态。 */
 async function spawnFake(registry: SubagentRegistry, process: FakeProcess) {
   startMock.mockResolvedValue(process);
   const result = await registry.spawn({ prompt: '跑一遍测试' });

@@ -51,7 +51,7 @@ mica 选后者，这个插件就是「洗」的地方。
 | `notebook-mcp` | 将旧 `notebook_read` / `notebook_write` 工具停用项迁为 `mica-plugin-notebook` MCP 停用项；移除已撤下的 `notebook` skill 选择，其它能力与会话内容不动。 |
 | `notebook-http-api` | Notebook 改为独立 HTTP API 后，移除上一步迁移留下的 `mica-plugin-notebook` MCP 停用项；保留其它 MCP 停用项。 |
 | `session-turn-state` | 给缺失或非法的会话顶层 `turnState` 补为 `completed`；当前桌面读取只把剩余异常当作损坏数据处理，不再把缺失字段当作旧版本能力。 |
-| `subagent-plugin-rename` | `sidecar` 插件改名成 `subagent`、旧的进程内委派插件 `subagent` 改成 `subagent-legacy`（映射表 `pluginRenames.ts`）：用量记录的 `pluginId` 与能力选择里的 `sidecar_*` 工具名 / `sidecar` skill 名跟着改；工具面同时从 11 个收到 6 个，于是旧名按表落进新工具（`sidecar_turns` / `grep` / `transcript` → `subagent_read`，`spawn` / `attach` → `subagent_open`，`abort` / `close` → `subagent_stop`）并去重，已撤下的 `session-control` 从停用名单里去掉。随会话文件变化反复重跑，因此只认能证明旧身份的写法（委派记录带 `origin: 'delegation'` 或 `initiatedByCallId`）。 |
+| `subagent-plugin-rename` | `sidecar` 插件改名成 `subagent`、旧的进程内委派插件 `subagent` 改成 `subagent-legacy`（映射表 `pluginRenames.ts`）：用量记录的 `pluginId` 与能力选择里的 `sidecar_*` 工具名 / `sidecar` skill 名跟着改；工具面同时从 11 个收到 4 个，于是旧名按表落进新工具（`sidecar_spawn` / `attach` / `send` → `subagent_drive`，`status` / `collect` / `turns` / `grep` / `transcript` → `subagent_inspect`，`abort` / `close` → `subagent_stop`）并去重，已撤下的 `session-control` 从停用名单里去掉。随会话文件变化反复重跑，因此只认能证明旧身份的写法（委派记录带 `origin: 'delegation'` 或 `initiatedByCallId`）。 |
 
 `pi-messages-v1` 只读文档本身：内联图片保留数据与 MIME，远程图片 URL / 文件引用保留为 `[Image](引用)` 文本（pi 图片块只支持内联数据）。Responses reasoning 的完整原项保存到 `thinkingSignature`，正文项的 id / phase 保存到 `textSignature`，函数调用与结果共享 pi 的 `call_id|item_id`。缺失的时间取会话创建时间，缺失的用量填零；现有用量记录的 token 数映射到消息内的 pi usage，不改原账本。无法识别的消息会使该文件转换失败，保留原文，不会把半份历史标成 pi。运行时不再支持旧 wire 历史，必须先经此迁移。
 

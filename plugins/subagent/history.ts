@@ -6,7 +6,7 @@ import type { SubagentToolCall, SubagentTurn } from './transcript.js';
  * 接管一条已有会话时的历史来源。
  *
  * resume 不发通知：子进程把它自己的历史从会话文件加载进上下文，而父会话这边看到的
- * 通知流是**空的**。不补这一层，`subagent_open` 之后 `subagent_read` 的 turns /
+ * 通知流是**空的**。不补这一层，`subagent_drive` 之后 `subagent_inspect` 的 turns /
  * transcript 视图会告诉你「还没有任何一轮对话」——而它明明已经干了半小时。
  *
  * 读的是落盘的一份 `$MICA_HOME/sessions/<id>.json`：只有 UI 视角的消息（用户说了什么、

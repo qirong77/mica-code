@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { SubagentRegistry } from './registry.js';
-import { SubagentOpenTool, SubagentReadTool, SubagentStatusTool, SubagentStopTool, SubagentWaitTool } from './tools.js';
+import { SubagentDriveTool, SubagentInspectTool, SubagentStopTool, SubagentWaitTool } from './tools.js';
 import { SubagentTranscript } from './transcript.js';
 
 afterEach(() => vi.useRealTimers());
@@ -15,8 +15,8 @@ function entry(id = 'child') {
 }
 
 describe('subagent tool boundaries', () => {
-  it('offers no iteration or token limits on open', () => {
-    const tool = new SubagentOpenTool({} as SubagentRegistry);
+  it('offers no iteration or token limits on drive', () => {
+    const tool = new SubagentDriveTool({} as SubagentRegistry);
     // 迭代上限与 token 预算都不暴露给模型：派活时只写目标，不要顺手给自己上闸。
     expect(tool.input_schema.properties?.max_turns).toBeUndefined();
     expect(tool.input_schema.properties?.max_tokens).toBeUndefined();
@@ -32,10 +32,10 @@ describe('subagent tool boundaries', () => {
     },
   );
 
-  it('passes the parent cancellation signal through a spawn', async () => {
+  it('passes the parent cancellation signal through a new session', async () => {
     const spawn = vi.fn(async () => ({ ok: false, error: 'cancelled' }));
     const controller = new AbortController();
-    const tool = new SubagentOpenTool({ spawn } as unknown as SubagentRegistry);
+    const tool = new SubagentDriveTool({ spawn } as unknown as SubagentRegistry);
     await tool.execute({ prompt: 'work' }, { signal: controller.signal });
     expect(spawn).toHaveBeenCalledWith({ prompt: 'work', signal: controller.signal });
   });
@@ -62,21 +62,29 @@ describe('subagent tool boundaries', () => {
   });
 });
 
-describe('subagent_open: 新建与接管是同一个动作的两条路', () => {
+describe('subagent_drive: 新建、接管、追加是同一个动作', () => {
   it('两个都没给时说清少什么，不凭空开一条空会话', async () => {
     const spawn = vi.fn();
     const attach = vi.fn();
-    const tool = new SubagentOpenTool({ spawn, attach } as unknown as SubagentRegistry);
+    const tool = new SubagentDriveTool({ spawn, attach } as unknown as SubagentRegistry);
     expect(await tool.execute({})).toContain('session_id');
     expect(spawn).not.toHaveBeenCalled();
     expect(attach).not.toHaveBeenCalled();
   });
 
-  it('给 session_id 就接管，不会新建', async () => {
+  it('只给 prompt 就新建，不碰已有会话', async () => {
+    const spawn = vi.fn(async () => ({ ok: false, error: 'stop-here' }));
+    const attach = vi.fn();
+    const tool = new SubagentDriveTool({ spawn, attach } as unknown as SubagentRegistry);
+    expect(await tool.execute({ prompt: '跑一组测试' })).toBe('stop-here');
+    expect(attach).not.toHaveBeenCalled();
+  });
+
+  it('只给 session_id 就接管，不新建、不投消息', async () => {
     const child = entry();
     const spawn = vi.fn();
     const attach = vi.fn(async () => ({ ok: true as const, entry: child }));
-    const tool = new SubagentOpenTool({ spawn, attach } as unknown as SubagentRegistry);
+    const tool = new SubagentDriveTool({ spawn, attach, get: () => undefined } as unknown as SubagentRegistry);
     const result = await tool.execute({ session_id: 'child' });
     expect(result).toContain('已接管');
     expect(attach).toHaveBeenCalledWith({ sessionId: 'child' });
@@ -84,25 +92,33 @@ describe('subagent_open: 新建与接管是同一个动作的两条路', () => {
     expect(child.process.send).not.toHaveBeenCalled();
   });
 
-  it('接管并同时派活时，接完就把那句话投出去', async () => {
+  it('给 session_id + prompt 就是追加一句（顺带接管）', async () => {
     const child = entry();
     const attach = vi.fn(async () => ({ ok: true as const, entry: child }));
-    const tool = new SubagentOpenTool({ attach } as unknown as SubagentRegistry);
+    const tool = new SubagentDriveTool({ attach, get: () => undefined } as unknown as SubagentRegistry);
     const result = await tool.execute({ session_id: 'child', prompt: '继续把测试跑完' });
-    expect(result).toContain('已接管');
     expect(result).toContain('已发送');
     expect(child.process.send).toHaveBeenCalledWith('继续把测试跑完');
   });
 
-  it('接管的对话关不回自己', async () => {
-    const tool = new SubagentOpenTool({
+  it('前缀按登记表解析成完整 id 再接管', async () => {
+    const child = entry('20261125T095054Z-rrtwhn');
+    const attach = vi.fn(async () => ({ ok: true as const, entry: child }));
+    const tool = new SubagentDriveTool({ attach, get: () => child } as unknown as SubagentRegistry);
+    await tool.execute({ session_id: '20261125T09' });
+    expect(attach).toHaveBeenCalledWith({ sessionId: '20261125T095054Z-rrtwhn' });
+  });
+
+  it('接管的错误照实回给模型', async () => {
+    const tool = new SubagentDriveTool({
       attach: vi.fn(async () => ({ ok: false as const, error: '不能接管当前会话自己；要接着说就直接继续当前对话。' })),
+      get: () => undefined,
     } as unknown as SubagentRegistry);
     expect(await tool.execute({ session_id: 'self', prompt: 'x' })).toContain('不能接管当前会话自己');
   });
 });
 
-describe('subagent_status: 进度与收尾是同一个视图的两种详细度', () => {
+describe('subagent_inspect: 状态与内容是一个「看」轴的六档', () => {
   function registry(entries: unknown[]) {
     return {
       sweep: vi.fn(),
@@ -112,51 +128,84 @@ describe('subagent_status: 进度与收尾是同一个视图的两种详细度',
     } as unknown as SubagentRegistry;
   }
 
-  it('不带 id 与 full 时每条一行', async () => {
-    const tool = new SubagentStatusTool(registry([entry('a'), entry('b')]));
+  it('什么都不给时每条一行', async () => {
+    const tool = new SubagentInspectTool(registry([entry('a'), entry('b')]));
     const text = await tool.execute({});
     expect(text).toContain('a · 空闲');
     expect(text).toContain('b · 空闲');
   });
 
   it('full: true 换成收尾视图（原来的 collect）', async () => {
-    const tool = new SubagentStatusTool(registry([entry('a')]));
+    const tool = new SubagentInspectTool(registry([entry('a')]));
     const text = await tool.execute({ full: true });
     expect(text).not.toContain('（还没有内容）');
     expect(text).toContain('a');
   });
 
   it('session_ids 只汇总这几条', async () => {
-    const tool = new SubagentStatusTool(registry([entry('a'), entry('b')]));
+    const tool = new SubagentInspectTool(registry([entry('a'), entry('b')]));
     const text = await tool.execute({ session_ids: ['a'] });
     expect(text).toContain('a');
     expect(text).not.toContain('b · ');
   });
 
   it('找不到的 id 直接说找不到', async () => {
-    const tool = new SubagentStatusTool(registry([]));
+    const tool = new SubagentInspectTool(registry([]));
     expect(await tool.execute({ session_id: 'nope' })).toContain('找不到子会话');
   });
-});
 
-describe('subagent_read: 三档成本用一个 view 选', () => {
-  const tool = new SubagentReadTool({ sweep: vi.fn(), get: vi.fn(), markRead: vi.fn() } as unknown as SubagentRegistry);
+  it('view 只能取三档，且必须带会话', async () => {
+    const tool = new SubagentInspectTool(registry([entry('a')]));
+    expect(await tool.execute({ session_id: 'a', view: 'everything' })).toContain('view 必须为');
+    expect(await tool.execute({ view: 'turns' })).toContain('需要 session_id 或 session_ids');
+  });
 
-  it('view 只能取三档', async () => {
-    expect(await tool.execute({ session_id: 'x', view: 'everything' })).toContain('view 必须为');
+  it('view + session_ids 一次读多条（真实链路里模型就是这么传的）', async () => {
+    const a = entry('a');
+    const b = entry('b');
+    const tool = new SubagentInspectTool(registry([a, b]));
+    const text = await tool.execute({ view: 'turns', session_ids: ['a', 'b'] });
+    expect(text).toContain('会话 a');
+    expect(text).toContain('会话 b');
+    expect(text).not.toContain('需要 session_id');
+  });
+
+  it('多条读正文时按条分摊预算，不会一次灌进三份全文', async () => {
+    const entries = ['a', 'b', 'c'].map((id) => {
+      const item = entry(id);
+      item.process.transcript.apply({ method: 'turn/started', params: { turn: { id: `t-${id}` } } });
+      item.process.transcript.apply({
+        method: 'item/completed',
+        params: { item: { id: `m-${id}`, type: 'agentMessage', text: `${id.repeat(4_000)}` } },
+      });
+      return item;
+    });
+    const tool = new SubagentInspectTool(registry(entries));
+    const text = await tool.execute({ view: 'transcript', session_ids: ['a', 'b', 'c'], max_chars: 3_000 });
+    // 每条至少 1000 字符预算，而不是各自吃满 3000。
+    expect(text.length).toBeLessThan(3_200);
+    for (const id of ['a', 'b', 'c']) expect(text).toContain(`会话 ${id}`);
+  });
+
+  it('full 与 view 同用时再附一份收尾投影（模型会把两个字段一起填）', async () => {
+    const tool = new SubagentInspectTool(registry([entry('a'), entry('b')]));
+    const text = await tool.execute({ view: 'turns', session_ids: ['a', 'b'], full: true });
+    // renderCollect 的开头是「N 个子会话（x 个在跑 / y 个空闲）」，turns 视图没有这行。
+    expect(text).toContain('2 个子会话（0 个在跑 / 2 个空闲）');
+    expect(text).toContain('会话 a');
+    expect(text).toContain('会话 b');
   });
 
   it('grep 缺 pattern 时不猜', async () => {
-    const registry = {
-      sweep: vi.fn(),
-      get: vi.fn(() => entry('x')),
-      markRead: vi.fn(),
-    } as unknown as SubagentRegistry;
-    expect(await new SubagentReadTool(registry).execute({ session_id: 'x', view: 'grep' })).toContain('需要提供 pattern');
+    expect(await new SubagentInspectTool(registry([entry('a')])).execute({ session_id: 'a', view: 'grep' })).toContain(
+      '需要提供 pattern',
+    );
   });
 
   it('读不到会话时给下一步', async () => {
-    expect(await tool.execute({ session_id: 'x', view: 'turns' })).toContain('找不到子会话');
+    expect(await new SubagentInspectTool(registry([])).execute({ session_id: 'x', view: 'turns' })).toContain(
+      '找不到子会话',
+    );
   });
 });
 
@@ -188,5 +237,71 @@ describe('subagent_stop: 打断与收掉是同一个动作的两种力度', () =
     expect(closeMany).toHaveBeenCalledWith('all');
     await tool.execute({ action: 'close', idle: true });
     expect(closeMany).toHaveBeenCalledWith('idle');
+  });
+
+  it('close 给了 id 就只动那一条：idle 是过滤条件，不是「所有空闲的」', async () => {
+    const a = entry('a');
+    const b = entry('b');
+    const closeMany = vi.fn(async (scope: unknown) => (Array.isArray(scope) ? scope : []));
+    const get = (id: string) => (id === 'a' ? a : id === 'b' ? b : null);
+    const tool = new SubagentStopTool({ get, closeMany } as unknown as SubagentRegistry);
+    const output = await tool.execute({ action: 'close', session_id: 'a', idle: true });
+    // 真实链路里模型就是这么调的（id 与 idle 一起给）：不能把 b 一起收掉。
+    expect(closeMany).toHaveBeenCalledWith(['a']);
+    expect(output).toContain('已关闭：a');
+    expect(output).not.toContain('已关闭：b');
+  });
+
+  it('close 的 idle 把还在跑的那条留在原地，并说清为什么', async () => {
+    const running = entry('busy');
+    running.process.transcript.apply({ method: 'turn/started', params: { turn: { id: 't1' } } });
+    const closeMany = vi.fn(async () => []);
+    const tool = new SubagentStopTool({ get: () => running, closeMany } as unknown as SubagentRegistry);
+    const output = await tool.execute({ action: 'close', session_id: 'busy', idle: true });
+    expect(closeMany).not.toHaveBeenCalled();
+    expect(output).toContain('还在跑，没动：busy');
+  });
+
+  it('all + idle 是交集：只收跑完的，不收还在跑的', async () => {
+    const idle = entry('idle');
+    const running = entry('running');
+    running.process.transcript.apply({ method: 'turn/started', params: { turn: { id: 't1' } } });
+    const closeMany = vi.fn(async (scope: unknown) => (Array.isArray(scope) ? scope : []));
+    const tool = new SubagentStopTool({
+      list: () => [idle, running],
+      closeMany,
+    } as unknown as SubagentRegistry);
+    const output = await tool.execute({ action: 'close', all: true, idle: true });
+    expect(closeMany).toHaveBeenCalledWith(['idle']);
+    expect(output).toContain('已关闭：idle');
+    expect(output).toContain('还在跑，没动：running');
+  });
+
+  it('只给 idle 时在全部里挑跑完的', async () => {
+    const idle = entry('idle');
+    const closeMany = vi.fn(async (scope: unknown) => (scope === 'idle' ? ['idle'] : Array.isArray(scope) ? scope : []));
+    const tool = new SubagentStopTool({ list: () => [idle], closeMany } as unknown as SubagentRegistry);
+    expect(await tool.execute({ action: 'close', idle: true })).toContain('已关闭：idle');
+    expect(closeMany).toHaveBeenCalledWith('idle');
+  });
+
+  it('interrupt 只在真正停下之后才说「已打断」', async () => {
+    vi.useFakeTimers();
+    const running = entry('child');
+    running.process.transcript.apply({ method: 'turn/started', params: { turn: { id: 't1' } } });
+    const waitForChange = vi.fn(
+      () => new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 250)),
+    );
+    const tool = new SubagentStopTool({
+      get: () => ({ ...running, process: { ...running.process, abort: async () => true, waitForChange } }),
+    } as unknown as SubagentRegistry);
+    const pending = tool.execute({ action: 'interrupt', session_id: 'child' });
+    await vi.advanceTimersByTimeAsync(4_500);
+    expect(await pending).toContain('还在收尾');
+  });
+
+  it('interrupt 不接受 idle：那不是打断的力度', async () => {
+    const tool = new SubagentStopTool({} as SubagentRegistry);
+    expect(await tool.execute({ action: 'interrupt', idle: true })).toContain('idle 只用于 close');
   });
 });

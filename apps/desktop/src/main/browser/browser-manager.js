@@ -235,6 +235,8 @@ export function createBrowserManager({
       url: current?.url || '',
       title: current?.title || '',
       loading: Boolean(current?.loading),
+      canGoBack: canGo(current, 'canGoBack'),
+      canGoForward: canGo(current, 'canGoForward'),
       palette: chrome.palette,
       tabs: record.tabs.map((tab) => ({
         id: tab.id,
@@ -247,6 +249,17 @@ export function createBrowserManager({
       .catch(() => {
         // chrome 还在加载或窗口已销毁：下一次状态变化会再推一遍
       })
+  }
+
+  /** 顶栏前进 / 后退按钮的可用状态：Electron 39 用 navigationHistory，旧接口兜底 */
+  function canGo(tab, direction) {
+    try {
+      const history = tab?.contents?.navigationHistory
+      if (history && typeof history[direction] === 'function') return Boolean(history[direction]())
+      return Boolean(tab?.contents && tab.contents[direction]?.())
+    } catch {
+      return false
+    }
   }
 
   function syncWindowTitle(record) {
@@ -411,6 +424,32 @@ export function createBrowserManager({
     if (message.action === 'copy') {
       // 顶栏没有 preload，复制统一交给主进程：页面自己复制要过渲染进程的权限判定
       if (typeof message.text === 'string' && message.text) clipboard.writeText(message.text)
+      return
+    }
+    if (message.action === 'paste') {
+      // 应用没有原生菜单，⌘V 不一定能走系统编辑命令：页面把按键交回来，这里直接执行
+      if (!record.chrome.isDestroyed()) record.chrome.paste()
+      return
+    }
+    // 顶栏的前进 / 后退 / 刷新 / 地址导航：与 agent 走同一条 navigate 链路，用户自己
+    // 操作的跳转也照常刷新状态、广播 browser:changed。失败（没有上一页、地址不合法）
+    // 就把状态推回去，地址栏不会一直停在一条根本没打开过的地址上。
+    if (
+      message.action === 'back' ||
+      message.action === 'forward' ||
+      message.action === 'reload' ||
+      message.action === 'navigate'
+    ) {
+      const current = activeTab(record)
+      if (!current) return
+      const options =
+        message.action === 'navigate'
+          ? { url: String(message.url || '') }
+          : { action: message.action }
+      void navigate(current.id, options).catch((error) => {
+        console.warn('[mica-browser] 顶栏导航失败:', error?.message || error)
+        pushChrome(record)
+      })
     }
   }
 

@@ -128,7 +128,7 @@ describe('subagent panel', () => {
       values: {},
     } as never);
     // 汇总要读转录、写结论：那是模型的事，插件只把话放进输入框。
-    expect(result).toMatchObject({ compose: expect.stringContaining('subagent_status') });
+    expect(result).toMatchObject({ compose: expect.stringContaining('subagent_inspect') });
   });
 
   it('tolerates a stale click after the child is gone', async () => {
