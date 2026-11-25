@@ -49,6 +49,7 @@ export function normalizeBrowserSummaries(value) {
         url: String(item.url || ''),
         visible: Boolean(item.visible),
         loading: Boolean(item.loading),
+        lastUsedAt: Number(item.lastUsedAt) || 0,
         activeTabId: item.activeTabId ? String(item.activeTabId) : null,
         tabs
       }

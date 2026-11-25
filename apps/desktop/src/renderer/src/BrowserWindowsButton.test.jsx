@@ -6,11 +6,11 @@ import { BrowserWindowsButton } from './BrowserWindowsButton'
 const render = (props) => renderToStaticMarkup(createElement(BrowserWindowsButton, props))
 
 describe('BrowserWindowsButton', () => {
-  test('stays in the header with no window and says why it is disabled', () => {
+  test('stays in the header and clickable with no window: one click creates one', () => {
     const html = render({ browsers: [] })
     expect(html).toContain('arco-btn')
-    expect(html).toContain('disabled')
-    expect(html).toContain('当前会话还没有打开的窗口')
+    expect(html).not.toContain('disabled')
+    expect(html).toContain('点击新建一个窗口')
   })
 
   test('a single window keeps the old click-to-show/hide button, without a count', () => {
@@ -32,7 +32,8 @@ describe('BrowserWindowsButton', () => {
       ]
     })
     expect(html).toContain('浏览器 · 3 个窗口（1 个已显示）')
-    expect(html).toContain('悬停或点击选择窗口')
+    expect(html).toContain('点击显示 / 收起最近用过的窗口')
+    expect(html).toContain('悬停选择窗口')
     expect(html).toContain('text-[8px]')
     expect(html).toContain('>3</span>')
     expect(html).toContain('aria-expanded="false"')

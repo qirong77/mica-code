@@ -95,6 +95,9 @@ export default defineConfig({
         // 受控浏览器顶栏只要设置页的那几个 Arco 控件，不要整个配置页（barrel 会把 App 与
         // 六千行 settings 样式一起拖进来）。这条别名指向同一个 ArcoSettings 模块，控件不变。
         '@mica-config-ui/arco': resolve('../../packages/mica-config-ui/web/components/ArcoSettings.tsx'),
+        // 最近访问下拉用的就是设置页那套菜单（`MenuList` / `MenuItem`）：同一个组件、
+        // 同一份 .mica-menu 样式，别再按尺寸手写一排按钮。同样只指向这一个模块。
+        '@mica-config-ui/menu': resolve('../../packages/mica-config-ui/web/components/ActionMenu.tsx'),
         // 插件自己的桌面入口（`plugins/<id>/desktop.jsx`）：页面按 id 去插件目录找模块，
         // 宿主因此不需要登记任何具体插件。指向仓库根，glob 才能收录这些文件。
         '@plugins': resolve('../../plugins'),

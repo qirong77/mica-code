@@ -2085,6 +2085,24 @@ export default function App() {
   // 顶栏图标按「当前这条会话」归属：只显示这条会话自己开的窗口，切走就一起消失。
   // 没有归属的窗口不在这里出现——主进程会直接把它们销毁（归属是图标的唯一依据）。
   const activeBrowsers = useMemo(() => nodeBrowsers(browsers, activeNode), [browsers, activeNode])
+  // 顶栏按钮在没有窗口时点一下就是这里：给当前会话新建一扇并直接显示（人点了就是要看）。
+  // 归属写会话 id，与 agent 建窗口时同一套——不这样写，新建的窗口就不会归到这条会话下，
+  // 顶栏按钮里也看不到它。
+  const createBrowser = useCallback(() => {
+    const owner = String(activeNode?.sessionId || activeNode?.id || '')
+    if (!owner) return
+    window.mica.browserControl
+      .create({ owner })
+      .then((result) => {
+        applyBrowsers(result?.browsers)
+        // 没有浏览器宿主（纯 web 运行时）时接口不会报错，只回 available: false
+        if (result?.available === false) showToast('当前环境没有受控浏览器，新建不了窗口', true)
+      })
+      .catch((error) => {
+        console.error('create browser failed', error)
+        showToast(`新建浏览器窗口失败：${error?.message || error}`, true)
+      })
+  }, [activeNode, applyBrowsers, showToast])
   const activeTerminals = useMemo(
     () => nodeTerminals(terminals, activeNode),
     [terminals, activeNode]
@@ -2961,13 +2979,15 @@ export default function App() {
                   </ArcoAction>
                 )
               })}
-              {/* 浏览器常驻一枚按钮：多开窗口只在右下角标数量，悬停出窗口列表
-                  （见 BrowserWindowsButton）。终端仍按窗口/会话一枚图标。 */}
+              {/* 浏览器常驻一枚按钮：多开窗口只在右下角标数量，悬停出窗口列表，
+                  没有窗口时点一下就给这条会话新建一个（见 BrowserWindowsButton）。
+                  终端仍按窗口/会话一枚图标。 */}
               <BrowserWindowsButton
                 browsers={activeBrowsers}
                 flashes={controlFlashes}
                 onToggle={toggleBrowser}
                 onClose={closeBrowser}
+                onCreate={createBrowser}
               />
               {/* 统计页没有终端可切（见 `terminalVisible`）：留着这枚图标只会点了没反应。 */}
               {view !== 'stats' && (

@@ -92,6 +92,7 @@ describe('summaries', () => {
     label: '订单页',
     visible: true,
     createdAt: '2026-01-01T00:00:00.000Z',
+    lastUsedAt: 1763000000000,
     activeTabId: 'tab-2',
     tabs: [
       { id: 'tab-1', browserId: 'brw-1', url: 'https://a.example', title: 'A', loading: false },
@@ -108,6 +109,8 @@ describe('summaries', () => {
       visible: true,
       url: 'https://b.example',
       loading: true,
+      // 顶栏按钮按它决定「点一下作用在哪一扇窗口」，必须一路带到页面
+      lastUsedAt: 1763000000000,
       activeTabId: 'tab-2'
     })
     expect(summary.tabs).toHaveLength(2)

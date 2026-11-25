@@ -1,25 +1,40 @@
 import { useEffect, useState } from 'react'
 import { IconWorld } from '@tabler/icons-react'
 import { ArcoAction, ArcoPopover, MenuItem, MenuList } from '@mica-config-ui/web'
-import { browserButtonTitle, browserCountBadge, browserMenuRows } from './browser-control'
+import {
+  browserButtonTitle,
+  browserClickAction,
+  browserCountBadge,
+  browserMenuRows
+} from './browser-control'
 import { longPressHandlers } from './hooks'
 
 /**
  * 顶栏的浏览器入口：**一枚常驻按钮**，当前会话开了几扇受控浏览器窗口都只占这一格。
  *
  * 以前是一个窗口一枚图标：窗口一多就在顶栏排成一排、把别的入口挤走，还没法一眼看出
- * 一共有几个。现在窗口数量写在按钮右下角（一个窗口时不写），多于一个时悬停或点一下
- * 展开窗口列表——一行一扇窗口，点哪行就显示 / 收起哪个，在行上右键仍是关闭那扇窗口
- * （宿主会先确认）。没有窗口时按钮留着但禁用：位置稳定，也不用猜「这次为什么没有」。
+ * 一共有几个。现在窗口数量写在按钮右下角（一个窗口时不写），多于一个时悬停展开窗口列表
+ * ——一行一扇窗口，点哪行就显示 / 收起哪个，在行上右键仍是关闭那扇窗口（宿主会先确认）。
+ *
+ * 按钮**永远可点**，不按「有没有窗口」禁用：没有窗口时点一下就给当前会话新建一个（人自己
+ * 想看网页，不该先去求 agent），有窗口时作用在最近用过的那一扇（见 `browserClickAction`）。
+ * 要多扇里挑别的，悬停出下拉。
  *
  * 窗口的开关仍然走 `browser-control` 的同一套接口；这里只决定「点的是哪一扇」。
  */
-export function BrowserWindowsButton({ browsers = [], flashes = {}, onToggle, onClose }) {
+export function BrowserWindowsButton({
+  browsers = [],
+  flashes = {},
+  onToggle,
+  onClose,
+  onCreate
+}) {
   const [open, setOpen] = useState(false)
   const rows = browserMenuRows(browsers)
   const multiple = rows.length > 1
   // 只有一扇窗口时右键 / 长按关的就是它；多扇时「关哪个」不成立，交给下拉里的行。
-  const single = rows.length === 1 ? browsers.find((item) => item?.id === rows[0].id) : null
+  const action = browserClickAction(browsers)
+  const single = multiple ? null : action.browser
   const badge = browserCountBadge(browsers)
   const title = browserButtonTitle(browsers)
   // 任何一扇窗口被 agent 调用，按钮都闪一下；计数相加，连着两次调用就闪两次。
@@ -43,7 +58,6 @@ export function BrowserWindowsButton({ browsers = [], flashes = {}, onToggle, on
       aria-pressed={visible}
       aria-expanded={multiple ? open : undefined}
       aria-haspopup={multiple ? 'menu' : undefined}
-      disabled={!rows.length}
       {...(single ? longPressHandlers(() => onClose?.(single)) : {})}
       onContextMenu={
         single
@@ -53,14 +67,14 @@ export function BrowserWindowsButton({ browsers = [], flashes = {}, onToggle, on
             }
           : undefined
       }
-      // 悬停已经会展开；点一下是给触控板 / 键盘用户的同一个入口，不再「点一下关掉」。
+      // 悬停已经会展开列表；点一下只作用于「默认的那一扇」（没有就新建），所以同一下点击
+      // 不会顺带把列表弹出来。
       onClick={() => {
-        if (!rows.length) return
-        if (multiple) {
-          setOpen(true)
+        if (action.kind === 'create') {
+          onCreate?.()
           return
         }
-        onToggle?.(browsers.find((item) => item?.id === rows[0].id))
+        onToggle?.(action.browser)
       }}
       className="relative grid size-6 shrink-0 place-items-center transition-colors"
     >

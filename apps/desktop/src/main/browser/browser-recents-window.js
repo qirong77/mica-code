@@ -15,9 +15,9 @@
  * - 面板只在需要时创建，浏览器窗口销毁时一起销毁；闲置回收本来就会连窗口一起收掉。
  */
 
-import { BrowserWindow, screen } from 'electron'
+import { BrowserWindow } from 'electron'
 import { chromeUpdateScript, parseChromeMessage } from '@packages/mica-web-shared'
-import { recentBounds } from './browser-recents.js'
+import { recentBounds, recentWindowOptions } from './browser-recents.js'
 import { recentPageUrl } from './browser-chrome.js'
 
 /** 页面还没就绪时最多等多久（运行时可能比窗口晚起来）。 */
@@ -29,7 +29,9 @@ export function createRecentWindow({
   isDevPage = () => false,
   onPick = () => {},
   // 鼠标划过某一行：顶栏据此更新高亮，回车与点选才是同一条
-  onHover = () => {}
+  onHover = () => {},
+  // 测试里可以换成别的平台；运行时就是真实平台
+  platform = process.platform
 } = {}) {
   let win = null
   let ready = false
@@ -69,21 +71,8 @@ export function createRecentWindow({
     if (!parent || parent.isDestroyed()) return null
     win = new BrowserWindow({
       parent,
-      frame: false,
-      transparent: true,
-      backgroundColor: '#00000000',
-      show: false,
-      focusable: false,
-      resizable: false,
-      movable: false,
-      minimizable: false,
-      maximizable: false,
-      fullscreenable: false,
-      skipTaskbar: true,
-      // 面板紧贴顶栏下沿、上沿是直角：系统阴影会把它推成一张浮卡片，不要
-      hasShadow: false,
-      // 面板自己画圆角与边框；macOS 的 panel 类型让它跟住父窗口、不参与应用切换
-      ...(process.platform === 'darwin' ? { type: 'panel' } : {}),
+      // 紧贴顶栏下沿、上沿直角、不裁系统圆角：每一项的理由见 recentWindowOptions
+      ...recentWindowOptions({ platform }),
       webPreferences: {
         contextIsolation: true,
         nodeIntegration: false,
@@ -92,6 +81,9 @@ export function createRecentWindow({
         acceptFirstMouse: true
       }
     })
+    // 浮层是应用界面，不允许手势缩放：缩放一变，页面 CSS px 与窗口坐标的换算就跟着变，
+    // 而这里只在 show 时算一次 bounds，列表会在窗口里错位
+    win.webContents.setVisualZoomLevelLimits(1, 1).catch(() => {})
     ready = false
     win.webContents.on('console-message', (details) => {
       const message = parseChromeMessage(details?.message)
@@ -126,7 +118,7 @@ export function createRecentWindow({
     return win
   }
 
-  function show(parent, { anchor, items, highlight = -1 } = {}) {
+  function show(parent, { anchor, items, highlight = -1, zoom = 1 } = {}) {
     const list = Array.isArray(items) ? items.filter((item) => item && typeof item.url === 'string') : []
     if (!list.length) {
       hide()
@@ -135,17 +127,11 @@ export function createRecentWindow({
     const target = ensure(parent)
     if (!target) return
     const content = parent.getContentBounds()
-    let workArea
-    try {
-      workArea = screen.getDisplayMatching(content).workArea
-    } catch {
-      workArea = content
-    }
-    target.setBounds(recentBounds({ anchor, content, rows: list.length, workArea }))
+    target.setBounds(recentBounds({ anchor, content, rows: list.length, zoom }))
     state = { items: list, highlight: Number.isInteger(highlight) ? highlight : -1 }
     if (!ready) {
       // 页面还在加载：记住这一次，加载完再显示（不然会先看到一个空白框）
-      pending = { parent, anchor, items: list, highlight: state.highlight }
+      pending = { parent, anchor, items: list, highlight: state.highlight, zoom }
       return
     }
     push()

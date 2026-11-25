@@ -679,6 +679,7 @@ function createWebApi(env) {
       // 受控浏览器（Electron 主进程里的窗口）在页面上的把手：够图标渲染与开关窗口用，
       // 真正的操作面是给 agent 用的 HTTP 接口，见 src/main/browser/browser-docs.js
       list: () => invoke('browser-control:list'),
+      create: (input = {}) => invoke('browser-control:create', input),
       show: (id, focus = true) => invoke('browser-control:show', { id, focus }),
       hide: (id) => invoke('browser-control:hide', { id }),
       close: (id) => invoke('browser-control:close', { id }),

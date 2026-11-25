@@ -65,10 +65,11 @@ export function browserCountBadge(browsers) {
  */
 export function browserButtonTitle(browsers) {
   const list = (Array.isArray(browsers) ? browsers : []).filter((item) => item?.id)
-  if (!list.length) return '浏览器\n当前会话还没有打开的窗口'
+  // 没有窗口时按钮照样能点：点一下就新建一个，tooltip 先把这件事说明白
+  if (!list.length) return '浏览器\n点击新建一个窗口'
   if (list.length === 1) return browserIconTitle(list[0])
   const visible = list.filter((item) => item.visible).length
-  return `浏览器 · ${list.length} 个窗口${visible ? `（${visible} 个已显示）` : ''}\n悬停或点击选择窗口 · 行上右键关闭`
+  return `浏览器 · ${list.length} 个窗口${visible ? `（${visible} 个已显示）` : ''}\n点击显示 / 收起最近用过的窗口 · 悬停选择窗口 · 行上右键关闭`
 }
 
 /**
@@ -86,11 +87,32 @@ export function browserMenuRow(browser) {
     status: browserStatusLabel(browser),
     tooltip: browserIconTitle(browser),
     visible: Boolean(browser?.visible),
-    loading: Boolean(browser?.loading)
+    loading: Boolean(browser?.loading),
+    lastUsedAt: Number(browser?.lastUsedAt) || 0
   }
 }
 
-/** 下拉的整份行模型：没有 id 的条目直接丢掉（界面上点不中它） */
+/**
+ * 下拉的整份行模型：没有 id 的条目直接丢掉（界面上点不中它），按「最近用过」排序——
+ * 第一行就是按钮点一下会作用到的那扇窗口。
+ */
 export function browserMenuRows(browsers) {
-  return (Array.isArray(browsers) ? browsers : []).filter((item) => item?.id).map(browserMenuRow)
+  return (Array.isArray(browsers) ? browsers : [])
+    .filter((item) => item?.id)
+    .map(browserMenuRow)
+    .sort((left, right) => right.lastUsedAt - left.lastUsedAt)
+}
+
+/**
+ * 顶栏那枚按钮**点一下**该做什么：没有窗口就新建一个，有窗口就作用于最近用过的那一扇。
+ *
+ * 「最近」取服务端给的 `lastUsedAt`（每次接口调用、显示 / 收起都会刷新它），不自己攒一份
+ * 时间表：窗口闲置被回收、agent 在后台用它，页面这边都可能没接到事件。旧快照没有这个字段
+ * 时全是 0，退化成服务端给的顺序。
+ */
+export function browserClickAction(browsers) {
+  const list = Array.isArray(browsers) ? browsers : []
+  const [row] = browserMenuRows(list)
+  if (!row) return { kind: 'create', browser: null }
+  return { kind: 'toggle', browser: list.find((item) => item?.id === row.id) || null }
 }

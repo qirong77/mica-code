@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { BrowserWindow, WebContentsView, clipboard, session } from 'electron'
+import { BrowserWindow, WebContentsView, clipboard, nativeImage, session } from 'electron'
 import {
   chromeUpdateScript,
   isRecentUrl,
@@ -33,7 +33,8 @@ import {
 } from './browser-core.js'
 import { chromePageUrl } from './browser-chrome.js'
 import { createRecentWindow } from './browser-recents-window.js'
-import { pushRecent } from './browser-recents.js'
+import { pickFaviconSource, pushRecent } from './browser-recents.js'
+import { createLauncherFavicons } from '../launcher-favicon.js'
 import {
   BROWSER_IDLE_REAP_MS,
   WINDOW_IDLE_SWEEP_MS,
@@ -76,6 +77,11 @@ const CHROME_LOAD_RETRIES = 30
 /** `allCookies` 一次最多回多少条：分区里可能有上万条，整份 JSON 会把调用方和 IPC 一起拖住。 */
 const MAX_COOKIE_LIST = 20000
 const DEFAULT_COOKIE_LIST = 2000
+/** 最近访问里的图标：小到这个体积就不用再压（16×16 PNG 一般 400–900 字节）。 */
+const FAVICON_INLINE_MAX = 1024
+/** 压完之后的上限：再大就说明这不是一张能当图标的图，宁可不显示也别拖慢每次推送。 */
+const FAVICON_PUSH_MAX = 4096
+const FAVICON_SIZE = 16
 
 export function createBrowserManager({
   onChange = () => {},
@@ -146,6 +152,63 @@ export function createBrowserManager({
     return recents.get(recentKeyOf(record)) || []
   }
 
+  // 站点图标：按分区各一份缓存（取图标要用该页面自己的 cookie / 代理），
+  // 与最近访问的地址簿一样只活在内存里。
+  const faviconStores = new Map()
+
+  function faviconsFor(record) {
+    const key = record?.partitionName
+    if (!key || !record.browserSession) return null
+    const cached = faviconStores.get(key)
+    if (cached) return cached
+    const store = createLauncherFavicons({
+      fetchImage: (url, init) => record.browserSession.fetch(url, init)
+    })
+    faviconStores.set(key, store)
+    return store
+  }
+
+  /**
+   * 列表状态每次导航都要整份推给顶栏，图标必须小：页面报的图标可能是一张 180px 的
+   * PNG（几十 KB），统一压到 16×16 再放进去。压不动（超大 SVG）就干脆不显示图标。
+   */
+  function compactFavicon(dataUrl) {
+    if (!dataUrl) return ''
+    if (dataUrl.length <= FAVICON_INLINE_MAX) return dataUrl
+    try {
+      const image = nativeImage.createFromDataURL(dataUrl)
+      // SVG 图标 nativeImage 读不了（它只认位图）：这类原样留着，只要没超过推送上限。
+      // 直接把 SVG 丢掉会让一半站点没有图标——Chromium 现在优先报的就是 svg。
+      if (image.isEmpty()) return dataUrl.length <= FAVICON_PUSH_MAX ? dataUrl : ''
+      const { width, height } = image.getSize()
+      const scaled =
+        width > FAVICON_SIZE || height > FAVICON_SIZE
+          ? image.resize({ width: FAVICON_SIZE, height: FAVICON_SIZE, quality: 'good' })
+          : image
+      const small = scaled.toDataURL()
+      return small.length <= FAVICON_PUSH_MAX ? small : ''
+    } catch {
+      return ''
+    }
+  }
+
+  /** 页面报了图标：取成 data URL 挂到这一次访问上，再让顶栏把列表刷新一遍。 */
+  async function rememberFavicon(record, tab, source) {
+    const store = faviconsFor(record)
+    if (!store) return
+    let dataUrl = ''
+    try {
+      dataUrl = compactFavicon(await store.load(source))
+    } catch {
+      return
+    }
+    if (!dataUrl || tab.favicon === dataUrl) return
+    if (record.destroyRequested || record.win.isDestroyed()) return
+    tab.favicon = dataUrl
+    rememberVisit(record, tab)
+    pushChrome(record)
+  }
+
   /** 记一次访问。窗口每次状态刷新都会走到这里，没变化就别换数组引用。 */
   function rememberVisit(record, tab) {
     const url = String(tab?.url || '').trim()
@@ -153,8 +216,9 @@ export function createBrowserManager({
     const key = recentKeyOf(record)
     const list = recents.get(key) || []
     const title = String(tab?.title || '').trim()
-    if (list[0]?.url === url && list[0]?.title === title) return
-    recents.set(key, pushRecent(list, { url, title }))
+    const favicon = String(tab?.favicon || '')
+    if (list[0]?.url === url && list[0]?.title === title && (list[0]?.favicon || '') === favicon) return
+    recents.set(key, pushRecent(list, { url, title, favicon }))
   }
 
   function nextId(prefix) {
@@ -406,6 +470,9 @@ export function createBrowserManager({
       backgroundColor: chrome.canvas,
       webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true }
     })
+    // 顶栏是应用界面，不是网页：禁掉手势缩放。缩放一变，页面里的 CSS px 与窗口坐标
+    // （DIP）就不再是同一把尺子，地址框的矩形和浮层的位置会整体错开一截。
+    win.webContents.setVisualZoomLevelLimits(1, 1).catch(() => {})
     // 多个窗口时错开一点，别叠成一摞看不出有几个
     const offset = Math.min(browsers.size, 6) * 26
     if (offset) {
@@ -535,7 +602,10 @@ export function createBrowserManager({
       recentWindowFor(record).show(record.win, {
         anchor,
         items,
-        highlight: Number.isInteger(message.highlight) ? message.highlight : -1
+        highlight: Number.isInteger(message.highlight) ? message.highlight : -1,
+        // 顶栏页面可能被 Chromium 按 host 记住的 zoomLevel 缩放：锚点是页面 CSS px，
+        // 要按同一个倍数换算成窗口坐标，浮层才会与地址框严格重合
+        zoom: record.chrome.isDestroyed() ? 1 : record.chrome.getZoomFactor()
       })
       return
     }
@@ -601,9 +671,17 @@ export function createBrowserManager({
       refresh()
     })
     contents.on('did-stop-loading', refresh)
-    contents.on('did-navigate', refresh)
+    contents.on('did-navigate', () => {
+      // 新文档还没报图标：先清掉上一页的，别把旧图标记到新地址上
+      tab.favicon = ''
+      refresh()
+    })
     contents.on('did-navigate-in-page', refresh)
     contents.on('page-title-updated', refresh)
+    contents.on('page-favicon-updated', (_event, icons) => {
+      const source = pickFaviconSource(icons, tab.url)
+      if (source) void rememberFavicon(record, tab, source)
+    })
     contents.on('did-fail-load', (_event, code, description, validatedURL, isMainFrame) => {
       if (!isMainFrame || code === -3) return
       tab.loadError = `${code} ${description} (${validatedURL})`

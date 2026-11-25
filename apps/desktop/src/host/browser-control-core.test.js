@@ -32,9 +32,24 @@ describe('normalizeBrowserSummaries', () => {
       url: 'https://example.com',
       visible: true,
       loading: false,
+      lastUsedAt: 0,
       activeTabId: 'tab-1',
       tabs: [{ id: 'tab-1', title: '订单', url: 'https://example.com', active: true }]
     })
+  })
+
+  it('keeps the last-used stamp the header button orders windows by', () => {
+    const [browser] = normalizeBrowserSummaries([
+      { id: 'brw-1', lastUsedAt: 1763000000000 },
+      { id: 'brw-2', lastUsedAt: 'nope' }
+    ])
+    expect(browser.lastUsedAt).toBe(1763000000000)
+    const [, broken] = normalizeBrowserSummaries([
+      { id: 'brw-1', lastUsedAt: 1 },
+      { id: 'brw-2', lastUsedAt: 'nope' }
+    ])
+    // 坏值当 0（最旧），不让一行 NaN 把整个排序搅乱
+    expect(broken.lastUsedAt).toBe(0)
   })
 
   it('survives missing fields, junk entries and a non-array payload', () => {

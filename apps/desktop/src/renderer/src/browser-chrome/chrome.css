@@ -184,7 +184,10 @@ body.chrome-recent-root {
   height: 38px;
   padding: 0 8px;
   background: var(--color-panel);
-  border-bottom: 1px solid var(--color-line);
+  /* 分隔线用 inset 阴影画，不占布局。用 border-bottom 时 `box-sizing: border-box` 把内容盒
+     压成 37px，28px 的地址框/按钮被居中成「上 4.5px、下 4.5px + 1px 线」——放大看就是
+     上下不齐（用户直接指出来的）。阴影不参与排版，上下各 5px，正好对称。 */
+  box-shadow: inset 0 -1px 0 var(--color-line);
   -webkit-app-region: drag;
 }
 
@@ -195,19 +198,6 @@ body.chrome-recent-root {
 .chrome-bar button,
 .chrome-bar input {
   -webkit-app-region: no-drag;
-}
-
-/* 窗口身份（受控浏览器 / 无痕）只由窗口标题栏说一遍：这里只留一个状态点 */
-.chrome-dot {
-  flex: none;
-  width: 5px;
-  height: 5px;
-  border-radius: 999px;
-  background: var(--color-fg-faint);
-}
-
-.chrome-dot.loading {
-  background: var(--color-warn);
 }
 
 .chrome-nav {
@@ -252,67 +242,58 @@ body.chrome-recent-root {
   line-height: 38px;
 }
 
-/* -------------------------------------------------- 最近访问（独立浮层窗口） */
+/* ---------------------------------------- 最近访问（独立浮层窗口，组件库菜单） */
 
-.recent-panel {
-  display: flex;
-  flex-direction: column;
+/*
+ * 这个窗口就是一个菜单：撑满它（尺寸由主进程按 `.mica-menu-item` 的 32px 行高算好），
+ * 上沿不留边框也不收圆角——它紧贴顶栏下沿，那条分隔线由顶栏自己画，看起来才像从地址栏
+ * 下面长出来的，而不是飘着的一张卡片。投影由窗口画（`hasShadow`）：CSS 的 box-shadow
+ * 会画到窗口外面，被窗口边界裁掉，等于没有。
+ * 行高、内边距、圆角、hover 都是 `@mica-config-ui/menu` 自带的，这里不重写。
+ */
+.recent-menu {
+  width: 100%;
   height: 100%;
-  padding: 4px;
-  background: var(--color-panel);
-  /* 贴着顶栏下沿：上沿直角、不留缝，只给下面两个角收圆；上边框不要，
-     让顶栏自己的分隔线当两者之间的那条线 */
-  border: 1px solid var(--color-line);
+  min-width: 0;
+  /* 组件库给菜单留了 `max-width: calc(100vw - 16px)`（浮层浮在页面上时要防溢出）。
+     这里菜单就是整个窗口，留着它右边会空出 16px 透明条——网页从那一条里透出来。 */
+  max-width: none;
+  max-height: none;
+  padding: 6px;
   border-top: 0;
   border-radius: 0 0 8px 8px;
-  overflow: hidden;
+  box-shadow: none;
 }
 
-.recent-list {
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow-y: auto;
-}
-
-.recent-item {
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  gap: 1px;
-  width: 100%;
-  height: 34px;
-  padding: 0 8px;
-  border: 0;
-  border-radius: 4px;
-  background: transparent;
-  color: inherit;
-  font: inherit;
-  text-align: left;
-  cursor: default;
-  overflow: hidden;
-}
-
-.recent-item:hover {
-  background: var(--color-panel-hi);
-}
-
+/* 键盘高亮与 hover 同一个颜色：两者指的是同一行 */
 .recent-item.active {
-  background: var(--color-active);
+  background: var(--mica-arco-active);
 }
 
-.recent-item-title {
-  width: 100%;
+.recent-item .recent-favicon {
+  width: 16px;
+  height: 16px;
+  border-radius: 3px;
+}
+
+.recent-item .recent-favicon-fallback {
+  opacity: 0.75;
+}
+
+/* 标题占剩下的空间、地址只占它需要的那一段：同一个站点的一串页面靠地址区分 */
+.recent-item .recent-title {
+  flex: 0 1 auto;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: var(--color-fg-strong);
 }
 
-.recent-item-url {
-  width: 100%;
+.recent-item .recent-url {
+  flex: 1 1 auto;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--color-fg-faint);
-  font-size: 11px;
 }

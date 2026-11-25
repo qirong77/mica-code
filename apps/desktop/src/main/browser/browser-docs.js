@@ -79,7 +79,8 @@ const RAW_ENDPOINTS = [
     id: 'createBrowser',
     method: 'POST',
     path: '/browser/browsers',
-    summary: '新开一个受控浏览器窗口（默认隐藏；一个会话可以开多个，顶栏一个窗口一枚图标）',
+    summary:
+      '新开一个受控浏览器窗口（默认隐藏；一个会话可以开多个，顶栏只占一枚按钮，多扇时在那枚按钮的下拉里选）',
     params: [
       { name: 'url', in: 'body', required: false, description: '初始地址，省略则开 about:blank' },
       {
@@ -636,7 +637,7 @@ export function buildDocsMarkdown({ serviceUrl = '$MICA_BROWSER_URL' } = {}) {
     `服务地址：\`${serviceUrl}\``,
     '',
     '新建窗口**必须**带 `x-mica-owner: $MICA_BROWSER_OWNER`：顶栏只显示本会话自己的窗口，没有归属的窗口会被直接关闭（缺这个头时新建返回 400）。',
-    '窗口彼此独立：同一个会话可以开任意多个窗口，顶栏按窗口各显示一枚图标（标签页仍按会话归属）。普通窗口、无痕窗口都用同一套规则；不活跃的窗口闲置超过 30 分钟（`MICA_BROWSER_IDLE_REAP_MS`）会被自动回收，回收后窗口与标签页的现场消失，需要时重新创建。普通窗口共享持久化分区，无痕窗口各自使用独立内存分区，返回的 Browser.incognito 标识窗口模式。',
+    '窗口彼此独立：同一个会话可以开任意多个窗口，顶栏只占一枚按钮——没有窗口时点它就是新建一个，多扇时点它作用于最近用过的那一扇、悬停出下拉逐扇挑选（标签页仍按会话归属）。普通窗口、无痕窗口都用同一套规则；不活跃的窗口闲置超过 30 分钟（`MICA_BROWSER_IDLE_REAP_MS`）会被自动回收，回收后窗口与标签页的现场消失，需要时重新创建。普通窗口共享持久化分区，无痕窗口各自使用独立内存分区，返回的 Browser.incognito 标识窗口模式。',
     '',
     '## 通过 MCP 的 control 工具调用',
     '',

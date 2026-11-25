@@ -210,18 +210,12 @@ export function Bar({ store }) {
     return () => document.removeEventListener('contextmenu', onContextMenu)
   }, [])
 
-  const who = `${state.incognito ? '无痕 · ' : ''}${state.label || '受控浏览器'}`
   // 右侧只放当前页标题：标签页之间的切换归 agent（顶栏不放一排按钮——用户要的是
   // 一条能自己操作的地址栏，不是第二个标签管理器）。
   const pageTitle = String(state.title || '').trim()
 
   return (
     <div className="chrome-bar">
-      <span
-        className={state.loading ? 'chrome-dot loading' : 'chrome-dot'}
-        title={`${who}${state.owner ? `\n用户会话 ${state.owner}` : '\n未归属'}`}
-        aria-hidden="true"
-      />
       <div className="chrome-nav">
         <ArcoAction
           iconOnly

@@ -9,7 +9,9 @@ import {
   type KeyboardEvent,
   type ReactNode,
 } from 'react';
-import { Button as ArcoButton } from '@arco-design/web-react';
+// 深路径导入：与控制台各页一致（ArcoSettings.tsx 也是这么写的）。barrel 会把整个
+// Arco 都拉进调用方的 chunk，而这个菜单也要给「38px 的浏览器顶栏」这种小页面用。
+import ArcoButton from '@arco-design/web-react/es/Button';
 // The host's ArcoProvider (or the editor's virtual theme) supplies the shared CSS.
 
 export type MenuListProps = HTMLAttributes<HTMLDivElement> & {

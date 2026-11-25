@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'bun:test'
 import {
   browserButtonTitle,
+  browserClickAction,
   browserCountBadge,
   browserIconTitle,
   browserMenuRow,
@@ -117,8 +118,8 @@ describe('browserCountBadge', () => {
 })
 
 describe('browserButtonTitle', () => {
-  it('says there is no window instead of leaving the always-on button silent', () => {
-    expect(browserButtonTitle([])).toBe('浏览器\n当前会话还没有打开的窗口')
+  it('offers to create a window when there is none, so the always-on button is not a dead end', () => {
+    expect(browserButtonTitle([])).toBe('浏览器\n点击新建一个窗口')
   })
 
   it('reuses the single-window wording so click and right-click stay explained', () => {
@@ -136,10 +137,12 @@ describe('browserButtonTitle', () => {
       { id: 'brw-2', visible: false },
       { id: 'brw-3', visible: false }
     ])
-    expect(title).toBe('浏览器 · 3 个窗口（1 个已显示）\n悬停或点击选择窗口 · 行上右键关闭')
+    expect(title).toBe(
+      '浏览器 · 3 个窗口（1 个已显示）\n点击显示 / 收起最近用过的窗口 · 悬停选择窗口 · 行上右键关闭'
+    )
     // 一个都没显示时不写括号，别在 tooltip 里出现「（0 个已显示）」
     expect(browserButtonTitle([{ id: 'brw-1' }, { id: 'brw-2' }])).toBe(
-      '浏览器 · 2 个窗口\n悬停或点击选择窗口 · 行上右键关闭'
+      '浏览器 · 2 个窗口\n点击显示 / 收起最近用过的窗口 · 悬停选择窗口 · 行上右键关闭'
     )
   })
 })
@@ -178,5 +181,42 @@ describe('browserMenuRows', () => {
   it('drops entries the list could not point at', () => {
     expect(browserMenuRows([{ id: 'brw-1' }, null, {}]).map((row) => row.id)).toEqual(['brw-1'])
     expect(browserMenuRows(null)).toEqual([])
+  })
+
+  it('puts the most recently used window first, so row one is what a click lands on', () => {
+    const rows = browserMenuRows([
+      { id: 'brw-old', label: '旧窗口', lastUsedAt: 1000 },
+      { id: 'brw-new', label: '新窗口', lastUsedAt: 9000 },
+      { id: 'brw-mid', label: '中间', lastUsedAt: 5000 }
+    ])
+    expect(rows.map((row) => row.id)).toEqual(['brw-new', 'brw-mid', 'brw-old'])
+    // 旧快照没有这个字段：全按 0 算，保持服务端给的顺序，不把列表打乱
+    expect(browserMenuRows([{ id: 'brw-1' }, { id: 'brw-2' }]).map((row) => row.id)).toEqual([
+      'brw-1',
+      'brw-2'
+    ])
+  })
+})
+
+describe('browserClickAction', () => {
+  it('creates a window when the session has none', () => {
+    expect(browserClickAction([])).toEqual({ kind: 'create', browser: null })
+    expect(browserClickAction([{ label: '没有 id' }])).toEqual({ kind: 'create', browser: null })
+  })
+
+  it('toggles the most recently used window, not the first one stored', () => {
+    const browsers = [
+      { id: 'brw-1', label: '订单页', visible: true, lastUsedAt: 1000 },
+      { id: 'brw-2', label: '登录页', visible: false, lastUsedAt: 8000 }
+    ]
+    const action = browserClickAction(browsers)
+    expect(action.kind).toBe('toggle')
+    // 拿的是原始对象：调用方要按它的 visible 决定显示还是收起
+    expect(action.browser).toBe(browsers[1])
+  })
+
+  it('falls back to the first window for snapshots without a timestamp', () => {
+    const browsers = [{ id: 'brw-1' }, { id: 'brw-2' }]
+    expect(browserClickAction(browsers).browser).toBe(browsers[0])
   })
 })

@@ -157,6 +157,9 @@ export function browserSummary(record) {
     incognito: Boolean(record.incognito),
     visible: Boolean(record.visible),
     createdAt: record.createdAt || null,
+    // 最近一次被接口调用 / 显示的时间：顶栏那枚按钮按它决定「点一下作用在哪一扇窗口」，
+    // 下拉里也按它排序（最近用过的在最上）。
+    lastUsedAt: Number(record.lastUsedAt) || 0,
     title: text(active?.title || record.title || '', TITLE_MAX) || '新标签页',
     url: active?.url || '',
     loading: Boolean(active?.loading),

@@ -16,7 +16,7 @@ import { controlMcpUrl } from './control-mcp-config.js'
 /**
  * 受控浏览器在运行时的门面：页面（顶栏图标、设置页）与 agent 各自从这一层进出。
  *
- * - **页面**通过 `browser-control:*` IPC 读列表、显示/隐藏/关闭窗口；
+ * - **页面**通过 `browser-control:*` IPC 读列表、新建、显示/隐藏/关闭窗口；
  * - **agent** 不经过这里：它通过运行时同源端口上的 MCP 端点 `/mcp/browser` 使用这个能力
  *   （见 control-mcp.js），配置由 control-mcp-config.js 按会话生成。
  *
@@ -222,6 +222,24 @@ async function mutate(path, body, { method = 'POST' } = {}) {
 
 export function registerBrowserControlIpc() {
   ipcMain.handle('browser-control:list', () => getBrowserControlSnapshot())
+
+  // 用户自己点顶栏那枚按钮新建窗口：归属带当前会话（agent 调接口时用自己的会话 id，
+  // 同一份归属才能让「这条会话的窗口」在顶栏里归到一起）。默认建完就显示——人点它
+  // 就是要看，不像 agent 演示那样需要额外传 show。
+  ipcMain.handle('browser-control:create', async (_event, input = {}) => {
+    if (!hasService()) return getBrowserControlSnapshot()
+    await request('/browser/browsers', {
+      method: 'POST',
+      body: {
+        url: typeof input.url === 'string' ? input.url : '',
+        label: typeof input.label === 'string' ? input.label : '',
+        owner: typeof input.owner === 'string' && input.owner ? input.owner : undefined,
+        show: input.show !== false
+      }
+    })
+    await refresh('created')
+    return getBrowserControlSnapshot()
+  })
 
   ipcMain.handle('browser-control:show', async (_event, input = {}) =>
     showBrowserControlWindow(input)
