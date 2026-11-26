@@ -25,6 +25,7 @@ import type {ComponentPickerOption} from '../ComponentPickerPlugin';
 import type {BlockShape} from './blockMenuActions';
 import {
   MENU_MIN_WIDTH,
+  type PlacementSafeArea,
   type PlacementRect,
   placeBlockMenu,
   placeSubmenu,
@@ -41,6 +42,20 @@ export type BlockMenuAction =
 type SubmenuKind = 'turn-into' | 'indent' | 'insert-below';
 
 type Rect = PlacementRect;
+
+function notebookSafeArea(): PlacementSafeArea {
+  if (!document.querySelector('.notebook-workbench')) return {};
+  const rootStyle = getComputedStyle(document.documentElement);
+  const parsedBar = Number.parseFloat(rootStyle.getPropertyValue('--notebook-bar-height'));
+  const toolbar = document.querySelector<HTMLElement>('.notebook-workbench .toolbar');
+  const statusbar = document.querySelector<HTMLElement>('.notebook-workbench .document-statusbar');
+  const panel = document.querySelector<HTMLElement>('.notebook-document-panel');
+  return {
+    top: Number.isFinite(parsedBar) ? parsedBar : toolbar?.getBoundingClientRect().height ?? 0,
+    bottom: statusbar?.getBoundingClientRect().height ?? 0,
+    right: document.body.dataset.notebookStyle === 'open' ? panel?.getBoundingClientRect().width ?? 0 : 0,
+  };
+}
 
 const SHAPE_ITEMS: Array<{shape: BlockShape; label: string}> = [
   {shape: 'paragraph', label: '正文'},
@@ -82,6 +97,7 @@ function SubMenuPanel({
       main,
       size: {width: MENU_MIN_WIDTH, height: 0},
       viewport: {width: window.innerWidth, height: window.innerHeight},
+      safeArea: notebookSafeArea(),
     }),
   );
 
@@ -94,6 +110,7 @@ function SubMenuPanel({
       main,
       size: {width: size.width, height: size.height},
       viewport: {width: window.innerWidth, height: window.innerHeight},
+      safeArea: notebookSafeArea(),
     });
     setPosition(current => (current.left === next.left && current.top === next.top ? current : next));
   }, [row.left, row.top, main.left, main.right]);
@@ -138,6 +155,7 @@ export default function BlockMenu({
       blockRect,
       size: {width: MENU_MIN_WIDTH, height: 0},
       viewport: {width: window.innerWidth, height: window.innerHeight},
+      safeArea: notebookSafeArea(),
     }),
   );
 
@@ -150,6 +168,7 @@ export default function BlockMenu({
       blockRect,
       size: {width: size.width, height: size.height},
       viewport: {width: window.innerWidth, height: window.innerHeight},
+      safeArea: notebookSafeArea(),
     });
     setPosition(current => (current.left === next.left && current.top === next.top ? current : next));
   }, [anchor.left, anchor.top, blockRect.top, blockRect.bottom]);
@@ -177,6 +196,7 @@ export default function BlockMenu({
     const panel = mainRef.current;
     if (!panel) return;
     const doc = panel.ownerDocument;
+    const submenuNode = () => doc.querySelector('.mica-block-menu.is-submenu');
     const isInside = (target: Node | null) =>
       Boolean(
         target &&
@@ -184,13 +204,18 @@ export default function BlockMenu({
             submenuNode()?.contains(target) ||
             (target as HTMLElement).closest?.('.draggable-block-menu')),
       );
-    const submenuNode = () => doc.querySelector('.mica-block-menu.is-submenu');
 
     const stopOutside = registerEventListener(doc, 'pointerdown', event => {
       const target = getComposedEventTarget(event) as Node | null;
       if (!isInside(target)) onClose(false);
     }, true);
-    const stopScroll = registerEventListener(doc, 'scroll', () => onClose(false), true);
+    const stopScroll = registerEventListener(doc, 'scroll', event => {
+      const target = getComposedEventTarget(event) as Node | null;
+      // Scrolling a long submenu must not dismiss the menu stack. Only a
+      // scroll outside both portalled panels means the editor moved away.
+      if (target && (panel.contains(target) || submenuNode()?.contains(target))) return;
+      onClose(false);
+    }, true);
     const stopResize = registerEventListener(window, 'resize', () => onClose(false));
     const stopBlur = registerEventListener(window, 'blur', () => onClose(false));
     const stopKey = registerEventListener(window, 'keydown', event => {
@@ -289,7 +314,7 @@ export default function BlockMenu({
             openSubmenu(kind, row);
             window.setTimeout(() => {
               document
-                .querySelector<HTMLElement>('.mica-block-menu.is-submenu [data-block-action]')
+                .querySelector<HTMLElement>('.mica-block-menu.is-submenu [role="menuitem"]:not([aria-disabled="true"])')
                 ?.focus({preventScroll: true});
             }, 0);
           }

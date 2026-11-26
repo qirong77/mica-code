@@ -9,9 +9,14 @@
   background: var(--color-bg-popup, #fff);
   box-shadow: 0 4px 18px #1d212912;
   max-width: calc(100vw - 24px);
+  overflow-x: auto;
+  scrollbar-width: none;
+  overscroll-behavior-x: contain;
   color: var(--color-text-2);
   user-select: none;
 }
+.table-context-toolbar::-webkit-scrollbar { display: none; }
+.table-context-toolbar > * { flex: none; }
 .table-context-toolbar .arco-btn { font-size: 12px; border-radius: 4px; color: var(--color-text-2); padding: 0 7px; }
 .table-context-toolbar .arco-btn-disabled { color: var(--color-text-4); }
 .table-context-toolbar .arco-btn:hover:not(.arco-btn-disabled) { color: rgb(var(--primary-6)); background: rgb(var(--primary-1)); }

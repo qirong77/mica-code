@@ -24,10 +24,10 @@ body:has(.notebook-workbench) {
   top: 0;
   min-width: 0;
   max-width: 100%;
-  min-height: var(--notebook-bar-height, 44px);
+  min-height: var(--notebook-bar-height, 52px);
   /* The host's document bar occupies this row on both ends; keep its width as
      inner padding so no control ends up underneath it when the row scrolls. */
-  padding: 5px calc(12px + var(--notebook-bar-inset-right, 0px)) 5px calc(12px + var(--notebook-bar-inset-left, 0px));
+  padding: 10px calc(12px + var(--notebook-bar-inset-right, 0px)) 10px calc(12px + var(--notebook-bar-inset-left, 0px));
   border-bottom: 1px solid var(--color-line-soft);
   border-radius: 0;
   background: var(--color-canvas);
@@ -46,29 +46,6 @@ body:has(.notebook-workbench) {
 /* Page geometry, type and block rhythm live in notebook-document.css only:
    this file is chrome (toolbar, statusbar, surfaces). Two sets of body sizes
    used to fight here, so the measured result never matched either file. */
-
-/* Keep table/column widths and alignment under Lexical's control. Wide tables
-   continue to scroll inside the existing wrapper. */
-.notebook-workbench .PlaygroundEditorTheme__tableCell {
-  min-width: 0;
-  height: 34px;
-  padding: 7px 10px;
-  border-color: var(--color-line-soft);
-}
-
-.notebook-workbench .PlaygroundEditorTheme__tableCell > .PlaygroundEditorTheme__paragraph {
-  min-height: 20px;
-  margin: 0;
-  line-height: 1.65;
-}
-
-.notebook-workbench .PlaygroundEditorTheme__tableScrollableWrapper {
-  min-width: 0;
-  max-width: 100%;
-  /* The table toolbar is fixed and only appears while the table is selected;
-     it must not reserve an empty row in the document when the table is idle. */
-  margin: 8px 0 24px;
-}
 
 /* Display the whole figure within the reading column. The node's stored pixel
    dimensions remain unchanged; only oversized display geometry is constrained. */
@@ -149,17 +126,9 @@ body.mica-arco-theme .notebook-workbench .editor-image .image-caption-container 
   background: var(--color-panel);
 }
 
-/* The iframe viewport changes when either host sidebar opens or closes. */
-@media (max-width: 1050px) {
-  .notebook-workbench {
-    --notebook-body-gutter: 32px;
-  }
-}
-
 @media (max-width: 760px) {
   .notebook-workbench {
-    --notebook-body-top: 28px;
-    --notebook-body-gutter: 26px;
+    --notebook-body-top: 24px;
     --notebook-body-bottom: 90px;
   }
 
@@ -174,13 +143,8 @@ body.mica-arco-theme .notebook-workbench .editor-image .image-caption-container 
 
 @media (max-width: 600px) {
   /* Reserve space for the 22px outer controls, including a 20px page gutter. */
-  .notebook-workbench .PlaygroundEditorTheme__tableScrollableWrapper {
-    margin-inline-start: 20px;
-    max-width: calc(100% - 20px);
-  }
-
   .notebook-workbench {
-    --notebook-body-top: 26px;
+    --notebook-body-top: 24px;
     --notebook-body-gutter: 20px;
     --notebook-body-bottom: 78px;
     --notebook-body-size: 15px;
@@ -196,19 +160,5 @@ body.mica-arco-theme .notebook-workbench .editor-image .image-caption-container 
 
   .notebook-workbench .PlaygroundEditorTheme__h1 {
     font-size: 28px;
-  }
-
-  .notebook-workbench .PlaygroundEditorTheme__tableCell {
-    padding: 7px 9px;
-  }
-}
-
-/* The block handle lives in the left gutter. A narrow desktop pane (the
-   notebook keeps a 512px-wide frame when its directory is open) must still
-   leave room for it; phones keep the tighter gutters above, and get no handle
-   because they have no hover. */
-@media (max-width: 900px) and (hover: hover) and (pointer: fine) {
-  .notebook-workbench {
-    --notebook-body-gutter: 32px;
   }
 }

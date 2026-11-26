@@ -2,7 +2,9 @@
   --notebook-rail-width: 260px;
   /* 窄屏抽屉保持自己的宽度：桌面上拖出来的宽度不该把手机抽屉一起拉宽。 */
   --notebook-rail-drawer-width: 260px;
-  --notebook-bar-height: 44px;
+  /* Yuque's document header and editor toolbar both resolve to a 52px row. */
+  --notebook-bar-height: 52px;
+  --notebook-outline-width: 305px;
   display: flex;
   width: 100%;
   height: 100%;
@@ -11,7 +13,7 @@
   color: var(--color-fg);
   background: var(--color-canvas);
   /* Same face as the document and as Yuque's own sidebar. */
-  --font-family: 'Chinese Quote', -apple-system, system-ui, 'Segoe UI', Roboto, 'PingFang SC', 'Microsoft YaHei', Arial, sans-serif;
+  --font-family: 'Chinese Quote', -apple-system, BlinkMacSystemFont, system-ui, 'Segoe UI', Roboto, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Helvetica Neue', Helvetica, Arial, sans-serif;
   font-family: var(--font-family);
   font-size: 14px;
   line-height: 1.5;
@@ -19,12 +21,15 @@
   overflow: hidden;
   container: notebook / inline-size;
   --notebook-rail-bg: color-mix(in srgb, var(--color-canvas) 70%, var(--color-panel));
+  --notebook-text-primary: color-mix(in srgb, var(--color-fg-strong) 55%, var(--color-fg-soft));
+  --notebook-text-secondary: color-mix(in srgb, var(--color-fg-soft) 78%, var(--color-fg-strong));
+  --notebook-bg-tertiary: color-mix(in srgb, var(--color-fg-strong) 4%, var(--color-canvas));
   /* Yuque marks rows with a neutral grey (#eff0f0 on white), not the bluish
      --color-active the app tabs use. Both derive from the theme's strong
      foreground so dark themes stay neutral too. */
   --notebook-row-hover-bg: color-mix(in srgb, var(--color-fg-strong) 4%, var(--color-canvas));
   --notebook-row-active-bg: color-mix(in srgb, var(--color-fg-strong) 7%, var(--color-canvas));
-  --notebook-row-height: 34px;
+  --notebook-row-height: 36px;
 }
 .notebook-layout {
   display: flex;
@@ -119,8 +124,8 @@
   pointer-events: none;
 }
 .notebook-rail-title {
-  min-height: 84px;
-  padding: 18px 12px 18px 20px;
+  min-height: 94px;
+  padding: 16px 12px 12px 20px;
   display: flex;
   align-items: center;
   gap: 12px;
@@ -168,7 +173,7 @@
   align-items: center;
   gap: 8px;
   flex: none;
-  margin: 0 16px 22px;
+  margin: 16px 8px 10px;
 }
 .notebook-search {
   flex: 1;
@@ -181,7 +186,7 @@
   padding: 0 8px;
   border: 1px solid var(--color-line-soft);
   border-radius: 6px;
-  background: var(--color-canvas);
+  background: var(--notebook-bg-tertiary);
   box-shadow: none;
 }
 .notebook-search .arco-input-inner-wrapper:hover {
@@ -200,7 +205,7 @@
 .notebook-search input.arco-input {
   padding: 0;
   height: 30px;
-  font-size: 13px;
+  font-size: 14px;
   line-height: 20px;
   background: transparent;
 }
@@ -233,8 +238,8 @@
   justify-content: space-between;
   align-items: center;
   gap: 6px;
-  color: var(--color-fg-soft);
-  font-size: 13px;
+  color: var(--notebook-text-primary);
+  font-size: 14px;
 }
 .notebook-tree-heading > span,
 .notebook-tree-tools {
@@ -255,8 +260,8 @@
   min-height: 28px;
   padding: 0 6px;
   border-radius: 5px;
-  color: var(--color-fg-soft);
-  font-size: 13px;
+  color: var(--notebook-text-primary);
+  font-size: 14px;
   font-weight: 500;
 }
 .notebook-page .notebook-root-target.is-drop-inside:not(:disabled),
@@ -284,7 +289,7 @@
   min-height: 0;
   overflow: auto;
   overscroll-behavior: contain;
-  padding: 0 10px 20px;
+  padding: 0 8px 20px;
   scrollbar-width: thin;
   scrollbar-color: var(--color-line-strong) transparent;
 }
@@ -293,7 +298,7 @@
   display: flex;
   align-items: center;
   border-radius: 6px;
-  color: var(--color-nav-fg);
+  color: var(--notebook-text-primary);
   min-width: 0;
   position: relative;
 }
@@ -311,7 +316,7 @@
 }
 .notebook-tree-entry.is-active {
   background: var(--notebook-row-active-bg);
-  color: var(--color-fg-strong);
+  color: var(--notebook-text-primary);
   font-weight: 500;
 }
 .notebook-tree-entry.is-dragging {
@@ -338,11 +343,13 @@
   cursor: grabbing;
 }
 .notebook-tree-row {
+  box-sizing: border-box;
   display: flex;
   align-items: center;
   gap: 6px;
+  height: var(--notebook-row-height);
   min-height: var(--notebook-row-height);
-  padding-block: 5px;
+  padding-block: 7px;
   padding-inline: min(45%, calc(6px + var(--depth, 0) * var(--tree-indent))) var(--row-action-space);
   width: 100%;
   min-width: 0;
@@ -600,9 +607,9 @@
   display: flex;
   flex-direction: column;
   flex: none;
-  width: clamp(208px, 17cqw, 248px);
+  width: var(--notebook-outline-width);
   min-height: 0;
-  padding-top: calc(var(--notebook-bar-height) + 28px);
+  padding-top: calc(var(--notebook-bar-height) + 24px);
   border-inline-start: 1px solid var(--color-line-soft);
   background: var(--color-canvas);
   color: var(--color-fg-muted);
@@ -705,12 +712,12 @@
   align-items: center;
   justify-content: space-between;
   flex: none;
-  height: 32px;
-  padding: 0 16px;
+  height: 30px;
+  padding: 0 28px;
   color: var(--color-fg-muted);
 }
 .notebook-outline > header strong {
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 500;
 }
 .notebook-outline-list {
@@ -718,23 +725,26 @@
   min-height: 0;
   overflow: auto;
   overscroll-behavior: contain;
-  padding: 8px 12px 24px;
+  padding: 12px 0 24px;
   scrollbar-width: thin;
   scrollbar-color: var(--color-line-strong) transparent;
 }
 .notebook-page .notebook-outline-entry {
-  height: 32px;
+  box-sizing: border-box;
+  width: 100%;
+  height: 22px;
   border-radius: 6px;
-  padding-inline: calc(8px + clamp(0px, (var(--heading-level, 1) - 1) * 10px, 40px)) 8px;
-  color: var(--color-fg-soft);
-  font-size: 13px;
-  line-height: 20px;
+  padding-inline: calc(25px + clamp(0px, (var(--heading-level, 1) - 1) * 16px, 80px)) 20px;
+  color: var(--notebook-text-primary);
+  font-size: 14px;
+  line-height: 22px;
   text-align: start;
 }
-.notebook-outline-tree-entry { min-width: 0; }
+.notebook-outline-tree-entry { min-width: 0; margin-bottom: 6px; }
+.notebook-outline-tree-entry:last-child { margin-bottom: 0; }
 .notebook-outline-tree-entry .notebook-outline-entry { display: flex; align-items: center; gap: 4px; }
 .notebook-outline-toggle { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 16px; width: 16px; height: 20px; color: var(--color-fg-muted); }
-.notebook-outline-toggle-empty { opacity: 0; }
+.notebook-outline-toggle-empty { flex-basis: 0; width: 0; opacity: 0; }
 .notebook-outline-toggle:hover { color: var(--color-fg-strong); }
 .notebook-page .notebook-outline-entry:hover:not(:disabled) {
   color: var(--color-fg-strong);
@@ -749,7 +759,7 @@
 }
 .notebook-page .notebook-outline-entry.is-active:not(:disabled) {
   background: var(--notebook-row-active-bg);
-  color: var(--color-fg-strong);
+  color: var(--notebook-text-primary);
   font-weight: 500;
 }
 .notebook-outline-empty {
@@ -837,7 +847,7 @@
   position: absolute;
   inset: 0;
   background: var(--color-canvas);
-  padding: calc(var(--notebook-bar-height) + 36px) max(36px, calc((100% - 900px) / 2 + 36px)) 36px;
+  padding: calc(var(--notebook-bar-height) + 24px) max(36px, calc((100% - 850px) / 2 + 36px)) 36px;
   /* 只在真的等了一会儿才出现，所以淡入即可；热缓存下通常根本走不到这里。 */
   animation: notebook-skeleton-in 160ms ease-out both;
 }
@@ -983,7 +993,7 @@
 }
 @container notebook (max-width: 1100px) {
   .notebook-outline {
-    width: 200px;
+    --notebook-outline-width: 240px;
   }
 }
 @container notebook (max-width: 760px) {
@@ -1028,7 +1038,7 @@
     min-height: 0;
   }
   .notebook-outline {
-    width: min(208px, 46%);
+    --notebook-outline-width: min(208px, 46%);
     padding-top: calc(var(--notebook-bar-height) + 16px);
   }
   /* 触屏与窄窗口没有可靠的 hover，隐藏按钮直接常显。 */

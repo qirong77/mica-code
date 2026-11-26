@@ -3,7 +3,7 @@ import {createEmptyHistoryState, registerHistory} from '@lexical/history';
 import {$createParagraphNode, $createTextNode, $getRoot, REDO_COMMAND, UNDO_COMMAND} from 'lexical';
 import {describe, expect, it} from 'vitest';
 
-import {$readDocumentStyle, $updateDocumentStyle, DEFAULT_DOCUMENT_STYLE, parseDocumentStyle} from '../src/workspace/documentStyle';
+import {$readDocumentStyle, $updateDocumentStyle, DEFAULT_DOCUMENT_STYLE, documentStyleVariables, parseDocumentStyle} from '../src/workspace/documentStyle';
 
 const createEditor = () => createHeadlessEditor({
   namespace: 'document-workbench', nodes: [], onError(error) {throw error;},
@@ -11,6 +11,14 @@ const createEditor = () => createHeadlessEditor({
 const paragraph = (text: string) => $createParagraphNode().append($createTextNode(text));
 
 describe('document appearance persistence', () => {
+  it("uses Yuque's measured standard page geometry for new documents", () => {
+    expect(documentStyleVariables(DEFAULT_DOCUMENT_STYLE)).toMatchObject({
+      '--notebook-page-width': '850px',
+      '--notebook-paragraph-gap': '8px',
+      '--notebook-line-height': '1.74',
+    });
+  });
+
   it('reads defaults without rewriting existing documents', () => {
     const editor = createEditor();
     editor.update(() => {$getRoot().append(paragraph('正文'));}, {discrete: true});

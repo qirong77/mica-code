@@ -43,8 +43,8 @@ export function $updateDocumentStyle(patch: Partial<NotebookDocumentStyle>): voi
 export function documentStyleVariables(style: NotebookDocumentStyle): Record<string, string> {
   return {
     '--notebook-body-size': `${style.bodySize}px`,
-    '--notebook-page-width': style.pageSize === 'wide' ? '100%' : '900px',
-    '--notebook-paragraph-gap': style.paragraphSpacing === 'loose' ? '16px' : '8px',
+    '--notebook-page-width': style.pageSize === 'wide' ? '100%' : '850px',
+    '--notebook-paragraph-gap': style.paragraphSpacing === 'loose' ? '8px' : '0px',
     '--notebook-line-height': String(style.lineHeight),
   };
 }

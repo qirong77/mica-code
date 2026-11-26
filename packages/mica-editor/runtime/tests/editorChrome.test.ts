@@ -8,6 +8,8 @@ const linkSource = readSource('src/playground/plugins/FloatingLinkEditorPlugin/i
 const linkStyles = readSource('src/playground/plugins/FloatingLinkEditorPlugin/index.css');
 const notebookStyles = readSource('src/workspace/notebook.css');
 const notebookWorkbenchStyles = readSource('src/workspace/notebook-workbench.css');
+const notebookDocumentStyles = readSource('src/workspace/notebook-document.css');
+const notebookHostStyles = readSource('../../../plugins/notebook/notebook.css');
 const blockSource = readSource('src/playground/plugins/DraggableBlockPlugin/index.tsx');
 const blockMenuSource = readSource('src/playground/plugins/DraggableBlockPlugin/BlockMenu.tsx');
 const blockActionsSource = readSource('src/playground/plugins/DraggableBlockPlugin/blockMenuActions.ts');
@@ -91,8 +93,21 @@ describe('editor chrome style contracts', () => {
   });
 
   it('does not reserve the table toolbar as an empty document row', () => {
-    expect(notebookWorkbenchStyles).toContain('margin: 8px 0 24px;');
-    expect(notebookWorkbenchStyles).toContain('must not reserve an empty row');
+    expect(notebookDocumentStyles).toContain('margin: 4px 0 16px;');
+    expect(notebookWorkbenchStyles).not.toContain('margin: 8px 0 24px;');
+  });
+
+  it('pins the measured Yuque document and host geometry', () => {
+    expect(notebookDocumentStyles).toContain('--notebook-page-width: 850px;');
+    expect(notebookDocumentStyles).toContain('--notebook-body-gutter: 50px;');
+    expect(notebookDocumentStyles).toContain('--notebook-body-top: 24px;');
+    expect(notebookDocumentStyles).toContain("'Chinese Quote', -apple-system, BlinkMacSystemFont");
+    expect(notebookDocumentStyles).toContain('font-size: var(--notebook-body-size);');
+    expect(notebookDocumentStyles).toContain('height: 33px;');
+    expect(notebookDocumentStyles).toContain('padding: 3px 8px;');
+    expect(notebookHostStyles).toContain('--notebook-bar-height: 52px;');
+    expect(notebookHostStyles).toContain('--notebook-outline-width: 305px;');
+    expect(notebookHostStyles).toContain('--notebook-row-height: 36px;');
   });
 
   it('reveals the block handle on block hover, in panes narrower than the toolbar breakpoint', () => {
@@ -102,14 +117,23 @@ describe('editor chrome style contracts', () => {
     // The notebook hosts this editor in a pane that is usually < 1025px.
     expect(editorSource).toContain("window.matchMedia('(hover: hover) and (pointer: fine)')");
     expect(editorSource).toContain('floatingAnchorElem && canUseBlockHandle &&');
-    // A narrow desktop pane still leaves 32px for the 24px grip.
-    expect(notebookWorkbenchStyles).toContain('@media (max-width: 900px) and (hover: hover) and (pointer: fine)');
+    // The measured 50px reading gutter remains stable while both host panels
+    // are open; the block handle is positioned inside that gutter.
+    expect(notebookDocumentStyles).toContain('--notebook-body-gutter: 50px;');
   });
 
   it('keeps a portal submenu open while the pointer crosses into it', () => {
     expect(blockMenuSource).toContain('scheduleSubmenuClose');
     expect(blockMenuSource).toContain('cancelSubmenuClose');
     expect(blockMenuSource).toContain('onMouseEnter={cancelSubmenuClose}');
+    expect(blockMenuSource).toContain('[role="menuitem"]:not([aria-disabled="true"])');
+    expect(blockMenuSource).toContain('Scrolling a long submenu must not dismiss the menu stack');
+  });
+
+  it('keeps narrow table controls reachable instead of clipping their action row', () => {
+    const tableControlsStyles = readSource('src/playground/plugins/TableControlsPlugin/index.css');
+    expect(tableControlsStyles).toContain('overflow-x: auto;');
+    expect(tableControlsStyles).toContain('.table-context-toolbar > * { flex: none; }');
   });
 
   it('clears the insert placeholder after the inserted block commits', () => {

@@ -74,6 +74,18 @@ describe('placeBlockMenu', () => {
     expect(placement.left + 180).toBe(viewport.width - VIEWPORT_PADDING);
   });
 
+  it('keeps the card out of the notebook toolbar and status bar', () => {
+    const placement = placeBlockMenu({
+      anchor: grip,
+      blockRect: rect(330, 0, 700, 40),
+      size: {width: 180, height: 300},
+      viewport,
+      safeArea: {top: 52, bottom: 28},
+    });
+    expect(placement.top).toBe(52);
+    expect(placement.top + 300).toBeLessThanOrEqual(viewport.height - 28);
+  });
+
   it('keeps its design width when the measured card is narrower', () => {
     const placement = placeBlockMenu({
       anchor: {left: 1400, top: 200, right: 1424, bottom: 224},
@@ -121,6 +133,18 @@ describe('placeSubmenu', () => {
     });
     expect(placement.left).toBeGreaterThanOrEqual(VIEWPORT_PADDING);
     expect(placement.left + 180).toBeLessThanOrEqual(viewport.width - VIEWPORT_PADDING);
+  });
+
+  it('does not expand into the notebook style panel on the right', () => {
+    const nearRight = rect(1000, 200, 180, 300);
+    const placement = placeSubmenu({
+      row: rect(1000, 236, 180, 36),
+      main: nearRight,
+      size: {width: 180, height: 296},
+      viewport,
+      safeArea: {right: 320},
+    });
+    expect(placement.left + 180).toBeLessThanOrEqual(viewport.width - 320);
   });
 
   it('clamps the bottom edge for a long submenu opened from a low row', () => {

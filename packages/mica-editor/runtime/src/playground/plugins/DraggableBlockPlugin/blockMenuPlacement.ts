@@ -13,6 +13,7 @@
 export type PlacementRect = {left: number; top: number; right: number; bottom: number};
 export type PlacementSize = {width: number; height: number};
 export type PlacementViewport = {width: number; height: number};
+export type PlacementSafeArea = {top?: number; right?: number; bottom?: number; left?: number};
 export type Placement = {left: number; top: number};
 
 /** Distance the card keeps from every window edge. */
@@ -27,9 +28,8 @@ function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);
 }
 
-/** Keep a panel horizontally on screen, preferring its requested left edge. */
-function clampLeft(left: number, width: number, viewportWidth: number): number {
-  return clamp(left, VIEWPORT_PADDING, viewportWidth - width - VIEWPORT_PADDING);
+function safeEdge(value: number | undefined): number {
+  return Number.isFinite(value) ? Math.max(0, value as number) : 0;
 }
 
 /**
@@ -43,21 +43,29 @@ export function placeBlockMenu({
   blockRect,
   size,
   viewport,
+  safeArea,
 }: {
   anchor: PlacementRect;
   blockRect: PlacementRect;
   size: PlacementSize;
   viewport: PlacementViewport;
+  safeArea?: PlacementSafeArea;
 }): Placement {
   const width = Math.max(size.width, MENU_MIN_WIDTH);
   const height = size.height;
-  const left = clampLeft(anchor.left - VIEWPORT_PADDING, width, viewport.width);
+  const left = clamp(
+    anchor.left - VIEWPORT_PADDING,
+    Math.max(VIEWPORT_PADDING, safeEdge(safeArea?.left)),
+    viewport.width - width - Math.max(VIEWPORT_PADDING, safeEdge(safeArea?.right)),
+  );
+  const topMin = Math.max(VIEWPORT_PADDING, safeEdge(safeArea?.top));
+  const bottomInset = Math.max(VIEWPORT_PADDING, safeEdge(safeArea?.bottom));
 
   let top = blockRect.top;
-  if (top + height > viewport.height - VIEWPORT_PADDING) {
-    top = viewport.height - height - VIEWPORT_PADDING;
+  if (top + height > viewport.height - bottomInset) {
+    top = viewport.height - height - bottomInset;
   }
-  top = Math.max(VIEWPORT_PADDING, top);
+  top = Math.max(topMin, top);
   return {left, top};
 }
 
@@ -71,6 +79,7 @@ export function placeSubmenu({
   main,
   size,
   viewport,
+  safeArea,
 }: {
   /** The hovered row inside the main card. */
   row: PlacementRect;
@@ -78,27 +87,32 @@ export function placeSubmenu({
   main: PlacementRect;
   size: PlacementSize;
   viewport: PlacementViewport;
+  safeArea?: PlacementSafeArea;
 }): Placement {
   const width = Math.max(size.width, MENU_MIN_WIDTH);
   const height = size.height;
 
   const rightOfCard = main.right + MENU_GAP;
+  const leftMin = Math.max(VIEWPORT_PADDING, safeEdge(safeArea?.left));
+  const rightMax = viewport.width - Math.max(VIEWPORT_PADDING, safeEdge(safeArea?.right));
   let left: number;
-  if (rightOfCard + width <= viewport.width - VIEWPORT_PADDING) {
+  if (rightOfCard + width <= rightMax) {
     left = rightOfCard;
   } else {
     const leftOfCard = main.left - width - MENU_GAP;
-    left = leftOfCard >= VIEWPORT_PADDING
+    left = leftOfCard >= leftMin
       ? leftOfCard
-      : clampLeft(rightOfCard, width, viewport.width);
+      : clamp(rightOfCard, leftMin, rightMax - width);
   }
 
   // The card's top padding sits above its first row; cancelling it lines the
   // submenu's first row up with the row the pointer is on.
   let top = row.top - VIEWPORT_PADDING;
-  if (top + height > viewport.height - VIEWPORT_PADDING) {
-    top = viewport.height - height - VIEWPORT_PADDING;
+  const topMin = Math.max(VIEWPORT_PADDING, safeEdge(safeArea?.top));
+  const bottomInset = Math.max(VIEWPORT_PADDING, safeEdge(safeArea?.bottom));
+  if (top + height > viewport.height - bottomInset) {
+    top = viewport.height - height - bottomInset;
   }
-  top = Math.max(VIEWPORT_PADDING, top);
+  top = Math.max(topMin, top);
   return {left, top};
 }
