@@ -91,6 +91,7 @@ export default function DraggableBlockPlugin({
   const [isTitleBlock, setIsTitleBlock] = useState(false);
   const [menu, setMenu] = useState<OpenMenu | null>(null);
   const restoreKey = useRef<NodeKey | null>(null);
+  const previousMenu = useRef<OpenMenu | null>(null);
   const pointerStart = useRef<{x: number; y: number} | null>(null);
   const draggedRef = useRef(false);
 
@@ -160,16 +161,20 @@ export default function DraggableBlockPlugin({
 
   // The caret goes back to the block the menu acted on, once the card is gone.
   useEffect(() => {
-    if (menu) return;
+    const closed = previousMenu.current !== null && menu === null;
+    previousMenu.current = menu;
+    if (!closed) return;
     const key = restoreKey.current;
-    if (!key) return;
     restoreKey.current = null;
-    editor.update(() => {
-      const node = $getNodeByKey(key);
-      if (node && node.isAttached() && 'selectStart' in node && typeof node.selectStart === 'function') {
-        node.selectStart();
-      }
-    });
+    if (key) {
+      editor.update(() => {
+        const node = $getNodeByKey(key);
+        if (node && node.isAttached() && 'selectStart' in node && typeof node.selectStart === 'function') {
+          node.selectStart();
+        }
+      });
+    }
+    queueMicrotask(() => editor.getRootElement()?.focus({preventScroll: true}));
   }, [editor, menu]);
 
   const closeMenu = useCallback(
@@ -204,7 +209,6 @@ export default function DraggableBlockPlugin({
 
       if (action.type === 'insert') {
         const option = action.option;
-        setMenu(null);
         // The option needs its own empty block to land in; blocks that insert a
         // node (table, image, …) push past that placeholder and would leave an
         // empty line above themselves. Drop it after the insert commits — the
@@ -219,6 +223,8 @@ export default function DraggableBlockPlugin({
           placeholderKey = placeholder.getKey();
           option.onSelect('');
         });
+        restoreKey.current = placeholderKey;
+        setMenu(null);
         if (placeholderKey) {
           const key = placeholderKey;
           editor.update(() => {
@@ -250,6 +256,7 @@ export default function DraggableBlockPlugin({
             text: selection.getTextContent(),
           };
         }, {discrete: true});
+        restoreKey.current = blockKey;
         setMenu(null);
         if (!selected || !payload) return;
         const blockPayload = payload as {html: string; text: string};

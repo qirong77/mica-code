@@ -10,45 +10,94 @@ html { min-height: 100%; scroll-padding-top: 90px; }
 body.mica-arco-theme {
   --workspace-accent: var(--color-accent);
   --workspace-line: var(--color-line);
-  --notebook-popup-shadow: 0 4px 18px var(--color-overlay-strong);
+  /* Runtime is sandboxed in an iframe, so it cannot inherit the host's
+     .notebook-page variables. Mirror the Yuque semantic palette here. */
+  --notebook-bg-primary: var(--color-canvas);
+  --notebook-bg-secondary: var(--color-panel);
+  --notebook-bg-tertiary: color-mix(in srgb, var(--color-fg-strong) 4%, var(--color-canvas));
+  --notebook-bg-hover: color-mix(in srgb, var(--color-fg-strong) 7%, var(--color-canvas));
+  --notebook-bg-hover-light: var(--color-line-soft);
+  --notebook-border-primary: var(--color-line-soft);
+  --notebook-border-light: color-mix(in srgb, var(--color-line-soft) 70%, transparent);
+  --notebook-text-primary: var(--color-fg-strong);
+  --notebook-text-body: var(--color-fg-soft);
+  --notebook-text-caption: var(--color-fg-muted);
+  --notebook-text-disabled: var(--color-fg-faint);
+  --notebook-accent: var(--color-accent);
+  --notebook-accent-subtle: var(--color-accent-subtle);
+  --notebook-link: var(--color-accent);
+  --notebook-popup-shadow: 0 1px 4px -2px rgb(0 0 0 / 13%), 0 2px 8px rgb(0 0 0 / 8%), 0 8px 16px 4px rgb(0 0 0 / 4%);
   --font-family: var(--notebook-font-family, var(--chat-font-family, 'Chinese Quote', -apple-system, BlinkMacSystemFont, system-ui, 'Segoe UI', Roboto, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Helvetica Neue', Helvetica, Arial, sans-serif));
   margin: 0; padding: 0; min-width: 280px; min-height: 100vh;
-  color: var(--color-fg-soft); background: var(--color-canvas);
+  color: var(--notebook-text-body); background: var(--notebook-bg-primary);
   font: 12px/1.6 var(--font-family);
   accent-color: var(--color-accent);
+}
+html[data-appearance='light'] body.mica-arco-theme {
+  --notebook-bg-primary: #fff;
+  --notebook-bg-secondary: #fafafa;
+  --notebook-bg-tertiary: #f4f5f5;
+  --notebook-bg-hover: #eff0f0;
+  --notebook-bg-hover-light: #e7e9e8;
+  --notebook-border-primary: #e7e9e8;
+  --notebook-border-light: rgb(0 0 0 / 4%);
+  --notebook-text-primary: #262626;
+  --notebook-text-body: #585a5a;
+  --notebook-text-caption: #8a8f8d;
+  --notebook-text-disabled: #bec0bf;
+  --notebook-accent: #00b96b;
+  --notebook-accent-subtle: #ecfaf4;
+  --notebook-link: #117cee;
+}
+html[data-appearance='dark'] body.mica-arco-theme {
+  --notebook-bg-primary: #141414;
+  --notebook-bg-secondary: #1f1f1f;
+  --notebook-bg-tertiary: rgb(255 255 255 / 4%);
+  --notebook-bg-hover: rgb(255 255 255 / 12%);
+  --notebook-bg-hover-light: #333;
+  --notebook-border-primary: rgb(255 255 255 / 12%);
+  --notebook-border-light: rgb(255 255 255 / 8%);
+  --notebook-text-primary: #e2e2e2;
+  --notebook-text-body: #b3b3b3;
+  --notebook-text-caption: #848484;
+  --notebook-text-disabled: #505050;
+  --notebook-accent: #2ed790;
+  --notebook-accent-subtle: #10211a;
+  --notebook-link: #3b82ce;
+  --notebook-popup-shadow: 0 8px 24px rgb(0 0 0 / 28%);
 }
 /* The host can pass the app's chat font token into the iframe. Notebook is a
    Yuque-shaped surface, so its chrome and portals must resolve to the same
    measured stack instead of silently falling back to Inter. */
 body:has(.notebook-editor) {
-  --font-family: 'Chinese Quote', -apple-system, BlinkMacSystemFont, system-ui, 'Segoe UI', Roboto, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+  --font-family: var(--notebook-font-family, var(--chat-font-family, 'Chinese Quote', -apple-system, BlinkMacSystemFont, system-ui, 'Segoe UI', Roboto, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Helvetica Neue', Helvetica, Arial, sans-serif));
 }
 html[data-appearance='dark'] { color-scheme: dark; }
 html[data-appearance='light'] { color-scheme: light; }
 /* Portals may explicitly opt back into pointer-events, hence the descendants.
    Already-focused native inputs and shortcuts are guarded by NotebookBridge. */
 html[data-frozen='true'] body, html[data-frozen='true'] body * { pointer-events: none !important; }
-body ::selection { background: var(--color-primary-light-2); }
-body a { color: var(--color-accent); }
+body ::selection { background: var(--notebook-accent-subtle); }
+body a { color: var(--notebook-link); }
 body :is(button, input, textarea, select) { font-family: inherit; }
-body :is(button, a, input, textarea, select):focus-visible { outline-color: var(--color-accent); }
-body :is(input, textarea)::placeholder { color: var(--color-fg-faint); }
+body :is(button, a, input, textarea, select):focus-visible { outline-color: var(--notebook-accent); }
+body :is(input, textarea)::placeholder { color: var(--notebook-text-disabled); }
 #root, .notebook-editor { min-height: 100vh; }
-.notebook-loading { display: grid; min-height: 100vh; place-items: center; color: var(--color-fg-faint); }
-.notebook-editor .editor-canvas { min-height: 100vh; display: flex; flex-direction: column; background: var(--color-canvas); border: 0; border-radius: 0; box-shadow: none; }
-.notebook-editor .editor-shell { flex: 1; display: flex; flex-direction: column; color: var(--color-fg-soft); font-family: var(--font-family); }
+.notebook-loading { display: grid; min-height: 100vh; place-items: center; color: var(--notebook-text-disabled); }
+.notebook-editor .editor-canvas { min-height: 100vh; display: flex; flex-direction: column; background: var(--notebook-bg-primary); border: 0; border-radius: 0; box-shadow: none; }
+.notebook-editor .editor-shell { flex: 1; display: flex; flex-direction: column; color: var(--notebook-text-body); font-family: var(--font-family); }
 .notebook-editor .editor-shell .editor-container { flex: 1; background: transparent; }
 /* One operation bar: actual group widths decide which tools move to More.
    Horizontal scrolling only covers viewports narrower than the fixed actions. */
-.notebook-editor .toolbar { position: sticky; top: 0; display: flex; align-items: center; height: auto; border-radius: 0; padding: 5px 12px; min-height: 44px; --toolbar-group-gap: 2px; --toolbar-section-gap: 16px; gap: var(--toolbar-group-gap); background: var(--color-canvas); border-color: var(--color-line-soft); box-shadow: none; flex-wrap: nowrap; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
+.notebook-editor .toolbar { position: sticky; top: 0; display: flex; align-items: center; height: auto; border-radius: 0; padding: 5px 12px; min-height: 44px; --toolbar-group-gap: 2px; --toolbar-section-gap: 16px; gap: var(--toolbar-group-gap); background: var(--notebook-bg-primary); border-color: var(--notebook-border-primary); box-shadow: none; flex-wrap: nowrap; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
 .notebook-editor .toolbar::-webkit-scrollbar { display: none; }
 .notebook-editor .toolbar-group { position: relative; display: flex; align-items: center; gap: 2px; flex: none; padding: 0; margin: 0; }
 .notebook-editor .toolbar-group[data-section-start='true'] { margin-inline-start: calc(var(--toolbar-section-gap) / 2); padding-inline-start: calc(var(--toolbar-section-gap) / 2); }
-.notebook-editor .toolbar-group[data-section-start='true']::before { content: ''; position: absolute; inset-inline-start: 0; top: 50%; width: 1px; height: 20px; transform: translateY(-50%); background: var(--color-line-soft); }
+.notebook-editor .toolbar-group[data-section-start='true']::before { content: ''; position: absolute; inset-inline-start: 0; top: 50%; width: 1px; height: 20px; transform: translateY(-50%); background: var(--notebook-border-primary); }
 .notebook-editor .toolbar:not([data-measuring='true']) > .toolbar-group[data-overflowed='true'] { display: none; }
 .notebook-editor .toolbar[data-measuring='true'] > .toolbar-group { display: flex; margin: 0; padding: 0; border: 0; }
 .notebook-editor .toolbar[data-measuring='true'] > .toolbar-group::before { display: none; }
-.notebook-editor .toolbar button.toolbar-item { display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box; height: 32px; min-width: 32px; padding: 6px 7px; margin: 0; border: 0; border-radius: 4px; gap: 6px; color: var(--color-fg); }
+.notebook-editor .toolbar button.toolbar-item { display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box; height: 32px; min-width: 32px; padding: 6px 7px; margin: 0; border: 0; border-radius: 4px; gap: 6px; color: var(--notebook-text-body); }
 .notebook-editor .toolbar button.toolbar-item[aria-haspopup='menu'] { gap: 4px; padding-inline: 5px; }
 .notebook-editor .toolbar .toolbar-item .text { font-size: 14px; font-weight: 500; color: inherit; padding: 0; height: auto; line-height: 20px; white-space: nowrap; }
 .notebook-editor .toolbar .toolbar-item :is(.icon, i.format, .editor-icon) { flex: none; width: 18px; height: 18px; margin: 0; opacity: 1; }
@@ -60,7 +109,7 @@ body :is(input, textarea)::placeholder { color: var(--color-fg-faint); }
 .notebook-editor .toolbar .block-controls .icon { display: none; }
 .notebook-editor .toolbar .block-controls .dropdown-button-text { width: auto; min-width: 0; }
 .notebook-editor .toolbar .toolbar-font-size { display: flex; align-items: center; box-sizing: border-box; height: 32px; padding-inline-start: 5px; border: 1px solid transparent; border-radius: 4px; color: var(--color-fg); }
-.notebook-editor .toolbar .toolbar-font-size:hover { background: var(--color-active); }
+.notebook-editor .toolbar .toolbar-font-size:hover { background: var(--notebook-bg-hover); }
 .notebook-editor .toolbar .toolbar-font-size button.toolbar-item.font-size-presets { width: 22px; min-width: 22px; height: 30px; padding: 0; }
 .notebook-editor .toolbar .toolbar-font-size input { width: 23px; height: 30px; padding: 0; margin: 0; border: 0; border-radius: 0; font: 500 14px var(--font-family); background: transparent; color: inherit; }
 .notebook-editor .toolbar .font-size-unit { color: inherit; font-size: 14px; font-weight: 500; line-height: 20px; pointer-events: none; }
@@ -83,11 +132,11 @@ body :is(input, textarea)::placeholder { color: var(--color-fg-faint); }
 .notebook-editor .toolbar .color-picker { position: relative; }
 /* Recolor the glyph's own bottom stripe, preserving its original geometry. */
 .notebook-editor .toolbar .color-picker .icon::after { content: ''; position: absolute; inset: 84% 0 0; background: var(--toolbar-swatch); }
-.notebook-editor .toolbar button.toolbar-item:hover:not(:disabled) { background: var(--color-active); }
-.notebook-editor .toolbar button.toolbar-item[aria-expanded='true'] { background: var(--color-active); color: var(--color-fg-strong); }
+.notebook-editor .toolbar button.toolbar-item:hover:not(:disabled) { background: var(--notebook-bg-hover); }
+.notebook-editor .toolbar button.toolbar-item[aria-expanded='true'] { background: var(--notebook-bg-hover); color: var(--notebook-text-primary); }
 .notebook-editor .toolbar button.toolbar-item:focus:not(:focus-visible):not(:hover):not(.active):not([aria-expanded='true']) { background: transparent; }
-.notebook-editor .toolbar button.toolbar-item.active { background: var(--color-primary-light-1); color: var(--color-accent); }
-.notebook-editor .toolbar .divider { background: var(--color-line-soft); margin: 0 4px; }
+.notebook-editor .toolbar button.toolbar-item.active { background: var(--notebook-accent-subtle); color: var(--notebook-accent); }
+.notebook-editor .toolbar .divider { background: var(--notebook-border-primary); margin: 0 4px; }
 .notebook-editor .image-caption-container .ContentEditable__root, .notebook-editor .sticky-note .ContentEditable__root { min-height: 20px; padding: 10px; }
 .notebook-editor .image-caption-container .ContentEditable__placeholder { top: 10px; left: 10px; }
 .notebook-editor :is(.PlaygroundEditorTheme__h1, .PlaygroundEditorTheme__h2, .PlaygroundEditorTheme__h3) { color: var(--color-fg-strong); }
@@ -340,3 +389,132 @@ body.mica-arco-theme {
 .editor-dropdown .toolbar-menu-back-icon { display: grid; place-items: center; width: 16px; height: 16px; font-size: 22px; line-height: 1; }
 .editor-dropdown .toolbar-menu-back { font-weight: 500; }
 .editor-dropdown .icon-text-container .format-icon { flex: none; }
+
+/* Yuque palette application. These selectors are intentionally scoped to the
+   Notebook runtime; other playground examples continue to use Mica tokens. */
+body.mica-arco-theme .notebook-editor :is(.PlaygroundEditorTheme__h1, .PlaygroundEditorTheme__h2, .PlaygroundEditorTheme__h3, .PlaygroundEditorTheme__h4, .PlaygroundEditorTheme__h5, .PlaygroundEditorTheme__h6) {
+  color: var(--notebook-text-primary);
+}
+body.mica-arco-theme .notebook-editor .PlaygroundEditorTheme__quote {
+  color: var(--notebook-text-caption);
+  background: transparent;
+  border-left-color: var(--notebook-border-primary);
+}
+body.mica-arco-theme .notebook-editor .PlaygroundEditorTheme__textCode {
+  color: var(--notebook-text-primary);
+  background: var(--notebook-bg-tertiary);
+}
+body.mica-arco-theme .notebook-editor .PlaygroundEditorTheme__link {
+  color: var(--notebook-link);
+}
+body.mica-arco-theme .notebook-editor .PlaygroundEditorTheme__code {
+  color: var(--notebook-text-primary);
+  background: var(--notebook-bg-secondary);
+  border-color: var(--notebook-border-primary);
+}
+body.mica-arco-theme .notebook-editor .PlaygroundEditorTheme__code::before {
+  color: var(--notebook-text-caption);
+  background: var(--notebook-bg-tertiary);
+  border-color: var(--notebook-border-primary);
+}
+body.mica-arco-theme .notebook-editor :is(.PlaygroundEditorTheme__table, .PlaygroundEditorTheme__tableCell) {
+  border-color: var(--notebook-border-primary);
+}
+body.mica-arco-theme .notebook-editor .PlaygroundEditorTheme__tableCellHeader {
+  color: var(--notebook-text-primary);
+  background: var(--notebook-bg-tertiary);
+}
+body.mica-arco-theme .notebook-editor .PlaygroundEditorTheme__tableCellSelected::after {
+  background: var(--notebook-accent-subtle);
+}
+body.mica-arco-theme .notebook-editor .document-statusbar {
+  color: var(--notebook-text-caption);
+  background: var(--notebook-bg-primary);
+  border-color: var(--notebook-border-primary);
+}
+body.mica-arco-theme :is(.table-context-toolbar, .table-control-popup, .mica-block-menu, .typeahead-popover, .floating-text-format-popup, .link-editor, .ruby-editor, .find-replace-panel, .PlaygroundEditorTheme__contextMenu, .dateTimePicker) {
+  color: var(--notebook-text-body);
+  background: var(--notebook-bg-secondary);
+  border-color: var(--notebook-border-primary);
+  box-shadow: var(--notebook-popup-shadow);
+}
+body.mica-arco-theme :is(.table-context-toolbar, .table-control-popup, .mica-block-menu) :is(button, [role='menuitem']):hover:not(:disabled):not([aria-disabled='true']) {
+  color: var(--notebook-text-primary);
+  background: var(--notebook-bg-hover);
+}
+body.mica-arco-theme .mica-block-menu .mica-menu-item.arco-btn {
+  color: var(--notebook-text-primary);
+}
+body.mica-arco-theme .mica-block-menu .mica-menu-item.arco-btn:is(:hover, :focus-visible) {
+  background: var(--notebook-bg-hover);
+}
+body.mica-arco-theme .mica-block-menu .mica-menu-item.arco-btn[data-block-action='delete'] {
+  color: var(--notebook-text-primary);
+}
+body.mica-arco-theme .mica-block-menu .mica-menu-separator {
+  background: var(--notebook-border-primary);
+}
+body.mica-arco-theme .mica-block-handle {
+  color: var(--notebook-text-caption);
+}
+body.mica-arco-theme .mica-block-handle:hover,
+body.mica-arco-theme .draggable-block-menu.is-open .mica-block-handle {
+  color: var(--notebook-text-primary);
+  background: var(--notebook-bg-hover);
+}
+body.mica-arco-theme .mica-block-handle:focus-visible {
+  outline-color: var(--notebook-accent);
+}
+body.mica-arco-theme .mica-block-handle__hint {
+  color: var(--notebook-bg-primary);
+  background: var(--notebook-text-primary);
+}
+body.mica-arco-theme .table-selection-handles {
+  color: var(--notebook-text-caption);
+}
+body.mica-arco-theme .table-selection-handle,
+body.mica-arco-theme .table-selection-all {
+  color: var(--notebook-text-caption);
+  background: var(--notebook-bg-tertiary);
+  border-color: var(--notebook-border-primary);
+}
+body.mica-arco-theme .table-selection-handle:hover,
+body.mica-arco-theme .table-selection-all:hover {
+  color: var(--notebook-accent);
+  background: var(--notebook-bg-hover);
+}
+body.mica-arco-theme .table-selection-handle.is-active,
+body.mica-arco-theme .table-selection-all.is-active {
+  color: var(--notebook-bg-primary);
+  background: var(--notebook-accent);
+}
+body.mica-arco-theme .table-selection-handle-grip {
+  color: var(--notebook-accent);
+}
+body.mica-arco-theme .table-selection-handle-grip.is-on-active {
+  color: var(--notebook-bg-primary);
+}
+body.mica-arco-theme .table-selection-drop-line,
+body.mica-arco-theme .table-selection-connector-line {
+  background: var(--notebook-accent);
+}
+body.mica-arco-theme .table-selection-band-action {
+  color: var(--notebook-text-body);
+  background: var(--notebook-bg-primary);
+  border-color: var(--notebook-border-primary);
+}
+body.mica-arco-theme .table-selection-band-action:hover {
+  color: var(--notebook-accent);
+  background: var(--notebook-bg-hover);
+  border-color: var(--notebook-accent);
+}
+body.mica-arco-theme .table-scroll-fade::before {
+  background: linear-gradient(to right, var(--notebook-border-primary), transparent);
+}
+body.mica-arco-theme .table-scroll-fade::after {
+  background: linear-gradient(to left, var(--notebook-border-primary), transparent);
+}
+body.mica-arco-theme .notebook-editor .toolbar .toolbar-insert-symbol {
+  background: var(--notebook-accent);
+  color: var(--notebook-bg-primary);
+}

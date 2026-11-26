@@ -13,17 +13,17 @@
   --notebook-body-top: 24px;
   /* Yuque's own stack: "Chinese Quote" first, then the platform UI face. */
   --notebook-document-font: 'Chinese Quote', -apple-system, BlinkMacSystemFont, system-ui, 'Segoe UI', Roboto, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Helvetica Neue', Helvetica, Arial, sans-serif;
-  --notebook-document-fg: color-mix(in srgb, var(--color-fg-strong) 55%, var(--color-fg-soft));
-  --notebook-document-muted: color-mix(in srgb, var(--color-fg-soft) 78%, var(--color-fg-strong));
+  --notebook-document-fg: var(--notebook-text-primary);
+  --notebook-document-muted: var(--notebook-text-body);
 }
 
 html[data-appearance='light'] .notebook-workbench {
-  --notebook-document-fg: #262626;
-  --notebook-document-muted: #585a5a;
+  --notebook-document-fg: var(--notebook-text-primary);
+  --notebook-document-muted: var(--notebook-text-body);
 }
 html[data-appearance='dark'] .notebook-workbench {
-  --notebook-document-fg: #e2e2e2;
-  --notebook-document-muted: #b3b3b3;
+  --notebook-document-fg: var(--notebook-text-primary);
+  --notebook-document-muted: var(--notebook-text-body);
 }
 
 .notebook-workbench .editor-scroller > .editor > .ContentEditable__root {
@@ -84,7 +84,7 @@ html[data-appearance='dark'] .notebook-workbench {
 .notebook-workbench .PlaygroundEditorTheme__quote {
   margin: var(--notebook-paragraph-gap) 0;
   padding: 4px 16px;
-  border-left: 3px solid var(--color-line);
+  border-left: 3px solid var(--notebook-border-primary);
   border-radius: 0;
   background: transparent;
   font-size: inherit;
@@ -96,13 +96,13 @@ html[data-appearance='dark'] .notebook-workbench {
   padding: 1px 5px;
   border: 0;
   border-radius: 4px;
-  color: var(--color-inline-code);
-  background: var(--color-inline-code-bg);
+  color: var(--notebook-text-primary);
+  background: var(--notebook-bg-tertiary);
   font-size: .9em;
 }
 .notebook-workbench .PlaygroundEditorTheme__code {
   margin: 16px 0 20px;
-  border: 1px solid var(--color-line-soft);
+  border: 1px solid var(--notebook-border-primary);
   border-radius: 6px;
   font-size: 13px;
   line-height: 1.65;
@@ -119,7 +119,7 @@ html[data-appearance='dark'] .notebook-workbench {
   width: 100%;
   min-width: 750px;
   font-size: var(--notebook-body-size);
-  border-color: var(--color-line-soft);
+  border-color: var(--notebook-border-primary);
 }
 .notebook-workbench .PlaygroundEditorTheme__tableCell {
   min-width: 75px;
@@ -135,8 +135,8 @@ html[data-appearance='dark'] .notebook-workbench {
 }
 .notebook-workbench .PlaygroundEditorTheme__tableCell > * { overflow: visible; }
 .notebook-workbench .PlaygroundEditorTheme__tableCell > .PlaygroundEditorTheme__paragraph { min-height: 24px; margin: 0; font-size: inherit; line-height: 24px; }
-.notebook-workbench :is(.PlaygroundEditorTheme__table, .PlaygroundEditorTheme__tableCell) { border-color: var(--color-line); }
-.notebook-workbench .PlaygroundEditorTheme__tableCellHeader { background: var(--color-panel); font-size: inherit; }
+.notebook-workbench :is(.PlaygroundEditorTheme__table, .PlaygroundEditorTheme__tableCell) { border-color: var(--notebook-border-primary); }
+.notebook-workbench .PlaygroundEditorTheme__tableCellHeader { background: var(--notebook-bg-tertiary); font-size: inherit; }
 .notebook-workbench .PlaygroundEditorTheme__tableScrollableWrapper {
   max-width: 100%;
   /* Yuque's table hole contributes 4px/16px outside spacing; its inner wrap
@@ -161,9 +161,9 @@ html[data-appearance='dark'] .notebook-workbench {
   max-width: calc(100vw - 20px);
   display: flex;
   flex-direction: column;
-  color: var(--color-fg-strong);
-  background: var(--color-canvas);
-  border-left: 1px solid var(--color-line-soft);
+  color: var(--notebook-text-body);
+  background: var(--notebook-bg-primary);
+  border-left: 1px solid var(--notebook-border-primary);
   font: 13px/1.6 var(--font-family);
 }
 .notebook-panel-header {

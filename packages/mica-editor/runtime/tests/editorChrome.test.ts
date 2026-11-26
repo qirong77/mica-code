@@ -10,6 +10,7 @@ const notebookStyles = readSource('src/workspace/notebook.css');
 const notebookWorkbenchStyles = readSource('src/workspace/notebook-workbench.css');
 const notebookDocumentStyles = readSource('src/workspace/notebook-document.css');
 const notebookHostStyles = readSource('../../../plugins/notebook/notebook.css');
+const notebookDesktopSource = readSource('../../../plugins/notebook/desktop.jsx');
 const blockSource = readSource('src/playground/plugins/DraggableBlockPlugin/index.tsx');
 const blockMenuSource = readSource('src/playground/plugins/DraggableBlockPlugin/BlockMenu.tsx');
 const blockActionsSource = readSource('src/playground/plugins/DraggableBlockPlugin/blockMenuActions.ts');
@@ -118,6 +119,40 @@ describe('editor chrome style contracts', () => {
     expect(notebookHostStyles).toContain('background: transparent;');
   });
 
+  it('keeps the Notebook palette independent from the surrounding Mica accent', () => {
+    for (const value of [
+      '--notebook-bg-primary: #fff;',
+      '--notebook-bg-secondary: #fafafa;',
+      '--notebook-bg-tertiary: #f4f5f5;',
+      '--notebook-bg-hover: #eff0f0;',
+      '--notebook-border-primary: #e7e9e8;',
+      '--notebook-text-primary: #262626;',
+      '--notebook-text-body: #585a5a;',
+      '--notebook-text-caption: #8a8f8d;',
+      '--notebook-accent: #00b96b;',
+      '--notebook-link: #117cee;',
+    ]) {
+      expect(notebookHostStyles).toContain(value);
+      expect(notebookStyles).toContain(value);
+    }
+    for (const value of [
+      '--notebook-bg-primary: #141414;',
+      '--notebook-bg-secondary: #1f1f1f;',
+      '--notebook-bg-tertiary: rgb(255 255 255 / 4%);',
+      '--notebook-border-primary: rgb(255 255 255 / 12%);',
+      '--notebook-text-primary: #e2e2e2;',
+      '--notebook-text-body: #b3b3b3;',
+      '--notebook-text-caption: #848484;',
+      '--notebook-accent: #2ed790;',
+      '--notebook-link: #3b82ce;',
+    ]) {
+      expect(notebookHostStyles).toContain(value);
+      expect(notebookStyles).toContain(value);
+    }
+    expect(notebookDesktopSource).toContain("'has-children'");
+    expect(notebookHostStyles).not.toContain('--notebook-outline-width: 240px;');
+  });
+
   it('reveals the block handle on block hover, in panes narrower than the toolbar breakpoint', () => {
     // Hovering the block (not the invisible handle) has to reveal the grip.
     expect(blockStyles).toContain('.draggable-block-menu.is-visible,');
@@ -137,6 +172,8 @@ describe('editor chrome style contracts', () => {
     expect(blockMenuSource).toContain('onMouseEnter={cancelSubmenuClose}');
     expect(blockMenuSource).toContain('[role="menuitem"]:not([aria-disabled="true"])');
     expect(blockMenuSource).toContain('Scrolling a long submenu must not dismiss the menu stack');
+    expect(blockSource).toContain('previousMenu');
+    expect(blockSource).toContain('editor.getRootElement()?.focus({preventScroll: true})');
   });
 
   it('keeps narrow table controls reachable instead of clipping their action row', () => {
@@ -146,6 +183,8 @@ describe('editor chrome style contracts', () => {
     expect(tableControlsStyles).toContain('overflow-x: auto;');
     expect(tableControlsStyles).toContain('.table-context-toolbar > * { flex: none; }');
     expect(tableControlsSource).toContain('whileElementsMounted: autoUpdate');
+    expect(tableControlsSource).toContain('new MutationObserver(closeWhenStylePanelOpens)');
+    expect(tableControlsSource).toContain('queueMicrotask(() => menu.refs.floating.current');
     expect(tableHandlesSource).toContain('const RAIL_SIZE = 14;');
     expect(tableHandlesSource).toContain('const RAIL_OFFSET = 13;');
   });

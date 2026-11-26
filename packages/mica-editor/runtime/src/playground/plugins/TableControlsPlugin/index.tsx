@@ -91,8 +91,24 @@ export default function TableControlsPlugin({markdownOnly = false}: {markdownOnl
     } : anchor || {
       getBoundingClientRect: () => new DOMRect(popup.x, popup.y, 0, 0),
     });
-    if (popup.keyboard) menu.refs.floating.current?.querySelector<HTMLElement>('[role="menuitem"]:not([aria-disabled="true"]), .arco-menu-pop-header, button')?.focus();
+    // Mouse-opened menus need a real focus target too. Otherwise Arrow keys
+    // keep going to the editor and Escape cannot reliably close the popup.
+    queueMicrotask(() => menu.refs.floating.current?.querySelector<HTMLElement>('[role="menuitem"]:not([aria-disabled="true"]), .arco-menu-pop-header, button')?.focus());
   }, [popup, menu.refs]);
+
+  useEffect(() => {
+    const body = editor.getRootElement()?.ownerDocument.body;
+    if (!body) return;
+    const closeWhenStylePanelOpens = () => {
+      if (body.dataset.notebookStyle !== 'open') return;
+      popupRef.current = null;
+      setPopup(null);
+    };
+    closeWhenStylePanelOpens();
+    const observer = new MutationObserver(closeWhenStylePanelOpens);
+    observer.observe(body, {attributes: true, attributeFilter: ['data-notebook-style']});
+    return () => observer.disconnect();
+  }, [editor]);
 
   useEffect(() => {
     if (editable) return;
@@ -326,7 +342,7 @@ export default function TableControlsPlugin({markdownOnly = false}: {markdownOnl
       onMenu={(axis, index, event) => {
         const fullAxisSelected = axis === 'row' ? context.minColumn === 0 && context.maxColumn === context.columns - 1 && index >= context.minRow && index <= context.maxRow : context.minRow === 0 && context.maxRow === context.rows - 1 && index >= context.minColumn && index <= context.maxColumn;
         if (!fullAxisSelected) select(axis, index, index);
-        setPopup({kind: axis, x: event.clientX, y: event.clientY, keyboard: false});
+        setPopup({kind: axis, x: event.clientX, y: event.clientY, keyboard: true});
       }} />
     {createPortal(<>
       <div ref={toolbar.refs.setFloating} style={{...toolbar.floatingStyles, visibility: toolbar.middlewareData.hide?.referenceHidden ? 'hidden' : undefined}} className="table-context-toolbar" role="toolbar" aria-label="表格工具栏"

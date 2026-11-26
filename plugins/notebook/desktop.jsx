@@ -342,7 +342,7 @@ export default function NotebookPage({ api }) {
   const [railMaxWidth, setRailMaxWidth] = useState(RAIL_MAX_WIDTH);
   const [railDragging, setRailDragging] = useState(false);
   const [focused, setFocused] = useState(false);
-  const [outlineOpen, setOutlineOpen] = useState(() => !window.matchMedia('(max-width: 1100px)').matches);
+  const [outlineOpen, setOutlineOpen] = useState(() => !window.matchMedia('(max-width: 760px)').matches);
   const [outlineCollapsed, setOutlineCollapsed] = useState(new Set());
   const [outline, setOutline] = useState(emptyOutline);
   const [externalUpdate, setExternalUpdate] = useState(null);
@@ -1577,7 +1577,7 @@ export default function NotebookPage({ api }) {
           <Button
             variant="ghost"
             fullWidth
-            className={`mica-arco-row notebook-outline-entry ${currentHeading ? 'is-active' : ''}`}
+            className={`mica-arco-row notebook-outline-entry ${item.children.length ? 'has-children' : ''} ${currentHeading ? 'is-active' : ''}`}
             style={{ '--heading-level': item.level }}
             aria-current={currentHeading ? 'location' : undefined}
             aria-level={item.level}
@@ -1662,12 +1662,13 @@ export default function NotebookPage({ api }) {
       <div className="notebook-layout">
         <aside ref={rail} className="notebook-rail" aria-label="笔记目录" inert={editorModalOpen}>
           <div className="notebook-rail-title">
-            <span className="notebook-book-icon" aria-hidden="true">
-              <BookMarked size={22} strokeWidth={1.6} />
-            </span>
+            <div className="notebook-book-crumb">本地笔记</div>
             <div className="notebook-book-info">
+              <span className="notebook-book-icon" aria-hidden="true">
+                <BookMarked size={20} strokeWidth={1.6} />
+              </span>
               <strong>我的笔记</strong>
-              <span>{loaded ? `${noteCount} 篇笔记` : '\u00a0'}</span>
+              <small>{loaded ? `${noteCount} 篇笔记` : '\u00a0'}</small>
             </div>
             <Button
               variant="ghost"

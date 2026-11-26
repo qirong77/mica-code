@@ -78,7 +78,7 @@ export default function NotebookDocumentStyle() {
     <aside className="notebook-document-panel notebook-style-panel" aria-label="样式设置">
       <header className="notebook-panel-header">
         <strong>样式设置</strong>
-        <Button variant="ghost" size="compact" title="关闭样式设置" onClick={() => setOpen(false)} icon={
+        <Button variant="ghost" size="compact" title="关闭样式设置" onClick={() => {setOpen(false); editor.focus();}} icon={
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" /></svg>
         } />
       </header>

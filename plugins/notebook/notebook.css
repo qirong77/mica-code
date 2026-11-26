@@ -10,8 +10,8 @@
   height: 100%;
   min-width: 0;
   min-height: 0;
-  color: var(--color-fg);
-  background: var(--color-canvas);
+  color: var(--notebook-text-body);
+  background: var(--notebook-bg-primary);
   /* Same face as the document and as Yuque's own sidebar. */
   --font-family: 'Chinese Quote', -apple-system, BlinkMacSystemFont, system-ui, 'Segoe UI', Roboto, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Helvetica Neue', Helvetica, Arial, sans-serif;
   font-family: var(--font-family);
@@ -20,32 +20,73 @@
   position: relative;
   overflow: hidden;
   container: notebook / inline-size;
-  --notebook-rail-bg: color-mix(in srgb, var(--color-canvas) 70%, var(--color-panel));
-  --notebook-text-primary: color-mix(in srgb, var(--color-fg-strong) 55%, var(--color-fg-soft));
-  --notebook-text-secondary: color-mix(in srgb, var(--color-fg-soft) 78%, var(--color-fg-strong));
+  /* Notebook owns a Yuque-shaped palette instead of inheriting Mica's blue
+     active surface. Keep the semantic names local: the surrounding app may
+     use a different accent and that must not recolor the editor halfway. */
+  --notebook-bg-primary: var(--color-canvas);
+  --notebook-bg-secondary: var(--color-panel);
   --notebook-bg-tertiary: color-mix(in srgb, var(--color-fg-strong) 4%, var(--color-canvas));
-  /* Yuque marks rows with a neutral grey (#eff0f0 on white), not the bluish
-     --color-active the app tabs use. Both derive from the theme's strong
-     foreground so dark themes stay neutral too. */
-  --notebook-row-hover-bg: color-mix(in srgb, var(--color-fg-strong) 4%, var(--color-canvas));
-  --notebook-row-active-bg: color-mix(in srgb, var(--color-fg-strong) 7%, var(--color-canvas));
+  --notebook-bg-hover: color-mix(in srgb, var(--color-fg-strong) 7%, var(--color-canvas));
+  --notebook-bg-hover-light: var(--color-line-soft);
+  --notebook-border-primary: var(--color-line-soft);
+  --notebook-border-light: color-mix(in srgb, var(--color-line-soft) 70%, transparent);
+  --notebook-text-primary: var(--color-fg-strong);
+  --notebook-text-body: var(--color-fg-soft);
+  --notebook-text-secondary: var(--notebook-text-body);
+  --notebook-text-caption: var(--color-fg-muted);
+  --notebook-text-disabled: var(--color-fg-faint);
+  --notebook-accent: var(--color-accent);
+  --notebook-accent-subtle: var(--color-accent-subtle);
+  --notebook-link: var(--color-accent);
+  --notebook-rail-bg: var(--notebook-bg-secondary);
+  --notebook-search-bg: var(--notebook-bg-tertiary);
+  --notebook-row-hover-bg: var(--notebook-bg-hover);
+  --notebook-row-active-bg: var(--notebook-bg-hover);
   --notebook-row-height: 36px;
 }
 
-/* Yuque's catalog uses neutral gray steps in light mode. Keep the same
-   semantic contrast in dark mode instead of reusing Mica's bluish active row. */
+/* Values copied from Yuque's public palette (pc.9283cd96.css). Other Mica
+   themes keep their light/dark appearance but use the same editor language. */
 html[data-appearance='light'] .notebook-page {
-  --notebook-rail-bg: #fafafa;
+  --notebook-bg-primary: #fff;
+  --notebook-bg-secondary: #fafafa;
+  --notebook-bg-tertiary: #f4f5f5;
+  --notebook-bg-hover: #eff0f0;
+  --notebook-bg-hover-light: #e7e9e8;
+  --notebook-border-primary: #e7e9e8;
+  --notebook-border-light: rgba(0, 0, 0, .04);
+  --notebook-rail-bg: #fff;
   --notebook-text-primary: #262626;
+  --notebook-text-body: #585a5a;
   --notebook-text-secondary: #585a5a;
-  --notebook-bg-tertiary: #fafafa;
-  --notebook-row-hover-bg: #f4f5f5;
+  --notebook-text-caption: #8a8f8d;
+  --notebook-text-disabled: #bec0bf;
+  --notebook-accent: #00b96b;
+  --notebook-accent-subtle: #ecfaf4;
+  --notebook-link: #117cee;
+  --notebook-search-bg: #f4f5f5;
+  --notebook-row-hover-bg: #eff0f0;
   --notebook-row-active-bg: #eff0f0;
 }
 html[data-appearance='dark'] .notebook-page {
+  --notebook-bg-primary: #141414;
+  --notebook-bg-secondary: #1f1f1f;
+  --notebook-bg-tertiary: rgb(255 255 255 / 4%);
+  --notebook-bg-hover: rgb(255 255 255 / 12%);
+  --notebook-bg-hover-light: #333;
+  --notebook-border-primary: rgb(255 255 255 / 12%);
+  --notebook-border-light: rgb(255 255 255 / 8%);
+  --notebook-rail-bg: #141414;
   --notebook-text-primary: #e2e2e2;
+  --notebook-text-body: #b3b3b3;
   --notebook-text-secondary: #b3b3b3;
-  --notebook-row-hover-bg: rgb(255 255 255 / 4%);
+  --notebook-text-caption: #848484;
+  --notebook-text-disabled: #505050;
+  --notebook-accent: #2ed790;
+  --notebook-accent-subtle: #10211a;
+  --notebook-link: #3b82ce;
+  --notebook-search-bg: rgb(255 255 255 / 4%);
+  --notebook-row-hover-bg: rgb(255 255 255 / 12%);
   --notebook-row-active-bg: rgb(255 255 255 / 12%);
 }
 .notebook-layout {
@@ -67,7 +108,7 @@ html[data-appearance='dark'] .notebook-page {
 .notebook-yuque-icon[data-icon='more'] { --notebook-yuque-icon: url('../../packages/mica-editor/web/assets/yuque/more.svg'); }
 .notebook-yuque-icon[data-icon='outline'] { --notebook-yuque-icon: url('../../packages/mica-editor/web/assets/yuque/outline.svg'); }
 .notebook-page button:focus-visible {
-  outline: 2px solid var(--color-accent);
+  outline: 2px solid var(--notebook-accent);
   outline-offset: -2px;
 }
 .notebook-page .ui-button-icon-only {
@@ -79,7 +120,7 @@ html[data-appearance='dark'] .notebook-page {
   flex: none;
 }
 .notebook-page .ui-button[aria-pressed='true']:not(:disabled) {
-  color: var(--color-fg-strong);
+  color: var(--notebook-text-primary);
   background: var(--notebook-row-active-bg);
 }
 .notebook-rail {
@@ -91,7 +132,7 @@ html[data-appearance='dark'] .notebook-page {
   flex-direction: column;
   min-height: 0;
   background: var(--notebook-rail-bg);
-  border-inline-end: 1px solid var(--color-line-soft);
+  border-inline-end: 1px solid var(--notebook-border-primary);
   overflow: hidden;
 }
 .notebook-page.is-rail-open:not(.is-focused) .notebook-rail {
@@ -122,13 +163,13 @@ html[data-appearance='dark'] .notebook-page {
   transition: background-color var(--motion-fast, 90ms) ease;
 }
 .notebook-rail-resizer:is(:hover, :focus-visible)::after {
-  background: var(--color-line-strong);
+  background: var(--notebook-border-primary);
 }
 .notebook-rail-resizer:is(:focus-visible, [data-resizing='true']) {
   outline: none;
 }
 .notebook-rail-resizer:is(:focus-visible, [data-resizing='true'])::after {
-  background: var(--color-accent);
+  background: var(--notebook-accent);
 }
 /* 拖动期间光标与选区统一交给这条命中区，正文里的按钮不再抢指针。 */
 .notebook-page.is-resizing,
@@ -141,49 +182,62 @@ html[data-appearance='dark'] .notebook-page {
   pointer-events: none;
 }
 .notebook-rail-title {
+  position: relative;
   min-height: 94px;
-  padding: 16px 12px 12px 20px;
-  display: flex;
-  align-items: center;
-  gap: 12px;
+  padding: 0 10px 12px;
+  display: block;
   flex: none;
+}
+.notebook-book-crumb {
+  box-sizing: border-box;
+  height: 45px;
+  padding: 16px 0 6px 6px;
+  color: var(--notebook-text-caption);
+  font-size: 12px;
+  line-height: 18px;
 }
 .notebook-book-icon {
   display: grid;
   place-items: center;
   flex: none;
-  color: var(--color-accent);
-  width: 34px;
-  height: 38px;
-  border: 1px solid color-mix(in srgb, var(--color-accent) 18%, var(--color-line-soft));
-  border-radius: 7px;
-  background: var(--color-accent-subtle);
+  color: var(--notebook-text-body);
+  width: 20px;
+  height: 20px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
 }
 .notebook-book-icon svg {
-  width: 22px;
-  height: 22px;
+  width: 20px;
+  height: 20px;
 }
 .notebook-book-info {
-  display: grid;
-  gap: 3px;
-  flex: 1;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
   min-width: 0;
 }
-.notebook-book-info > span {
-  color: var(--color-fg-muted);
+.notebook-book-info > small {
+  margin-inline-start: auto;
+  color: var(--notebook-text-caption);
   font-size: 12px;
   line-height: 18px;
 }
 .notebook-rail-title > .ui-button {
-  color: var(--color-fg-muted);
+  position: absolute;
+  top: 45px;
+  right: 0;
+  color: var(--notebook-text-caption);
 }
 .notebook-book-info > strong {
-  font-size: 16px;
-  font-weight: 600;
-  color: var(--color-fg-strong);
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  font-size: 16px;
+  font-weight: 400;
+  color: var(--notebook-text-primary);
 }
 .notebook-rail-tools {
   display: flex;
@@ -201,23 +255,23 @@ html[data-appearance='dark'] .notebook-page {
   width: 100%;
   height: 32px;
   padding: 0 8px;
-  border: 1px solid var(--color-line-soft);
-  border-radius: 6px;
-  background: var(--notebook-bg-tertiary);
+  border: 0;
+  border-radius: 8px;
+  background: var(--notebook-search-bg);
   box-shadow: none;
 }
 .notebook-search .arco-input-inner-wrapper:hover {
-  border-color: var(--color-line);
+  background: var(--notebook-bg-hover);
 }
 .notebook-search .arco-input-inner-wrapper:focus-within {
-  background: var(--color-canvas);
-  border-color: var(--color-accent);
+  background: var(--notebook-bg-primary);
+  box-shadow: 0 0 0 1px var(--notebook-accent);
 }
 .notebook-search .arco-input-group-prefix {
   display: inline-flex;
   align-items: center;
-  margin-inline-end: 7px;
-  color: var(--color-fg-muted);
+  margin-inline-end: 12px;
+  color: var(--notebook-text-disabled);
 }
 .notebook-search input.arco-input {
   padding: 0;
@@ -235,15 +289,15 @@ html[data-appearance='dark'] .notebook-page {
   width: 32px;
   min-width: 32px;
   height: 32px;
-  border: 1px solid var(--color-line);
-  border-radius: 6px;
-  background: var(--color-canvas);
+  border: 1px solid var(--notebook-border-primary);
+  border-radius: 8px;
+  background: var(--notebook-bg-primary);
   padding: 0;
-  color: var(--color-fg-soft);
+  color: var(--notebook-text-body);
   font-size: 12px;
 }
 .notebook-page .notebook-rail-add:hover:not(:disabled) {
-  border-color: var(--color-line-strong);
+  border-color: var(--notebook-border-primary);
   background: var(--notebook-row-hover-bg);
 }
 .notebook-tree-heading {
@@ -271,7 +325,7 @@ html[data-appearance='dark'] .notebook-page {
 }
 .notebook-tree-heading small {
   font-size: 12px;
-  color: var(--color-fg-muted);
+  color: var(--notebook-text-caption);
 }
 .notebook-page .notebook-root-target {
   min-height: 28px;
@@ -283,8 +337,8 @@ html[data-appearance='dark'] .notebook-page {
 }
 .notebook-page .notebook-root-target.is-drop-inside:not(:disabled),
 .notebook-tree .notebook-tree-entry.is-drop-inside {
-  background: var(--color-accent-subtle);
-  color: var(--color-accent);
+  background: var(--notebook-accent-subtle);
+  color: var(--notebook-accent);
 }
 .notebook-drag-hint {
   position: absolute;
@@ -294,9 +348,9 @@ html[data-appearance='dark'] .notebook-page {
   justify-content: center;
   padding: 5px 7px;
   border-radius: 6px;
-  color: var(--color-fg-soft);
-  background: var(--color-panel);
-  border: 1px solid var(--color-line);
+  color: var(--notebook-text-body);
+  background: var(--notebook-bg-secondary);
+  border: 1px solid var(--notebook-border-primary);
   font-size: 12px;
   pointer-events: none;
 }
@@ -308,7 +362,7 @@ html[data-appearance='dark'] .notebook-page {
   overscroll-behavior: contain;
   padding: 0 8px 20px;
   scrollbar-width: thin;
-  scrollbar-color: var(--color-line-strong) transparent;
+  scrollbar-color: var(--notebook-border-primary) transparent;
 }
 .notebook-tree-entry {
   --row-action-space: 10px;
@@ -347,7 +401,7 @@ html[data-appearance='dark'] .notebook-page {
   inset-inline-end: 4px;
   height: 2px;
   border-radius: 2px;
-  background: var(--color-accent);
+  background: var(--notebook-accent);
   pointer-events: none;
   z-index: 1;
 }
@@ -391,7 +445,7 @@ html[data-appearance='dark'] .notebook-page {
   display: grid;
   place-items: center;
   flex: 0 0 16px;
-  color: var(--color-fg-muted);
+  color: var(--notebook-text-caption);
 }
 .notebook-tree-title,
 .notebook-tree-title > :is(span, small) {
@@ -402,7 +456,7 @@ html[data-appearance='dark'] .notebook-page {
   white-space: nowrap;
 }
 .notebook-tree-title small {
-  color: var(--color-fg-muted);
+  color: var(--notebook-text-caption);
   font-size: 12px;
   font-weight: 400;
   line-height: 18px;
@@ -420,7 +474,7 @@ html[data-appearance='dark'] .notebook-page {
   width: 24px;
   min-width: 24px;
   padding: 0;
-  color: var(--color-fg-muted);
+  color: var(--notebook-text-caption);
 }
 .notebook-tree-entry:hover .notebook-row-actions,
 .notebook-tree-entry:focus-within .notebook-row-actions,
@@ -429,7 +483,7 @@ html[data-appearance='dark'] .notebook-page {
   pointer-events: auto;
 }
 .notebook-tree-empty {
-  color: var(--color-fg-muted);
+  color: var(--notebook-text-caption);
   font-size: 13px;
   padding: 42px 8px;
   display: flex;
@@ -447,9 +501,9 @@ html[data-appearance='dark'] .notebook-page {
   flex: none;
   min-height: 44px;
   padding: 7px 10px 7px 16px;
-  border-top: 1px solid var(--color-line-soft);
+  border-top: 1px solid var(--notebook-border-primary);
   font-size: 12px;
-  color: var(--color-fg-muted);
+  color: var(--notebook-text-caption);
 }
 .notebook-rail-footer > span {
   display: inline-flex;
@@ -491,8 +545,8 @@ html[data-appearance='dark'] .notebook-page {
   align-items: center;
   gap: 4px;
   min-width: 0;
-  background: var(--color-canvas);
-  border-bottom: 1px solid var(--color-line-soft);
+  background: var(--notebook-bg-primary);
+  border-bottom: 1px solid var(--notebook-border-primary);
   pointer-events: auto;
 }
 .notebook-bar-lead {
@@ -506,7 +560,7 @@ html[data-appearance='dark'] .notebook-page {
   flex: none;
   width: 1px;
   height: 16px;
-  background: var(--color-line-soft);
+  background: var(--notebook-border-primary);
 }
 .notebook-bar-lead:not(:empty)::after {
   position: absolute;
@@ -516,7 +570,7 @@ html[data-appearance='dark'] .notebook-page {
   margin-inline-end: 6px;
 }
 .notebook-bar .ui-button-icon-only {
-  color: var(--color-fg-soft);
+  color: var(--notebook-text-body);
 }
 .notebook-bar-actions {
   flex: none;
@@ -535,7 +589,7 @@ html[data-appearance='dark'] .notebook-page {
   min-width: 0;
   overflow: hidden;
   white-space: nowrap;
-  color: var(--color-fg-muted);
+  color: var(--notebook-text-caption);
   font-size: 13px;
   line-height: 20px;
 }
@@ -549,7 +603,7 @@ html[data-appearance='dark'] .notebook-page {
   max-width: 45%;
 }
 .notebook-breadcrumb > strong {
-  color: var(--color-fg-soft);
+  color: var(--notebook-text-body);
   font-weight: 500;
 }
 .notebook-document-body {
@@ -568,7 +622,7 @@ html[data-appearance='dark'] .notebook-page {
   min-height: 0;
   position: relative;
   overflow: hidden;
-  background: var(--color-canvas);
+  background: var(--notebook-bg-primary);
 }
 .notebook-editor-frame {
   flex: 1;
@@ -628,9 +682,9 @@ html[data-appearance='dark'] .notebook-page {
   width: var(--notebook-outline-width);
   min-height: 0;
   padding-top: calc(var(--notebook-bar-height) + 24px);
-  border-inline-start: 1px solid var(--color-line-soft);
-  background: var(--color-canvas);
-  color: var(--color-fg-muted);
+  border-inline-start: 1px solid var(--notebook-border-primary);
+  background: var(--notebook-bg-primary);
+  color: var(--notebook-text-caption);
   box-sizing: border-box;
 }
 .notebook-outline::before {
@@ -638,7 +692,7 @@ html[data-appearance='dark'] .notebook-page {
   position: absolute;
   inset: 0 0 auto;
   height: var(--notebook-bar-height);
-  border-bottom: 1px solid var(--color-line-soft);
+  border-bottom: 1px solid var(--notebook-border-primary);
   pointer-events: none;
 }
 .notebook-outline > header .ui-button {
@@ -668,7 +722,7 @@ html[data-appearance='dark'] .notebook-page {
   transition: background-color 120ms ease;
 }
 .notebook-outline-rail:is(:hover, :focus-visible) {
-  background: color-mix(in srgb, var(--color-overlay) 70%, transparent);
+  background: var(--notebook-bg-tertiary);
 }
 .notebook-outline-rail-ticks {
   display: flex;
@@ -702,7 +756,7 @@ html[data-appearance='dark'] .notebook-page {
 }
 .notebook-outline-rail-ticks > i.is-empty {
   width: 10px;
-  background: var(--color-line-strong);
+  background: var(--notebook-border-primary);
   opacity: 0.45;
 }
 .notebook-outline-rail-icon {
@@ -715,8 +769,8 @@ html[data-appearance='dark'] .notebook-page {
   width: 18px;
   height: 18px;
   border-radius: 5px;
-  background: var(--color-canvas);
-  color: var(--color-fg-strong);
+  background: var(--notebook-bg-primary);
+  color: var(--notebook-text-primary);
   box-shadow: 0 1px 4px #1d212926;
   opacity: 0;
   transition: opacity 120ms ease;
@@ -734,7 +788,7 @@ html[data-appearance='dark'] .notebook-page {
   box-sizing: border-box;
   margin-bottom: 12px;
   padding: 8px 28px 0;
-  color: var(--color-fg-muted);
+  color: var(--notebook-text-caption);
 }
 .notebook-outline > header strong {
   font-size: 14px;
@@ -748,7 +802,7 @@ html[data-appearance='dark'] .notebook-page {
   overscroll-behavior: contain;
   padding: 0 0 24px;
   scrollbar-width: thin;
-  scrollbar-color: var(--color-line-strong) transparent;
+  scrollbar-color: var(--notebook-border-primary) transparent;
 }
 .notebook-page .notebook-outline-entry {
   box-sizing: border-box;
@@ -756,7 +810,7 @@ html[data-appearance='dark'] .notebook-page {
   height: 22px;
   border-radius: 6px;
   padding-inline: calc(25px + clamp(0px, (var(--heading-level, 1) - 1) * 16px, 80px)) 20px;
-  color: var(--notebook-text-secondary);
+  color: var(--notebook-text-body);
   font-size: 14px;
   line-height: 22px;
   text-align: start;
@@ -764,11 +818,14 @@ html[data-appearance='dark'] .notebook-page {
 .notebook-outline-tree-entry { min-width: 0; margin-bottom: 6px; }
 .notebook-outline-tree-entry:last-child { margin-bottom: 0; }
 .notebook-outline-tree-entry .notebook-outline-entry { display: flex; align-items: center; gap: 4px; }
-.notebook-outline-toggle { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 16px; width: 16px; height: 20px; color: var(--color-fg-muted); }
+.notebook-outline-tree-entry .notebook-outline-entry.has-children {
+  padding-inline-start: calc(8px + clamp(0px, (var(--heading-level, 1) - 1) * 16px, 80px));
+}
+.notebook-outline-toggle { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 16px; width: 16px; height: 20px; color: var(--notebook-text-caption); }
 .notebook-outline-toggle-empty { flex-basis: 0; width: 0; opacity: 0; }
-.notebook-outline-toggle:hover { color: var(--color-fg-strong); }
+.notebook-outline-toggle:hover { color: var(--notebook-text-primary); }
 .notebook-page .notebook-outline-entry:hover:not(:disabled) {
-  color: var(--color-fg-strong);
+  color: var(--notebook-text-primary);
   background: var(--notebook-row-hover-bg);
 }
 .notebook-outline-entry > span:last-child {
@@ -1012,11 +1069,6 @@ html[data-appearance='dark'] .notebook-page {
   border: 0;
   background: color-mix(in srgb, var(--color-mask-bg) 50%, transparent);
 }
-@container notebook (max-width: 1100px) {
-  .notebook-outline {
-    --notebook-outline-width: 240px;
-  }
-}
 @container notebook (max-width: 760px) {
   .notebook-rail {
     position: absolute;
@@ -1117,4 +1169,23 @@ html[data-appearance='dark'] .notebook-page {
     opacity: 1;
     pointer-events: auto;
   }
+}
+
+/* Keep empty/loading/error states on the same Yuque surface stack as the
+   active editor; otherwise switching notes briefly flashes Mica's blue panel. */
+.notebook-page :is(.notebook-welcome, .notebook-editor-skeleton, .notebook-load-error) {
+  background: var(--notebook-bg-primary);
+}
+.notebook-page .notebook-welcome-icon {
+  color: var(--notebook-text-body);
+  border-color: var(--notebook-border-primary);
+}
+.notebook-page .notebook-welcome h1 {
+  color: var(--notebook-text-primary);
+}
+.notebook-page :is(.notebook-welcome p, .notebook-editor-skeleton span, .notebook-api-hint) {
+  color: var(--notebook-text-caption);
+}
+.notebook-page .notebook-error {
+  border-color: var(--notebook-border-primary);
 }
