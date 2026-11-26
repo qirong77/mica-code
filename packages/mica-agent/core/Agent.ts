@@ -77,8 +77,6 @@ export type AgentCallbacks = {
   /** Checkpoint and restore visible text around a retried request. */
   onTextAttemptStart?: () => void;
   onTextRollback?: () => void;
-  /** The attempt rollback callback also restores every thinking consumer. */
-  canRollbackThinking?: boolean;
   onThinking?: (thinking: string) => void;
   /** Save a complete Responses thinking part or completed request for display. */
   onThinkingCheckpoint?: (boundary: 'part' | 'request') => void;
@@ -127,8 +125,10 @@ export type AgentQueryOptions = {
   ) => unknown[] | null | undefined | Promise<unknown[] | null | undefined>;
   /** Maximum number of model requests in one agentic query, including the initial request. */
   maxTurns?: number;
-  /** Provider-level retry progress. Used to surface
-   *  retrying to the caller (e.g. a `retrying` working status in the UI). */
+  /**
+   * 一次请求失败、马上要重发时调用：`attempt` 是第几次重试（从 1 开始），
+   * `delayMs` 是这次要等多久。宿主据此在会话里留一条「第 n/10 次 · 原因」的提示。
+   */
   onRetry?: (info: { attempt: number; error: unknown; delayMs: number }) => void;
 };
 
@@ -199,7 +199,6 @@ export abstract class BaseAgent<
   onText: ((text: string) => void) | undefined;
   onTextAttemptStart: (() => void) | undefined;
   onTextRollback: (() => void) | undefined;
-  canRollbackThinking = false;
   onThinking: ((thinking: string) => void) | undefined;
   onThinkingCheckpoint: ((boundary: 'part' | 'request') => void) | undefined;
   onToolInput: AgentCallbacks['onToolInput'];

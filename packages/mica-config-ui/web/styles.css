@@ -5819,15 +5819,6 @@ html[data-theme='tokyo-night-light'] .mica-config-ui {
   white-space: nowrap;
 }
 
-.capability-source {
-  display: block;
-  overflow: hidden;
-  color: var(--text-faint);
-  font-family: var(--font-sans);
-  font-size: 10px;
-  text-overflow: ellipsis;
-}
-
 .capability-plugin-row {
   display: flex;
   align-items: center;
@@ -6215,15 +6206,31 @@ html[data-theme='tokyo-night-light'] .mica-config-ui {
 }
 
 .capability-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   min-width: 0;
   overflow: hidden;
   color: var(--text);
   font-family: var(--font-mono);
   font-size: 12.5px;
   line-height: 1.5;
-  text-overflow: ellipsis;
   white-space: nowrap;
   cursor: pointer;
+}
+
+.capability-name-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.capability-name .ui-tag {
+  flex: none;
+  max-width: 130px;
+  overflow: hidden;
+  font-family: var(--font-sans);
+  text-overflow: ellipsis;
 }
 
 .capability-technical-name {

@@ -1,11 +1,9 @@
 import type { AgentQueryContent } from '@packages/mica-agent/index.js';
-import { micaAgent } from '@packages/mica-agent/index.js';
-import { MAX_PROVIDER_RETRIES } from '@packages/mica-agent/core/retry.js';
+import { describeRequestError, REQUEST_MAX_RETRIES } from '@packages/mica-agent/core/retry.js';
 import type { MicaUiConversationMessage } from '@packages/mica-ui/index.js';
 import type { HookRegistry } from '@packages/mica-plugin/index.js';
 import { micaRuntime, type MessageQueueService, type RuntimeInput } from '@packages/mica-runtime/index.js';
 import type { SessionTurnLease } from '@packages/mica-session/index.js';
-import { micaTools } from '@packages/mica-tools/index.js';
 import { parseImageRefs } from '@packages/mica-ui/utils/imagePaste.js';
 import type { SessionController } from '../session/SessionController.js';
 import { AgentAbortError, type AgentRuntime } from '../agent/AgentRuntime.js';
@@ -13,6 +11,7 @@ import type { SubagentTaskManager } from '../agents/SubagentTaskManager.js';
 import { uncommittedResponseText } from './conversationHistory.js';
 import {
   TurnNoticeLog,
+  createRetryFailedNotice,
   createRetryNotice,
   createRetryRecoveredNotice,
   createTurnErrorNotice,
@@ -49,13 +48,6 @@ export type HeadlessTurnEvent =
 /** Shown when the session is running somewhere else (another window or terminal). */
 export const REMOTE_TURN_MESSAGE = '该会话正在另一个窗口或终端运行，请等待完成后再发送';
 
-// Mirrors the interactive runtime's turn-level retry policy
-// (LocalRuntimeController): at most 5 attempts with a fixed 10s delay, only
-// for transient provider errors, and never after a non-readonly tool call ran.
-const MAX_TURN_RETRIES = 5;
-const TURN_RETRY_DELAY_MS = 10_000;
-export { MAX_TURN_RETRIES, TURN_RETRY_DELAY_MS };
-
 export type HeadlessTurnExecutorOptions = {
   agent: AgentRuntime;
   sessionController: SessionController;
@@ -85,9 +77,6 @@ export type HeadlessTurnExecutorOptions = {
   getConversationMessages?: (extra?: MicaUiConversationMessage[]) => MicaUiConversationMessage[] | undefined;
   /** Set to false to skip session persistence entirely (e.g. one-shot UI tasks). */
   save?: boolean;
-  /** Turn-level retry policy override (defaults match the interactive CLI). */
-  maxTurnRetries?: number;
-  retryDelayMs?: number;
   /**
    * 这一轮结束时收尾它起的后台子代理。
    *
@@ -553,16 +542,6 @@ export class HeadlessTurnExecutor {
         if (promptBuildEvent?.content !== undefined) runContent = promptBuildEvent.content;
       }
       this.throwIfTurnStopped(signal, reservedRunId);
-      const maxRetries = this.options.maxTurnRetries ?? MAX_TURN_RETRIES;
-      let preTurnSnapshot = maxRetries > 0 ? agent.captureClientSnapshot() : null;
-      let hadNonRetryableToolCall = false;
-      const markToolCall = (toolCall: { name: string }) => {
-        if (!micaTools.isReadOnly(toolCall.name)) {
-          hadNonRetryableToolCall = true;
-          // 有写操作之后不再允许整轮重试，尽早释放整份历史回滚副本。
-          preTurnSnapshot = null;
-        }
-      };
       let attemptStartBuffer = this.responseBuffer;
       const text = (chunk: string) => {
         this.responseBuffer += chunk;
@@ -577,123 +556,58 @@ export class HeadlessTurnExecutor {
       agent.events.on('textAttemptStart', start);
       agent.events.on('textRollback', rollback);
       const unregisterRollback = agent.registerTextRollbackConsumer({ text, start, rollback });
-      agent.events.on('toolCall', markToolCall);
       try {
-        let runResult: { runId: number; text: string } | null = null;
-        // after_iteration inputs consumed by a failed attempt are re-injected
-        // at the next attempt's first iteration boundary so a retry never
-        // swallows a queued user input.
-        const replayInputs: AgentQueryContent[] = [];
-        const retryDelayMs = this.options.retryDelayMs ?? TURN_RETRY_DELAY_MS;
         const promptControls = readPromptControls();
         this.pendingRetry = null;
-        for (let attempt = 0; attempt <= maxRetries; attempt++) {
-          this.throwIfTurnStopped(signal);
-          const attemptInputs: AgentQueryContent[] = [];
-          const attemptRunId = attempt === 0 ? reservedRunId : agent.reserveRunId();
-          try {
-            agent.events.emit('thinkingTurnAttemptStart', undefined);
-            this.throwIfTurnStopped(signal, attemptRunId);
-            runResult = await agent.run(runContent, {
-              reservedRunId: attemptRunId,
-              promptControls,
-              maxTurns: this.options.maxTurns,
-              onIterationComplete: () => {
-                this.saveCurrent({ allowEmpty: true, turnState: 'running' });
-                // The iteration that just completed pushed its text (and tool
-                // results) into the provider history: everything streamed so far
-                // is committed, so an abort from here on only owes the remainder.
-                this.committedResponseBuffer = this.responseBuffer;
-                if (signal.aborted || !agent.isCurrent(attemptRunId)) return null;
-                const replayed = replayInputs.shift();
-                if (replayed !== undefined) {
-                  attemptInputs.push(replayed);
-                  return replayed;
-                }
-                return this.takeQueuedIterationInput(attemptInputs);
-              },
-              // `AgentRuntime` exposes provider-level retries separately from
-              // whole-turn retries.  The app-server uses this headless path,
-              // so without forwarding this callback a request can be retried
-              // several times while the desktop only sees the final /error.
-              // This retry is safe even after a write tool: the provider only
-              // calls it when the current request has no replay-unsafe output.
-              onRetry: (info) => {
-                if (signal.aborted || !agent.isCurrent(attemptRunId)) return;
-                const notice = createRetryNotice(info.error, info.attempt, MAX_PROVIDER_RETRIES, info.delayMs);
-                this.pendingRetry = { attempt: info.attempt, maxAttempts: MAX_PROVIDER_RETRIES, error: info.error };
-                try {
-                  this.writeNotice(notice);
-                  this.saveCurrent({ allowEmpty: true, turnState: 'running' }, inFlightUser);
-                } catch {
-                  // A diagnostic notice must never turn a retryable provider
-                  // failure into a terminal inference failure.
-                }
-                onEvent({
-                  type: 'turn:retrying',
-                  input,
-                  attempt: info.attempt,
-                  maxAttempts: MAX_PROVIDER_RETRIES,
-                  delayMs: info.delayMs,
-                  error: info.error instanceof Error ? info.error.message : String(info.error),
-                });
-              },
-              // 重试后的那次请求收尾时才知道它到底通没通：红了整轮的提示要在这里转绿。
-              onRequestEnd: (info) => {
-                if (info.outcome === 'completed') this.settleRetryNotice();
-              },
-            });
-            break;
-          } catch (error) {
-            replayInputs.unshift(...attemptInputs);
-            // An abort that lands between reserveRunId() and the agent.run()
-            // check is surfaced as an AgentAbortError here; never retry it.
-            if (error instanceof AgentAbortError) throw error;
-            this.throwIfTurnStopped(signal, attemptRunId);
-            if (hadNonRetryableToolCall || !micaAgent.isRetryableError(error) || attempt >= maxRetries) {
-              throw error;
-            }
-            // A safe turn retry discards the entire client run, including
-            // reasoning from responses that completed before the failed one.
-            // Do this before restoring/saving history or announcing the delay.
-            agent.events.emit('thinkingTurnAttemptRollback', undefined);
-            if (preTurnSnapshot) agent.restoreClientSnapshot(preTurnSnapshot, { preserveUsage: true });
-            this.responseBuffer = '';
-            this.committedResponseBuffer = '';
-            this.saveCurrent({ allowEmpty: true, turnState: 'running' }, inFlightUser);
-            this.throwIfTurnStopped(signal, attemptRunId);
-            if (this.options.hooks) {
-              await this.options.hooks.emit('turn:error', { runtime: this.options.host, input, content, error });
-            }
-            this.throwIfTurnStopped(signal, attemptRunId);
-            // Persist the hint before announcing the wait: the desktop app shows
-            // it inside the conversation, so a client that reconnects during the
-            // delay finds it in the session file instead of a frozen run.
-            this.pendingRetry = { attempt: attempt + 1, maxAttempts: maxRetries, error };
-            this.writeNotice(createRetryNotice(error, attempt + 1, maxRetries, retryDelayMs));
+        const runResult = await agent.run(runContent, {
+          reservedRunId,
+          promptControls,
+          maxTurns: this.options.maxTurns,
+          onIterationComplete: () => {
             this.saveCurrent({ allowEmpty: true, turnState: 'running' });
+            // The iteration that just completed pushed its text (and tool
+            // results) into the provider history: everything streamed so far
+            // is committed, so an abort from here on only owes the remainder.
+            this.committedResponseBuffer = this.responseBuffer;
+            if (signal.aborted || !agent.isCurrent(reservedRunId)) return null;
+            return this.takeQueuedIterationInput();
+          },
+          // 请求级重试是这条路径上唯一的重试层：它只重发当前这条请求，已经跑过的工具
+          // 不重放，所以跑过写操作也不影响。每次重发都落一条 notice 并通知客户端，
+          // 桌面端据此显示「第 n/10 次 · 原因」。
+          onRetry: (info) => {
+            if (signal.aborted || !agent.isCurrent(reservedRunId)) return;
+            this.pendingRetry = { attempt: info.attempt, maxAttempts: REQUEST_MAX_RETRIES, error: info.error };
+            try {
+              this.writeNotice(createRetryNotice(info.error, info.attempt, REQUEST_MAX_RETRIES, info.delayMs));
+              this.saveCurrent({ allowEmpty: true, turnState: 'running' }, inFlightUser);
+            } catch {
+              // 诊断性质的 notice 不能把一次还能重试的请求变成失败。
+            }
             onEvent({
               type: 'turn:retrying',
               input,
-              attempt: attempt + 1,
-              maxAttempts: maxRetries,
-              delayMs: retryDelayMs,
-              error: error instanceof Error ? error.message : String(error),
+              attempt: info.attempt,
+              maxAttempts: REQUEST_MAX_RETRIES,
+              delayMs: info.delayMs,
+              error: describeRequestError(info.error),
             });
-            await waitForRetryDelay(agent, retryDelayMs, attemptRunId, signal);
-            this.throwIfTurnStopped(signal, attemptRunId);
-          }
-        }
+          },
+          // 重试后的那次请求收尾时才知道它到底通没通：那条红字提示要在这里转绿。
+          onRequestEnd: (info) => {
+            if (info.outcome === 'completed') this.settleRetryNotice();
+          },
+        });
         // A resolved query has committed its final response as well as its
         // tool iterations.  If abort invalidates the result before persistence,
         // preserveAbortedTurn must not append that response a second time.
         this.committedResponseBuffer = this.responseBuffer;
-        if (signal.aborted || !agent.isCurrent(runResult!.runId)) {
+        if (signal.aborted || !agent.isCurrent(runResult.runId)) {
           // `agent.run()` can resolve after an abort has invalidated its run id.
           // Route that stale resolution through the same abort finalization as a
           // rejected AgentAbortError; returning here leaves the persisted turn
           // running and skips turn:after/turn:finish.
-          throw new AgentAbortError(runResult!.runId);
+          throw new AgentAbortError(runResult.runId);
         }
         if (this.options.hooks) {
           await this.options.hooks.emit('turn:beforePersist', {
@@ -703,10 +617,9 @@ export class HeadlessTurnExecutor {
             result: runResult,
           });
         }
-        this.throwIfTurnStopped(signal, runResult!.runId);
+        this.throwIfTurnStopped(signal, runResult.runId);
         return await finalization.finish('completed', undefined, inFlightUser);
       } finally {
-        agent.events.off('toolCall', markToolCall);
         unregisterRollback();
         agent.events.off('text', text);
         agent.events.off('textAttemptStart', start);
@@ -750,7 +663,17 @@ export class HeadlessTurnExecutor {
     // The turn-level error becomes part of the conversation, not just of the
     // transient Codex `turn/completed.status=failed` payload: the desktop app
     // used to lose it on reload. Notices stay out of the provider history.
-    this.options.notices?.ensure().upsert(createTurnErrorNotice(error));
+    //
+    // 这一轮里最后一次请求是重试耗尽的，就把那条「将在 Ns 后重试」就地改成结论：
+    // 次数与最后一次失败原因留在同一行，不另起一条看起来像第二件事的 `/error`。
+    const retry = this.pendingRetry;
+    this.pendingRetry = null;
+    this.writeNotice(
+      retry
+        ? createRetryFailedNotice(error, retry.attempt, retry.maxAttempts)
+        : createTurnErrorNotice(error),
+      retry ? { inPlace: true } : {},
+    );
     return finalization.finish('error', error, inFlightUser);
   }
 
@@ -855,16 +778,12 @@ export class HeadlessTurnExecutor {
     this.options.sessionController.saveCurrent(conversationMessages ? { ...options, conversationMessages } : options);
   }
 
-  private takeQueuedIterationInput(consumedInputs: AgentQueryContent[]): Promise<AgentQueryContent | null> {
+  private takeQueuedIterationInput(): Promise<AgentQueryContent | null> {
     const next = this.queue.dequeueAfterCompletedIteration(true);
     if (!next) return Promise.resolve(null);
     this.options.onEvent({ type: 'dequeue', input: next });
     this.options.onEvent({ type: 'queue:changed', pending: this.queue.list() });
-    const content = next.source === 'system' ? Promise.resolve(next.text) : this.parseImageRefs(next.text);
-    return content.then((c) => {
-      consumedInputs.push(c);
-      return c;
-    });
+    return next.source === 'system' ? Promise.resolve(next.text) : this.parseImageRefs(next.text);
   }
 }
 
@@ -889,40 +808,3 @@ export function displayUserContent(input: RuntimeInput, content: AgentQueryConte
   return display || content;
 }
 
-/** Fixed-delay wait that aborts early (throws AgentAbortError) when the agent
- * run id changes, so an interrupt during a retry delay stops the turn instead
- * of silently waiting out the full 10s. */
-function waitForRetryDelay(agent: AgentRuntime, delayMs: number, delayRunId: number, signal: AbortSignal): Promise<void> {
-  return new Promise<void>((resolve, reject) => {
-    if (signal.aborted || !agent.isCurrent(delayRunId)) {
-      reject(new AgentAbortError(delayRunId));
-      return;
-    }
-    let settled = false;
-    const finish = (fn: () => void) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      clearInterval(poll);
-      signal.removeEventListener('abort', onAbort);
-      fn();
-    };
-    const onAbort = () => finish(() => reject(new AgentAbortError(delayRunId)));
-    const timer = setTimeout(
-      () =>
-        finish(() => {
-          if (signal.aborted || !agent.isCurrent(delayRunId)) reject(new AgentAbortError(delayRunId));
-          else resolve();
-        }),
-      delayMs,
-    );
-    const poll = setInterval(() => {
-      if (!agent.isCurrent(delayRunId)) {
-        finish(() => reject(new AgentAbortError(delayRunId)));
-        return;
-      }
-    }, 250);
-    signal.addEventListener('abort', onAbort, { once: true });
-    if (signal.aborted) onAbort();
-  });
-}

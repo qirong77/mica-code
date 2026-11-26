@@ -1,0 +1,135 @@
+import {describe, expect, it} from 'vitest';
+
+import {
+  MENU_GAP,
+  MENU_MIN_WIDTH,
+  VIEWPORT_PADDING,
+  placeBlockMenu,
+  placeSubmenu,
+} from '../src/playground/plugins/DraggableBlockPlugin/blockMenuPlacement';
+
+const viewport = {width: 1440, height: 900};
+const grip = {left: 300, top: 200, right: 324, bottom: 224};
+
+function rect(left: number, top: number, width: number, height: number) {
+  return {left, top, right: left + width, bottom: top + height};
+}
+
+describe('placeBlockMenu', () => {
+  it('aligns the card with the grip and the block top', () => {
+    const block = rect(330, 200, 700, 48);
+    const placement = placeBlockMenu({
+      anchor: grip,
+      blockRect: block,
+      size: {width: 180, height: 300},
+      viewport,
+    });
+    expect(placement).toEqual({left: grip.left - VIEWPORT_PADDING, top: 200});
+  });
+
+  it('keeps a tall block’s card beside the block instead of mirroring it above', () => {
+    // A code block running past the window: the old rule put the card at
+    // `block.top - height - gap`, which landed on the document title.
+    const block = rect(330, 600, 700, 700);
+    const placement = placeBlockMenu({
+      anchor: {left: 300, top: 600, right: 324, bottom: 624},
+      blockRect: block,
+      size: {width: 180, height: 296},
+      viewport,
+    });
+    expect(placement.top).toBeGreaterThan(VIEWPORT_PADDING * 10);
+    expect(placement.top + 296).toBeLessThanOrEqual(viewport.height - VIEWPORT_PADDING);
+    expect(placement.top).toBe(viewport.height - 296 - VIEWPORT_PADDING);
+  });
+
+  it('slides the card up when the block starts near the bottom of the window', () => {
+    const block = rect(330, 840, 700, 40);
+    const placement = placeBlockMenu({
+      anchor: {left: 300, top: 840, right: 324, bottom: 864},
+      blockRect: block,
+      size: {width: 180, height: 300},
+      viewport,
+    });
+    expect(placement.top).toBe(viewport.height - 300 - VIEWPORT_PADDING);
+    expect(placement.top).toBeLessThan(block.top);
+  });
+
+  it('never leaves the top edge, even when the whole card cannot fit', () => {
+    const placement = placeBlockMenu({
+      anchor: grip,
+      blockRect: rect(330, 4, 700, 40),
+      size: {width: 180, height: 1200},
+      viewport,
+    });
+    expect(placement.top).toBe(VIEWPORT_PADDING);
+  });
+
+  it('pulls the card back inside the right edge', () => {
+    const placement = placeBlockMenu({
+      anchor: {left: 1380, top: 200, right: 1404, bottom: 224},
+      blockRect: rect(1390, 200, 40, 24),
+      size: {width: 180, height: 300},
+      viewport,
+    });
+    expect(placement.left + 180).toBe(viewport.width - VIEWPORT_PADDING);
+  });
+
+  it('keeps its design width when the measured card is narrower', () => {
+    const placement = placeBlockMenu({
+      anchor: {left: 1400, top: 200, right: 1424, bottom: 224},
+      blockRect: rect(1400, 200, 40, 24),
+      size: {width: 120, height: 300},
+      viewport,
+    });
+    expect(placement.left).toBe(viewport.width - MENU_MIN_WIDTH - VIEWPORT_PADDING);
+  });
+});
+
+describe('placeSubmenu', () => {
+  const main = rect(292, 200, 180, 300);
+
+  it('opens to the right of the card, aligned with the hovered row', () => {
+    const placement = placeSubmenu({
+      row: rect(292, 236, 180, 36),
+      main,
+      size: {width: 180, height: 296},
+      viewport,
+    });
+    expect(placement.left).toBe(main.right + MENU_GAP);
+    expect(placement.top).toBe(236 - VIEWPORT_PADDING);
+  });
+
+  it('flips to the card’s left side without double-counting its own width', () => {
+    const nearRight = rect(1240, 200, 180, 300);
+    const placement = placeSubmenu({
+      row: rect(1240, 236, 180, 36),
+      main: nearRight,
+      size: {width: 180, height: 296},
+      viewport,
+    });
+    expect(placement.left).toBe(nearRight.left - 180 - MENU_GAP);
+    expect(placement.left + 180).toBeLessThanOrEqual(nearRight.left);
+  });
+
+  it('stays on screen when neither side of the card has room', () => {
+    const centred = rect(720, 200, 180, 300);
+    const placement = placeSubmenu({
+      row: rect(720, 236, 180, 36),
+      main: centred,
+      size: {width: 180, height: 296},
+      viewport,
+    });
+    expect(placement.left).toBeGreaterThanOrEqual(VIEWPORT_PADDING);
+    expect(placement.left + 180).toBeLessThanOrEqual(viewport.width - VIEWPORT_PADDING);
+  });
+
+  it('clamps the bottom edge for a long submenu opened from a low row', () => {
+    const placement = placeSubmenu({
+      row: rect(292, 460, 180, 36),
+      main,
+      size: {width: 180, height: 500},
+      viewport,
+    });
+    expect(placement.top).toBe(viewport.height - 500 - VIEWPORT_PADDING);
+  });
+});

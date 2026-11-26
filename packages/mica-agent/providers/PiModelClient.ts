@@ -21,7 +21,13 @@ import {
   type AgentSnapshot,
   type AgentUsageRecord,
 } from '../core/Agent.js';
-import { abortError, isRetryableError, MAX_PROVIDER_RETRIES, withRetry } from '../core/retry.js';
+import {
+  abortError,
+  describeRequestError,
+  REQUEST_MAX_RETRIES,
+  requestRetryDelayMs,
+  withRetry,
+} from '../core/retry.js';
 import { withIdleTimeout } from '../core/streamIdleTimeout.js';
 import { buildSystemPrompt } from '../prompt/index.js';
 import { compactHistoricalToolResultText } from './historyCompaction.js';
@@ -199,7 +205,7 @@ export class PiModelClient extends BaseAgent<ModelClientOptions, Message, AgentU
             attempts,
             outcome,
             toolCalls,
-            error: error === undefined ? undefined : errorText(error).slice(0, 200),
+            error: error === undefined ? undefined : describeRequestError(error).slice(0, 300),
           }),
         );
       };
@@ -359,15 +365,12 @@ export class PiModelClient extends BaseAgent<ModelClientOptions, Message, AgentU
           },
           {
             signal: options?.signal,
-            maxRetries: MAX_PROVIDER_RETRIES,
-            delayMs: 15_000,
-            backoffFactor: 2,
-            maxDelayMs: 180_000,
-            shouldRetry: (error) =>
-              (rollback ? !hadThinking || this.canRollbackThinking : !hadOutput && !hadThinking) &&
-              isRetryableError(error),
+            maxRetries: REQUEST_MAX_RETRIES,
+            delayMs: requestRetryDelayMs,
             onRetry: (info) => {
               attempts++;
+              // 已经吐给展示层的正文/思考属于失败的那一次：能撤就撤掉再重发，
+              // 撤不掉（消费者没有回滚钩子）就让它留着，重发的正文接在后面。
               if (rollback && (hadOutput || hadThinking)) this.onTextRollback?.();
               totalContent = totalCheckpoint;
               endsWithBlankLine = blankCheckpoint;

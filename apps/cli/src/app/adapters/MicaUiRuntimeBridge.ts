@@ -383,7 +383,6 @@ export class MicaUiRuntimeBridge {
     let thinkingRollbackText = attemptThinkingText;
     let attemptRollbackThinkingText = thinkingRollbackText;
     let logCheckpoint = [...this.sessionFor(agent).uiState.agentTurnLogItems];
-    let turnAttemptThinkingText = '';
     const applyThinkingChanges = (
       items: typeof logCheckpoint,
       changes: ReturnType<ToolLogController['rollbackUncheckpointedThinking']>,
@@ -425,27 +424,6 @@ export class MicaUiRuntimeBridge {
         thinkingRollbackText = this.sessionFor(agent).uiState.thinkingText;
       }
       this.onThinking(agent, text);
-    };
-    const onThinkingTurnAttemptStart = () => {
-      this.toolLogFor(agent).beginTurnAttempt();
-      turnAttemptThinkingText = this.sessionFor(agent).uiState.thinkingText;
-    };
-    const onThinkingTurnAttemptRollback = () => {
-      const session = this.sessionFor(agent);
-      const changes = this.toolLogFor(agent).rollbackTurnAttemptThinking();
-      session.uiState.agentTurnLogItems = applyThinkingChanges(session.uiState.agentTurnLogItems, changes);
-      // An earlier interrupted turn can have display text even when the
-      // controller has no active segment for it.
-      session.uiState.thinkingText = turnAttemptThinkingText;
-      if (this.isActiveAgent(agent)) {
-        micaUi.panels.thinkingText.set(turnAttemptThinkingText);
-        micaUi.bottom.agentTurnLog.setItems(session.uiState.agentTurnLogItems);
-      }
-      attemptThinkingCheckpoint = this.toolLogFor(agent).checkpointThinking();
-      attemptThinkingText = turnAttemptThinkingText;
-      thinkingRollbackText = turnAttemptThinkingText;
-      attemptRollbackThinkingText = thinkingRollbackText;
-      logCheckpoint = [...session.uiState.agentTurnLogItems];
     };
     const onThinkingCheckpoint = () => this.toolLogFor(agent).markThinkingCheckpoint();
     const onThinkingRollback = () => {
@@ -496,8 +474,6 @@ export class MicaUiRuntimeBridge {
     agent.events.on('textRollback', onTextRollback);
     const unregisterRollback = agent.registerTextRollbackConsumer({ text: onText, thinking: onThinking, start: onTextAttemptStart, rollback: onTextRollback });
     agent.events.on('thinking', onThinking);
-    agent.events.on('thinkingTurnAttemptStart', onThinkingTurnAttemptStart);
-    agent.events.on('thinkingTurnAttemptRollback', onThinkingTurnAttemptRollback);
     agent.events.on('thinkingCheckpoint', onThinkingCheckpoint);
     agent.events.on('thinkingRollback', onThinkingRollback);
     agent.events.on('thinkingReset', onThinkingReset);
@@ -511,8 +487,6 @@ export class MicaUiRuntimeBridge {
       agent.events.off('textAttemptStart', onTextAttemptStart);
       agent.events.off('textRollback', onTextRollback);
       agent.events.off('thinking', onThinking);
-      agent.events.off('thinkingTurnAttemptStart', onThinkingTurnAttemptStart);
-      agent.events.off('thinkingTurnAttemptRollback', onThinkingTurnAttemptRollback);
       agent.events.off('thinkingCheckpoint', onThinkingCheckpoint);
       agent.events.off('thinkingRollback', onThinkingRollback);
       agent.events.off('thinkingReset', onThinkingReset);

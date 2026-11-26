@@ -274,7 +274,7 @@ describe('pi iteration boundaries', () => {
     const end = vi.fn();
     const client = new PiModelClient({ ...options(), toolFilter: (name) => name === 'allowed' });
     const query = client.query('current', { onRequestStart: start, onRequestEnd: end });
-    await vi.advanceTimersByTimeAsync(15_000);
+    await vi.advanceTimersByTimeAsync(2_000);
     await expect(query).resolves.toBe('done');
     expect(requests[0]!.context.tools?.map((definition) => definition.name)).toEqual(['allowed']);
     expect(requests[1]!.context.tools).toEqual(requests[0]!.context.tools);
@@ -429,31 +429,44 @@ describe('pi abort and snapshots', () => {
 });
 
 describe('pi retries and display rollback', () => {
-  it.each([400, 401, 422])('does not retry deterministic HTTP %s errors', async (status) => {
-    scripts.push(async function* () {
-      throw httpError(status);
-    });
+  it.each([400, 401, 422, 429, 503])('retries HTTP %s like any other unfinished request', async (status) => {
+    vi.useFakeTimers();
+    scripts.push(
+      async function* () {
+        throw httpError(status);
+      },
+      () => text('done'),
+    );
     const start = vi.fn();
     const end = vi.fn();
-    await expect(
-      new PiModelClient(options()).query('question', { onRequestStart: start, onRequestEnd: end }),
-    ).rejects.toMatchObject({ status });
-    expect(requests).toHaveLength(1);
+    const query = new PiModelClient(options()).query('question', { onRequestStart: start, onRequestEnd: end });
+    await vi.advanceTimersByTimeAsync(2_000);
+    await expect(query).resolves.toBe('done');
+    expect(requests).toHaveLength(2);
     expect(start).toHaveBeenCalledTimes(1);
-    expect(end).toHaveBeenCalledWith(expect.objectContaining({ outcome: 'error', attempts: 1 }));
+    expect(end).toHaveBeenCalledWith(expect.objectContaining({ outcome: 'completed', attempts: 2 }));
   });
-  it('streams partial output immediately and never repeats it without rollback', async () => {
+  it('retries after partial output and keeps the appended answer when there is no rollback', async () => {
+    vi.useFakeTimers();
     const client = new PiModelClient(options());
     client.onText = vi.fn();
-    scripts.push(async function* () {
-      yield textDelta('partial');
-      expect(client.onText).toHaveBeenCalledWith('partial');
-      throw httpError(503);
-    });
-    await expect(client.query('question')).rejects.toMatchObject({ status: 503 });
-    expect(requests).toHaveLength(1);
-    expect(client.onText).toHaveBeenCalledTimes(1);
-    expect(client.messages).toEqual([]);
+    scripts.push(
+      async function* () {
+        yield textDelta('partial');
+        expect(client.onText).toHaveBeenCalledWith('partial');
+        throw httpError(503);
+      },
+      () => text('retried'),
+    );
+    const query = client.query('question');
+    await vi.advanceTimersByTimeAsync(2_000);
+    await expect(query).resolves.toBe('retried');
+    expect(requests).toHaveLength(2);
+    expect(client.onText).toHaveBeenNthCalledWith(1, 'partial');
+    expect(client.onText).toHaveBeenNthCalledWith(2, 'retried');
+    expect(client.messages.filter((m) => m.role === 'assistant')).toMatchObject([
+      { content: [{ type: 'text', text: 'retried' }] },
+    ]);
   });
   it('rolls back only the later failed request preserving prior text and a completed write', async () => {
     vi.useFakeTimers();
@@ -483,7 +496,7 @@ describe('pi retries and display rollback', () => {
       display = checkpoint;
     });
     const query = client.query('question');
-    await vi.advanceTimersByTimeAsync(15_000);
+    await vi.advanceTimersByTimeAsync(2_000);
     await expect(query).resolves.toBe('before\n\nafter');
     expect(display).toBe('before\n\nafter');
     expect(client.onTextAttemptStart).toHaveBeenCalledTimes(3);
@@ -508,41 +521,30 @@ describe('pi retries and display rollback', () => {
     );
     const retry = vi.fn();
     const query = new PiModelClient(options()).query('question', { onRetry: retry });
-    await vi.advanceTimersByTimeAsync(15_000);
+    await vi.advanceTimersByTimeAsync(2_000);
     await expect(query).resolves.toBe('done');
-    expect(retry).toHaveBeenCalledExactlyOnceWith({ attempt: 1, delayMs: 15_000, error });
+    expect(retry).toHaveBeenCalledExactlyOnceWith({ attempt: 1, delayMs: 2_000, error });
     expect(execute).toHaveBeenCalledTimes(1);
     expect(requests[2]!.context.messages).toEqual(requests[1]!.context.messages);
   });
-  it.each([false, true])(
-    'requires thinking rollback support to retry thinking output: %s',
-    async (canRollbackThinking) => {
-      vi.useFakeTimers();
-      scripts.push(
-        async function* () {
-          yield thinkingDelta('failed thought');
-          throw httpError(503);
-        },
-        () => text('done'),
-      );
-      const client = new PiModelClient(options());
-      client.onTextAttemptStart = vi.fn();
-      client.onTextRollback = vi.fn();
-      client.canRollbackThinking = canRollbackThinking;
-      const result = client.query('question').then(
-        (value) => ({ value }),
-        (error: Error) => ({ error }),
-      );
-      await vi.advanceTimersByTimeAsync(15_000);
-      if (canRollbackThinking) {
-        expect(await result).toEqual({ value: 'done' });
-        expect(client.onTextRollback).toHaveBeenCalledTimes(1);
-      } else {
-        expect(await result).toMatchObject({ error: { status: 503 } });
-        expect(requests).toHaveLength(1);
-      }
-    },
-  );
+  it('retries thinking output too, rolling the failed attempt back when it can', async () => {
+    vi.useFakeTimers();
+    scripts.push(
+      async function* () {
+        yield thinkingDelta('failed thought');
+        throw httpError(503);
+      },
+      () => text('done'),
+    );
+    const client = new PiModelClient(options());
+    client.onTextAttemptStart = vi.fn();
+    client.onTextRollback = vi.fn();
+    const query = client.query('question');
+    await vi.advanceTimersByTimeAsync(2_000);
+    await expect(query).resolves.toBe('done');
+    expect(client.onTextRollback).toHaveBeenCalledTimes(1);
+    expect(requests).toHaveLength(2);
+  });
   it('aborts retry backoff immediately', async () => {
     vi.useFakeTimers();
     const controller = new AbortController();
@@ -659,12 +661,12 @@ describe('pi thinking and usage', () => {
     );
     const client = new PiModelClient(options());
     const query = client.query('question');
-    await vi.advanceTimersByTimeAsync(15_000);
+    await vi.advanceTimersByTimeAsync(2_000);
     await expect(query).resolves.toBe(first + last);
     expect(client.lastUsage).toMatchObject({
       firstTokenMs: 20,
-      responseWaitMs: 15120,
-      durationMs: 16820,
+      responseWaitMs: 2120,
+      durationMs: 3820,
       generationDurationMs: 600,
       generationOutputTokens: 63,
       outputTokens: 104,
@@ -812,18 +814,23 @@ describe('pi timeout and terminal guards', () => {
     expect(closed).toBe(true);
     expect(requests).toHaveLength(2);
   });
-  it('does not retry a stalled stream after visible output without rollback', async () => {
+  it('retries a stalled stream even after visible output', async () => {
     vi.useFakeTimers();
-    scripts.push(async function* () {
-      yield textDelta('partial');
-      await new Promise<void>(() => {});
-    });
+    scripts.push(
+      async function* () {
+        yield textDelta('partial');
+        await new Promise<void>(() => {});
+      },
+      () => text('after stall'),
+    );
     const client = new PiModelClient(options());
-    const result = client.query('question').catch((error: Error) => error);
-    await vi.advanceTimersByTimeAsync(60_000);
-    expect(await result).toMatchObject({ name: 'TimeoutError' });
-    expect(requests).toHaveLength(1);
-    expect(client.messages).toEqual([]);
+    const query = client.query('question');
+    await vi.advanceTimersByTimeAsync(62_000);
+    await expect(query).resolves.toBe('after stall');
+    expect(requests).toHaveLength(2);
+    expect(client.messages.filter((m) => m.role === 'assistant')).toMatchObject([
+      { content: [{ type: 'text', text: 'after stall' }] },
+    ]);
   });
   it('aborts promptly while waiting for a silent SDK stream', async () => {
     scripts.push(async function* () {
@@ -957,19 +964,27 @@ describe('pi thinking completion regressions', () => {
     ]);
   });
   it('waits for clean stream termination before executing a completed tool response', async () => {
+    vi.useFakeTimers();
     const execute = vi.fn(async () => 'written');
     tool('write_probe', false, execute);
-    scripts.push(async function* () {
-      yield* completed([call('w', 'write_probe')]);
-      throw httpError(400);
-    });
-    await expect(new PiModelClient(options()).query('write')).rejects.toMatchObject({ status: 400 });
+    scripts.push(
+      async function* () {
+        yield* completed([call('w', 'write_probe')]);
+        throw httpError(400);
+      },
+      () => text('retried'),
+    );
+    const query = new PiModelClient(options()).query('write');
+    await vi.advanceTimersByTimeAsync(2_000);
+    // 终止事件之后又失败的流不算正常结束：那条工具调用被丢掉，重发整条请求。
+    await expect(query).resolves.toBe('retried');
     expect(execute).not.toHaveBeenCalled();
   });
 });
 
 describe('pi retry termination regressions', () => {
   it('does not run effort fallback after text has already reached the user', async () => {
+    vi.useFakeTimers();
     disposers.push(
       micaConfig.registerModelRules({
         'pi-loop::pi-loop-model': {
@@ -988,9 +1003,12 @@ describe('pi retry termination regressions', () => {
     );
     const client = new PiModelClient({ ...options(), effort: 'none' });
     client.onText = vi.fn();
-    await expect(client.query('question')).rejects.toMatchObject({ status: 400 });
-    expect(requests).toHaveLength(1);
-    expect(client.onText).toHaveBeenCalledExactlyOnceWith('partial');
+    const query = client.query('question');
+    await vi.advanceTimersByTimeAsync(2_000);
+    await expect(query).resolves.toBe('duplicate');
+    // 重发沿用同一份 effort 参数：那次失败被当作普通请求失败重试，不是 effort 降级。
+    expect(requests[1]!.reasoning).toEqual(requests[0]!.reasoning);
+    expect(client.onText).toHaveBeenNthCalledWith(1, 'partial');
   });
 
   it('rolls back a failed stream after its terminal event without executing its tools', async () => {
@@ -1009,7 +1027,7 @@ describe('pi retry termination regressions', () => {
     client.onTextAttemptStart = vi.fn();
     client.onTextRollback = vi.fn();
     const result = client.query('question');
-    await vi.advanceTimersByTimeAsync(15_000);
+    await vi.advanceTimersByTimeAsync(2_000);
     await expect(result).resolves.toBe('final');
     expect(execute).not.toHaveBeenCalled();
     expect(client.onTextRollback).toHaveBeenCalledTimes(1);

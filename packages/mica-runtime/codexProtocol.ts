@@ -151,11 +151,12 @@ export const MICA_SESSION_NOTIFICATIONS = {
 
 /**
  * Mica extension notification: the host is waiting out the retry delay after a
- * transient provider error and will re-run the same turn (the CLI's 5 attempts
- * with a fixed 10s delay). The Codex protocol has no "retrying" state, and a
+ * request that did not finish normally, and will re-send the same request
+ * (`REQUEST_MAX_RETRIES` in `@packages/mica-agent/core/retry`: 10 retries,
+ * 2/4/8/16s then a 30s cap). The Codex protocol has no "retrying" state, and a
  * Codex `error` notification would end the run on the client, so without this
- * the desktop app sits silent for ten seconds per attempt and looks stuck —
- * then only reports the final failure.
+ * the desktop app sits silent during the delays and looks stuck — then only
+ * reports the final failure.
  */
 export const MICA_TURN_NOTIFICATIONS = {
   retrying: 'mica/turn/retrying',

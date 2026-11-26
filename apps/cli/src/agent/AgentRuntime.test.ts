@@ -267,7 +267,7 @@ describe('AgentRuntime tool status', () => {
     ]);
   });
 
-  it('requires all thinking listeners to register rollback and resets the capability each run', async () => {
+  it('refuses a request rollback once another thinking consumer joins the run', async () => {
     const { AgentRuntime } = await import('./AgentRuntime.js');
     const agent = new AgentRuntime();
     const consumer = { text: vi.fn(), thinking: vi.fn(), start: vi.fn(), rollback: vi.fn() };
@@ -277,17 +277,14 @@ describe('AgentRuntime tool status', () => {
     agent.events.on('textRollback', consumer.rollback);
     agent.registerTextRollbackConsumer(consumer);
     modelClient.queryImpl = async () => {
-      expect(modelClient.canRollbackThinking).toBe(true);
+      expect(() => modelClient.onTextAttemptStart?.()).not.toThrow();
+      const late = vi.fn();
+      agent.events.on('thinking', late);
+      expect(() => modelClient.onTextAttemptStart?.()).toThrow('Text rollback consumers changed during the run');
+      agent.events.off('thinking', late);
       return 'ok';
     };
-    await agent.run('one');
-    const legacy = vi.fn();
-    agent.events.on('thinking', legacy);
-    modelClient.queryImpl = async () => {
-      expect(modelClient.canRollbackThinking).toBe(false);
-      return 'ok';
-    };
-    await agent.run('two');
+    await expect(agent.run('one')).resolves.toMatchObject({ text: 'ok' });
   });
 
   it.each(['openai_chat_completions', 'openai_responses', 'anthropic_messages', 'google_generative_ai'] as const)(
@@ -496,33 +493,6 @@ describe('AgentRuntime tool status', () => {
       expect(agent.getSnapshot().activeThinking).toBeUndefined();
     },
   );
-
-  it('restores the original interrupted thinking when aborting during a whole-turn retry delay', async () => {
-    configState = {
-      ...testConfig,
-      providers: [{ ...testConfig.providers[0]!, protocol: 'openai_responses' }],
-    };
-    const { AgentRuntime } = await import('./AgentRuntime.js');
-    const agent = new AgentRuntime();
-    const original = {
-      providerId: 'test-provider',
-      protocol: 'openai_responses' as const,
-      model: 'test-model',
-      apiBase: 'https://example.com/v1',
-      text: 'earlier interruption',
-    };
-    agent.loadSnapshot({ ...agent.getSnapshot(), interruptedThinking: original });
-    agent.events.emit('thinkingTurnAttemptStart', undefined);
-    modelClient.queryImpl = async () => {
-      modelClient.onThinking?.('failed attempt');
-      modelClient.onThinkingCheckpoint?.('request');
-      throw new Error('retryable failure');
-    };
-    await expect(agent.run('continue')).rejects.toThrow('retryable failure');
-    agent.events.emit('thinkingTurnAttemptRollback', undefined);
-    agent.abort();
-    expect(agent.getSnapshot().interruptedThinking).toEqual(original);
-  });
 
   it('recovers active snapshots only for the matching Responses model and endpoint', async () => {
     configState = {

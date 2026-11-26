@@ -1,109 +1,48 @@
-const DEFAULT_MAX_RETRIES = 3;
-const DEFAULT_RETRY_DELAY_MS = 3000;
-export const MAX_PROVIDER_RETRIES = 5;
+/**
+ * 请求级重试策略：一次模型请求没有正常结束就重发，唯一不重发的是用户自己按了停止。
+ *
+ * 这里不再按错误类型挑「值不值得重试」：400 的网关解析失败、429、5xx、连接被掐、
+ * 流中途断、握手成功后长时间没有数据，全部走同一条路。确定性错误（上下文超长、
+ * 参数不合法）重发也不会变好，但那是把「重试了几次、最后一次为什么失败」摆到界面上
+ * 让人决定要不要停，比在客户端猜哪些错误不该重发更可靠。
+ */
+export const REQUEST_MAX_RETRIES = 10;
+const REQUEST_RETRY_BASE_DELAY_MS = 2_000;
+const REQUEST_RETRY_MAX_DELAY_MS = 30_000;
 
 /**
- * 中转网关报告请求体解析失败（Go 的 invalid json 或 codexgo 的 invalid_json）。
+ * 第 `retry` 次重试前等多久（`retry` 从 1 开始）：2s 起步、每次翻倍、封顶 30s。
  *
- * 本地序列化的请求也可能被网关偶发拒绝，允许按既有次数上限重试。
- * 解析错误本身不能证明传输抖动；持续失败仍须报错（如网关混用解析与大小限制文案）。
+ * 10 次合计约 3.5 分钟：短抖动很快就能过去，又不至于在一条注定失败的请求上
+ * 干等十几分钟——等人看到界面上的次数与原因后自己中止。
  */
-function isUpstreamBodyParseFailure(error: Record<string, unknown>): boolean {
-  const detail = error.error;
-  const nestedCode = detail && typeof detail === 'object' ? (detail as Record<string, unknown>).code : undefined;
-  if ([error.code, nestedCode].some((code) => typeof code === 'string' && code.toLowerCase() === 'invalid_json')) {
-    return true;
-  }
-  const message = error.message;
-  if (typeof message !== 'string') return false;
-  return /\binvalid[ _]json\b|invalid character|unexpected end of json|unexpected eof|请求体必须是有效\s*JSON/i.test(
-    message,
-  );
+export function requestRetryDelayMs(retry: number): number {
+  return Math.min(REQUEST_RETRY_BASE_DELAY_MS * 2 ** Math.max(0, retry - 1), REQUEST_RETRY_MAX_DELAY_MS);
 }
 
-function isUpstreamBodyReadFailure(error: Record<string, unknown>): boolean {
-  const detail = error.error;
-  const nestedCode = detail && typeof detail === 'object' ? (detail as Record<string, unknown>).code : undefined;
-  const codes = ['request_incomplete', 'request_read_error', 'request_timeout'];
-  if ([error.code, nestedCode].some((code) => typeof code === 'string' && codes.includes(code.toLowerCase()))) {
-    return true;
-  }
-  return typeof error.message === 'string' && /\brequest_(?:incomplete|read_error|timeout)\b/i.test(error.message);
-}
-
-export function isRetryableError(error: unknown): boolean {
+/** 用户中止（CLI 的 `AbortError`、宿主的 `AgentAbortError`）不是请求失败，不该重发。 */
+export function isAbortError(error: unknown): boolean {
   if (!error || typeof error !== 'object') return false;
-  const err = error as Record<string, unknown>;
+  const name = (error as { name?: unknown }).name;
+  return name === 'AbortError' || name === 'AgentAbortError';
+}
 
-  if (err.name === 'AbortError') return false;
-  // 超时错误没有 status/type，靠 name / message 兜底：Bun 下 AbortSignal.timeout()
-  // 抛 TimeoutError("The operation timed out.")，OpenAI SDK 抛 APIConnectionTimeoutError。
-  if (err.name === 'TimeoutError' || err.name === 'APIConnectionTimeoutError') return true;
-
-  const status = typeof err.status === 'number' ? err.status : undefined;
-  if (status !== undefined) {
-    if (status === 429) return true;
-    if (status >= 500 && status < 600) return true;
-    if (status === 400 && isUpstreamBodyParseFailure(err)) return true;
-    if ((status === 400 || status === 408) && isUpstreamBodyReadFailure(err)) return true;
-    return false;
-  }
-
-  const type = typeof err.type === 'string' ? err.type : undefined;
-  if (type === 'connection_error' || type === 'timeout_error') return true;
-  if (
-    type === 'api_error' ||
-    type === 'server_error' ||
-    type === 'rate_limit_error' ||
-    type === 'service_unavailable_error'
-  ) {
-    return true;
-  }
-
-  const code = typeof err.code === 'string' ? err.code.toLowerCase() : undefined;
-  if (code) {
-    if (code === 'econnreset' || code === 'etimedout' || code === 'econnrefused' || code === 'enotfound') return true;
-    if (
-      code === 'rate_limit_exceeded' ||
-      code === 'rate_limit_error' ||
-      code === 'server_error' ||
-      code === 'service_unavailable' ||
-      code === 'server_is_overloaded' ||
-      code === 'slow_down' ||
-      code === 'temporarily_unavailable' ||
-      code === 'overloaded'
-    ) {
-      return true;
-    }
-  }
-
-  if (err.message && typeof err.message === 'string') {
-    const msg = err.message.toLowerCase();
-    if (
-      msg.includes('rate limit') ||
-      msg.includes('rate_limit') ||
-      msg.includes('too many requests') ||
-      msg.includes('timeout') ||
-      msg.includes('timed out') ||
-      msg.includes('connection') ||
-      msg.includes('network') ||
-      msg.includes('econnrefused') ||
-      msg.includes('econnreset') ||
-      msg.includes('etimedout') ||
-      msg.includes('5xx') ||
-      msg.includes('server_error') ||
-      msg.includes('server error') ||
-      msg.includes('service unavailable') ||
-      msg.includes('internal server error') ||
-      msg.includes('temporarily unavailable') ||
-      msg.includes('try again later') ||
-      msg.includes('overloaded')
-    ) {
-      return true;
-    }
-  }
-
-  return false;
+/**
+ * 展示用的一句话失败原因：正文之后补上 HTTP 状态与错误码。
+ *
+ * notice 里只有 `error.message` 时，「500」与「socket closed」看起来一样都是
+ * 一句英文；把状态码和 code 一并写出来，才能判断是上游 5xx 还是链路断了。
+ */
+export function describeRequestError(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error ?? '未知错误');
+  const record = error && typeof error === 'object' ? (error as Record<string, unknown>) : {};
+  const detail = [
+    typeof record.status === 'number' ? `HTTP ${record.status}` : '',
+    typeof record.code === 'string' && record.code && !message.includes(record.code) ? record.code : '',
+  ].filter(Boolean);
+  if (!detail.length) return message;
+  if (typeof record.status === 'number' && message.includes(String(record.status))) return message;
+  return `${message}（${detail.join(' · ')}）`;
 }
 
 export function abortError(): Error {
@@ -138,49 +77,32 @@ function sleep(ms: number, signal?: AbortSignal): Promise<void> {
   });
 }
 
+/**
+ * 重发 `fn` 直到它正常返回、用户中止，或用完 `maxRetries`。
+ *
+ * 调用方只需要把「一次完整的模型请求」交给它；能不能安全重发（已经吐出去的正文与
+ * 思考能不能撤掉）由调用方在 `onRetry` 里处理，这里不做取舍。
+ */
 export async function withRetry<T>(
   fn: () => Promise<T>,
-  options?: {
-    maxRetries?: number;
-    delayMs?: number;
-    /** 指数退避倍数（每次重试 delayMs * factor^attempt），默认 1（固定间隔） */
-    backoffFactor?: number;
-    /** 单次重试等待上限，默认与 delayMs 相同 */
-    maxDelayMs?: number;
+  options: {
+    maxRetries: number;
+    /** 第 `retry` 次重试前的等待（`retry` 从 1 开始）。 */
+    delayMs: (retry: number) => number;
     signal?: AbortSignal;
-    /**
-     * 覆盖默认的可重试判定。默认用 isRetryableError(error)。
-     * 典型用法：调用方想在"重放安全"的前提下才重试（例如 provider 流消费
-     * 只有 0 输出时才可整体重发），用闭包状态决定是否允许本次重试。
-     */
-    shouldRetry?: (error: unknown) => boolean;
-    /** 每次实际重试前回调（用于诊断日志） */
+    /** 每次实际重试前回调：展示层用它报「第几次、多久后、上一次为什么失败」。 */
     onRetry?: (info: { attempt: number; error: unknown; delayMs: number }) => void;
   },
 ): Promise<T> {
-  const maxRetries = options?.maxRetries ?? DEFAULT_MAX_RETRIES;
-  const baseDelayMs = options?.delayMs ?? DEFAULT_RETRY_DELAY_MS;
-  const backoffFactor = options?.backoffFactor ?? 1;
-  const maxDelayMs = options?.maxDelayMs ?? baseDelayMs;
-  const shouldRetry = options?.shouldRetry ?? isRetryableError;
-  const onRetry = options?.onRetry;
-  let lastError: unknown;
-
-  for (let attempt = 0; attempt <= maxRetries; attempt++) {
-    throwIfQueryStopped(options);
+  for (let retry = 0; ; retry++) {
+    throwIfQueryStopped({ signal: options.signal });
     try {
       return await fn();
     } catch (error) {
-      lastError = error;
-      if (attempt < maxRetries && shouldRetry(error)) {
-        const delayMs = Math.min(baseDelayMs * Math.pow(backoffFactor, attempt), maxDelayMs);
-        onRetry?.({ attempt: attempt + 1, error, delayMs });
-        await sleep(delayMs, options?.signal);
-        continue;
-      }
-      throw error;
+      if (isAbortError(error) || options.signal?.aborted || retry >= options.maxRetries) throw error;
+      const delayMs = options.delayMs(retry + 1);
+      options.onRetry?.({ attempt: retry + 1, error, delayMs });
+      await sleep(delayMs, options.signal);
     }
   }
-
-  throw lastError;
 }

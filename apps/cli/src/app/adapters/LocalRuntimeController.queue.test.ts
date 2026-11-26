@@ -383,7 +383,7 @@ describe('LocalRuntimeController queue drain', () => {
       expect(notices).toHaveLength(1);
       const content = String((notices[0] as { content?: unknown })?.content);
       expect(content).toContain('请求暂时失败');
-      expect(content).toContain('第 2/5 次重试');
+      expect(content).toContain('第 2/10 次');
     } finally {
       setActiveContext(null);
     }

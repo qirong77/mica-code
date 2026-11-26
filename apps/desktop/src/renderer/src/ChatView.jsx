@@ -3195,8 +3195,9 @@ function statusLabel(phase, toolNames = []) {
   }
 }
 
-// 重试是 host 内部行为（最多 5 次、固定 10s），没有这两段文案时，等待期间与卡死
-// 无法区分：状态行只说第几次，会话里的 notice 额外带上一次失败的原因。
+// 重试是 host 内部行为（10 次，间隔 2/4/8/16s 后封顶 30s），没有这两段文案时，
+// 等待期间与卡死无法区分：状态行只说第几次与还要等多久，会话里的 notice 额外带上
+// 一次失败的原因。
 export function retryStatusLabel(retryInfo) {
   if (!retryInfo) return ''
   const seconds = Math.max(1, Math.round((Number(retryInfo.delayMs) || 0) / 1000))
@@ -3208,6 +3209,16 @@ export function retryNoticeText(retryInfo) {
   const seconds = Math.max(1, Math.ceil((Number(retryInfo.delayMs) || 0) / 1000))
   const line = `请求暂时失败，将在 ${seconds}s 后自动重试（第 ${retryInfo.attempt}/${retryInfo.maxAttempts} 次）`
   return retryInfo.error ? `${line}\n错误：${retryInfo.error}` : line
+}
+
+// 一轮失败的通知有两个来源：host 落盘的那条（重试耗尽时会写明「已重试 n/10 次」和原因）
+// 与 turn/completed 透传的错误文案。两处都贴出来会把同一次失败读成两次，所以宿主那条
+// 已经带着这句错误时不再追加；宿主没写（例如进程直接挂掉）时仍然兜底显示。
+export function turnFailureExplained(previous, text) {
+  const sample = compactLine(String(text ?? ''), 1000).slice(0, 40)
+  if (!sample) return false
+  const last = previous.at(-1)
+  return last?.kind === 'notice' && last.variant === 'error' && String(last.text).includes(sample)
 }
 
 function modelSummary(meta) {
@@ -4215,6 +4226,20 @@ export function ChatView({
         ...previous,
         { id, kind: 'notice', role: 'notice', text, variant, status, ...(typeof fullText === 'string' ? { fullText } : {}) }
       ])
+      return id
+    },
+    [updateMessages]
+  )
+
+  const appendTurnFailureNotice = useCallback(
+    (text) => {
+      if (!text) return null
+      const line = compactLine(String(text), 1000)
+      const id = uid('notice')
+      updateMessages((previous) => {
+        if (turnFailureExplained(previous, line)) return previous
+        return [...previous, { id, kind: 'notice', role: 'notice', text: line, variant: 'error', status: '' }]
+      })
       return id
     },
     [updateMessages]
@@ -5262,7 +5287,7 @@ export function ChatView({
           // 否则模型 400 / provider 配置错误等失败只会把 phase 置为 error，
           // 用户看到“运行了又马上停止”却没有任何提示。
           if (event.part?.reason === 'error' && event.part?.error) {
-            appendNotice(compactLine(String(event.part.error), 1000), 'error')
+            appendTurnFailureNotice(event.part.error)
           }
           const usage = event.part?.tokens
           if (usage) {

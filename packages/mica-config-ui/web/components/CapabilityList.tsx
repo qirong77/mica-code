@@ -1,4 +1,4 @@
-import { Switch } from './Ui.js';
+import { Switch, Tag } from './Ui.js';
 import { buildCapabilitySections } from '../capabilityGroups.js';
 import type { CapabilityGroupRef } from '../capabilityGroups.js';
 
@@ -23,6 +23,8 @@ export type CapabilityItem = {
   readOnly?: boolean;
   /** 工具入参；skills / MCP server 没有。 */
   parameters?: CapabilityParameter[];
+  /** 注册该能力的插件；没有插件归属时省略。 */
+  pluginId?: string;
   sourceLabel?: string;
   inputSchema?: unknown;
 };
@@ -74,37 +76,42 @@ export function CapabilityList({
 }) {
   const sections = buildCapabilitySections(items, isEnabled);
 
-  const renderRow = (item: CapabilityItem, grouped = false) => (
-    <li
-      key={item.name}
-      className={`capability-row${disabled ? ' is-disabled' : ''}${onOpenDetail ? ' is-clickable' : ''}`}
-      onClick={onOpenDetail ? () => onOpenDetail(item) : undefined}
-    >
-      {/* 开关区拦住冒泡：点滑块只改启用状态，不打开详情 */}
-      <span onClick={(event) => event.stopPropagation()}>
-        {!grouped ? (
-          <Switch
-            id={`capability-${group}-${item.name}`}
-            checked={isEnabled(item.name)}
-            label={item.name}
-            disabled={disabled}
-            onChange={(checked) => onToggle(item.name, checked)}
-          />
-        ) : null}
-      </span>
-      <span className="capability-name" title={item.name}>
-        {item.displayName ?? item.name}
-        {item.displayName ? <code className="capability-technical-name">{item.name}</code> : null}
-        {item.sourceLabel ? <small className="capability-source">{item.sourceLabel}</small> : null}
-      </span>
-      <span
-        className={`capability-description${item.description ? '' : ' capability-description-empty'}`}
-        title={item.description || undefined}
+  const renderRow = (item: CapabilityItem, grouped = false) => {
+    const sourceLabel = capabilitySourceLabel(item);
+    return (
+      <li
+        key={item.name}
+        className={`capability-row${disabled ? ' is-disabled' : ''}${onOpenDetail ? ' is-clickable' : ''}`}
+        onClick={onOpenDetail ? () => onOpenDetail(item) : undefined}
       >
-        {item.description || '—'}
-      </span>
-    </li>
-  );
+        {/* 开关区拦住冒泡：点滑块只改启用状态，不打开详情 */}
+        <span onClick={(event) => event.stopPropagation()}>
+          {!grouped ? (
+            <Switch
+              id={`capability-${group}-${item.name}`}
+              checked={isEnabled(item.name)}
+              label={item.name}
+              disabled={disabled}
+              onChange={(checked) => onToggle(item.name, checked)}
+            />
+          ) : null}
+        </span>
+        <div className="capability-name" title={item.name}>
+          <span className="capability-name-text">
+            {item.displayName ?? item.name}
+            {item.displayName ? <code className="capability-technical-name">{item.name}</code> : null}
+          </span>
+          {sourceLabel ? <Tag>{sourceLabel}</Tag> : null}
+        </div>
+        <span
+          className={`capability-description${item.description ? '' : ' capability-description-empty'}`}
+          title={item.description || undefined}
+        >
+          {item.description || '—'}
+        </span>
+      </li>
+    );
+  };
 
   return (
     <div className="capability-list-block">
@@ -213,4 +220,12 @@ export function CapabilityParameters({
       </ul>
     </div>
   );
+}
+
+function capabilitySourceLabel(item: CapabilityItem): string | null {
+  if (item.sourceLabel) return item.sourceLabel;
+  const pluginId =
+    item.pluginId ?? (item.group?.key.startsWith('plugin:') ? item.group.key.slice('plugin:'.length) : null);
+  if (!pluginId) return null;
+  return `插件 ${item.group?.label?.trim() || pluginId}`;
 }

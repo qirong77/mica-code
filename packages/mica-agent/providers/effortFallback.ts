@@ -55,7 +55,7 @@ export type EffortFallbackRequest<T> = {
  *
  * 发不出去就退化成「不发推理参数」而不是让整个请求失败：压缩摘要、起标题、子代理这些
  * 路径的 effort 不是用户选的，为一个元数据错误把整轮任务打掉没有道理。`withRetry` 仍然
- * 包在外面，所以这次重发同样受「还没有输出才安全重发」的约束。
+ * 包在外面：降级重发也失败时照常按请求失败重试。
  */
 export async function sendWithEffortFallback<T>(request: EffortFallbackRequest<T>): Promise<T> {
   try {

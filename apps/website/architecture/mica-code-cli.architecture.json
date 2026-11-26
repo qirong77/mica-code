@@ -335,8 +335,7 @@
       "dot": "emerald",
       "title": "Turn loop 与本地状态",
       "items": [
-        "turn 级最多重试 5 次（间隔 10s），只重放尚未产生副作用的阶段",
-        "provider 内建 5 次指数退避，仅在本次尝试还没有输出时重发",
+        "请求级重试 10 次（2/4/8/16s 后封顶 30s），只重发当前请求，不重放已执行的工具",
         "会话 JSON + turn lease 单写者，$MICA_HOME 收拢 config / sessions / cache"
       ]
     },

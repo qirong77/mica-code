@@ -1,4 +1,3 @@
-import { micaAgent } from '@packages/mica-agent/index.js';
 import type {
   PluginSubagentApi,
   PluginSubagentContextMode,
@@ -50,13 +49,6 @@ type RunRequest = {
   runInBackground?: boolean;
 };
 
-/**
- * 整轮重跑的次数上限。
- *
- * 单次模型请求的 provider 重试在 `withRetry` 里；这里处理的是「整轮子代理失败」——
- * 请求层重试全部耗尽之后仍然失败时，再给只读任务一次机会。
- */
-const MAX_SAFE_RETRIES = 1;
 
 /**
  * `await` / `join` 省略 `timeout_ms` 时的等待上限。
@@ -275,16 +267,8 @@ export class AgentTool extends MicaTool {
     const ownedPaths = resolveOwnedPaths(request.ownedPaths ?? [], type);
     const spawn = this.buildSpawnRequest(request, type, request.prompt.trim(), ownedPaths, callbacks);
 
-    let attempt = 0;
-    let result: PluginSubagentRunResult;
-    for (;;) {
-      attempt += 1;
-      const retryLabel = attempt > 1 ? ` (retry ${attempt - 1})` : '';
-      callbacks?.onChunk?.(`[Agent:${type.name}] start ${request.description}${retryLabel}\n`);
-      result = await this.subagents.run(spawn);
-      if (!shouldRetryRun(result, type, attempt, callbacks?.signal)) break;
-      callbacks?.onChunk?.(`[Agent:${type.name}] retry ${attempt}: ${summarizeError(result.error)}\n`);
-    }
+    callbacks?.onChunk?.(`[Agent:${type.name}] start ${request.description}\n`);
+    const result = await this.subagents.run(spawn);
     return {
       status: result.status,
       output: [
@@ -297,7 +281,6 @@ export class AgentTool extends MicaTool {
         }),
         // 前台任务同样留在任务表里：失败后父代理可以用 read 取回用量与活动记录。
         `task_id: ${result.taskId}`,
-        attempt > 1 ? `attempts: ${attempt}` : '',
       ]
         .filter(Boolean)
         .join('\n'),
@@ -490,7 +473,7 @@ function buildDescription(types: PluginSubagentType[]): string {
     'restart 用原任务和最近活动创建新任务，不是断点续跑；先 read 判断原因，不盲目重试用户主动停止的任务。',
     `可用 subagent_type: ${types.map((type) => `${type.name} (${type.description})`).join('; ')}。`,
     'effort 取子代理模型自己声明的档位名（模型不同档位集合也不同），省略时继承主 agent 当前 effort。',
-    '只读与提案类子代理（write_mode none/proposal）遇到可重试的 provider 错误会自动整轮重试一次；可写子代理失败后不会自动重跑，需要重新提交。',
+    '子代理失败后不会自动整轮重跑（请求级重试已在 provider 内做满 10 次）；先用 read 看清错误再决定是否重新提交。',
     'await/join 默认 wait_mode=all；wait_mode=any 会在任意一个任务结束时返回全部请求任务的当前状态，不取消仍在运行的任务。',
   ].join(' ');
 }
@@ -547,25 +530,6 @@ function toStructuredStatus(status: PluginSubagentRunResult['status']): Structur
   return status === 'partial' ? 'partial' : 'failed';
 }
 
-/**
- * 整轮重跑只对不落盘的类型做：`none` / `proposal` 重跑不会重复执行写操作，
- * 可写类型失败后交给父代理决定（可能已经改了一半的代码）。
- */
-function shouldRetryRun(
-  result: PluginSubagentRunResult,
-  type: PluginSubagentType,
-  attempt: number,
-  signal: AbortSignal | undefined,
-): boolean {
-  if (attempt > MAX_SAFE_RETRIES) return false;
-  if (result.status !== 'failed') return false;
-  if (signal?.aborted) return false;
-  const writeMode = type.writeMode ?? 'unrestricted';
-  if (writeMode !== 'none' && writeMode !== 'proposal') return false;
-  // 只认「错误本身可重试」（429 / 5xx / 超时 / 网络）。单次请求的重试已在 provider
-  // 里做满，能走到这里说明那几次都没成功——网络恢复后整轮重来仍有意义。
-  return Boolean(result.error) && micaAgent.isRetryableError({ message: result.error });
-}
 
 function formatBatchTally(statuses: Map<string, BatchStatus>): string {
   const tally = { completed: 0, partial: 0, failed: 0, skipped: 0, running: 0 };
@@ -581,14 +545,6 @@ function formatBatchTally(statuses: Map<string, BatchStatus>): string {
 
 function formatErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
-}
-
-function summarizeError(error: string | undefined): string {
-  const compact = String(error ?? '')
-    .replace(/\s+/g, ' ')
-    .trim();
-  if (!compact) return 'failed';
-  return compact.length <= 160 ? compact : `${compact.slice(0, 159)}…`;
 }
 
 function parseStringArray(value: unknown, field: string): string[] {

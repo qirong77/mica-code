@@ -1,9 +1,8 @@
 import type { AgentQueryContent } from '@packages/mica-agent/index.js';
-import { micaAgent } from '@packages/mica-agent/index.js';
+import { describeRequestError, REQUEST_MAX_RETRIES } from '@packages/mica-agent/core/retry.js';
 import { runtimeEnv } from '@packages/mica-config/runtimeEnv.js';
 import { readPromptControls } from '@packages/mica-config/promptControls.js';
 import type { SessionTurnLease } from '@packages/mica-session/index.js';
-import { micaTools } from '@packages/mica-tools/index.js';
 import { micaUi, type MicaUiConversationMessage } from '@packages/mica-ui/index.js';
 import type { CommandRegistry } from '@packages/mica-commands/index.js';
 import type { HookRegistry, ServiceContainer } from '@packages/mica-plugin/index.js';
@@ -38,9 +37,7 @@ import { uncommittedResponseText } from '../../runtime/conversationHistory.js';
 const ALLOW_DURING_EXCLUSIVE_TASK_COMMANDS = new Set(['status', 'task', 'agents', 'new']);
 const MAX_RESPONSE_BUFFER_CHARS = runtimeEnv.ui.responseTextMaxChars;
 const RESPONSE_TRUNCATION_MARKER = '[response display truncated]\n';
-const MAX_TURN_RETRIES = 5;
-const TURN_RETRY_DELAY_MS = 10_000;
-const RETRY_TURN_NOTICE_COMMAND = '/error';
+const ERROR_NOTICE_COMMAND = '/error';
 const STOP_ABORT_WAIT_MS = 5000;
 const EXTERNAL_SESSION_REFRESH_MS = 1000;
 
@@ -538,16 +535,10 @@ export class LocalRuntimeController implements RuntimeController {
     let hasError = false;
     let wasAborted = false;
     let rewindCheckpointId: string | null = null;
-    // Capture pre-turn client state so we can restore it before each retry.
-    let preTurnSnapshot: ReturnType<AgentRuntime['captureClientSnapshot']> = null;
-    let hadNonRetryableToolCall = false;
-    const markToolCall = (toolCall: { name: string }) => {
-      if (!micaTools.isReadOnly(toolCall.name)) {
-        hadNonRetryableToolCall = true;
-        // 后面不再允许整轮重试，长会话的回滚副本也不必保留到本轮结束。
-        preTurnSnapshot = null;
-      }
-    };
+    // provider 重试提示在会话里的位置，以及一共重试了几次：失败收尾时把同一条就地
+    // 改成结论，而不是再追加一条看起来像第二件事的错误。
+    let providerRetryNoticeIndex = -1;
+    let providerRetryAttempts = 0;
     this.responseBuffers.set(agent, '');
     this.committedResponseBuffers.set(agent, '');
     const activeContext = getActiveContext<RuntimeActiveContext>();
@@ -564,8 +555,6 @@ export class LocalRuntimeController implements RuntimeController {
         // left in `running` and turn:after/turn:finished still run exactly once.
         throw new AgentAbortError(reservedRunId);
       }
-      preTurnSnapshot = agent.captureClientSnapshot();
-      agent.events.on('toolCall', markToolCall);
       const clearPreviousTurnUi = shouldClearPreviousTurnUi(session?.uiState.lastTurnOutcome);
       const previousConversationMessages = displayConversationMessages(session, agent);
       if (input.source !== 'system') {
@@ -608,161 +597,87 @@ export class LocalRuntimeController implements RuntimeController {
       const promptBuildEvent = await this.hooks.pipeline('prompt:build', { runtime: this, input, content });
       const runContent = promptBuildEvent.content ?? content;
 
-      let pendingRetryNotice: { error: unknown; index: number; retryAttempt: number } | null = null;
-      // provider 层重试 notice：每个 turn 只占一个槽位，后续重试在原消息上原地更新，
-      // 避免多次请求 × 每次最多 5 次重试刷屏。
-      let providerRetryNoticeIndex = -1;
+      // provider 层重试 notice：本轮只占一个槽位，10 次重试都在同一条上原地更新，
+      // 不刷屏。
       const promptControls = readPromptControls();
-      for (let attempt = 0; attempt <= MAX_TURN_RETRIES; attempt++) {
-        const attemptSystemInputs: RuntimeInput[] = [];
-        const attemptRunId = attempt === 0 ? reservedRunId : agent.reserveRunId();
-        try {
-          agent.events.emit('thinkingTurnAttemptStart', undefined);
-          const result = await agent.run(runContent, {
-            reservedRunId: attemptRunId,
-            promptControls,
-            onIterationComplete: () => {
-              this.saveIterationCheckpoint(agent, sessionController);
-              return this.takeQueuedIterationInput(agent, attemptSystemInputs);
-            },
-            onRetry: (info) => {
-              if (!session && !this.isActiveAgent(agent)) return;
-              const retryNotice = createRetryNoticeMessage(info.error, info.attempt, info.delayMs);
-              if (session) {
-                if (
-                  providerRetryNoticeIndex >= 0 &&
-                  session.uiState.conversationMessages[providerRetryNoticeIndex]?.role === 'notice'
-                ) {
-                  session.uiState = normalizeUiState({
-                    ...session.uiState,
-                    conversationMessages: [
-                      ...session.uiState.conversationMessages.slice(0, providerRetryNoticeIndex),
-                      retryNotice,
-                      ...session.uiState.conversationMessages.slice(providerRetryNoticeIndex + 1),
-                    ],
-                  });
-                } else {
-                  session.uiState = normalizeUiState({
-                    ...session.uiState,
-                    conversationMessages: [...session.uiState.conversationMessages, retryNotice],
-                  });
-                  providerRetryNoticeIndex = session.uiState.conversationMessages.length - 1;
-                }
-                if (this.isActiveAgent(agent)) {
-                  micaUi.conversation.setMessages(session.uiState.conversationMessages);
-                }
-              } else if (this.isActiveAgent(agent)) {
-                micaUi.conversation.appendNoticeMessage(retryNotice.content, {
-                  variant: retryNotice.variant,
-                  command: retryNotice.command,
-                });
-              }
-            },
-          });
-          runId = result.runId;
-          const finalText = result.text;
-          // A resolved query already committed the final provider response.
-          // A stale result still needs aborted finalization, but not another
-          // copy of that response in preserveAbortedTurn.
-          this.committedResponseBuffers.set(agent, this.responseBuffers.get(agent) ?? '');
-          if (!agent.isCurrent(runId)) {
-            // A provider can resolve after another action invalidated this
-            // run.  Do not fall through to the completed UI/save path.
-            throw new AgentAbortError(runId);
-          }
-
-          const responseBuffer = this.responseBuffers.get(agent) ?? '';
-          this.committedResponseBuffers.set(agent, '');
-          this.responseBuffers.set(agent, '');
-          const assistantMessage = createAssistantTextMessage(responseBuffer || finalText || '(empty response)');
+      const result = await agent.run(runContent, {
+        reservedRunId,
+        promptControls,
+        onIterationComplete: () => {
+          this.saveIterationCheckpoint(agent, sessionController);
+          return this.takeQueuedIterationInput(agent);
+        },
+        onRetry: (info) => {
+          if (!session && !this.isActiveAgent(agent)) return;
+          providerRetryAttempts = info.attempt;
+          const retryNotice = createRetryNoticeMessage(info.error, info.attempt, info.delayMs);
           if (session) {
-            session.uiState = normalizeUiState({
-              ...session.uiState,
-              conversationMessages: [...session.uiState.conversationMessages, assistantMessage],
-              responseText: '',
-            });
-          }
-          if (this.isActiveAgent(agent)) {
-            if (session) {
-              micaUi.conversation.setMessages(session.uiState.conversationMessages);
-            } else {
-              micaUi.conversation.appendAssistantMessage(assistantMessage.content);
-            }
-            micaUi.conversation.clearResponseText();
-          }
-
-          await this.hooks.emit('turn:beforePersist', { runtime: this, input, content, result });
-          if (!agent.isCurrent(runId)) throw new AgentAbortError(runId);
-          sessionController.saveCurrent({ turnState: 'completed' });
-          return;
-        } catch (error) {
-          this.prependSystemInputs(agent, attemptSystemInputs);
-          if (error instanceof AgentAbortError) {
-            throw error;
-          }
-          if (!agent.isCurrent(attemptRunId)) throw new AgentAbortError(attemptRunId);
-          if (hadNonRetryableToolCall || !micaAgent.isRetryableError(error) || attempt >= MAX_TURN_RETRIES) {
-            throw error;
-          }
-          // The client snapshot covers the entire run, not just its last
-          // request. Restore its matching thinking before restoring history.
-          agent.events.emit('thinkingTurnAttemptRollback', undefined);
-          if (preTurnSnapshot) agent.restoreClientSnapshot(preTurnSnapshot, { preserveUsage: true });
-          this.responseBuffers.set(agent, '');
-          this.committedResponseBuffers.set(agent, '');
-          if (session) session.uiState.responseText = '';
-          if (this.isActiveAgent(agent)) {
-            micaUi.conversation.clearResponseText();
-            micaUi.panels.status.connecting();
-          }
-          sessionController.saveCurrent({ allowEmpty: true, turnState: 'running' });
-          if (!agent.isCurrent(attemptRunId)) throw new AgentAbortError(attemptRunId);
-          const retryNotice = createRetryNoticeMessage(error, attempt + 1, TURN_RETRY_DELAY_MS);
-          let retryNoticeIndex = -1;
-          if (session) {
-            session.uiState = normalizeUiState({
-              ...session.uiState,
-              conversationMessages: [...session.uiState.conversationMessages, retryNotice],
-            });
-            retryNoticeIndex = session.uiState.conversationMessages.length - 1;
-          }
-          if (this.isActiveAgent(agent)) {
-            if (session) {
-              micaUi.conversation.setMessages(session.uiState.conversationMessages);
-            } else {
-              micaUi.conversation.appendNoticeMessage(retryNotice.content, {
-                variant: retryNotice.variant,
-                command: retryNotice.command,
+            if (
+              providerRetryNoticeIndex >= 0 &&
+              session.uiState.conversationMessages[providerRetryNoticeIndex]?.role === 'notice'
+            ) {
+              session.uiState = normalizeUiState({
+                ...session.uiState,
+                conversationMessages: [
+                  ...session.uiState.conversationMessages.slice(0, providerRetryNoticeIndex),
+                  retryNotice,
+                  ...session.uiState.conversationMessages.slice(providerRetryNoticeIndex + 1),
+                ],
               });
+            } else {
+              session.uiState = normalizeUiState({
+                ...session.uiState,
+                conversationMessages: [...session.uiState.conversationMessages, retryNotice],
+              });
+              providerRetryNoticeIndex = session.uiState.conversationMessages.length - 1;
             }
+            if (this.isActiveAgent(agent)) {
+              micaUi.conversation.setMessages(session.uiState.conversationMessages);
+            }
+          } else if (this.isActiveAgent(agent)) {
+            micaUi.conversation.appendNoticeMessage(retryNotice.content, {
+              variant: retryNotice.variant,
+              command: retryNotice.command,
+            });
           }
-          if (retryNoticeIndex >= 0) {
-            pendingRetryNotice = { error, index: retryNoticeIndex, retryAttempt: attempt + 1 };
-          }
-          await this.hooks.emit('turn:error', { runtime: this, input, content, error });
-          if (!agent.isCurrent(attemptRunId)) throw new AgentAbortError(attemptRunId);
-          await waitForRetryDelay(agent, TURN_RETRY_DELAY_MS, attemptRunId, (remainingMs) => {
-            if (!pendingRetryNotice) return;
-            updateRetryNoticeMessage(
-              session,
-              pendingRetryNotice.index,
-              createRetryNoticeMessage(pendingRetryNotice.error, pendingRetryNotice.retryAttempt, remainingMs),
-              this.isActiveAgent(agent),
-            );
-          });
-          if (!agent.isCurrent(attemptRunId)) throw new AgentAbortError(attemptRunId);
-          if (pendingRetryNotice) {
-            updateRetryNoticeMessage(
-              session,
-              pendingRetryNotice.index,
-              createRetryNoticeMessage(pendingRetryNotice.error, pendingRetryNotice.retryAttempt, null),
-              this.isActiveAgent(agent),
-            );
-            pendingRetryNotice = null;
-          }
-          if (!agent.isCurrent(attemptRunId)) throw new AgentAbortError(attemptRunId);
-        }
+        },
+      });
+      runId = result.runId;
+      const finalText = result.text;
+      // A resolved query already committed the final provider response.
+      // A stale result still needs aborted finalization, but not another
+      // copy of that response in preserveAbortedTurn.
+      this.committedResponseBuffers.set(agent, this.responseBuffers.get(agent) ?? '');
+      if (!agent.isCurrent(runId)) {
+        // A provider can resolve after another action invalidated this
+        // run.  Do not fall through to the completed UI/save path.
+        throw new AgentAbortError(runId);
       }
+
+      const responseBuffer = this.responseBuffers.get(agent) ?? '';
+      this.committedResponseBuffers.set(agent, '');
+      this.responseBuffers.set(agent, '');
+      const assistantMessage = createAssistantTextMessage(responseBuffer || finalText || '(empty response)');
+      if (session) {
+        session.uiState = normalizeUiState({
+          ...session.uiState,
+          conversationMessages: [...session.uiState.conversationMessages, assistantMessage],
+          responseText: '',
+        });
+      }
+      if (this.isActiveAgent(agent)) {
+        if (session) {
+          micaUi.conversation.setMessages(session.uiState.conversationMessages);
+        } else {
+          micaUi.conversation.appendAssistantMessage(assistantMessage.content);
+        }
+        micaUi.conversation.clearResponseText();
+      }
+
+      await this.hooks.emit('turn:beforePersist', { runtime: this, input, content, result });
+      if (!agent.isCurrent(runId)) throw new AgentAbortError(runId);
+      sessionController.saveCurrent({ turnState: 'completed' });
+      return;
     } catch (error) {
       if (error instanceof AgentAbortError) {
         this.prependSystemInputs(agent, initialSystemInputs);
@@ -803,12 +718,19 @@ export class LocalRuntimeController implements RuntimeController {
       hasError = true;
       this.prependSystemInputs(agent, initialSystemInputs);
       await this.hooks.emit('turn:error', { runtime: this, input, content, error });
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      const errorNotice = createFinalErrorNoticeMessage(errorMessage);
+      const errorNotice = createFinalErrorNoticeMessage(error, providerRetryAttempts);
       if (session) {
+        // 这一轮重试过就改写那条「将在 Ns 后重试」，不另起一条。
+        const rewriteRetryNotice =
+          providerRetryNoticeIndex >= 0 &&
+          session.uiState.conversationMessages[providerRetryNoticeIndex]?.role === 'notice';
         session.uiState = normalizeUiState({
           ...session.uiState,
-          conversationMessages: [...session.uiState.conversationMessages, errorNotice],
+          conversationMessages: rewriteRetryNotice
+            ? session.uiState.conversationMessages.map((message, index) =>
+                index === providerRetryNoticeIndex ? errorNotice : message,
+              )
+            : [...session.uiState.conversationMessages, errorNotice],
           responseText: '',
           thinkingText: '',
           workingStatus: { type: 'idle' },
@@ -831,7 +753,6 @@ export class LocalRuntimeController implements RuntimeController {
       }
       sessionController.saveCurrent({ turnState: 'error' });
     } finally {
-      agent.events.off('toolCall', markToolCall);
       this.runningAgents.delete(agent);
       this.clearingAgents.delete(agent);
       this.committedResponseBuffers.delete(agent);
@@ -881,16 +802,12 @@ export class LocalRuntimeController implements RuntimeController {
     }
   }
 
-  private async takeQueuedIterationInput(
-    agent: AgentRuntime,
-    consumedSystemInputs: RuntimeInput[],
-  ): Promise<AgentQueryContent | null> {
+  private async takeQueuedIterationInput(agent: AgentRuntime): Promise<AgentQueryContent | null> {
     const queue = this.queueFor(agent);
     this.committedResponseBuffers.set(agent, this.responseBuffers.get(agent) ?? '');
     const systemQueue = this.systemQueues.get(agent);
     const systemInput = systemQueue?.shift() ?? null;
     if (systemQueue?.length === 0) this.systemQueues.delete(agent);
-    if (systemInput) consumedSystemInputs.push(systemInput);
     const queuedInput = queue.dequeueAfterCompletedIteration(!systemInput);
     const next = systemInput ?? queuedInput;
     if (!systemInput) this.events.publish({ type: 'queue:changed', pendingInputs: queue.list(), owner: agent });
@@ -1031,106 +948,27 @@ async function parseDisplayContent(
   return (await micaUi.parseImageRefs(input.displayText)) as AgentQueryContent;
 }
 
-function createRetryNoticeMessage(
-  error: unknown,
-  retryAttempt: number,
-  remainingMs: number | null,
-): MicaUiNoticeMessage {
+function createRetryNoticeMessage(error: unknown, retryAttempt: number, delayMs: number): MicaUiNoticeMessage {
+  const seconds = Math.max(1, Math.ceil(delayMs / 1000));
   return {
     role: 'notice',
-    content: formatRetryNoticeContent(error, retryAttempt, remainingMs),
+    content: [
+      `请求暂时失败，将在 ${seconds}s 后自动重试（第 ${retryAttempt}/${REQUEST_MAX_RETRIES} 次）`,
+      `错误：${describeRequestError(error)}`,
+    ].join('\n'),
     variant: 'error',
-    command: RETRY_TURN_NOTICE_COMMAND,
+    command: ERROR_NOTICE_COMMAND,
   };
 }
 
-function createFinalErrorNoticeMessage(errorMessage: string): MicaUiNoticeMessage {
+function createFinalErrorNoticeMessage(error: unknown, retries: number): MicaUiNoticeMessage {
+  const tried = retries > 0 ? `已重试 ${retries}/${REQUEST_MAX_RETRIES} 次` : '未重试';
   return {
     role: 'notice',
-    content: `请求失败: ${errorMessage}`,
+    content: [`请求失败（${tried}）`, `错误：${describeRequestError(error)}`].join('\n'),
     variant: 'error',
-    command: RETRY_TURN_NOTICE_COMMAND,
+    command: ERROR_NOTICE_COMMAND,
   };
-}
-
-function formatRetryNoticeContent(error: unknown, retryAttempt: number, remainingMs: number | null): string {
-  const retryLabel = `第 ${retryAttempt}/${MAX_TURN_RETRIES} 次重试`;
-  const errorMessage = error instanceof Error ? error.message : String(error);
-
-  if (remainingMs === null) {
-    return [`请求暂时失败，已发起${retryLabel}。`, `错误：${errorMessage}`].join('\n');
-  }
-
-  const remainingSeconds = Math.max(1, Math.ceil(remainingMs / 1000));
-  return [
-    `请求暂时失败，将自动重试。`,
-    `倒计时：${remainingSeconds}s 后发起${retryLabel}`,
-    `错误：${errorMessage}`,
-  ].join('\n');
-}
-
-function updateRetryNoticeMessage(
-  session: TerminalAgentSession | undefined,
-  index: number,
-  notice: MicaUiNoticeMessage,
-  isActive: boolean,
-): void {
-  if (!session || index < 0 || session.uiState.conversationMessages[index]?.role !== 'notice') return;
-  session.uiState = normalizeUiState({
-    ...session.uiState,
-    conversationMessages: [
-      ...session.uiState.conversationMessages.slice(0, index),
-      notice,
-      ...session.uiState.conversationMessages.slice(index + 1),
-    ],
-  });
-  if (isActive) micaUi.conversation.setMessages(session.uiState.conversationMessages);
-}
-
-function waitForRetryDelay(
-  agent: AgentRuntime,
-  delayMs: number,
-  delayRunId: number,
-  onRemainingMs?: (remainingMs: number) => void,
-): Promise<void> {
-  const startedAt = Date.now();
-  let lastRemainingSeconds = Math.ceil(delayMs / 1000);
-  return new Promise<void>((resolve, reject) => {
-    if (!agent.isCurrent(delayRunId)) {
-      reject(new AgentAbortError(delayRunId));
-      return;
-    }
-    let settled = false;
-    const finish = (fn: () => void) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      clearInterval(poll);
-      fn();
-    };
-    const updateCountdown = () => {
-      const remainingMs = Math.max(0, delayMs - (Date.now() - startedAt));
-      const remainingSeconds = Math.ceil(remainingMs / 1000);
-      if (remainingSeconds === lastRemainingSeconds) return;
-      lastRemainingSeconds = remainingSeconds;
-      onRemainingMs?.(remainingMs);
-    };
-    const timer = setTimeout(
-      () =>
-        finish(() => {
-          if (!agent.isCurrent(delayRunId)) reject(new AgentAbortError(delayRunId));
-          else resolve();
-        }),
-      delayMs,
-    );
-    const poll = setInterval(() => {
-      if (!agent.isCurrent(delayRunId)) {
-        finish(() => reject(new AgentAbortError(delayRunId)));
-        return;
-      }
-      updateCountdown();
-    }, 250);
-  });
 }
 
 function createAssistantTextMessage(text: string): ReturnType<AgentRuntime['toConversationMessages']>[number] {

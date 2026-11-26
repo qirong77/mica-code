@@ -29,9 +29,6 @@ export class ToolLogController {
   // The value is the text at the last completed reasoning checkpoint, or null
   // for a row created since then. Keep it even after a segment is flushed.
   private uncheckpointedThinking = new Map<string, string | null>();
-  // Unlike a request checkpoint, a turn attempt spans every completed response.
-  private turnAttemptThinking: Map<string, string | null> | null = null;
-  private turnAttemptCheckpoint: ReturnType<ToolLogController['checkpointThinking']> | null = null;
   private activeToolCalls = new Map<string, ActiveToolCall>();
 
   constructor(private readonly sink: ToolLogSink = defaultSink) {}
@@ -41,8 +38,6 @@ export class ToolLogController {
     this.activeThinkingId = null;
     this.lastThinkingUiUpdateAt = 0;
     this.uncheckpointedThinking.clear();
-    this.turnAttemptThinking = null;
-    this.turnAttemptCheckpoint = null;
     this.activeToolCalls.clear();
     if (options.clearThinkingText !== false) this.sink.setThinkingText('');
   }
@@ -75,28 +70,6 @@ export class ToolLogController {
     if (checkpoint.id) {
       this.sink.replaceAgentTurnLogItem(micaUi.createThinkingLogItem(checkpoint.id, checkpoint.buffer));
     }
-  }
-
-  beginTurnAttempt() {
-    this.flushThinking();
-    this.turnAttemptCheckpoint = this.checkpointThinking();
-    this.turnAttemptThinking = new Map();
-  }
-
-  /** Revert only thinking touched by this run, preserving tool and text rows. */
-  rollbackTurnAttemptThinking(): Array<{ id: string; text: string | null }> {
-    if (!this.turnAttemptThinking || !this.turnAttemptCheckpoint) return [];
-    const checkpoint = this.turnAttemptCheckpoint;
-    // 交回的是「尝试开始时那一行长什么样」，不是它现在的文本：本次尝试新开的那几行
-    // 要整行撤掉（`null`），否则重试前的回滚会把失败尝试的思考又原样贴回去。
-    const changes = Array.from(this.turnAttemptThinking.keys(), (id) => ({
-      id,
-      text: id === checkpoint.id ? checkpoint.buffer : (checkpoint.uncheckpointed.get(id) ?? null),
-    }));
-    this.restoreThinking(checkpoint);
-    this.turnAttemptThinking = null;
-    this.turnAttemptCheckpoint = null;
-    return changes;
   }
 
   /** Record completed reasoning independently of the retry-attempt snapshot. */
@@ -145,12 +118,8 @@ export class ToolLogController {
       this.activeThinkingId = `thinking-${++this.thinkingId}`;
       this.thinkingBuffer = '';
       this.uncheckpointedThinking.set(this.activeThinkingId, null);
-      this.turnAttemptThinking?.set(this.activeThinkingId, null);
     } else if (!this.uncheckpointedThinking.has(this.activeThinkingId)) {
       this.uncheckpointedThinking.set(this.activeThinkingId, this.thinkingBuffer);
-    }
-    if (this.turnAttemptThinking && !this.turnAttemptThinking.has(this.activeThinkingId)) {
-      this.turnAttemptThinking.set(this.activeThinkingId, this.thinkingBuffer);
     }
     this.thinkingBuffer = appendBoundedText(
       this.thinkingBuffer,

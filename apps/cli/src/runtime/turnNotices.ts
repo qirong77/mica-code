@@ -1,5 +1,6 @@
 import type { MicaUiCommandStatus, MicaUiConversationMessage } from '@packages/mica-ui/index.js';
 import { comparableText } from '@packages/mica-common/promptText.js';
+import { describeRequestError } from '@packages/mica-agent/core/retry.js';
 
 export type TurnNotice = Extract<MicaUiConversationMessage, { role: 'notice' }>;
 
@@ -201,7 +202,7 @@ export function createRetryNotice(error: unknown, attempt: number, maxAttempts: 
     role: 'notice',
     content: [
       `请求暂时失败，将在 ${seconds}s 后自动重试（第 ${attempt}/${maxAttempts} 次）`,
-      `错误：${errorMessageOf(error)}`,
+      `错误：${describeRequestError(error)}`,
     ].join('\n'),
     variant: 'error',
     command: TURN_RETRY_NOTICE_COMMAND,
@@ -211,7 +212,7 @@ export function createRetryNotice(error: unknown, attempt: number, maxAttempts: 
 export function createTurnErrorNotice(error: unknown): TurnNotice {
   return {
     role: 'notice',
-    content: `请求失败: ${errorMessageOf(error)}`,
+    content: `请求失败: ${describeRequestError(error)}`,
     variant: 'error',
     command: TURN_ERROR_NOTICE_COMMAND,
   };
@@ -226,8 +227,24 @@ export function createTurnErrorNotice(error: unknown): TurnNotice {
 export function createRetryRecoveredNotice(error: unknown, attempt: number, maxAttempts: number): TurnNotice {
   return {
     role: 'notice',
-    content: [`重试成功（第 ${attempt}/${maxAttempts} 次）`, `错误：${errorMessageOf(error)}`].join('\n'),
+    content: [`重试成功（第 ${attempt}/${maxAttempts} 次）`, `错误：${describeRequestError(error)}`].join('\n'),
     variant: 'success',
+    command: TURN_RETRY_NOTICE_COMMAND,
+  };
+}
+
+/**
+ * 重试用完仍然失败：把「将在 Ns 后重试」那条就地改成结论。
+ *
+ * 次数与最后一次失败原因写在同一条里 —— 再单起一条 `/error` 会读成两件事
+ * （先重试、后失败），看不出这是同一段请求的最后一次结果。
+ */
+export function createRetryFailedNotice(error: unknown, retries: number, maxRetries: number): TurnNotice {
+  const tried = retries > 0 ? `已重试 ${retries}/${maxRetries} 次` : '未重试';
+  return {
+    role: 'notice',
+    content: [`请求失败（${tried}）`, `错误：${describeRequestError(error)}`].join('\n'),
+    variant: 'error',
     command: TURN_RETRY_NOTICE_COMMAND,
   };
 }
@@ -254,10 +271,6 @@ export function publishTurnNotice(
   host.save(messages);
   const noticeIndex = messages.filter((message) => message.role === 'notice').indexOf(notice);
   host.onNotice?.(notice, { ...(upsert.replace ? { replace: true } : {}), noticeIndex });
-}
-
-function errorMessageOf(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }
 
 /** Same field whitelist as SessionController's conversation sanitizer. */

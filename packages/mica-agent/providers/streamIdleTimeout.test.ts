@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { withIdleTimeout, STREAM_IDLE_TIMEOUT_MS } from '../core/streamIdleTimeout.js';
-import { isRetryableError } from '../core/retry.js';
+import { isAbortError } from '../core/retry.js';
 afterEach(() => vi.useRealTimers());
 describe('withIdleTimeout', () => {
   it('passes every event through and completes normally', async () => {
@@ -9,7 +9,7 @@ describe('withIdleTimeout', () => {
     expect(events).toEqual([1, 2, 3]);
   });
 
-  it('throws a retryable timeout error when the stream goes silent', async () => {
+  it('throws a timeout error when the stream goes silent', async () => {
     vi.useFakeTimers();
     const seen: unknown[] = [];
     const silent = (async function* () {
@@ -28,8 +28,9 @@ describe('withIdleTimeout', () => {
 
     await vi.advanceTimersByTimeAsync(1);
     expect(await settled).toMatchObject({ name: 'TimeoutError' });
-    expect(String(((await settled) as Error).message)).toMatch(/No stream data from provider for 60s/);
-    expect(isRetryableError(Object.assign(new Error('x'), { name: 'TimeoutError' }))).toBe(true);
+    expect(String(((await settled) as Error).message)).toMatch(/No stream data from provider for 180s/);
+    // 它是一次没正常结束的请求：重试逻辑只放过用户中止。
+    expect(isAbortError(await settled)).toBe(false);
   });
 });
 

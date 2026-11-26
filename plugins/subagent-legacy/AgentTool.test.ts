@@ -115,15 +115,9 @@ describe('AgentTool', () => {
     expect(output).toContain('task_id: task-1');
   });
 
-  it('retries a read-only run once when the provider error is retryable', async () => {
-    let calls = 0;
+  it('reports a failed run once without re-spawning the subagent', async () => {
     const { api, spawns } = createApi({
-      run: async () => {
-        calls += 1;
-        return calls === 1
-          ? { taskId: 'task-1', status: 'failed', output: '', error: '429 rate limit exceeded' }
-          : { taskId: 'task-2', status: 'completed', output: 'all good' };
-      },
+      run: async () => ({ taskId: 'task-1', status: 'failed', output: '', error: '429 rate limit exceeded' }),
     });
 
     const output = await new AgentTool(api).execute({
@@ -133,21 +127,17 @@ describe('AgentTool', () => {
       subagent_type: 'Explore',
     });
 
-    expect(spawns).toHaveLength(2);
-    expect(output).toContain('Status: completed');
-    expect(output).toContain('all good');
-    expect(output).toContain('attempts: 2');
-    expect(output).toContain('task_id: task-2');
+    // 请求级重试已在 provider 内做满 10 次：能走到这里就是真的没跑通，不再整轮重来。
+    expect(spawns).toHaveLength(1);
+    expect(output).toContain('Status: failed');
+    expect(output).toContain('429 rate limit exceeded');
+    expect(output).toContain('task_id: task-1');
   });
 
-  it('does not retry a writable run, a non-retryable error, or a killed run', async () => {
-    const retryable = () => ({
-      taskId: 'task-1',
-      status: 'failed' as const,
-      output: '',
-      error: '503 service unavailable',
+  it('does not re-spawn a writable run or a killed run', async () => {
+    const writable = createApi({
+      run: async () => ({ taskId: 'task-1', status: 'failed' as const, output: '', error: '503 service unavailable' }),
     });
-    const writable = createApi({ run: async () => retryable() });
     await new AgentTool(writable.api).execute({
       operation: 'run',
       description: 'implement',
@@ -156,17 +146,6 @@ describe('AgentTool', () => {
       owned_paths: ['src'],
     });
     expect(writable.spawns).toHaveLength(1);
-
-    const permanent = createApi({
-      run: async () => ({ taskId: 'task-1', status: 'failed' as const, output: '', error: 'Unknown model: foo' }),
-    });
-    await new AgentTool(permanent.api).execute({
-      operation: 'run',
-      description: 'inspect loader',
-      prompt: 'look',
-      subagent_type: 'Explore',
-    });
-    expect(permanent.spawns).toHaveLength(1);
 
     const killed = createApi({
       run: async () => ({ taskId: 'task-1', status: 'killed' as const, output: '', error: 'timeout' }),

@@ -36,13 +36,17 @@ Key behaviors that mirror the interactive `LocalRuntimeController`:
 - **Queue semantics** are owner-aware and single-slot; `turn/start` when a turn
   is active is rejected with a JSON-RPC error telling the client to use
   `turn/steer`.
-- **Turn-level retry** (see `MAX_TURN_RETRIES` / `TURN_RETRY_DELAY_MS`): up to
-  5 attempts, 10s fixed delay, only for transient provider errors
-  (`micaAgent.isRetryableError`), and **never after a non-readonly tool call**
-  ran (`micaTools.isReadOnly`), so a retry cannot re-run a side-effecting tool.
-  Before each retry it restores the pre-turn client snapshot and clears partial
-  output; aborted input consumed by a failed attempt is re-injected at the next
-  attempt's first iteration boundary so a retry never swallows a queued input.
+- **Request-level retry only** (`REQUEST_MAX_RETRIES` in
+  `@packages/mica-agent/core/retry`): a request that does not finish normally is
+  re-sent up to 10 times, waiting 2/4/8/16s and then a 30s cap. Every failure
+  is retried except a user abort; there is no per-status allow list and no
+  whole-turn retry. Re-sending the current request never replays a tool that
+  already ran, so a turn that used a writing tool is retried like any other.
+  Each retry is persisted as a `/retry` notice and reported as
+  `turn:retrying`; when the retried request completes the same notice becomes
+  a success notice in place, and an exhausted retry rewrites it into
+  「请求失败（已重试 n/10 次）」 with the last error, instead of appending a
+  second `/error` row.
 - **Abort** stops the active turn but keeps the queue draining. An abort that
   lands between `reserveRunId()` and the first `agent.run()` is surfaced as an
   `AgentAbortError` and never retried; it is mapped to an `interrupted` turn

@@ -141,7 +141,7 @@ export class AskUserTool extends MicaTool {
         additionalProperties: false,
       },
       // A selected option can execute shell commands. The registry uses this
-      // flag for both scheduling and whole-turn retries, not just presentation.
+      // flag to schedule the call as a write barrier, not just for presentation.
       { readOnly: false },
     );
   }

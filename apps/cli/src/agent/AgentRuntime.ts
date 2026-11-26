@@ -79,9 +79,6 @@ export type AgentRuntimeEvents = {
   thinkingCheckpoint: undefined;
   thinkingRollback: undefined;
   thinkingReset: undefined;
-  /** Display state at the start of, and after discarding, a whole turn attempt. */
-  thinkingTurnAttemptStart?: undefined;
-  thinkingTurnAttemptRollback?: undefined;
   toolCall: { name: string; args: string; id?: string };
   toolResult: { name: string; result: string; id?: string };
   usage: AgentUsageRecord;
@@ -381,7 +378,6 @@ export class AgentRuntime {
   private completedThinkingAttemptStart = '';
   private thinkingNeedsSeparator = false;
   private thinkingAttemptNeedsSeparator = false;
-  private turnAttemptThinking: InterruptedThinking | undefined;
   private activeTurn: { runId: number; input: AgentQueryContent; committed: boolean } | undefined;
 
   constructor(
@@ -392,20 +388,6 @@ export class AgentRuntime {
   ) {
     this.currentConfig = readAgentRuntimeConfig(configOverride);
     this.recreateClient();
-    // The hosts emit these around each whole-turn attempt. The UI and the
-    // runtime must restore the same pre-turn checkpoint when a retry is safe.
-    this.events.on('thinkingTurnAttemptStart', () => {
-      this.turnAttemptThinking = this.interruptedThinking && { ...this.interruptedThinking };
-    });
-    this.events.on('thinkingTurnAttemptRollback', () => {
-      this.interruptedThinking = this.turnAttemptThinking && { ...this.turnAttemptThinking };
-      this.pendingThinking = this.interruptedThinking?.text ?? '';
-      this.completedThinking = this.pendingThinking;
-      this.thinkingNeedsSeparator = Boolean(this.pendingThinking);
-      this.thinkingAttemptStart = this.pendingThinking;
-      this.completedThinkingAttemptStart = this.completedThinking;
-      this.thinkingAttemptNeedsSeparator = this.thinkingNeedsSeparator;
-    });
   }
 
   /** Register the three listeners belonging to one rollback-capable text consumer. */
@@ -1211,7 +1193,6 @@ export class AgentRuntime {
       const initialTextListeners = [...(this.events.all.get('text') ?? [])];
       const initialThinkingListeners = [...(this.events.all.get('thinking') ?? [])];
       const thinkingRollbackEnabled = rollbackEnabled && this.canRollbackThinking();
-      client.canRollbackThinking = thinkingRollbackEnabled;
       const initialConsumers = [...this.rollbackConsumers];
       this.rollbackCheck = () =>
         this.canRollbackText() &&

@@ -6,10 +6,7 @@ import {
   getRolesDirectory,
   listAgentRoles,
 } from './prompt/index.js';
-import { isRetryableError } from './core/retry.js';
-
 export const micaAgent = {
-  isRetryableError,
   /** 按 provider.protocol 创建支持工具调用和流式事件的模型 client。 */
   createModelClient,
   /** 注册额外的 provider protocol client 实现。 */

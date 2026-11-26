@@ -11,8 +11,6 @@ type RuntimeEventMap = {
   thinkingCheckpoint: [];
   thinkingRollback: [];
   thinkingReset: [];
-  thinkingTurnAttemptStart: [];
-  thinkingTurnAttemptRollback: [];
   toolCall: [call: { name: string; args: string; id: string }];
   toolResult: [result: { name: string; result: string; id: string }];
   usage: [record: { totalTokens?: number; inputTokens?: number; outputTokens?: number; cachedInputTokens?: number }];
@@ -59,14 +57,13 @@ describe('attachCodexProjector thinking', () => {
       expect(agent.events.listenerCount('thinkingReset')).toBe(0);
     }
   });
-  it('undoes a whole run after a request retry without rolling anything back twice', () => {
+  it('rolls back only the failed request attempt and keeps the completed parts', () => {
     const agent = fakeAgent();
     const { notifications, writer } = collect();
     const projector = attachCodexProjector(agent as unknown as AgentRuntime, writer, {
       threadId: 't', turnId: 'turn-1', cwd: '/tmp', textRollback: true, thinkingRollback: true, thinking: true,
     });
 
-    agent.emit('thinkingTurnAttemptStart');
     agent.emit('textAttemptStart');
     agent.emit('thinking', 'first');
     agent.emit('thinkingCheckpoint');
@@ -81,8 +78,6 @@ describe('attachCodexProjector thinking', () => {
     agent.emit('thinking', 'second');
     agent.emit('thinkingCheckpoint');
     agent.emit('text', 'second text');
-    agent.emit('thinkingTurnAttemptRollback');
-    agent.emit('thinkingTurnAttemptStart');
     agent.emit('textAttemptStart');
     agent.emit('thinking', 'kept');
     agent.emit('thinkingCheckpoint');
@@ -90,37 +85,26 @@ describe('attachCodexProjector thinking', () => {
     projector.completeTurn('completed');
 
     expect(notifications.filter((n) => n.method === 'mica/reasoning/textRollback').map((n) => n.params))
-      .toEqual([
-        expect.objectContaining({ length: 7, micaAttemptId: 'turn-1:2' }),
-        expect.objectContaining({ length: 6, micaAttemptId: 'turn-1:3' }),
-        expect.objectContaining({ length: 5, micaAttemptId: 'turn-1:1' }),
-      ]);
+      .toEqual([expect.objectContaining({ length: 7, micaAttemptId: 'turn-1:2' })]);
     expect(notifications.filter((n) => n.method === 'mica/agentMessage/textRollback').map((n) => n.params))
-      .toEqual([
-        expect.objectContaining({ length: 12, micaAttemptId: 'turn-1:2' }),
-        expect.objectContaining({ length: 11, micaAttemptId: 'turn-1:3' }),
-        expect.objectContaining({ length: 10, micaAttemptId: 'turn-1:1' }),
-      ]);
+      .toEqual([expect.objectContaining({ length: 12, micaAttemptId: 'turn-1:2' })]);
     expect(notifications.findLast((n) => n.method === 'item/completed' && (n.params.item as { type: string }).type === 'agentMessage')?.params.item)
-      .toMatchObject({ text: 'normal answer' });
+      .toMatchObject({ text: 'first textsecond textnormal answer' });
     expect(notifications.find((n) => n.method === 'item/completed' && (n.params.item as { type: string }).type === 'commandExecution')?.params.item)
       .toMatchObject({ id: 'c1', aggregatedOutput: 'ok' });
     projector.dispose();
-    expect(agent.events.listenerCount('thinkingTurnAttemptRollback')).toBe(0);
   });
 
-  it('rolls back a run for text-only clients and preserves text before the run', () => {
+  it('rolls back the failed attempt for text-only clients and preserves earlier text', () => {
     const agent = fakeAgent();
     const { notifications, writer } = collect();
     const projector = attachCodexProjector(agent as unknown as AgentRuntime, writer, {
       threadId: 't', turnId: 'turn-1', cwd: '/tmp', textRollback: true,
     });
     agent.emit('text', 'earlier ');
-    agent.emit('thinkingTurnAttemptStart');
     agent.emit('textAttemptStart');
     agent.emit('text', 'discarded');
-    agent.emit('thinkingTurnAttemptRollback');
-    agent.emit('thinkingTurnAttemptStart');
+    agent.emit('textRollback');
     agent.emit('textAttemptStart');
     agent.emit('text', 'kept');
     projector.completeTurn('completed');

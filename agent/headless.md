@@ -6,7 +6,7 @@
 - 桌面端点停止是「撤回排队 + 中断」一次动作：`chat:abort` 先经 `mica/queue/recall`（和本地 after_turn 槽）把排队消息取出来，随结果回给页面放回输入框，再发中断。取不到（已注入 / host 不响应）就留在队列里，中止后仍可按 Shift+← 撤回。
 - 每轮都发 `turn:finish`，结果只有 completed / aborted / error；排队轮次同样逐轮取 lease。query resolve 后、异步 `turn:beforePersist` 后都复查 runId；失效统一进入 aborted 收尾。终态 finalizer 幂等：保存状态 → 释放租约/收尾子代理 → `turn:after` → `turn:finish`，终态 hook 抛错也不能漏发或重复发 finish。
 - 每轮在取 lease 前建立独立取消标记，不能只依赖会被 refresh/prepare/重试改变的 Agent runId。取 lease 后先 refresh，以便准备期失败/中止也按最新历史收尾；图片解析、配置应用、`turn:prepare`、`turn:before`、`prompt:build` 及每次 reserve/run 前后复查取消。停止后即使准备 Promise 晚到也不再 reserve/run，仍走同一幂等 aborted finalizer；排队输入保留，下一轮使用新标记。不抢先释放仍在 await 的准备操作所持租约。
-- 请求级和整轮级重试都经 `turn:retrying` 通知客户端并保存 `/retry` notice；次数与延迟取对应层实际策略，请求级重试不回放已执行的工具。重试后的那次请求跑通（`AgentRuntime` 的 `onRequestEnd` 报 `completed`）就把**同一条** notice 就地改写成 `variant: 'success'` 的「重试成功（第 n/m 次）」，次数与错误原因原样留着：一条红条留在会话里会让成功的回合看着是坏的。改写走 `notices.show`（落盘 + `mica/notice/updated`），位置不动。
+- 重试只有请求级一层（provider 的 `withRetry`，10 次、2s 起翻倍封顶 30s），执行器把它经 `turn:retrying` 通知客户端并保存 `/retry` notice；它只重发当前请求，不回放已执行的工具，所以跑过写操作的一轮同样允许重试。重试后的那次请求跑通（`AgentRuntime` 的 `onRequestEnd` 报 `completed`）就把**同一条** notice 就地改写成 `variant: 'success'` 的「重试成功（第 n/m 次）」，次数与错误原因原样留着：一条红条留在会话里会让成功的回合看着是坏的。用完 10 次仍失败则在同一位置改写成「请求失败（已重试 n/10 次）：原因」，不再追加一条 `/error`。改写都走 `notices.show`（落盘 + `mica/notice/updated`），位置不动。
 
 ## 装配
 

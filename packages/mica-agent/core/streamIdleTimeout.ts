@@ -7,10 +7,10 @@
  * （实测约 10 分钟，最后以 output=0 的空响应收尾）。
  *
  * 这里给流迭代加空闲上限：距上一个事件超过 idleMs 就主动关掉底层连接，并抛
- * 出 name=TimeoutError 的错误 —— `isRetryableError()` 认这个名字，于是重试
- * 逻辑接管（只有本轮还没输出过文本/工具调用时才会重发，见 shouldRetry）。
+ * 出 name=TimeoutError 的错误。它和连接被掐、5xx 一样是一次没正常结束的请求，
+ * `withRetry` 直接重发（`AbortError` 才是唯一的例外）。
  */
-export const STREAM_IDLE_TIMEOUT_MS = 60_000;
+export const STREAM_IDLE_TIMEOUT_MS = 180_000;
 
 export function streamIdleTimeoutError(idleMs: number): Error {
   const elapsed = idleMs >= 1000 ? `${Math.round(idleMs / 1000)}s` : `${idleMs}ms`;

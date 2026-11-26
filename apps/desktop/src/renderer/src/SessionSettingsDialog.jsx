@@ -327,6 +327,7 @@ function SessionSettingsContent({
                   name: item.name,
                   description: item.description || '',
                   group: item.group,
+                  pluginId: item.pluginId,
                   readOnly: item.readOnly,
                   parameters: item.parameters
                 }))}

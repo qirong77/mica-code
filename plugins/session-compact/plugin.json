@@ -2,21 +2,78 @@
   "id": "session-compact",
   "name": "会话压缩",
   "icon": "archive",
-  "version": "3.2.0",
-  "description": "右键会话手动压缩：快速压缩把历史里的工具过程聚合成一条占位调用，模型压缩把用户与助手的对话交给模型写摘要。",
+  "version": "3.3.0",
+  "description": "右键会话手动压缩：快速压缩把历史里的工具过程聚合成一条占位调用，模型压缩把用户与助手的对话交给模型写摘要。上下文到阈值（默认 400K）时自动让模型写一份交接文档，再快速压缩，仍高于模型压缩阈值（默认 100K）就补一次模型压缩，压完接着继续任务。",
   "main": "index.js",
   "priority": 100,
   "required": false,
-  "requires": ["agent", "desktop", "hooks", "llm"],
+  "requires": ["agent", "background", "desktop", "hooks", "llm", "runtime", "session", "sessionState", "settings"],
+  "settings": [
+    {
+      "key": "autoCompact",
+      "label": "自动压缩",
+      "type": "switch",
+      "default": "true",
+      "description": "每轮成功结束后检查上下文：最近一次请求的输入到阈值时，以插件身份发一条「暂停并写交接文档」，那一轮结束后自动压缩并继续任务。"
+    },
+    {
+      "key": "thresholdTokens",
+      "label": "触发阈值",
+      "type": "number",
+      "default": "400000",
+      "min": 10000,
+      "max": 2000000,
+      "step": 10000,
+      "unit": "tokens",
+      "description": "最近一次请求的输入 token 达到它就触发交接。同时不超过模型窗口的 90%：窗口小于约 444K 时会提前触发，避免请求先超限。"
+    },
+    {
+      "key": "modelCompactThreshold",
+      "label": "模型压缩阈值",
+      "type": "number",
+      "default": "100000",
+      "min": 10000,
+      "max": 1000000,
+      "step": 10000,
+      "unit": "tokens",
+      "description": "快速压缩后估算的上下文仍高于它，就再做一次模型压缩（checkpoint 摘要）。"
+    },
+    {
+      "key": "minIntervalMinutes",
+      "label": "最小间隔",
+      "type": "number",
+      "default": "10",
+      "min": 0,
+      "max": 1440,
+      "step": 5,
+      "unit": "分钟",
+      "description": "两次自动压缩之间至少隔多久（从触发那一刻算）。压不下去时靠它避免反复烧钱。"
+    },
+    {
+      "key": "autoResume",
+      "label": "压缩后继续任务",
+      "type": "switch",
+      "default": "true",
+      "description": "压缩完成后自动发一条「继续」，让模型按交接文档里的待办接着做。你在这期间自己发了消息就不抢。"
+    },
+    {
+      "key": "saveHandover",
+      "label": "交接文档另存一份",
+      "type": "switch",
+      "default": "true",
+      "description": "把模型写出的交接文档存到 ~/.mica/handovers/。模型压缩会把对话折成摘要，这份文件是之后回看原文的唯一入口。"
+    }
+  ],
   "desktop": {
     "sessionMenu": [
       { "label": "快速压缩", "action": "quick", "icon": "eraser", "position": "top", "surface": "chat" },
-      { "label": "模型压缩", "action": "model", "icon": "sparkles", "position": "top", "surface": "chat" }
+      { "label": "模型压缩", "action": "model", "icon": "sparkles", "position": "top", "surface": "chat" },
+      { "label": "交接并压缩", "action": "handoff", "icon": "notebook-pen", "position": "top", "surface": "chat" }
     ]
   },
   "llm": {
     "label": "压缩摘要模型",
-    "description": "模型压缩用它把对话写成 checkpoint 摘要；快速压缩不调用模型。",
+    "description": "模型压缩用它把对话写成 checkpoint 摘要；自动压缩里的模型压缩同样用它。快速压缩不调用模型。",
     "required": true,
     "modelPlaceholder": "gpt-4.1-mini"
   }

@@ -297,10 +297,13 @@ const { text } = await llm.request({ purpose: '自动起标题', system, user })
 checkpoint 摘要（工具过程不进摘要输入）。它只在能独占写会话文件的常驻宿主里提供——`mica exec`
 不落盘、TUI 走 `/compact`，两边都没有它，插件要当成可选能力。要不要在轮次之外动手由插件自己决定，
 会话压缩插件把它挂在会话右键菜单上；可订阅的客户端信号是 `input:activity`（用户在输入框敲字）与
-`input:focus`（焦点放回输入框），**当前官方插件都不订阅**——没有哪个插件会在你没有动作时改历史。
+`input:focus`（焦点放回输入框）。它同时会在 `turn:after` 之后按阈值自动走一遍：先以插件身份发一条
+可见的交接请求，交接轮结束后快速压缩，估算仍高于模型压缩阈值再补一次模型压缩，最后发「继续」；
+所以插件确实会在你没有动作时改历史——那条交接消息本身是可见的，压缩前后的数字也留在 notice 里。
 判断「现在要不要压」时用 `ctx.agent.lastUsage()` 与 `ctx.agent.contextWindowSize`：前者是最近一次
 真实请求的输入量（与界面 ctx 徽标同源，压缩保留它），后者随会话切模型变化。插件不要自己估历史——
-估出来会和用户看到的数不一致。
+估出来会和用户看到的数不一致。也正因为压缩保留 `lastUsage`，自动触发要自己记住「压缩那一刻的用量」，
+否则同一个数会被反复当成新的一轮（`plugins/session-compact/autoCompact.ts` 的 `staleUsageTokens`）。
 持久 headless 会话还在取得 turn lease、应用配置后和保存输入前 await `turn:prepare`：
 事件的 `previous` / `current` 表示模型配置，`compactHistory()` 使用已持有的 lease，
 避免轮次中重新抢锁。会话压缩插件在配置变化时用它快速压缩，展示历史保留；仅下一次发送时触发。

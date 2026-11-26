@@ -23,6 +23,12 @@ import {createPortal} from 'react-dom';
 import {MenuItem, MenuList, MenuSeparator} from '../../../../../../mica-config-ui/web/components/ActionMenu';
 import type {ComponentPickerOption} from '../ComponentPickerPlugin';
 import type {BlockShape} from './blockMenuActions';
+import {
+  MENU_MIN_WIDTH,
+  type PlacementRect,
+  placeBlockMenu,
+  placeSubmenu,
+} from './blockMenuPlacement';
 
 export type BlockMenuAction =
   | {type: 'shape'; shape: BlockShape}
@@ -34,7 +40,7 @@ export type BlockMenuAction =
 
 type SubmenuKind = 'turn-into' | 'indent' | 'insert-below';
 
-type Rect = {left: number; top: number; bottom: number; right: number};
+type Rect = PlacementRect;
 
 const SHAPE_ITEMS: Array<{shape: BlockShape; label: string}> = [
   {shape: 'paragraph', label: '正文'},
@@ -46,53 +52,23 @@ const SHAPE_ITEMS: Array<{shape: BlockShape; label: string}> = [
   {shape: 'code', label: '代码块'},
 ];
 
-const GAP = 4;
-const VIEWPORT_PADDING = 8;
-const SUBMENU_WIDTH = 180;
-
 function Chevron(): JSX.Element {
   return <span className="mica-block-menu__chevron" aria-hidden="true" />;
 }
 
-/** Keep a panel inside the viewport, opening below the anchor unless it flips. */
-function useClampedPosition(anchor: Rect, preferBelow: boolean, minWidth: number) {
-  const ref = useRef<HTMLDivElement>(null);
-  const [position, setPosition] = useState({
-    left: Math.max(VIEWPORT_PADDING, anchor.left),
-    top: preferBelow ? anchor.bottom + GAP : anchor.top,
-  });
-
-  useLayoutEffect(() => {
-    const panel = ref.current;
-    if (!panel) return;
-    const size = panel.getBoundingClientRect();
-    const width = Math.max(size.width, minWidth);
-    const height = size.height;
-    let left = Math.max(VIEWPORT_PADDING, anchor.left);
-    if (left + width > window.innerWidth - VIEWPORT_PADDING) {
-      left = Math.max(VIEWPORT_PADDING, window.innerWidth - width - VIEWPORT_PADDING);
-    }
-    let top = preferBelow ? anchor.bottom + GAP : anchor.top;
-    if (top + height > window.innerHeight - VIEWPORT_PADDING) {
-      top = Math.max(VIEWPORT_PADDING, anchor.top - height - GAP);
-    }
-    setPosition(current => (current.left === left && current.top === top ? current : {left, top}));
-  }, [anchor.left, anchor.top, anchor.bottom, minWidth, preferBelow]);
-
-  return {position, ref};
-}
-
 function SubMenuPanel({
-  left,
-  top,
+  row,
+  main,
   label,
   children,
   onMouseEnter,
   onMouseLeave,
   onKeyDown,
 }: {
-  left: number;
-  top: number;
+  /** The card row the submenu belongs to. */
+  row: Rect;
+  /** The main card, already measured. */
+  main: Rect;
   label: string;
   children: ReactNode;
   onMouseEnter: () => void;
@@ -100,19 +76,27 @@ function SubMenuPanel({
   onKeyDown: (event: ReactKeyboardEvent<HTMLDivElement>) => void;
 }): JSX.Element {
   const ref = useRef<HTMLDivElement>(null);
-  const [position, setPosition] = useState({left, top});
+  const [position, setPosition] = useState(() =>
+    placeSubmenu({
+      row,
+      main,
+      size: {width: MENU_MIN_WIDTH, height: 0},
+      viewport: {width: window.innerWidth, height: window.innerHeight},
+    }),
+  );
 
   useLayoutEffect(() => {
     const panel = ref.current;
     if (!panel) return;
     const size = panel.getBoundingClientRect();
-    const nextLeft =
-      left + size.width > window.innerWidth - VIEWPORT_PADDING
-        ? Math.max(VIEWPORT_PADDING, left - size.width - SUBMENU_WIDTH - GAP * 2)
-        : left;
-    const nextTop = Math.max(VIEWPORT_PADDING, Math.min(top, window.innerHeight - size.height - VIEWPORT_PADDING));
-    setPosition(current => (current.left === nextLeft && current.top === nextTop ? current : {left: nextLeft, top: nextTop}));
-  }, [left, top]);
+    const next = placeSubmenu({
+      row,
+      main,
+      size: {width: size.width, height: size.height},
+      viewport: {width: window.innerWidth, height: window.innerHeight},
+    });
+    setPosition(current => (current.left === next.left && current.top === next.top ? current : next));
+  }, [row.left, row.top, main.left, main.right]);
 
   return createPortal(
     <MenuList
@@ -147,12 +131,30 @@ export default function BlockMenu({
   /** `true` when the menu should hand the caret back to its block. */
   onClose: (restoreFocus?: boolean) => void;
 }): JSX.Element {
-  const main = useClampedPosition(
-    {left: anchor.left - VIEWPORT_PADDING, top: blockRect.top, bottom: blockRect.bottom, right: anchor.right},
-    true,
-    SUBMENU_WIDTH,
+  const mainRef = useRef<HTMLDivElement>(null);
+  const [position, setPosition] = useState<{left: number; top: number}>(() =>
+    placeBlockMenu({
+      anchor,
+      blockRect,
+      size: {width: MENU_MIN_WIDTH, height: 0},
+      viewport: {width: window.innerWidth, height: window.innerHeight},
+    }),
   );
-  const [submenu, setSubmenu] = useState<{kind: SubmenuKind; left: number; top: number} | null>(null);
+
+  useLayoutEffect(() => {
+    const panel = mainRef.current;
+    if (!panel) return;
+    const size = panel.getBoundingClientRect();
+    const next = placeBlockMenu({
+      anchor,
+      blockRect,
+      size: {width: size.width, height: size.height},
+      viewport: {width: window.innerWidth, height: window.innerHeight},
+    });
+    setPosition(current => (current.left === next.left && current.top === next.top ? current : next));
+  }, [anchor.left, anchor.top, blockRect.top, blockRect.bottom]);
+
+  const [submenu, setSubmenu] = useState<{kind: SubmenuKind; row: Rect} | null>(null);
   // The submenu is a portal sibling, not a child: moving from the card into it
   // fires the card's `mouseleave`. Yuque keeps the stack open, so the close is
   // deferred long enough for the pointer to cross the 4px gap.
@@ -172,7 +174,7 @@ export default function BlockMenu({
   }, [cancelSubmenuClose]);
 
   useEffect(() => {
-    const panel = main.ref.current;
+    const panel = mainRef.current;
     if (!panel) return;
     const doc = panel.ownerDocument;
     const isInside = (target: Node | null) =>
@@ -201,17 +203,11 @@ export default function BlockMenu({
       stopBlur();
       stopKey();
     };
-  }, [main.ref, onClose]);
+  }, [onClose]);
 
   const openSubmenu = useCallback((kind: SubmenuKind, row: HTMLElement) => {
-    const panel = main.ref.current?.getBoundingClientRect();
-    const rect = row.getBoundingClientRect();
-    setSubmenu({
-      kind,
-      left: (panel?.right ?? rect.right) + GAP,
-      top: rect.top - VIEWPORT_PADDING,
-    });
-  }, [main.ref]);
+    setSubmenu({kind, row: row.getBoundingClientRect()});
+  }, []);
 
   const closeSubmenu = useCallback(() => setSubmenu(null), []);
 
@@ -280,9 +276,9 @@ export default function BlockMenu({
       <MenuList
         className="mica-block-menu"
         aria-label="块操作"
-        ref={main.ref}
+        ref={mainRef}
         autoFocus
-        style={{left: main.position.left, position: 'fixed', top: main.position.top, zIndex: 1000}}
+        style={{left: position.left, position: 'fixed', top: position.top, zIndex: 1000}}
         onClose={() => onClose(true)}
         onKeyDown={event => {
           if (event.key === 'ArrowRight') {
@@ -303,7 +299,7 @@ export default function BlockMenu({
             event.preventDefault();
             const kind = submenu?.kind;
             setSubmenu(null);
-            if (kind) main.ref.current?.querySelector<HTMLElement>(`[data-block-action="${kind}"]`)?.focus();
+            if (kind) mainRef.current?.querySelector<HTMLElement>(`[data-block-action="${kind}"]`)?.focus();
           }
         }}
         onMouseEnter={cancelSubmenuClose}
@@ -342,8 +338,8 @@ export default function BlockMenu({
       {submenu ? (
         <SubMenuPanel
           label={submenu.kind === 'turn-into' ? '转化为' : submenu.kind === 'indent' ? '缩进' : '在下方添加'}
-          left={submenu.left}
-          top={submenu.top}
+          row={submenu.row}
+          main={mainRef.current?.getBoundingClientRect() ?? submenu.row}
           onMouseEnter={cancelSubmenuClose}
           onMouseLeave={scheduleSubmenuClose}
           onKeyDown={event => {
@@ -351,7 +347,7 @@ export default function BlockMenu({
               event.preventDefault();
               const kind = submenu.kind;
               setSubmenu(null);
-              main.ref.current?.querySelector<HTMLElement>(`[data-block-action="${kind}"]`)?.focus();
+              mainRef.current?.querySelector<HTMLElement>(`[data-block-action="${kind}"]`)?.focus();
             }
           }}>
           {submenuFor(submenu.kind)}

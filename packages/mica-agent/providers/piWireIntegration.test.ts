@@ -398,7 +398,7 @@ describe('real SDK request policy', () => {
     },
   );
 
-  it.each([400, 503])('uses the HTTP %s status from a real SDK failure for retry policy', async (status) => {
+  it.each([400, 503])('retries a real SDK HTTP %s failure like any other request failure', async (status) => {
     const wire = await server((response, index) => {
       if (index === 0) {
         response.writeHead(status, { 'content-type': 'application/json' });
@@ -418,16 +418,9 @@ describe('real SDK request policy', () => {
     });
     const start = vi.fn();
     const end = vi.fn();
-    if (status === 400) {
-      await expect(client.query('question', { onRequestStart: start, onRequestEnd: end })).rejects.toMatchObject({
-        status: 400,
-      });
-      expect(wire.requests).toHaveLength(1);
-    } else {
-      await expect(client.query('question', { onRequestStart: start, onRequestEnd: end })).resolves.toBe('after');
-      expect(wire.requests).toHaveLength(2);
-      expect(end).toHaveBeenCalledWith(expect.objectContaining({ attempts: 2, outcome: 'completed' }));
-    }
+    await expect(client.query('question', { onRequestStart: start, onRequestEnd: end })).resolves.toBe('after');
+    expect(wire.requests).toHaveLength(2);
+    expect(end).toHaveBeenCalledWith(expect.objectContaining({ attempts: 2, outcome: 'completed' }));
     expect(start).toHaveBeenCalledTimes(1);
     expect(end).toHaveBeenCalledTimes(1);
   });
@@ -683,8 +676,12 @@ describe('real SDK reasoning and truncation', () => {
     },
   );
 
-  it('rejects a truncated Responses SSE stream after displaying partial text', async () => {
-    const wire = await server((response) => {
+  it('retries a truncated Responses SSE stream after displaying partial text', async () => {
+    const wire = await server((response, index) => {
+      if (index > 0) {
+        responses(response, false);
+        return;
+      }
       sse(
         response,
         {
@@ -705,10 +702,11 @@ describe('real SDK reasoning and truncation', () => {
       tools: false,
     });
     client.onText = vi.fn();
-    await expect(client.query('question')).rejects.toThrow(/stream|terminal|completed/i);
-    expect(client.onText).toHaveBeenCalledWith('partial');
-    expect(wire.requests).toHaveLength(1);
-    expect(client.messages).toEqual([]);
+    const answer = await client.query('question');
+    expect(answer.length).toBeGreaterThan(0);
+    expect(client.onText).toHaveBeenNthCalledWith(1, 'partial');
+    expect(wire.requests).toHaveLength(2);
+    expect(client.messages.filter((message) => message.role === 'assistant')).toHaveLength(1);
   });
 
   it('learns a Chat gateway without finish_reason after one rollback and sends a single final answer', async () => {

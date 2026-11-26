@@ -11,7 +11,11 @@ describe('CapabilityList', () => {
         onGroupChange={vi.fn()}
         counts={{ tools: '2/4' }}
         items={[
-          { name: 'agent', description: 'Agent description', group: { key: 'subagent', label: 'subagent' } },
+          {
+            name: 'agent',
+            description: 'Agent description',
+            group: { key: 'plugin:subagent', label: 'Subagent' },
+          },
           { name: 'read', description: 'Read description', group: { key: 'tasks', label: 'Tasks' } },
           { name: 'write', description: 'Write description', group: { key: 'tasks', label: 'Tasks' } },
           { name: 'standalone', description: 'Standalone description' },
@@ -25,6 +29,7 @@ describe('CapabilityList', () => {
 
     expect(html).toContain('id="capability-tools-agent"');
     expect(html).toContain('Agent description');
+    expect(html).toContain('插件 Subagent');
     expect(html).not.toContain('capability-group-tools-subagent');
     expect(html).toContain('id="capability-tools-standalone"');
     expect(html).toContain('id="capability-group-tools-tasks"');

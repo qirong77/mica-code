@@ -60,7 +60,11 @@ describe('fetchWithReadableErrors', () => {
   });
 
   it('surfaces the gateway detail instead of "400 status code (no body)"', async () => {
-    const stub = vi.spyOn(globalThis, 'fetch').mockImplementation(fetchStub(responseWith('{"detail":"System messages are not allowed"}')));
+    vi.useFakeTimers();
+    // 每次请求都要给一个新的 Response：body 只能读一次，重试会复用同一份响应。
+    const stub = vi
+      .spyOn(globalThis, 'fetch')
+      .mockImplementation((async () => responseWith('{"detail":"System messages are not allowed"}')) as unknown as typeof fetch);
     const client = new PiModelClient({
       model: 'test-model', tools: false, systemPrompt: 'test',
       apiKey: 'test-key',
@@ -68,10 +72,14 @@ describe('fetchWithReadableErrors', () => {
       provider: { id: 'test', protocol: 'openai_responses', api_base: 'http://gateway.test/v1', supportsEffort: false },
     });
     try {
-      await expect(client.query('hi')).rejects.toThrow('System messages are not allowed');
-      expect(stub).toHaveBeenCalledTimes(1);
+      const query = client.query('hi').catch((error: Error) => error);
+      // 网关一直回同一个 400：重试 10 次后把原因原样报出来。
+      await vi.advanceTimersByTimeAsync(210_000);
+      expect(String(((await query) as Error).message)).toContain('System messages are not allowed');
+      expect(stub).toHaveBeenCalledTimes(11);
     } finally {
       stub.mockRestore();
+      vi.useRealTimers();
     }
   });
 });

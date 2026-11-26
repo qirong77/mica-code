@@ -119,8 +119,6 @@ let harnessSeq = 0;
 function createHarness(
   options: {
     withPluginLayer?: boolean;
-    maxTurnRetries?: number;
-    retryDelayMs?: number;
     applyInputSettings?: (input: RuntimeInput) => void;
     parseImageRefs?: (text: string) => Promise<string>;
   } = {},
@@ -158,8 +156,6 @@ function createHarness(
     sessionController: sessionController as never,
     onEvent: (event) => events.push(event),
     applyInputSettings: options.applyInputSettings,
-    maxTurnRetries: options.maxTurnRetries ?? 2,
-    retryDelayMs: options.retryDelayMs ?? 5,
     subagentTasks: {
       killRunningForOwner: (owner: unknown, reason: string) => {
         subagentSettleCalls.push({ owner, reason });
@@ -279,67 +275,6 @@ describe('HeadlessTurnExecutor', () => {
     const available = micaSession.acquireTurnLease(sessionId);
     expect(available).not.toBeNull();
     available?.release();
-  });
-
-  it('rolls back completed responses before a turn retry and aborts the wait without saving their text', async () => {
-    const { agent, executor, events } = createHarness({ retryDelayMs: 5000 });
-    const notifications: Array<{ method: string; params: Record<string, unknown> }> = [];
-    const projector = attachCodexProjector(
-      agent as never,
-      (method, params) => {
-        notifications.push({ method, params: params as Record<string, unknown> });
-      },
-      { threadId: 'thread', turnId: 'turn', cwd: '/', textRollback: true, thinkingRollback: true, thinking: true },
-    );
-    let rollbackBeforeRestore = false;
-    agent.events.on('thinkingTurnAttemptRollback', () => {
-      rollbackBeforeRestore = agent.restoreCalls === 0;
-    });
-    agent.run = async (_content, options = {}) => {
-      agent.events.emit('textAttemptStart');
-      agent.events.emit('thinking', 'first thought');
-      agent.events.emit('thinkingCheckpoint');
-      agent.events.emit('text', 'first response');
-      agent.events.emit('toolCall', { name: 'read_file', args: '{}', id: 'c1' });
-      agent.events.emit('toolResult', { name: 'read_file', result: 'ok', id: 'c1' });
-      await options.onIterationComplete?.();
-      agent.events.emit('textAttemptStart');
-      agent.events.emit('thinking', 'second thought');
-      agent.events.emit('thinkingCheckpoint');
-      agent.events.emit('text', 'second response');
-      throw Object.assign(new Error('busy'), { status: 503 });
-    };
-
-    await executor.start(input('retry and abort'));
-    await vi.waitFor(() => expect(events).toContainEqual(expect.objectContaining({ type: 'turn:retrying' })));
-    expect(rollbackBeforeRestore).toBe(true);
-    expect(agent.restoreCalls).toBe(1);
-    expect(
-      notifications.filter(({ method }) => method === 'mica/reasoning/textRollback').map(({ params }) => params),
-    ).toEqual([
-      expect.objectContaining({ length: 14, micaAttemptId: 'turn:2' }),
-      expect.objectContaining({ length: 13, micaAttemptId: 'turn:1' }),
-    ]);
-    expect(
-      notifications.filter(({ method }) => method === 'mica/agentMessage/textRollback').map(({ params }) => params),
-    ).toEqual([
-      expect.objectContaining({ length: 15, micaAttemptId: 'turn:2' }),
-      expect.objectContaining({ length: 14, micaAttemptId: 'turn:1' }),
-    ]);
-
-    executor.abort();
-    await vi.waitFor(() =>
-      expect(events).toContainEqual(expect.objectContaining({ type: 'turn:finish', status: 'aborted' })),
-    );
-    expect(agent.abortedTurnCalls).toEqual([{ content: 'retry and abort', partialAnswer: undefined }]);
-    projector.completeTurn('interrupted');
-    expect(
-      notifications.findLast(
-        ({ method, params }) =>
-          method === 'item/completed' && (params.item as { type: string }).type === 'agentMessage',
-      )?.params.item,
-    ).toMatchObject({ text: '' });
-    projector.dispose();
   });
 
   it('registers alongside the desktop projector and preserves text before a rolled back attempt', async () => {
@@ -543,7 +478,7 @@ describe('HeadlessTurnExecutor', () => {
     available?.release();
   });
 
-  it.each(['lease', 'refresh', 'settings', 'before', 'prompt', 'reserve', 'snapshot'] as const)(
+  it.each(['lease', 'refresh', 'settings', 'before', 'prompt', 'reserve'] as const)(
     'checks the turn cancellation at the %s preparation boundary',
     async (boundary) => {
       const harness = createHarness({ withPluginLayer: true, applyInputSettings: () => {
@@ -567,10 +502,6 @@ describe('HeadlessTurnExecutor', () => {
         const id = ++harness.agent.runId;
         harness.executor.abort();
         return id;
-      });
-      if (boundary === 'snapshot') vi.spyOn(harness.agent, 'captureClientSnapshot').mockImplementation(() => {
-        harness.executor.abort();
-        return { marker: 'pre-turn' };
       });
       await expect(harness.executor.start(input(`stop at ${boundary}`))).resolves.toBe('started');
       await vi.waitFor(() => expect(harness.getIdleCount()).toBe(1));
@@ -881,29 +812,6 @@ describe('HeadlessTurnExecutor', () => {
     expect(savedStates).toContain('completed');
   });
 
-  it('does not copy history when turn retries are disabled', async () => {
-    const { agent, executor, events } = createHarness({ maxTurnRetries: 0 });
-    const capture = vi.spyOn(agent, 'captureClientSnapshot');
-    await executor.start(input('no retries'));
-    await vi.waitFor(() => expect(events).toContainEqual(expect.objectContaining({ type: 'turn:finish' })));
-    expect(capture).not.toHaveBeenCalled();
-    expect(agent.runCalls).toHaveLength(1);
-  });
-
-  it('retries transient provider errors and reports turn:retrying', async () => {
-    const { agent, executor, events } = createHarness();
-    const restore = vi.spyOn(agent, 'restoreClientSnapshot');
-    agent.nextErrors = [Object.assign(new Error('server is busy'), { status: 500 })];
-    await executor.start(input('hello'));
-    await new Promise((resolve) => setTimeout(resolve, 80));
-    expect(agent.runCalls).toHaveLength(2);
-    expect(agent.restoreCalls).toBe(1);
-    expect(restore).toHaveBeenCalledWith({ marker: 'pre-turn' }, { preserveUsage: true });
-    const retrying = events.find((event) => event.type === 'turn:retrying');
-    expect(retrying).toMatchObject({ type: 'turn:retrying', attempt: 1, maxAttempts: 2 });
-    expect(events.find((event) => event.type === 'turn:finish')).toMatchObject({ status: 'completed' });
-  });
-
   it('reports and persists provider request retries without restarting the whole turn', async () => {
     const { agent, executor, events, savedConversations, noticeLog, getIdleCount } = createHarness();
     agent.nextProviderRetries = [[
@@ -914,11 +822,10 @@ describe('HeadlessTurnExecutor', () => {
     await vi.waitFor(() => expect(getIdleCount()).toBe(1));
 
     expect(agent.runCalls).toHaveLength(1);
-    expect(agent.restoreCalls).toBe(0);
     expect(events).toContainEqual(expect.objectContaining({
       type: 'turn:retrying',
       attempt: 2,
-      maxAttempts: 5,
+      maxAttempts: 10,
       delayMs: 4000,
       error: 'socket disconnected',
     }));
@@ -931,7 +838,7 @@ describe('HeadlessTurnExecutor', () => {
     expect(noticeLog.size).toBe(1);
   });
 
-  it('shows provider request retries after a non-readonly tool call without allowing a whole-turn retry', async () => {
+  it('shows provider request retries after a non-readonly tool call and keeps running that turn', async () => {
     const { agent, executor, events, savedConversations, getIdleCount } = createHarness();
     agent.emitToolCallAfterRunIndex = 0;
     agent.nextProviderRetries = [[
@@ -943,11 +850,10 @@ describe('HeadlessTurnExecutor', () => {
     await vi.waitFor(() => expect(getIdleCount()).toBe(1));
 
     expect(agent.runCalls).toHaveLength(1);
-    expect(agent.restoreCalls).toBe(0);
     expect(events).toContainEqual(expect.objectContaining({
       type: 'turn:retrying',
       attempt: 1,
-      maxAttempts: 5,
+      maxAttempts: 10,
       delayMs: 2000,
       error: 'request body reset',
     }));
@@ -973,7 +879,7 @@ describe('HeadlessTurnExecutor', () => {
     expect(noticeLog.compose().filter((message) => message.role === 'notice')).toEqual([
       {
         role: 'notice',
-        content: '重试成功（第 1/5 次）\n错误：socket closed',
+        content: '重试成功（第 1/10 次）\n错误：socket closed',
         variant: 'success',
         command: '/retry',
       },
@@ -982,114 +888,24 @@ describe('HeadlessTurnExecutor', () => {
     expect(noticePushes.map((notice) => notice.variant)).toEqual(['error', 'success']);
   });
 
-  it('keeps prompt controls fixed across turn retries and refreshes them for the next turn', async () => {
+  it('reads prompt controls once per turn and refreshes them for the next turn', async () => {
     const captured = { version: 1 as const, disabledPlugins: ['notes'], sections: {} };
     const later = { version: 1 as const, disabledPlugins: [], sections: { context: { content: 'Updated' } } };
     const read = vi.spyOn(promptControlStore, 'readPromptControls').mockReturnValueOnce(captured).mockReturnValue(later);
     try {
       const { agent, executor, getIdleCount } = createHarness();
-      agent.nextErrors.push(Object.assign(new Error('busy'), { status: 503 }));
-      await executor.start(input('retry with captured controls'));
+      await executor.start(input('captured controls'));
       await vi.waitFor(() => expect(getIdleCount()).toBe(1));
       expect(read).toHaveBeenCalledTimes(1);
-      expect(agent.runCalls).toHaveLength(2);
-      expect(agent.runCalls.map((call) => (call.options as { promptControls: unknown }).promptControls)).toEqual([captured, captured]);
+      expect(agent.runCalls).toHaveLength(1);
+      expect((agent.runCalls[0]!.options as { promptControls: unknown }).promptControls).toEqual(captured);
       await executor.start(input('next turn with new controls'));
       await vi.waitFor(() => expect(getIdleCount()).toBe(2));
       expect(read).toHaveBeenCalledTimes(2);
-      expect((agent.runCalls[2]!.options as { promptControls: unknown }).promptControls).toEqual(later);
+      expect((agent.runCalls[1]!.options as { promptControls: unknown }).promptControls).toEqual(later);
     } finally {
       read.mockRestore();
     }
-  });
-
-  it('keeps unconsumed replay inputs when a retry fails before replaying them all', async () => {
-    const { agent, executor, events, getIdleCount } = createHarness();
-    const attemptResults: unknown[][] = [];
-    const run = vi.spyOn(agent, 'run').mockImplementation(async (_content, options = {}) => {
-      const results: unknown[] = [];
-      attemptResults.push(results);
-      if (attemptResults.length === 1) {
-        for (const text of ['A', 'B']) {
-          expect(await executor.start(input(text, 'after_iteration'))).toBe('queued');
-          results.push(await options.onIterationComplete?.());
-        }
-      } else {
-        results.push(await options.onIterationComplete?.());
-        if (attemptResults.length === 3) {
-          results.push(await options.onIterationComplete?.());
-          return { runId: agent.runId, text: 'done' };
-        }
-      }
-      throw Object.assign(new Error('server is busy'), { status: 503 });
-    });
-
-    await expect(executor.start(input('hello'))).resolves.toBe('started');
-    await vi.waitFor(() => expect(getIdleCount()).toBe(1));
-
-    expect(run).toHaveBeenCalledTimes(3);
-    expect(attemptResults).toEqual([['A', 'B'], ['A'], ['A', 'B']]);
-    expect(agent.restoreCalls).toBe(2);
-    expect(events.filter((event) => event.type === 'turn:retrying')).toHaveLength(2);
-    expect(events.find((event) => event.type === 'turn:finish')).toMatchObject({ status: 'completed' });
-    expect(executor.pendingInputs).toEqual([]);
-  });
-
-  it('does not retry non-transient errors', async () => {
-    const { agent, executor, events } = createHarness();
-    agent.nextErrors = [Object.assign(new Error('bad request'), { status: 400 })];
-    await executor.start(input('hello'));
-    await new Promise((resolve) => setTimeout(resolve, 50));
-    expect(agent.runCalls).toHaveLength(1);
-    expect(events.find((event) => event.type === 'turn:retrying')).toBeUndefined();
-    expect(events.find((event) => event.type === 'turn:finish')).toMatchObject({ status: 'error' });
-  });
-
-  it('does not retry after a non-readonly tool call ran', async () => {
-    const { agent, executor, events } = createHarness();
-    agent.emitToolCallAfterRunIndex = 0;
-    agent.nextErrors = [Object.assign(new Error('server is busy'), { status: 500 })];
-    await executor.start(input('hello'));
-    await new Promise((resolve) => setTimeout(resolve, 50));
-    expect(agent.runCalls).toHaveLength(1);
-    expect(events.find((event) => event.type === 'turn:retrying')).toBeUndefined();
-    expect(events.find((event) => event.type === 'turn:finish')).toMatchObject({ status: 'error' });
-  });
-
-  it('gives up after exhausting retries and reports the final error', async () => {
-    const { agent, executor, events } = createHarness();
-    agent.nextErrors = [
-      Object.assign(new Error('busy 1'), { status: 503 }),
-      Object.assign(new Error('busy 2'), { status: 503 }),
-      Object.assign(new Error('busy 3'), { status: 503 }),
-    ];
-    await executor.start(input('hello'));
-    await new Promise((resolve) => setTimeout(resolve, 120));
-    expect(agent.runCalls).toHaveLength(3); // 1 + maxTurnRetries(2)
-    expect(events.filter((event) => event.type === 'turn:retrying')).toHaveLength(2);
-    expect(events.find((event) => event.type === 'turn:finish')).toMatchObject({ status: 'error' });
-  });
-
-  it('stops retrying when the turn is aborted during the retry delay', async () => {
-    const { agent, executor, events } = createHarness();
-    agent.nextErrors = [Object.assign(new Error('busy'), { status: 503 })];
-    await executor.start(input('hello'));
-    await new Promise((resolve) => setTimeout(resolve, 10));
-    executor.abort();
-    await new Promise((resolve) => setTimeout(resolve, 60));
-    expect(events.find((event) => event.type === 'turn:finish')).toMatchObject({ status: 'aborted' });
-  });
-
-  it('persists a retry notice in the conversation while waiting', async () => {
-    const { agent, executor, events, noticeLog, savedConversations } = createHarness();
-    agent.nextErrors = [Object.assign(new Error('server is busy'), { status: 503 })];
-    await executor.start(input('hello'));
-    await new Promise((resolve) => setTimeout(resolve, 80));
-    expect(events.find((event) => event.type === 'turn:finish')).toMatchObject({ status: 'completed' });
-    const saved = savedConversations.flatMap((messages) => messages ?? []);
-    expect(saved).toContainEqual(expect.objectContaining({ role: 'notice', command: '/retry' }));
-    // One slot per turn: the second attempt updates it instead of appending.
-    expect(noticeLog.size).toBe(1);
   });
 
   it('persists the final failure as a conversation notice', async () => {
@@ -1099,7 +915,7 @@ describe('HeadlessTurnExecutor', () => {
     await new Promise((resolve) => setTimeout(resolve, 50));
     const saved = savedConversations.flatMap((messages) => messages ?? []);
     expect(saved).toContainEqual(
-      expect.objectContaining({ role: 'notice', command: '/error', content: '请求失败: bad request' }),
+      expect.objectContaining({ role: 'notice', command: '/error', content: '请求失败: bad request（HTTP 400）' }),
     );
   });
 
@@ -1188,9 +1004,10 @@ describe('LocalRuntimeController stale turn finalization', () => {
         return new Promise((resolve) => { resolveRun = resolve; });
       });
       if (boundary === 'before-run') {
-        vi.spyOn(agent, 'captureClientSnapshot').mockImplementation(() => {
+        vi.spyOn(agent, 'reserveRunId').mockImplementation(() => {
+          const id = ++agent.runId;
           agent.abort();
-          return { marker: 'pre-turn' };
+          return id;
         });
       }
       if (boundary === 'before-persist') hooks.on('turn:beforePersist', () => agent.abort());
