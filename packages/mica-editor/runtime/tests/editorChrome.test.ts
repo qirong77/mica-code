@@ -50,6 +50,8 @@ describe('editor chrome style contracts', () => {
     expect(markdownStyles).toContain('height: 28px; min-width: 28px;');
     expect(notebookStyles).toContain('.ruby-editor :is(.button, .ruby-input):focus-visible');
     expect(notebookStyles).toContain('.image-settings-popover .Input__wrapper { display: flex; flex-direction: column; gap: 6px; }');
+    expect(notebookStyles).toContain('body:has(.notebook-editor)');
+    expect(notebookStyles).toContain("body[data-notebook-style='open'] :is(.table-selection-handles, .table-scroll-fades, .table-context-toolbar, .table-control-popup)");
   });
 
   it('keeps the Yuque-style block handle and action menu contract', () => {
@@ -94,6 +96,7 @@ describe('editor chrome style contracts', () => {
 
   it('does not reserve the table toolbar as an empty document row', () => {
     expect(notebookDocumentStyles).toContain('margin: 4px 0 16px;');
+    expect(notebookDocumentStyles).toContain('padding-top: 14px;');
     expect(notebookWorkbenchStyles).not.toContain('margin: 8px 0 24px;');
   });
 
@@ -102,12 +105,17 @@ describe('editor chrome style contracts', () => {
     expect(notebookDocumentStyles).toContain('--notebook-body-gutter: 50px;');
     expect(notebookDocumentStyles).toContain('--notebook-body-top: 24px;');
     expect(notebookDocumentStyles).toContain("'Chinese Quote', -apple-system, BlinkMacSystemFont");
+    expect(notebookDocumentStyles).toContain('letter-spacing: .008em;');
+    expect(notebookDocumentStyles).toContain('margin: 26px 0 10px;');
     expect(notebookDocumentStyles).toContain('font-size: var(--notebook-body-size);');
     expect(notebookDocumentStyles).toContain('height: 33px;');
-    expect(notebookDocumentStyles).toContain('padding: 3px 8px;');
+    expect(notebookDocumentStyles).toContain('line-height: 24px;');
+    expect(notebookDocumentStyles).toContain('padding: 4px 8px;');
     expect(notebookHostStyles).toContain('--notebook-bar-height: 52px;');
     expect(notebookHostStyles).toContain('--notebook-outline-width: 305px;');
     expect(notebookHostStyles).toContain('--notebook-row-height: 36px;');
+    expect(notebookHostStyles).toContain('height: calc(var(--notebook-row-height) - 2px);');
+    expect(notebookHostStyles).toContain('background: transparent;');
   });
 
   it('reveals the block handle on block hover, in panes narrower than the toolbar breakpoint', () => {
@@ -120,6 +128,7 @@ describe('editor chrome style contracts', () => {
     // The measured 50px reading gutter remains stable while both host panels
     // are open; the block handle is positioned inside that gutter.
     expect(notebookDocumentStyles).toContain('--notebook-body-gutter: 50px;');
+    expect(notebookDocumentStyles).not.toContain('--notebook-body-gutter: 32px;');
   });
 
   it('keeps a portal submenu open while the pointer crosses into it', () => {
@@ -132,8 +141,13 @@ describe('editor chrome style contracts', () => {
 
   it('keeps narrow table controls reachable instead of clipping their action row', () => {
     const tableControlsStyles = readSource('src/playground/plugins/TableControlsPlugin/index.css');
+    const tableHandlesSource = readSource('src/playground/plugins/TableControlsPlugin/TableSelectionHandles.tsx');
+    const tableControlsSource = readSource('src/playground/plugins/TableControlsPlugin/index.tsx');
     expect(tableControlsStyles).toContain('overflow-x: auto;');
     expect(tableControlsStyles).toContain('.table-context-toolbar > * { flex: none; }');
+    expect(tableControlsSource).toContain('whileElementsMounted: autoUpdate');
+    expect(tableHandlesSource).toContain('const RAIL_SIZE = 14;');
+    expect(tableHandlesSource).toContain('const RAIL_OFFSET = 13;');
   });
 
   it('clears the insert placeholder after the inserted block commits', () => {

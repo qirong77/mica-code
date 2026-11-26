@@ -12,7 +12,9 @@ export interface NotebookDocumentStyle {
 export const DEFAULT_DOCUMENT_STYLE: Readonly<NotebookDocumentStyle> = Object.freeze({
   bodySize: 15,
   pageSize: 'standard',
-  paragraphSpacing: 'loose',
+  // Yuque's classic typography keeps adjacent paragraphs on the same
+  // baseline rhythm. Extra breathing room is an explicit style choice.
+  paragraphSpacing: 'normal',
   lineHeight: 1.74,
 });
 
@@ -23,7 +25,7 @@ export function parseDocumentStyle(value: unknown): NotebookDocumentStyle {
     bodySize: DOCUMENT_BODY_SIZES.includes(input.bodySize as typeof DOCUMENT_BODY_SIZES[number])
       ? input.bodySize as number : DEFAULT_DOCUMENT_STYLE.bodySize,
     pageSize: input.pageSize === 'wide' ? 'wide' : 'standard',
-    paragraphSpacing: input.paragraphSpacing === 'normal' ? 'normal' : 'loose',
+    paragraphSpacing: input.paragraphSpacing === 'loose' ? 'loose' : DEFAULT_DOCUMENT_STYLE.paragraphSpacing,
     lineHeight: input.lineHeight === 1.5 || input.lineHeight === 2 ? input.lineHeight : 1.74,
   };
 }

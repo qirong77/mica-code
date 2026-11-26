@@ -80,7 +80,9 @@ type SelectionDrag = {
 type MoveDrag = {axis: Axis; from: number};
 type DropTarget = MoveDrag & {to: number; edge: number};
 
-const RAIL_SIZE = 12;
+// Yuque's row/column bars are 14px wide/high. Keep the existing 13px outer
+// gutter so the portal rail remains outside the first/last cell after scroll.
+const RAIL_SIZE = 14;
 const RAIL_OFFSET = 13;
 const GRIP_SIZE = 16;
 const CONNECTOR_REACH = 6;

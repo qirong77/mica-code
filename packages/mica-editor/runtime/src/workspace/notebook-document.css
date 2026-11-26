@@ -6,7 +6,7 @@
   --notebook-body-size: 15px;
   /* Yuque keeps a 750px reading column inside an 850px page box. */
   --notebook-page-width: 850px;
-  --notebook-paragraph-gap: 8px;
+  --notebook-paragraph-gap: 0px;
   --notebook-line-height: 1.74;
   --notebook-side-panel-width: 320px;
   --notebook-body-gutter: 50px;
@@ -15,6 +15,15 @@
   --notebook-document-font: 'Chinese Quote', -apple-system, BlinkMacSystemFont, system-ui, 'Segoe UI', Roboto, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Helvetica Neue', Helvetica, Arial, sans-serif;
   --notebook-document-fg: color-mix(in srgb, var(--color-fg-strong) 55%, var(--color-fg-soft));
   --notebook-document-muted: color-mix(in srgb, var(--color-fg-soft) 78%, var(--color-fg-strong));
+}
+
+html[data-appearance='light'] .notebook-workbench {
+  --notebook-document-fg: #262626;
+  --notebook-document-muted: #585a5a;
+}
+html[data-appearance='dark'] .notebook-workbench {
+  --notebook-document-fg: #e2e2e2;
+  --notebook-document-muted: #b3b3b3;
 }
 
 .notebook-workbench .editor-scroller > .editor > .ContentEditable__root {
@@ -27,7 +36,8 @@
   font-family: var(--notebook-document-font);
   font-size: var(--notebook-body-size);
   line-height: var(--notebook-line-height);
-  letter-spacing: 0;
+  /* Yuque classic typography uses .008em (0.12px at 15px). */
+  letter-spacing: .008em;
   color: var(--notebook-document-fg);
   overflow-wrap: anywhere;
 }
@@ -41,7 +51,7 @@
 }
 
 .notebook-workbench :is(.PlaygroundEditorTheme__h1, .PlaygroundEditorTheme__h2, .PlaygroundEditorTheme__h3, .PlaygroundEditorTheme__h4, .PlaygroundEditorTheme__h5, .PlaygroundEditorTheme__h6) {
-  font-weight: 600;
+  font-weight: 700;
   line-height: 1.3333;
   letter-spacing: 0;
   text-transform: none;
@@ -50,12 +60,12 @@
 
 /* Yuque's heading scale on a 15px body. The first heading is the note title:
    it keeps a tight bottom margin so the body starts right under it. */
-.notebook-workbench .PlaygroundEditorTheme__h1 { font-size: 28px; line-height: 36px; margin: 0 0 16px; }
+.notebook-workbench .PlaygroundEditorTheme__h1 { font-size: 28px; line-height: 36px; margin: 26px 0 10px; }
 .notebook-workbench .PlaygroundEditorTheme__h2 { font-size: 24px; line-height: 32px; margin: 21px 0 5px; }
-.notebook-workbench .PlaygroundEditorTheme__h3 { font-size: 20px; line-height: 28px; margin: 16px 0 4px; }
-.notebook-workbench .PlaygroundEditorTheme__h4 { font-size: 16px; line-height: 22px; margin: 14px 0 4px; }
-.notebook-workbench .PlaygroundEditorTheme__h5 { font-size: 15px; line-height: 22px; margin: 12px 0 4px; }
-.notebook-workbench .PlaygroundEditorTheme__h6 { font-size: 15px; line-height: 22px; margin: 12px 0 4px; color: var(--notebook-document-muted); }
+.notebook-workbench .PlaygroundEditorTheme__h3 { font-size: 20px; line-height: 28px; margin: 16px 0 5px; }
+.notebook-workbench .PlaygroundEditorTheme__h4 { font-size: 16px; line-height: 24px; margin: 10px 0 5px; }
+.notebook-workbench .PlaygroundEditorTheme__h5 { font-size: 15px; line-height: 24px; margin: 8px 0 5px; }
+.notebook-workbench .PlaygroundEditorTheme__h6 { font-size: 15px; line-height: 24px; margin: 8px 0 5px; color: var(--notebook-document-muted); }
 
 .notebook-workbench .ContentEditable__root > :first-child { margin-top: 0; }
 .notebook-workbench .PlaygroundEditorTheme__paragraph { margin: 0 0 var(--notebook-paragraph-gap); }
@@ -114,18 +124,25 @@
 .notebook-workbench .PlaygroundEditorTheme__tableCell {
   min-width: 75px;
   height: 33px;
-  padding: 3px 8px;
+  /* Yuque's 33px row is 24px text rhythm plus the 4px/4px content margin
+     and the two 1px cell borders. The document body remains 26.1px; table
+     cells use the editor's denser table rhythm. */
+  line-height: 24px;
+  padding: 4px 8px;
   vertical-align: top;
   overflow: visible;
   overflow-wrap: anywhere;
 }
 .notebook-workbench .PlaygroundEditorTheme__tableCell > * { overflow: visible; }
-.notebook-workbench .PlaygroundEditorTheme__tableCell > .PlaygroundEditorTheme__paragraph { min-height: 20px; margin: 0; font-size: inherit; line-height: var(--notebook-line-height); }
+.notebook-workbench .PlaygroundEditorTheme__tableCell > .PlaygroundEditorTheme__paragraph { min-height: 24px; margin: 0; font-size: inherit; line-height: 24px; }
 .notebook-workbench :is(.PlaygroundEditorTheme__table, .PlaygroundEditorTheme__tableCell) { border-color: var(--color-line); }
 .notebook-workbench .PlaygroundEditorTheme__tableCellHeader { background: var(--color-panel); font-size: inherit; }
 .notebook-workbench .PlaygroundEditorTheme__tableScrollableWrapper {
   max-width: 100%;
+  /* Yuque's table hole contributes 4px/16px outside spacing; its inner wrap
+     reserves another 14px for the control rail above the grid. */
   margin: 4px 0 16px;
+  padding-top: 14px;
   overscroll-behavior-x: contain;
 }
 .notebook-workbench .PlaygroundEditorTheme__hr { margin-block: 30px; }
@@ -196,11 +213,6 @@ html[data-appearance='dark'] .notebook-body-size-control .arco-slider-button::af
 }
 @media (max-width: 600px) {
   .notebook-workbench { --notebook-body-gutter: 20px; }
-}
-@media (max-width: 900px) and (hover: hover) and (pointer: fine) {
-  /* Keep the 24px block handle usable when both host panels squeeze the
-     editor to a narrow desktop column. */
-  .notebook-workbench { --notebook-body-gutter: 32px; }
 }
 @media print {
   .notebook-document-panel { display: none; }

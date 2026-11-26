@@ -19,7 +19,9 @@
   position: absolute;
   top: 0;
   bottom: 0;
-  width: min(12px, 20%);
+  /* Yuque's edge mask is a narrow 8px fade, not a broad overlay over the
+     first or last cell. */
+  width: min(8px, 20%);
   opacity: 0;
 }
 

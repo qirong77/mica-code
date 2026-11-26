@@ -17,6 +17,12 @@ body.mica-arco-theme {
   font: 12px/1.6 var(--font-family);
   accent-color: var(--color-accent);
 }
+/* The host can pass the app's chat font token into the iframe. Notebook is a
+   Yuque-shaped surface, so its chrome and portals must resolve to the same
+   measured stack instead of silently falling back to Inter. */
+body:has(.notebook-editor) {
+  --font-family: 'Chinese Quote', -apple-system, BlinkMacSystemFont, system-ui, 'Segoe UI', Roboto, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+}
 html[data-appearance='dark'] { color-scheme: dark; }
 html[data-appearance='light'] { color-scheme: light; }
 /* Portals may explicitly opt back into pointer-events, hence the descendants.
@@ -161,7 +167,7 @@ body.mica-arco-theme {
 .floating-add-indicator { --notebook-table-icon: url('../playground/images/icons/plus.svg'); }
 .floating-filter-indicator { --notebook-table-icon: url('../playground/images/icons/filter-left.svg'); }
 .floating-drag-indicator { --notebook-table-icon: url('../playground/images/icons/draggable-block-menu.svg'); }
-.table-context-toolbar, .table-control-popup { background: var(--color-panel); color: var(--color-fg-soft); border-color: var(--color-line); border-radius: 6px; box-shadow: var(--notebook-popup-shadow); font: 12px/1.6 var(--font-family); }
+.table-context-toolbar, .table-control-popup { background: var(--color-panel); color: var(--color-fg-soft); border-color: var(--color-line); border-radius: 5px; box-shadow: var(--notebook-popup-shadow); font: 12px/1.6 var(--font-family); }
 .table-context-toolbar .arco-btn:hover:not(.arco-btn-disabled):not([aria-expanded='true']):not([aria-pressed='true']), .table-context-label:hover:not(.has-selection), .table-menu-style-entry:hover { color: var(--color-fg-strong); background: var(--color-active); }
 .table-context-label .arco-icon { color: inherit; }
 .table-context-toolbar .arco-btn[aria-expanded='true'], .table-context-label.has-selection { color: var(--color-accent); background: var(--color-primary-light-1); }
@@ -176,12 +182,19 @@ body.mica-arco-theme {
 .table-selection-drop-line { background: var(--color-accent); box-shadow: 0 0 0 1px var(--color-canvas); }
 }
 
+/* The style inspector is a modal editor state. Portalled table controls must
+   not float above it merely because their generic z-index is larger. */
+body[data-notebook-style='open'] :is(.table-selection-handles, .table-scroll-fades, .table-context-toolbar, .table-control-popup) {
+  visibility: hidden;
+  pointer-events: none;
+}
+
 /* Menu geometry is local; its surface and rows come from the shared ActionMenu. */
 .editor-dropdown { position: fixed; z-index: 100; }
 
 /* Menus are portalled outside .notebook-editor. Keep anchors/positions as-is. */
 body.mica-arco-theme {
-.typeahead-popover, .floating-text-format-popup, .link-editor, .ruby-editor, .find-replace-panel, .PlaygroundEditorTheme__contextMenu, .dateTimePicker { background: var(--color-panel); color: var(--color-fg-soft); border: 1px solid var(--color-line); border-radius: 6px; box-shadow: var(--notebook-popup-shadow); font-family: var(--font-family); font-size: 12px; }
+.typeahead-popover, .floating-text-format-popup, .link-editor, .ruby-editor, .find-replace-panel, .PlaygroundEditorTheme__contextMenu, .dateTimePicker { background: var(--color-panel); color: var(--color-fg-soft); border: 1px solid var(--color-line); border-radius: 5px; box-shadow: var(--notebook-popup-shadow); font-family: var(--font-family); font-size: 12px; }
 .typeahead-popover li, .PlaygroundEditorTheme__contextMenuItem { color: var(--color-fg-soft); background: transparent; font: 12px/1.6 var(--font-family); }
 .typeahead-popover li:hover, .PlaygroundEditorTheme__contextMenuItem:is(:hover, :focus, .open):not(:disabled) { background: var(--color-active); }
 .typeahead-popover ul li.selected { background: var(--color-primary-light-1); color: var(--color-accent); }

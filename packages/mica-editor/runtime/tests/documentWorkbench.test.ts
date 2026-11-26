@@ -14,7 +14,7 @@ describe('document appearance persistence', () => {
   it("uses Yuque's measured standard page geometry for new documents", () => {
     expect(documentStyleVariables(DEFAULT_DOCUMENT_STYLE)).toMatchObject({
       '--notebook-page-width': '850px',
-      '--notebook-paragraph-gap': '8px',
+      '--notebook-paragraph-gap': '0px',
       '--notebook-line-height': '1.74',
     });
   });

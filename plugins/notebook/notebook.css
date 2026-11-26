@@ -31,6 +31,23 @@
   --notebook-row-active-bg: color-mix(in srgb, var(--color-fg-strong) 7%, var(--color-canvas));
   --notebook-row-height: 36px;
 }
+
+/* Yuque's catalog uses neutral gray steps in light mode. Keep the same
+   semantic contrast in dark mode instead of reusing Mica's bluish active row. */
+html[data-appearance='light'] .notebook-page {
+  --notebook-rail-bg: #fafafa;
+  --notebook-text-primary: #262626;
+  --notebook-text-secondary: #585a5a;
+  --notebook-bg-tertiary: #fafafa;
+  --notebook-row-hover-bg: #f4f5f5;
+  --notebook-row-active-bg: #eff0f0;
+}
+html[data-appearance='dark'] .notebook-page {
+  --notebook-text-primary: #e2e2e2;
+  --notebook-text-secondary: #b3b3b3;
+  --notebook-row-hover-bg: rgb(255 255 255 / 4%);
+  --notebook-row-active-bg: rgb(255 255 255 / 12%);
+}
 .notebook-layout {
   display: flex;
   flex: 1;
@@ -301,10 +318,11 @@
   color: var(--notebook-text-primary);
   min-width: 0;
   position: relative;
+  box-sizing: border-box;
+  min-height: var(--notebook-row-height);
+  padding-block: 1px;
 }
-.notebook-tree-entry:is(:hover, :focus-within, .is-selected) {
-  background: var(--notebook-row-hover-bg);
-}
+.notebook-tree-entry:is(:hover, :focus-within, .is-selected) .notebook-tree-row { background: var(--notebook-row-hover-bg); }
 .notebook-tree-entry:is(:hover, :focus-within, :has([aria-pressed='true'])) {
   --row-action-space: 34px;
 }
@@ -315,10 +333,10 @@
   font-weight: 500;
 }
 .notebook-tree-entry.is-active {
-  background: var(--notebook-row-active-bg);
   color: var(--notebook-text-primary);
   font-weight: 500;
 }
+.notebook-tree-entry.is-active .notebook-tree-row { background: var(--notebook-row-active-bg); }
 .notebook-tree-entry.is-dragging {
   opacity: 0.4;
 }
@@ -347,9 +365,9 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  height: var(--notebook-row-height);
-  min-height: var(--notebook-row-height);
-  padding-block: 7px;
+  height: calc(var(--notebook-row-height) - 2px);
+  min-height: calc(var(--notebook-row-height) - 2px);
+  padding-block: 0;
   padding-inline: min(45%, calc(6px + var(--depth, 0) * var(--tree-indent))) var(--row-action-space);
   width: 100%;
   min-width: 0;
@@ -709,23 +727,26 @@
 }
 .notebook-outline > header {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   flex: none;
   height: 30px;
-  padding: 0 28px;
+  box-sizing: border-box;
+  margin-bottom: 12px;
+  padding: 8px 28px 0;
   color: var(--color-fg-muted);
 }
 .notebook-outline > header strong {
   font-size: 14px;
   font-weight: 500;
+  color: var(--notebook-text-primary);
 }
 .notebook-outline-list {
   flex: 1;
   min-height: 0;
   overflow: auto;
   overscroll-behavior: contain;
-  padding: 12px 0 24px;
+  padding: 0 0 24px;
   scrollbar-width: thin;
   scrollbar-color: var(--color-line-strong) transparent;
 }
@@ -735,7 +756,7 @@
   height: 22px;
   border-radius: 6px;
   padding-inline: calc(25px + clamp(0px, (var(--heading-level, 1) - 1) * 16px, 80px)) 20px;
-  color: var(--notebook-text-primary);
+  color: var(--notebook-text-secondary);
   font-size: 14px;
   line-height: 22px;
   text-align: start;
@@ -758,9 +779,9 @@
   white-space: nowrap;
 }
 .notebook-page .notebook-outline-entry.is-active:not(:disabled) {
-  background: var(--notebook-row-active-bg);
   color: var(--notebook-text-primary);
-  font-weight: 500;
+  background: transparent;
+  font-weight: 700;
 }
 .notebook-outline-empty {
   margin: 8px;
