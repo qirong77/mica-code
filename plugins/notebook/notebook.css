@@ -194,7 +194,7 @@ html[data-appearance='dark'] .notebook-page {
   padding: 16px 0 6px 6px;
   color: var(--notebook-text-caption);
   font-size: 12px;
-  line-height: 18px;
+  line-height: 1.5715;
 }
 .notebook-book-icon {
   display: grid;
@@ -213,6 +213,8 @@ html[data-appearance='dark'] .notebook-page {
 }
 .notebook-book-info {
   height: 36px;
+  /* 语雀的书名行在 10px 内距里再缩 4px：图标起于 14，书名起于 44。 */
+  padding-inline-start: 4px;
   display: flex;
   align-items: center;
   gap: 10px;
@@ -220,15 +222,25 @@ html[data-appearance='dark'] .notebook-page {
 }
 .notebook-book-info > small {
   margin-inline-start: auto;
+  flex: none;
   color: var(--notebook-text-caption);
   font-size: 12px;
   line-height: 18px;
 }
-.notebook-rail-title > .ui-button {
-  position: absolute;
-  top: 45px;
-  right: 0;
+/* 收起按钮留在书名行里：右边贴住 10px 内距，不再浮在「N 篇笔记」上面。 */
+.notebook-page .notebook-rail-collapse {
+  flex: none;
+  width: 24px;
+  min-width: 24px;
+  height: 24px;
+  margin: 0 0 0 8px;
+  padding: 0;
+  border-radius: 6px;
   color: var(--notebook-text-caption);
+}
+.notebook-page .notebook-rail-collapse:hover {
+  color: var(--notebook-text-primary);
+  background: var(--notebook-bg-hover);
 }
 .notebook-book-info > strong {
   min-width: 0;
@@ -236,7 +248,8 @@ html[data-appearance='dark'] .notebook-page {
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 16px;
-  font-weight: 400;
+  line-height: 22px;
+  font-weight: 700;
   color: var(--notebook-text-primary);
 }
 .notebook-rail-tools {
@@ -694,6 +707,25 @@ html[data-appearance='dark'] .notebook-page {
   height: var(--notebook-bar-height);
   border-bottom: 1px solid var(--notebook-border-primary);
   pointer-events: none;
+}
+/* 窗口放不下两侧栏时，大纲改成浮层：不占正文宽度，盖在文档右缘。 */
+.notebook-outline.is-floating {
+  position: absolute;
+  inset-block: 0;
+  inset-inline-end: 0;
+  z-index: 24;
+  width: min(var(--notebook-outline-width), calc(100% - 48px));
+  box-shadow: -8px 0 24px color-mix(in srgb, var(--color-mask-bg) 18%, transparent);
+}
+.notebook-outline-scrim {
+  position: absolute;
+  inset: 0;
+  z-index: 23;
+  padding: 0;
+  border: 0;
+  /* 只当点击接收层：语雀的浮动大纲也不给正文加整片遮罩。 */
+  background: transparent;
+  cursor: default;
 }
 .notebook-outline > header .ui-button {
   opacity: 0;

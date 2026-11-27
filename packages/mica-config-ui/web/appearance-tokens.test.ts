@@ -37,8 +37,14 @@ function declarations(block: string): Map<string, string> {
   return result;
 }
 
-/** 值里出现颜色表达式的才是颜色 token；字号 / 字体 / 圆角这些不该被亮色块重复声明。 */
+/**
+ * 值里出现颜色表达式的才是颜色 token；字号 / 字体 / 圆角这些不该被亮色块重复声明。
+ * `--shadow-*` 例外：阴影值里必然带 rgb()，但它只分「亮/暗」两档（亮色在主题块里换成一串
+ * 更轻的阴影），不需要每个第三方主题各写一份——所以单独断言存在性，不参与颜色覆盖比对。
+ */
 const COLOR_VALUE = /#[0-9a-f]{3,8}\b|rgba?\(|hsla?\(|color-mix\(/i;
+const isColorToken = ([name, value]: [string, string]) =>
+  !name.startsWith('--shadow-') && COLOR_VALUE.test(value);
 
 const darkTokens = declarations(blockAfter('\n.mica-config-ui {'));
 const lightTokens = declarations(blockAfter("html[data-theme='light'] .mica-config-ui {"));
@@ -55,7 +61,8 @@ function themeTokens(id: string): Map<string, string> {
 
 describe('config-ui 亮色皮肤 token 覆盖', () => {
   it('浅色说明使用可读灰阶，并保留 Arco 的 small 控件密度', () => {
-    expect(lightTokens.get('--text-faint')).toBe('#61666b');
+    // 语雀的 grey-700：说明/占位这一档，比正文（#262626）淡两档。
+    expect(lightTokens.get('--text-faint')).toBe('#8a8f8d');
     expect(darkTokens.get('--control-h')).toBe('28px');
     expect(darkTokens.get('--text-body')).toBe('0.875rem');
     const hint = blockAfter('  .setting-row-hint {');
@@ -64,9 +71,9 @@ describe('config-ui 亮色皮肤 token 覆盖', () => {
   });
 
   it('暗色块里的每个颜色 token 在亮色块里都有覆盖', () => {
-    const colorTokens = [...darkTokens].filter(([, value]) => COLOR_VALUE.test(value)).map(([name]) => name);
+    const colorTokens = [...darkTokens].filter(isColorToken).map(([name]) => name);
     // 暗色块确实有一整套颜色 token：解析写错（比如正则不匹配）时先在这里失败。
-    expect(colorTokens.length).toBeGreaterThan(25);
+    expect(colorTokens.length).toBeGreaterThanOrEqual(24);
     const missing = colorTokens.filter((name) => !lightTokens.has(name));
     expect(missing).toEqual([]);
   });
@@ -105,7 +112,9 @@ describe('config-ui 亮色皮肤 token 覆盖', () => {
   });
 
   it('亮色块只覆盖颜色，不重复声明尺寸 / 字体 token', () => {
-    const layoutTokens = [...lightTokens.keys()].filter((name) => !COLOR_VALUE.test(lightTokens.get(name)!));
+    const layoutTokens = [...lightTokens.keys()].filter(
+      (name) => !name.startsWith('--shadow-') && !isColorToken([name, lightTokens.get(name)!])
+    );
     expect(layoutTokens).toEqual([]);
   });
 
@@ -147,7 +156,7 @@ describe('config-ui 亮色皮肤 token 覆盖', () => {
   });
 
   it('注册表里的每个主题都有皮肤块，覆盖默认块的全部颜色 token', () => {
-    const colorTokens = [...darkTokens].filter(([, value]) => COLOR_VALUE.test(value)).map(([name]) => name);
+    const colorTokens = [...darkTokens].filter(isColorToken).map(([name]) => name);
 
     for (const theme of THEMES) {
       const tokens = themeTokens(theme.id);

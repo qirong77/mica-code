@@ -43,6 +43,8 @@
   --accent-contrast: #1e1f22;
   /* 弹层投影：亮色下同一条阴影要收轻，否则白底上像糊了一块灰。 */
   --shadow-modal: 0 24px 60px rgb(0 0 0 / 60%);
+  /* 浮层（下拉、气泡、菜单）投影。亮色块里换成语雀那三层，与桌面端同一串。 */
+  --shadow-popover: 0 6px 20px rgb(0 0 0 / 14%), 0 2px 6px rgb(0 0 0 / 6%);
 
   /* Type scale — one principled ladder (code-by-wire parity). px shown at the 16px root. */
   --text-micro: 0.6875rem; /* 11px — micro overlines, tabular meta */
@@ -53,14 +55,16 @@
   --text-title: 1rem; /* 16px — section titles */
   --text-heading: 1.125rem; /* 18px — page headers */
 
+  /* 与语雀同一套字体栈（桌面端 body 也用这一串）：中文落 PingFang SC / 微软雅黑，
+     不再用 Inter 抢先——西文和中文的字面比例不一致时，同一行会一高一矮。 */
   --font-sans:
-    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'SF Pro Text', 'SF Pro Display',
-    sans-serif;
+    'Chinese Quote', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'PingFang SC', 'Hiragino Sans GB',
+    'Microsoft YaHei', 'Helvetica Neue', Helvetica, Arial, sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace;
 
-  /* Align the shell with Arco's 2 / 4 / 8px radius ladder. */
-  --radius-sm: 2px;
-  --radius-md: 4px;
+  /* 与语雀一致的圆角梯：4 图标按钮 / 6 控件与菜单项 / 8 浮层 / 12 弹窗。 */
+  --radius-sm: 4px;
+  --radius-md: 6px;
   --radius-lg: 8px;
   --radius-xl: 12px;
 
@@ -83,36 +87,41 @@
 }
 
 /* 亮色皮肤：只覆盖颜色变量与 color-scheme，尺寸、间距、字体沿用暗色那一套。
-   基础色板沿用 DeepSeek harness；说明文字加深，禁用态由 Arco 适配层单独派生。
+   基础色板取语雀（中性灰阶梯 + 品牌绿），与桌面端 `html[data-theme='light']` 同源：
+   灰 100 #fafafa / 200 #f4f5f5 / 300 #eff0f0 / 400 #e7e9e8，文字 900 #262626 /
+   800 #585a5a / 700 #8a8f8d。
    新增颜色变量必须同步写进这一块，appearance-tokens.test.ts 会拦漏项。 */
 html[data-theme='light'] .mica-config-ui {
   color-scheme: light;
   --bg: #ffffff;
-  --panel: #f5f6f7;
-  --panel-muted: #f1f3f5;
-  --panel-hover: #ebeef2;
-  --sidebar-bg: #f9fafb;
-  --line: #0000001a;
-  --line-soft: #0000000a;
-  --line-strong: #00000029;
-  --text: #0f1115; /* label-primary：与桌面端正文同一个近黑 */
-  --text-soft: #61666b;
-  --text-faint: #61666b;
-  --accent: #4176e6;
-  --accent-hover: #2563eb;
-  --blue: #4176e6;
-  --green: #2b8a3e;
-  --red: #ec1313;
-  --amber: #b45309;
-  --violet: #6741d9;
-  --overlay-subtle: rgb(38 49 72 / 4%);
-  --overlay: rgb(38 49 72 / 6%);
-  --overlay-strong: rgb(38 49 72 / 10%);
+  --panel: #fafafa; /* grey-100 */
+  --panel-muted: #f4f5f5; /* grey-200 */
+  --panel-hover: #eff0f0; /* grey-300 */
+  --sidebar-bg: #fafafa;
+  --line: #e7e9e8; /* grey-400 — 语雀唯一一档描边 */
+  --line-soft: rgb(0 0 0 / 6%);
+  --line-strong: #d8dad9; /* grey-500 */
+  --text: #262626; /* grey-900 — --yq-text-primary */
+  --text-soft: #585a5a; /* grey-800 */
+  --text-faint: #8a8f8d; /* grey-700 */
+  --accent: #00b96b; /* green-600 */
+  --accent-hover: #009456; /* green-700 */
+  --blue: #117cee; /* blue-600 */
+  --green: #00b96b;
+  --red: #df2a3f; /* red-600 */
+  --amber: #ecaa04; /* yellow-600 */
+  --violet: #722ed1;
+  --overlay-subtle: rgb(0 0 0 / 2%);
+  --overlay: rgb(0 0 0 / 4%);
+  --overlay-strong: rgb(0 0 0 / 6%);
   --focus-ring: rgb(0 0 0 / 8%);
   --selection-bg: rgb(0 0 0 / 12%);
-  --panel-inset: #f9fafb;
+  --panel-inset: #fafafa;
   --accent-contrast: #ffffff;
   --shadow-modal: 0 24px 60px rgb(0 0 0 / 18%);
+  --shadow-popover:
+    0 1px 4px -2px rgb(0 0 0 / 13%), 0 2px 8px rgb(0 0 0 / 8%),
+    0 8px 16px 4px rgb(0 0 0 / 4%);
 }
 
 /* Catppuccin Mocha：与 app.css 同 id 块同源（内容面 canvas、卡片 panel、嵌套面 panel-hi、
@@ -956,10 +965,10 @@ html[data-theme='tokyo-night-light'] .mica-config-ui {
 
   .theme-preview[data-preview-theme='light'] {
     --preview-bg: #ffffff;
-    --preview-panel: #f1f3f5;
-    --preview-line: #0000001a;
-    --preview-text: #61666b;
-    --preview-accent: #4176e6;
+    --preview-panel: #f4f5f5;
+    --preview-line: #e7e9e8;
+    --preview-text: #585a5a;
+    --preview-accent: #00b96b;
   }
 
   .theme-preview[data-preview-theme='mocha'] {

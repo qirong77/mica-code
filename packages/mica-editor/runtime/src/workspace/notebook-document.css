@@ -31,7 +31,9 @@ html[data-appearance='dark'] .notebook-workbench {
   width: 100%;
   max-width: var(--notebook-page-width);
   min-height: calc(100vh - 76px);
-  margin-inline: auto;
+  /* 语雀把阅读列钉在大纲一侧：页面盒再宽也不居中，多出来的留白全落在左边。
+     1440px 下正文因此从 335px 开始（259 侧栏 + 76），而不是居中的 322px。 */
+  margin-inline: auto 0;
   padding: var(--notebook-body-top) var(--notebook-body-gutter) var(--notebook-body-bottom, 100px);
   font-family: var(--notebook-document-font);
   font-size: var(--notebook-body-size);
@@ -44,7 +46,7 @@ html[data-appearance='dark'] .notebook-workbench {
 
 .notebook-workbench .editor-scroller > .editor > .ContentEditable__placeholder {
   top: var(--notebook-body-top);
-  left: max(var(--notebook-body-gutter), calc((100% - var(--notebook-page-width)) / 2 + var(--notebook-body-gutter)));
+  left: max(var(--notebook-body-gutter), calc(100% - var(--notebook-page-width) + var(--notebook-body-gutter)));
   font-family: var(--notebook-document-font);
   font-size: var(--notebook-body-size);
   line-height: var(--notebook-line-height);
@@ -211,7 +213,9 @@ html[data-appearance='dark'] .notebook-body-size-control .arco-slider-button::af
 @media (max-width: 760px) {
   .notebook-workbench { --notebook-body-top: 24px; }
 }
-@media (max-width: 600px) {
+/* 手机才收窄留白。桌面上编辑列再挤也要留住 50px gutter：块握把和
+   正文起点都靠它，收到 20px 时握把会贴在编辑框边缘。 */
+@media (max-width: 480px) {
   .notebook-workbench { --notebook-body-gutter: 20px; }
 }
 @media print {

@@ -36,23 +36,25 @@
 html[data-theme='light'] {
   color-scheme: light;
   --color-canvas: #ffffff;
-  --color-panel: #f9fafb;
-  --color-panel-hi: #f1f3f5;
-  --color-active: #ebeef2;
-  --color-fg-strong: #0f1115;
-  --color-fg-soft: #43454a;
-  --color-fg-faint: #979da6;
-  --color-line-soft: #0000000a;
-  --color-line: #0000001a;
-  --color-line-strong: #00000029;
-  --color-overlay: rgb(38 49 72 / 6%);
-  --color-overlay-strong: rgb(38 49 72 / 10%);
-  --color-accent: #4176e6;
-  --color-accent-hover: #2563eb;
-  --color-danger: #ec1313;
-  --color-warn: #b45309;
-  --color-success: #2b8a3e;
-  --color-info: #4176e6;
+  /* 语雀亮色：grey-100/200/300/400/500 + text-900/800/700 + 品牌绿。
+     与 assets/app.css 的 html[data-theme='light'] 逐项相同（测试会比对）。 */
+  --color-panel: #fafafa;
+  --color-panel-hi: #f4f5f5;
+  --color-active: #eff0f0;
+  --color-fg-strong: #262626;
+  --color-fg-soft: #585a5a;
+  --color-fg-faint: #8a8f8d;
+  --color-line-soft: rgb(0 0 0 / 6%);
+  --color-line: #e7e9e8;
+  --color-line-strong: #d8dad9;
+  --color-overlay: rgb(0 0 0 / 4%);
+  --color-overlay-strong: rgb(0 0 0 / 6%);
+  --color-accent: #00b96b;
+  --color-accent-hover: #009456;
+  --color-danger: #df2a3f;
+  --color-warn: #ecaa04;
+  --color-success: #00b96b;
+  --color-info: #117cee;
 }
 
 html[data-theme='mocha'] {

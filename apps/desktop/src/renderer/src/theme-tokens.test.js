@@ -390,6 +390,11 @@ describe('app.css 颜色 token 主题契约', () => {
 
     for (const selector of shadowedRules) {
       const darkAlpha = shadowAlpha(ruleBody(selector))
+      // 阴影已经收敛到主题 token（`--shadow-popover`）：亮色由主题块里的同名变量覆盖，
+      // 不再需要在每条规则后面再写一份 `html[data-appearance='light']` 覆盖。
+      if (darkAlpha === null && /box-shadow:\s*var\(--shadow-popover\)/.test(ruleBody(selector) || '')) {
+        continue
+      }
       expect(darkAlpha, `${selector} 暗色阴影`).not.toBeNull()
       expect(darkAlpha, `${selector} 暗色阴影`).toBeGreaterThanOrEqual(35)
 
@@ -414,23 +419,25 @@ describe('app.css 颜色 token 主题契约', () => {
   })
 
   /**
-   * 亮色主题的取值来自 DSH（deepseek-harness）的 `--dsw-static-*` / `--dsw-alias-*`
-   * 调色板。这几个是最容易被「看着调一下」改走的锚点，钉死它们：
-   * 正文与菜单是 label-primary（近黑），不是中灰；用户消息带是 deepseek-50 淡蓝；
-   * 面板是 neutral-bluish-50，选中行是 neutral-bluish-100。
+   * 亮色主题的取值来自语雀（yuque.com）的 `--yq-yuque-grey-*` 调色板与
+   * `--yq-text-primary` / `--yq-bg-*` 语义层。这几个是最容易被「看着调一下」改走的锚点，
+   * 钉死它们：
+   * - 正文、菜单、标题同为 grey-900 #262626（语雀靠字号/字重分层，不用灰色）；
+   * - 面板 grey-100、选中/hover grey-300、描边 grey-400；
+   * - 用户消息带与行内代码是 grey-200，不再带蓝调；
+   * - 强调色是品牌绿 green-600 #00b96b。
    */
-  it('亮色锚点取 DSH 的 label / surface 档位', () => {
-    expect(lightHexToken('panel')).toBe('#f9fafb') // neutral-bluish-50
-    expect(lightHexToken('active')).toBe('#ebeef2') // neutral-bluish-100
-    expect(lightHexToken('fg-max')).toBe('#0f1115') // label-primary
-    // 正文也是 label-primary：DSH 的 label 阶梯里没有比它更深的正文档，
-    // 亮色顶端两档因此并成同一个值（暗色里 #fff / #d4d4d4 仍然分开）。
-    expect(lightHexToken('fg-strong')).toBe('#0f1115') // label-primary
-    expect(lightHexToken('fg')).toBe('#1b1b1c') // neutral-bluish-900 — 正文
-    expect(lightHexToken('nav-fg')).toBe('#0f1115') // 侧栏/菜单 = label-primary
-    expect(lightHexToken('bubble')).toBe('#edf3fe') // --dsw-specific-bubble
-    expect(lightHexToken('inline-code-bg')).toBe('#fafafa') // markdown-inline-code
-    expect(lightHexToken('heat-empty')).toBe('#ebeef2') // neutral-bluish-100
+  it('亮色锚点取语雀的 grey 阶梯与品牌绿', () => {
+    expect(lightHexToken('panel')).toBe('#fafafa') // grey-100
+    expect(lightHexToken('active')).toBe('#eff0f0') // grey-300 — --yq-bg-primary-hover
+    expect(lightHexToken('fg-max')).toBe('#1f1f1f') // 正文再压一档，只用于 hover
+    expect(lightHexToken('fg-strong')).toBe('#262626') // grey-900 — --yq-text-primary
+    expect(lightHexToken('fg')).toBe('#262626') // grey-900 — 正文
+    expect(lightHexToken('nav-fg')).toBe('#262626') // 侧栏/菜单 = --yq-text-primary
+    expect(lightHexToken('bubble')).toBe('#f4f5f5') // grey-200
+    expect(lightHexToken('inline-code-bg')).toBe('#f4f5f5') // grey-200 — --yq-bg-tertiary
+    expect(lightHexToken('heat-empty')).toBe('#eff0f0') // grey-300
+    expect(lightHexToken('accent')).toBe('#00b96b') // green-600 — --yq-theme
   })
 
   it('菜单文字有专属 token，侧栏不得回退成中灰的 fg-soft', () => {

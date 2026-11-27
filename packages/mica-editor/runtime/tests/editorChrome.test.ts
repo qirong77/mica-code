@@ -15,6 +15,7 @@ const blockSource = readSource('src/playground/plugins/DraggableBlockPlugin/inde
 const blockMenuSource = readSource('src/playground/plugins/DraggableBlockPlugin/BlockMenu.tsx');
 const blockActionsSource = readSource('src/playground/plugins/DraggableBlockPlugin/blockMenuActions.ts');
 const blockStyles = readSource('src/playground/plugins/DraggableBlockPlugin/index.css');
+const blockIcon = readSource('src/playground/images/icons/draggable-block-menu.svg');
 const editorSource = readSource('src/playground/Editor.tsx');
 const notebookBridgeSource = readSource('src/workspace/NotebookBridge.tsx');
 const notebookHostBridgeSource = readSource('../../../plugins/notebook/bridge.ts');
@@ -58,7 +59,17 @@ describe('editor chrome style contracts', () => {
   it('keeps the Yuque-style block handle and action menu contract', () => {
     expect(blockSource).toContain('className="mica-block-handle"');
     expect(blockSource).toContain('data-block-handle');
-    expect(blockMenuSource).toContain('可拖拽和点击');
+    // 语雀的提示拆成四段：可 / 拖拽 / 和 / 点击，奇偶序号分别用灰、白两种字色。
+    for (const word of ['可', '拖拽', '和', '点击']) {
+      expect(blockMenuSource).toContain(`<span>${word}</span>`);
+    }
+    expect(blockStyles).toContain('.mica-block-handle__hint > span:nth-child(odd)');
+    expect(blockStyles).toContain('var(--block-hint-left, -8px)');
+    expect(blockSource).toContain('--block-hint-left');
+    expect(blockStyles).toContain("html[data-appearance='dark'] .mica-block-handle__hint");
+    // 握把图标取自语雀 larkui-icon-drag（六点，viewBox 256）。
+    expect(blockIcon).toContain('viewBox="0 0 256 256"');
+    expect(blockIcon).toContain('M88 187c9.941 0 18 8.059 18 18s-8.059 18-18 18');
     expect(blockSource).toContain('CLICK_SLOP');
 
     expect(blockMenuSource).toContain('className="mica-block-menu"');
@@ -85,7 +96,9 @@ describe('editor chrome style contracts', () => {
     expect(blockStyles).toContain('padding: 8px;');
     expect(blockStyles).toContain('height: 36px;');
     expect(blockStyles).toContain('font-size: 14px;');
-    expect(blockStyles).toContain('border-radius: 8px;');
+    // 语雀的块菜单面板是 6px 圆角（`.ant-menu-submenu-popup.ne-brick-menu`），
+    // 菜单项也是 6px；不要再回到 8。
+    expect(blockStyles).toContain('border-radius: 6px;');
     expect(blockStyles).toContain("data-block-action='delete'");
     expect(blockStyles).toContain('color: var(--mica-arco-text);');
 
@@ -105,6 +118,11 @@ describe('editor chrome style contracts', () => {
     expect(notebookDocumentStyles).toContain('--notebook-page-width: 850px;');
     expect(notebookDocumentStyles).toContain('--notebook-body-gutter: 50px;');
     expect(notebookDocumentStyles).toContain('--notebook-body-top: 24px;');
+    // 语雀把阅读列钉在大纲一侧，宽窗口多出来的留白落在左边。
+    expect(notebookDocumentStyles).toContain('margin-inline: auto 0;');
+    // 只有手机收窄留白；桌面上的编辑列再挤也要留住 50px gutter。
+    expect(notebookDocumentStyles).toContain('@media (max-width: 480px)');
+    expect(notebookDocumentStyles).not.toContain('@media (max-width: 600px)');
     expect(notebookDocumentStyles).toContain("'Chinese Quote', -apple-system, BlinkMacSystemFont");
     expect(notebookDocumentStyles).toContain('letter-spacing: .008em;');
     expect(notebookDocumentStyles).toContain('margin: 26px 0 10px;');
@@ -153,6 +171,18 @@ describe('editor chrome style contracts', () => {
     expect(notebookHostStyles).not.toContain('--notebook-outline-width: 240px;');
   });
 
+  it('keeps the notebook header on Yuque’s 10 / 4 / 10 rhythm', () => {
+    // 书名列在 10px 内距里再缩 4px：图标 14、书名 44，收起按钮留在同一行。
+    expect(notebookHostStyles).toContain('padding: 0 10px 12px;');
+    expect(notebookHostStyles).toContain('padding-inline-start: 4px;');
+    expect(notebookHostStyles).toContain('font-weight: 700;');
+    expect(notebookHostStyles).toContain('.notebook-page .notebook-rail-collapse');
+    expect(notebookHostStyles).toContain('margin: 0 0 0 8px;');
+    // 收起按钮不能再绝对定位压在「N 篇笔记」上。
+    expect(notebookHostStyles).not.toContain('.notebook-rail-title > .ui-button');
+    expect(notebookDesktopSource).toMatch(/notebook-book-info[\s\S]*notebook-rail-collapse/);
+  });
+
   it('reveals the block handle on block hover, in panes narrower than the toolbar breakpoint', () => {
     // Hovering the block (not the invisible handle) has to reveal the grip.
     expect(blockStyles).toContain('.draggable-block-menu.is-visible,');
@@ -164,6 +194,12 @@ describe('editor chrome style contracts', () => {
     // are open; the block handle is positioned inside that gutter.
     expect(notebookDocumentStyles).toContain('--notebook-body-gutter: 50px;');
     expect(notebookDocumentStyles).not.toContain('--notebook-body-gutter: 32px;');
+    // 握把是语雀那枚 24px 圆角按钮：页面底色 + 正文色，16px 图标离正文 2px，
+    // 再抵消 Lexical 固定加的 4px。
+    expect(blockSource).toContain('const BLOCK_HANDLE_TEXT_GAP = 2;');
+    expect(blockSource).toContain('const BLOCK_HANDLE_LEXICAL_OFFSET = 4;');
+    expect(blockStyles).toContain('background: var(--mica-arco-bg);');
+    expect(blockStyles).toContain('opacity: .88;');
   });
 
   it('keeps a portal submenu open while the pointer crosses into it', () => {

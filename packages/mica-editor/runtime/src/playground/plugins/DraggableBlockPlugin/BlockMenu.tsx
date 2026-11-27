@@ -140,7 +140,7 @@ export default function BlockMenu({
 }: {
   /** The handle the menu hangs from. */
   anchor: Rect;
-  /** The block the menu acts on; the card opens under it like Yuque's. */
+  /** The block the menu acts on; the card opens beside its grip like Yuque's. */
   blockRect: Rect;
   shape: BlockShape | null;
   insertOptions: ComponentPickerOption[];
@@ -385,5 +385,12 @@ export default function BlockMenu({
 
 /** Hover hint the handle shows, matching Yuque's "可拖拽和点击". */
 export function BlockHandleHint(): JSX.Element {
-  return <span className="mica-block-handle__hint">可拖拽和点击</span>;
+  return (
+    <span className="mica-block-handle__hint">
+      <span>可</span>
+      <span>拖拽</span>
+      <span>和</span>
+      <span>点击</span>
+    </span>
+  );
 }

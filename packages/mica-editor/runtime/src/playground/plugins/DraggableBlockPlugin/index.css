@@ -46,21 +46,32 @@
   padding: 0;
   border: 0;
   border-radius: 6px;
-  color: var(--mica-arco-text-soft);
-  background: transparent;
+  /* 与语雀 .ne-ui-brick-toolbar-trigger 对齐：24px、圆角 6、默认 .88 透明度，
+     底色取页面底色、图标取正文色，hover 换成 tertiary，按下换成 hover。 */
+  color: var(--notebook-text-primary);
+  background: var(--notebook-bg-primary);
   box-shadow: none;
+  opacity: .88;
   cursor: grab;
   appearance: none;
 }
 
-.mica-block-handle:hover,
-.draggable-block-menu.is-open .mica-block-handle {
-  background: var(--mica-arco-active);
-  color: var(--mica-arco-text);
+.mica-block-handle:hover {
+  background: var(--notebook-bg-tertiary);
+  color: var(--notebook-text-primary);
+  opacity: 1;
 }
 
-.mica-block-handle:active {
-  cursor: grabbing;
+.mica-block-handle:focus-visible {
+  background: var(--notebook-bg-hover);
+  color: var(--notebook-text-primary);
+  opacity: 1;
+}
+
+.draggable-block-menu.is-open .mica-block-handle {
+  background: var(--notebook-bg-hover);
+  color: var(--notebook-text-primary);
+  opacity: 1;
 }
 
 .mica-block-handle:focus-visible {
@@ -73,22 +84,33 @@
   flex: none;
   width: 16px;
   height: 16px;
-  color: var(--mica-arco-text-soft);
+  color: currentColor;
+  opacity: .88;
   background: currentColor;
   -webkit-mask: url('../../images/icons/draggable-block-menu.svg') center / contain no-repeat;
   mask: url('../../images/icons/draggable-block-menu.svg') center / contain no-repeat;
 }
 
-/* "可拖拽和点击" — the hint Yuque shows next to the grip. */
+.mica-block-handle:hover .mica-block-handle__grip,
+.draggable-block-menu.is-open .mica-block-handle__grip,
+.mica-block-handle:focus-visible .mica-block-handle__grip {
+  opacity: 1;
+}
+
+/* 「可拖拽和点击」——语雀的 Ant Tooltip：12px、6/8 内距、6px 圆角、4px 间距，
+   正文里的「可」「和」用 #d8dad9，「拖拽」「点击」保持白色。 */
 .mica-block-handle__hint {
   position: absolute;
-  right: 0;
+  left: var(--block-hint-left, -8px);
   bottom: calc(100% + 4px);
   z-index: 1;
-  padding: 4px 8px;
+  box-sizing: border-box;
+  min-width: 30px;
+  min-height: 32px;
+  padding: 6px 8px;
   border-radius: 6px;
   color: #fff;
-  background: #1f2329;
+  background: rgb(0 0 0 / 75%);
   font-size: 12px;
   font-weight: 400;
   line-height: 20px;
@@ -98,10 +120,19 @@
   transition: opacity 140ms ease;
 }
 
+.mica-block-handle__hint > span:nth-child(odd) {
+  color: #d8dad9;
+}
+
+html[data-appearance='dark'] .mica-block-handle__hint {
+  background: #1f1f1f;
+}
+
 .mica-block-handle:hover .mica-block-handle__hint,
 .mica-block-handle:focus-visible .mica-block-handle__hint {
   opacity: 1;
-  transition-delay: 300ms;
+  /* Ant Tooltip 默认 mouseEnterDelay 0.1s。 */
+  transition-delay: 100ms;
 }
 
 /* The open card covers the block; the hover hint would sit behind it. */
@@ -121,11 +152,19 @@
   overflow: auto;
   padding: 8px;
   border: 1px solid var(--mica-arco-line-soft);
-  border-radius: 8px;
+  /* 语雀的块菜单是 6px 圆角（`.ant-menu-submenu-popup.ne-brick-menu`），
+     与共享菜单 `.mica-menu` 保持同一个数。 */
+  border-radius: 6px;
   outline: none;
   color: var(--mica-arco-text);
   background: var(--mica-arco-bg);
-  box-shadow: 0 8px 16px 4px color-mix(in srgb, #000 4%, transparent);
+  /* 语雀浮层的三层阴影：1px 收边 + 8px 柔边 + 16px 扩散。 */
+  box-shadow: var(
+    --shadow-popover,
+    0 1px 4px -2px rgb(0 0 0 / 13%),
+    0 2px 8px rgb(0 0 0 / 8%),
+    0 8px 16px 4px rgb(0 0 0 / 4%)
+  );
   font-family: inherit;
   font-size: 14px;
   line-height: 36px;

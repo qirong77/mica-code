@@ -117,6 +117,11 @@ function createMemoryHost() {
         }
         return readRecord(`document:${id}`)
       },
+      async version(id) {
+        if (id !== RAIL_LAYOUT_DOCUMENT) validateNodeId(id)
+        const record = records.get(`document:${id}`)
+        return { ok: true, version: record?.version ?? null }
+      },
       write: async (id, value, options) => writeRecord('document', id, value, options)
     },
     page: {

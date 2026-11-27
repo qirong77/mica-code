@@ -454,20 +454,15 @@ body.mica-arco-theme .mica-block-menu .mica-menu-item.arco-btn[data-block-action
 body.mica-arco-theme .mica-block-menu .mica-menu-separator {
   background: var(--notebook-border-primary);
 }
-body.mica-arco-theme .mica-block-handle {
-  color: var(--notebook-text-caption);
-}
-body.mica-arco-theme .mica-block-handle:hover,
-body.mica-arco-theme .draggable-block-menu.is-open .mica-block-handle {
-  color: var(--notebook-text-primary);
-  background: var(--notebook-bg-hover);
+/* 手机宽度里 50px 的 gutter 已经用于正文留白，24px 的块锚点会压到字上：
+   语雀在移动端同样不提供这个锚点。 */
+@media (max-width: 480px) {
+  body.mica-arco-theme .draggable-block-menu {
+    display: none;
+  }
 }
 body.mica-arco-theme .mica-block-handle:focus-visible {
   outline-color: var(--notebook-accent);
-}
-body.mica-arco-theme .mica-block-handle__hint {
-  color: var(--notebook-bg-primary);
-  background: var(--notebook-text-primary);
 }
 body.mica-arco-theme .table-selection-handles {
   color: var(--notebook-text-caption);

@@ -92,6 +92,13 @@ export const RAIL_MAX_WIDTH = 460;
 export const RAIL_DEFAULT_WIDTH = 260;
 const RAIL_MIN_MAIN_WIDTH = 480;
 const RAIL_MAX_SHARE = 0.42;
+/** 大纲栏宽度；与 notebook.css 的 `--notebook-outline-width` 一致。 */
+const OUTLINE_WIDTH = 305;
+/**
+ * 大纲停靠时正文至少保留的宽度。语雀在窗口变窄时不再让大纲挤压正文：
+ * 1024px 下它的正文仍有 626px，而两边栏都占位时会只剩 419px。
+ */
+const OUTLINE_DOCK_MIN_DOCUMENT = 540;
 /** 键盘一次挪多少。 */
 export const RAIL_KEY_STEP = 16;
 /**
@@ -154,6 +161,14 @@ export function clampRailWidth(width, available) {
   const value = Number(width);
   const { min, max } = notebookRailLimits(available);
   return Math.min(Math.max(Number.isFinite(value) ? Math.round(value) : RAIL_DEFAULT_WIDTH, min), max);
+}
+
+/**
+ * 大纲是否还停得下。语雀在窗口变窄时先收起大纲，而不是把正文压窄：
+ * 1024px 下它的正文仍有 626px，而两侧栏都占位时只剩 419px。
+ */
+export function outlineDockFits(documentWidth) {
+  return Number(documentWidth) - OUTLINE_WIDTH >= OUTLINE_DOCK_MIN_DOCUMENT;
 }
 
 function editorNodeText(value) {
@@ -338,11 +353,15 @@ export default function NotebookPage({ api }) {
   const [layout, setLayout] = useState(() => ({
     mobile: window.innerWidth <= 760,
   }));
+  /** 页面实际宽度：大纲是否还停得下由它决定，不能只看窗口断点。 */
+  const [pageWidth, setPageWidth] = useState(() => window.innerWidth);
   const [railWidth, setRailWidth] = useState(RAIL_DEFAULT_WIDTH);
   const [railMaxWidth, setRailMaxWidth] = useState(RAIL_MAX_WIDTH);
   const [railDragging, setRailDragging] = useState(false);
   const [focused, setFocused] = useState(false);
   const [outlineOpen, setOutlineOpen] = useState(() => !window.matchMedia('(max-width: 760px)').matches);
+  /** 窄窗口里从右侧彩条临时唤出大纲；窗口变宽后自动收起。 */
+  const [outlinePeek, setOutlinePeek] = useState(false);
   const [outlineCollapsed, setOutlineCollapsed] = useState(new Set());
   const [outline, setOutline] = useState(emptyOutline);
   const [externalUpdate, setExternalUpdate] = useState(null);
@@ -518,6 +537,16 @@ export default function NotebookPage({ api }) {
   );
   const railOverlay = layout.mobile && railOpen && !focused;
   const outlineAvailable = !focused && !!active;
+  // 目录在移动端是浮层，不占正文宽度；桌面收起时也不占位。
+  const documentWidth = layout.mobile || !railOpen ? pageWidth : pageWidth - railWidth;
+  // 语雀在窗口变窄时收起大纲，而不是把正文压到四百多像素。保留用户
+  // 的展开意图：窗口重新变宽时大纲自己回来。
+  const outlineFits = outlineDockFits(documentWidth);
+  const outlineDocked = outlineAvailable && outlineOpen && outlineFits;
+  const outlinePeeking = outlineAvailable && outlinePeek && !outlineFits;
+  useEffect(() => {
+    if (outlineFits && outlinePeek) setOutlinePeek(false);
+  }, [outlineFits, outlinePeek]);
 
   /**
    * 把宽度写到页面根节点的样式变量上。
@@ -1094,6 +1123,7 @@ export default function NotebookPage({ api }) {
       const applied = applyRailWidth(railWidthRef.current);
       setRailWidth(applied);
       setRailMaxWidth(notebookRailLimits(entry.contentRect.width).max);
+      setPageWidth(Math.round(entry.contentRect.width));
       const next = { mobile: entry.contentRect.width <= 760 };
       const previous = layoutRef.current;
       if (previous.mobile === next.mobile) return;
@@ -1669,14 +1699,15 @@ export default function NotebookPage({ api }) {
               </span>
               <strong>我的笔记</strong>
               <small>{loaded ? `${noteCount} 篇笔记` : '\u00a0'}</small>
+              <Button
+                className="notebook-rail-collapse"
+                variant="ghost"
+                icon={<PanelLeftClose size={16} />}
+                title="收起目录"
+                aria-label="收起目录"
+                onClick={() => setRailOpen(false)}
+              />
             </div>
-            <Button
-              variant="ghost"
-              icon={<PanelLeftClose size={15} />}
-              title="收起目录"
-              aria-label="收起目录"
-              onClick={() => setRailOpen(false)}
-            />
           </div>
           <div className="notebook-rail-tools">
             <div className="notebook-search">
@@ -2176,9 +2207,23 @@ export default function NotebookPage({ api }) {
                 </div>
               ) : null}
             </div>
-            {outlineAvailable &&
-              (outlineOpen ? (
-                <aside className="notebook-outline" aria-label="文档大纲" inert={editorModalOpen}>
+            {outlineAvailable && (outlineDocked || outlinePeeking) ? (
+              <>
+                {/* 窄窗口里大纲是浮层：点空白处先收起它，别顺手改到正文。 */}
+                {outlinePeeking ? (
+                  <button
+                    type="button"
+                    className="notebook-outline-scrim"
+                    aria-label="关闭文档大纲"
+                    tabIndex={-1}
+                    onClick={() => setOutlinePeek(false)}
+                  />
+                ) : null}
+                <aside
+                  className={`notebook-outline${outlinePeeking ? ' is-floating' : ''}`}
+                  aria-label="文档大纲"
+                  inert={editorModalOpen}
+                >
                   <header>
                     <strong>文档大纲</strong>
                     <Button
@@ -2186,7 +2231,7 @@ export default function NotebookPage({ api }) {
                       icon={<YuqueIcon name="outline" />}
                       title="隐藏文档大纲"
                       aria-label="隐藏文档大纲"
-                      onClick={() => setOutlineOpen(false)}
+                      onClick={() => (outlinePeeking ? setOutlinePeek(false) : setOutlineOpen(false))}
                     />
                   </header>
                   <nav className="notebook-outline-list" aria-label="当前笔记的标题">
@@ -2199,37 +2244,38 @@ export default function NotebookPage({ api }) {
                     )}
                   </nav>
                 </aside>
-              ) : (
-                <button
-                  type="button"
-                  className="notebook-outline-rail"
-                  aria-label="显示文档大纲"
-                  title="显示文档大纲"
-                  onClick={() => setOutlineOpen(true)}
-                >
-                  <span className="notebook-outline-rail-ticks" aria-hidden="true">
-                    {outline.items.length ? (
-                      outline.items.map((item, index) => (
-                        <i
-                          key={item.key}
-                          data-level={Math.min(6, Math.max(1, item.level))}
-                          className={item.key === outline.activeKey ? 'is-active' : undefined}
-                          style={{
-                            '--outline-rail-hue': Math.round(
-                              205 - (index / Math.max(1, outline.items.length - 1)) * 245,
-                            ),
-                          }}
-                        />
-                      ))
-                    ) : (
-                      <i className="is-empty" />
-                    )}
-                  </span>
-                  <span className="notebook-outline-rail-icon">
-                    <YuqueIcon name="outline" size={13} />
-                  </span>
-                </button>
-              ))}
+              </>
+            ) : outlineAvailable ? (
+              <button
+                type="button"
+                className="notebook-outline-rail"
+                aria-label="显示文档大纲"
+                title="显示文档大纲"
+                onClick={() => (outlineFits ? setOutlineOpen(true) : setOutlinePeek(true))}
+              >
+                <span className="notebook-outline-rail-ticks" aria-hidden="true">
+                  {outline.items.length ? (
+                    outline.items.map((item, index) => (
+                      <i
+                        key={item.key}
+                        data-level={Math.min(6, Math.max(1, item.level))}
+                        className={item.key === outline.activeKey ? 'is-active' : undefined}
+                        style={{
+                          '--outline-rail-hue': Math.round(
+                            205 - (index / Math.max(1, outline.items.length - 1)) * 245,
+                          ),
+                        }}
+                      />
+                    ))
+                  ) : (
+                    <i className="is-empty" />
+                  )}
+                </span>
+                <span className="notebook-outline-rail-icon">
+                  <YuqueIcon name="outline" size={13} />
+                </span>
+              </button>
+            ) : null}
           </div>
         </main>
       </div>

@@ -39,6 +39,11 @@ import {
 const DRAGGABLE_BLOCK_MENU_CLASSNAME = 'draggable-block-menu';
 /** A pointer that moved further than this is a block drag, not a click. */
 const CLICK_SLOP = 4;
+/** Yuque's trigger is a 24px chip whose 16px grip stops 2px before the text. */
+const BLOCK_HANDLE_SIZE = 24;
+const BLOCK_HANDLE_TEXT_GAP = 2;
+/** Lexical shifts the handle by its own `SPACE` constant, always 4px to the right. */
+const BLOCK_HANDLE_LEXICAL_OFFSET = 4;
 /** "在下方添加" offers the blocks Yuque lists there, not the whole catalog. */
 const INSERT_TITLES = [
   '正文 Paragraph',
@@ -116,10 +121,27 @@ export default function DraggableBlockPlugin({
       const columnLeft = root
         ? root.getBoundingClientRect().left + (Number.parseFloat(getComputedStyle(root).paddingLeft) || 0)
         : blockLeft;
-      container.style.setProperty(
-        '--block-handle-left',
-        `${Math.max(0, Math.round((columnLeft || blockLeft) - anchorLeft - 28))}px`,
+      const handleLeft = Math.max(
+        0,
+        Math.round(
+          (columnLeft || blockLeft) -
+            anchorLeft -
+            BLOCK_HANDLE_SIZE +
+            BLOCK_HANDLE_TEXT_GAP -
+            BLOCK_HANDLE_LEXICAL_OFFSET,
+        ),
       );
+      container.style.setProperty('--block-handle-left', `${handleLeft}px`);
+      // 语雀的 Ant Tooltip 居中于握把；靠左放不下时整体右移，不裁掉文字。
+      const hint = container.querySelector<HTMLElement>('.mica-block-handle__hint');
+      const hintWidth = hint?.offsetWidth ?? 0;
+      if (hintWidth > 0) {
+        // Lexical 还会把整枚菜单右移 4px，夹紧时按它的实际位置算。
+        const handleViewportLeft = anchorLeft + handleLeft + BLOCK_HANDLE_LEXICAL_OFFSET;
+        const centered = handleViewportLeft + (BLOCK_HANDLE_SIZE - hintWidth) / 2;
+        const clamped = Math.max(0, Math.min(centered, document.documentElement.clientWidth - hintWidth));
+        container.style.setProperty('--block-hint-left', `${Math.round(clamped - handleViewportLeft)}px`);
+      }
     },
     [anchorElem],
   );
@@ -158,6 +180,19 @@ export default function DraggableBlockPlugin({
       if (frame) window.cancelAnimationFrame(frame);
     };
   }, [anchorElem, draggableElement, placeHandle]);
+
+  // The hint is measured before the webfont settles; re-place it once the final
+  // width is known so the tooltip clamps instead of drifting right.
+  useEffect(() => {
+    if (!draggableElement) return;
+    let alive = true;
+    void document.fonts?.ready.then(() => {
+      if (alive) placeHandle(draggableElement);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [draggableElement, placeHandle]);
 
   // The caret goes back to the block the menu acted on, once the card is gone.
   useEffect(() => {

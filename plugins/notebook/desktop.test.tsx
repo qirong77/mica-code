@@ -7,6 +7,7 @@ import NotebookPage, {
   clampRailWidth,
   createDefaultNote,
   editorOverlayMode,
+  outlineDockFits,
   notebookRowTap,
   notebookRailLimits,
 } from './desktop.jsx';
@@ -94,6 +95,14 @@ describe('Notebook rail width', () => {
     // 刚过移动端断点时目录仍有可拖动区间，不会把正文挤没。
     expect(notebookRailLimits(761)).toEqual({ min: 200, max: 281 });
     expect(clampRailWidth(RAIL_DEFAULT_WIDTH, 761)).toBe(RAIL_DEFAULT_WIDTH);
+  });
+
+  it('docks the outline only while the document keeps a readable column', () => {
+    // 语雀实测：1180px 时正文 516px（大纲停靠），1024px 时正文 626px（大纲收起）。
+    expect(outlineDockFits(1180 - RAIL_DEFAULT_WIDTH)).toBe(true);
+    expect(outlineDockFits(1440 - RAIL_DEFAULT_WIDTH)).toBe(true);
+    expect(outlineDockFits(1024 - RAIL_DEFAULT_WIDTH)).toBe(false);
+    expect(outlineDockFits(900 - RAIL_DEFAULT_WIDTH)).toBe(false);
   });
 });
 

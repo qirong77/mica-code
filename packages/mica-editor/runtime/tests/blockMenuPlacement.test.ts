@@ -16,7 +16,7 @@ function rect(left: number, top: number, width: number, height: number) {
 }
 
 describe('placeBlockMenu', () => {
-  it('aligns the card with the grip and the block top', () => {
+  it('opens beside the grip without covering its click target', () => {
     const block = rect(330, 200, 700, 48);
     const placement = placeBlockMenu({
       anchor: grip,
@@ -24,7 +24,7 @@ describe('placeBlockMenu', () => {
       size: {width: 180, height: 300},
       viewport,
     });
-    expect(placement).toEqual({left: grip.left - VIEWPORT_PADDING, top: 200});
+    expect(placement).toEqual({left: grip.right + MENU_GAP, top: 200});
   });
 
   it('keeps a tall block’s card beside the block instead of mirroring it above', () => {
@@ -64,14 +64,26 @@ describe('placeBlockMenu', () => {
     expect(placement.top).toBe(VIEWPORT_PADDING);
   });
 
-  it('pulls the card back inside the right edge', () => {
+  it('flips to the grip’s left side at the right edge', () => {
     const placement = placeBlockMenu({
       anchor: {left: 1380, top: 200, right: 1404, bottom: 224},
       blockRect: rect(1390, 200, 40, 24),
       size: {width: 180, height: 300},
       viewport,
     });
-    expect(placement.left + 180).toBe(viewport.width - VIEWPORT_PADDING);
+    expect(placement.left).toBe(1380 - 180 - MENU_GAP);
+    expect(placement.left + 180).toBeLessThanOrEqual(1380);
+  });
+
+  it('keeps the grip visible when the right side is unavailable', () => {
+    const placement = placeBlockMenu({
+      anchor: {left: 24, top: 200, right: 48, bottom: 224},
+      blockRect: rect(52, 200, 240, 24),
+      size: {width: 180, height: 300},
+      viewport: {width: 240, height: 900},
+    });
+    expect(placement.left).toBe(52);
+    expect(placement.left).toBeGreaterThanOrEqual(48 + MENU_GAP);
   });
 
   it('keeps the card out of the notebook toolbar and status bar', () => {
@@ -93,7 +105,8 @@ describe('placeBlockMenu', () => {
       size: {width: 120, height: 300},
       viewport,
     });
-    expect(placement.left).toBe(viewport.width - MENU_MIN_WIDTH - VIEWPORT_PADDING);
+    expect(placement.left).toBe(1400 - MENU_MIN_WIDTH - MENU_GAP);
+    expect(placement.left + MENU_MIN_WIDTH).toBeLessThanOrEqual(1400);
   });
 });
 

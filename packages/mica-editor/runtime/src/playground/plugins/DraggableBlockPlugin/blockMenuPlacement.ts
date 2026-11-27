@@ -2,12 +2,12 @@
  * Placement maths for the block menu, kept away from React so the geometry can
  * be tested directly.
  *
- * Yuque anchors the card at the grip: its left edge lines up with the handle
- * and its top edge lines up with the block's first line. The card never jumps
- * above its block — when the block sits near the bottom of the window the card
- * slides up just enough to stay visible. The old rule ("open below the block,
- * otherwise mirror it above") threw the card at the top of the page for any
- * tall block, covering the document title and the toolbar.
+ * Yuque opens the card beside the grip, leaving the grip itself in the gutter
+ * as a visible anchor. Its top edge lines up with the block's first line. The
+ * card never jumps above its block — when the block sits near the bottom of the
+ * window the card slides up just enough to stay visible. The old rule ("open
+ * below the block, otherwise mirror it above") threw the card at the top of the
+ * page for any tall block, covering the document title and the toolbar.
  */
 
 export type PlacementRect = {left: number; top: number; right: number; bottom: number};
@@ -35,8 +35,10 @@ function safeEdge(value: number | undefined): number {
 /**
  * Where the main card goes.
  *
- * `anchor` is the grip, `blockRect` the block it acts on. The card starts at
- * the grip's left edge pulled slightly into the gutter, and at the block's top.
+ * `anchor` is the grip, `blockRect` the block it acts on. The card starts just
+ * after the grip so the handle remains clickable/visible while the menu is
+ * open. If the right side is full, it flips to the grip's left side before
+ * falling back to a viewport clamp.
  */
 export function placeBlockMenu({
   anchor,
@@ -53,11 +55,15 @@ export function placeBlockMenu({
 }): Placement {
   const width = Math.max(size.width, MENU_MIN_WIDTH);
   const height = size.height;
-  const left = clamp(
-    anchor.left - VIEWPORT_PADDING,
-    Math.max(VIEWPORT_PADDING, safeEdge(safeArea?.left)),
-    viewport.width - width - Math.max(VIEWPORT_PADDING, safeEdge(safeArea?.right)),
-  );
+  const leftMin = Math.max(VIEWPORT_PADDING, safeEdge(safeArea?.left));
+  const rightMax = viewport.width - Math.max(VIEWPORT_PADDING, safeEdge(safeArea?.right));
+  const rightOfGrip = anchor.right + MENU_GAP;
+  const leftOfGrip = anchor.left - width - MENU_GAP;
+  const left = rightOfGrip + width <= rightMax
+    ? rightOfGrip
+    : leftOfGrip >= leftMin
+      ? leftOfGrip
+      : clamp(rightOfGrip, leftMin, rightMax - width);
   const topMin = Math.max(VIEWPORT_PADDING, safeEdge(safeArea?.top));
   const bottomInset = Math.max(VIEWPORT_PADDING, safeEdge(safeArea?.bottom));
 

@@ -32,32 +32,32 @@ const DARK = {
   brightWhite: '#ffffff'
 }
 
-/* 亮色终端：内容面 --color-canvas #ffffff、正文 --color-fg #2c2c2e、光标
-   --color-fg-max #0f1115、选中 --color-accent 的 22%；ANSI 用亮色状态 token。
+/* 亮色终端：语雀灰阶——内容面 #ffffff、正文 grey-900 #262626、光标 #1f1f1f、
+   选中品牌绿 22%；ANSI 用语雀的 red/green/yellow/blue 深档（白底可读的那一档）。
    亮底上没有「更亮一档」的余地：bright* 若继续往浅里走，白底对比度会掉到 3:1 以下
    （#f25a5a 2.9、#dd8629 2.8），ls / git / npm 的强调色反而看不清。与 VS Code 的
    Light+ 一致：彩色档保持本色，只有黑白两对继续走灰度阶梯。 */
 const LIGHT = {
   background: '#ffffff',
-  foreground: '#2c2c2e',
-  cursor: '#0f1115',
-  selectionBackground: 'rgba(65, 118, 230, 0.22)',
-  black: '#0f1115',
-  red: '#ec1313',
-  green: '#2b8a3e',
-  yellow: '#b45309',
-  blue: '#4176e6',
-  magenta: '#6741d9',
+  foreground: '#262626',
+  cursor: '#1f1f1f',
+  selectionBackground: 'rgba(0, 185, 107, 0.22)',
+  black: '#262626',
+  red: '#df2a3f',
+  green: '#00663b',
+  yellow: '#8f6600',
+  blue: '#0c68ca',
+  magenta: '#722ed1',
   cyan: '#0f766e',
-  white: '#81858c',
-  brightBlack: '#61666b',
-  brightRed: '#ec1313',
-  brightGreen: '#2b8a3e',
-  brightYellow: '#b45309',
-  brightBlue: '#4176e6',
-  brightMagenta: '#6741d9',
+  white: '#585a5a',
+  brightBlack: '#8a8f8d',
+  brightRed: '#df2a3f',
+  brightGreen: '#00663b',
+  brightYellow: '#8f6600',
+  brightBlue: '#0c68ca',
+  brightMagenta: '#722ed1',
   brightCyan: '#0f766e',
-  brightWhite: '#979da6'
+  brightWhite: '#8a8f8d'
 }
 
 /* Catppuccin Mocha / Latte：ANSI 取 Catppuccin 官方调色板的 terminal 映射
