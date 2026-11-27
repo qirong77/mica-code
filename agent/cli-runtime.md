@@ -3,7 +3,7 @@
 ## 启动
 
 1. `apps/cli/src/app/configWebWorker.ts` 优先分派 Config Web worker。
-2. `apps/cli/src/index.ts` 在加载 config/runtime 前分派 version、models、exec、compact、插件命令（`mica commit`）与交互模式；`startup/validate-config.js` 补齐默认值。
+2. `apps/cli/src/index.ts` 在加载 config/runtime 前分派 version、models、exec、compact、插件命令（`mica commit`）、`remote` 与交互模式；`startup/validate-config.js` 补齐默认值。
 3. `Application.start()`：Ink → 配置校验 → 必要时选初始模型 → runtime、session、registry、hooks、services、agent/session manager、UI bridge、subagent manager。
 4. 设 active context → 注册内置插件 → 用户插件 `setupAll` 并写 `plugin-status.json` → 启动 UI bridge 与 runtime。
 5. 失败时显示修复提示、清理资源、设置 `process.exitCode = 1`。
@@ -76,3 +76,12 @@
 - 档位的**字段名**跟着「谁在服务这次请求」走（`isGatewayEntry`）：厂商直连的条目（`deepseek-flash`）用 `thinking` / `reasoning_effort`，聚合网关的条目（`z-ai/glm-4.6` 这类带前缀的键）只能用 `reasoning.effort`——网关会静默忽略 `thinking`，推理照跑。两边一起发更糟，网关会先命中 `thinking` / `reasoning_effort` 而把 `none` 顶掉。
 - models.dev 的档位是社区数据，未必等于某台网关的真实枚举（`openai/gpt-6.1-terra` 在一处声明 `none`，某台 codex 网关只认 low…max）。provider 用 400/422 明确拒绝本次带上的推理参数时，客户端丢掉推理参数重发一次，并经 `markEffortLevelRejected` 记住「这台服务商的这个模型不收这一档」，`resolveEffortParams` 之后直接不发——压缩摘要、起标题、子代理这些每次新建客户端、effort 又不是用户选的路径因此不会反复撞同一个 400。
 - 模型列表全部来自 `config.json` 里手填的 `providers[].models`：没有任何探测 / 拉取路径，配置页也不再提供「模型列表地址」。
+
+## 远程上下文（`mica remote`）
+
+- 入口在 `apps/cli/src/remote/`：`serve` 是执行机 Worker，`pair` / `list` / `history` / `status` / `revoke` 是控制端命令；协议与加密在 `packages/mica-remote-protocol`，中转服务在 `apps/relay`。`serve` 显式启动、显式停止，不注册系统服务，也不依赖某个聊天窗口。
+- `serve` 只向中转机出站连接，不监听端口。它发布的是工作区/会话的不透明引用、手动标题和状态；自动标题、系统提示词、推理、工具结果、图片数据和完整 session JSON 都不进入目录或历史页。
+- 控制端每次命令重新连一次中转机；`pair` 用一次性配对码建立 X25519 设备密钥，之后 RPC 走 AES-256-GCM 信封。中转机只看到设备 id、授权、目录元数据、帧大小和时序。
+- `history` 按 `(sessionRef, cursor)` 从最新消息向前分页，单页正文与帧大小都有上限；A 离线时目录显示最后同步时间并标「缓存」，任何读取历史或文件的请求都直接报离线，不回退到 B 的同名目录。
+- 目录里的 `running` 只认本地 turn 租约：持有进程已消失的残留 running 在发布前降级为 `unknown`，历史仍返回已保存的消息，不把崩溃会话伪装成正在执行。
+- 首版只开放 `directory.read` / `history.read`。`turn.operate` 尚未实现；远程执行必须先补齐受限工具集、执行隔离和请求回执去重，不能把本机 `app-server` 的全部 RPC 透传出去。

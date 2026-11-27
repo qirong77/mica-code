@@ -160,6 +160,21 @@ mica app-server
 
 `exec` 默认输出文本，`--json` 输出 ThreadEvent JSONL；`app-server` 通过 stdin/stdout 提供 Codex v2 风格协议子集，用于客户端持续会话。它不是浏览器 HTTP 服务。工具使用宿主的文件与命令环境；参数、事件和集成示例见[自动化与协议](https://qirong77.github.io/mica-code/docs/headless/)。
 
+需要从另一台机器查看某个工作区时，先在中转机上运行 `apps/relay/src/entry.ts`，再在执行机 A 和控制端 B 分别注册设备：
+
+```bash
+# A：显式启动远程 Worker，打印本次运行的配对码；停止进程即下线
+mica remote serve --relay https://relay.example.com --workspace ~/project
+
+# B：用配对码建立设备授权，之后列出目录、按页读取历史
+mica remote pair <配对码> --relay https://relay.example.com --invite <邀请码>
+mica remote list
+mica remote history <sessionRef> --machine <machineId>
+mica remote revoke <machineId>
+```
+
+第一版只开放目录与只读历史：消息正文经端到端加密，按页传输并受大小/频率限制；不上传项目文件或完整会话 JSON。执行机离线时目录显示最后同步时间，读取历史会明确失败。远程执行（`turn.operate`）尚未开放，边界与后续阶段见[远程 Agent 设计](./docs/remote-agent-design.md)。
+
 ## 扩展你的工作方式
 
 - **Skills 与项目指令**：将可复用的流程写入 `.mica/skills/<name>/SKILL.md`，将项目约定放在 `AGENT.md` 或 `AGENTS.md`。

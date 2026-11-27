@@ -8,6 +8,7 @@
 | `apps/desktop/`    | Web 运行时、renderer、Electron 容器           |
 | `apps/config-web/` | 配置页浏览器宿主：Bun HTTP 服务与内嵌静态资源 |
 | `apps/website/`    | Astro 官网                                    |
+| `apps/relay/`      | 远程上下文中转机：设备注册、配对授权、在线状态、目录索引与密文转发 |
 
 仓库根的 `plugins/` 是官方插件源码，由 `packages/mica-official-plugins` 静态登记后编译进产物；用户插件装在 `$MICA_HOME/plugins`，格式相同。
 
@@ -35,6 +36,7 @@
 | `mica-config-ui`              | 配置页唯一实现：页面、数据动作、共享类型                                |
 | `mica-editor`                 | 共享 Lexical 编辑器：富文本与 Markdown 两种模式、隔离 runtime、CDN 依赖  |
 | `mica-diagnostics`            | 诊断日志唯一写入器：JSONL 落盘、慢操作聚合、进程内存采样（node-only）   |
+| `mica-remote-protocol`        | 远程上下文协议：设备身份 / 端到端加密 / 帧与限额 / 会话投影；不含 UI 与网络 |
 | `mica-official-plugins`       | 官方插件目录：`manifests.js` 只含清单，`index.js` 才带入口              |
 | `@anthropic/ink`              | 仓库内 vendored 的 Ink 分支：终端渲染原语，`mica-ui` 的唯一 Ink 来源    |
 
