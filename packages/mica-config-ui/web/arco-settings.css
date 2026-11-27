@@ -30,8 +30,7 @@ body.mica-arco-theme {
   --mica-arco-text: var(--color-fg-strong);
   --mica-arco-text-soft: var(--color-fg-soft);
   --mica-arco-text-faint: var(--color-fg-faint);
-  /* 禁用字色 = 语雀的 --yq-text-disable（grey-600），比 faint 再退一档。 */
-  --mica-arco-text-disabled: var(--color-fg-ghost);
+  --mica-arco-text-disabled: var(--color-fg-faint);
   --mica-arco-line-soft: var(--color-line-soft);
   --mica-arco-line: var(--color-line);
   --mica-arco-line-strong: var(--color-line-strong);
@@ -88,9 +87,7 @@ body.mica-arco-theme,
   --color-bg-3: var(--mica-arco-panel);
   --color-bg-4: var(--mica-arco-raised);
   --color-bg-5: var(--mica-arco-active);
-  /* 浮层底色 = 画布（亮色纯白、暗色最深的画布色），不再是面板灰：
-     语雀的下拉/气泡都是白底，和它背后的列表拉开一层。 */
-  --color-bg-popup: var(--mica-arco-bg);
+  --color-bg-popup: var(--mica-arco-panel);
   --color-fill-1: var(--mica-arco-overlay);
   --color-fill-2: var(--mica-arco-raised);
   --color-fill-3: var(--mica-arco-active);
@@ -137,11 +134,9 @@ body.mica-arco-theme,
   --color-tooltip-bg: var(--mica-arco-active);
   --color-mask-bg: rgb(0 0 0 / 55%);
   --color-spin-layer-bg: var(--mica-arco-overlay);
-  /* 圆角只有三档，和语雀一致：4 = 图标按钮/小控件（语雀顶栏 32×32 按钮实测 4px）、
-     6 = 输入框/下拉/菜单项、8 = 浮层与卡片。 */
   --border-radius-none: 0;
-  --border-radius-small: 4px;
-  --border-radius-medium: 6px;
+  --border-radius-small: 2px;
+  --border-radius-medium: 4px;
   --border-radius-large: 8px;
   --border-radius-circle: 50%;
   /* Component CSS wraps these channel lists in rgb(). */
@@ -377,26 +372,25 @@ html[data-appearance='light'] :is(body.mica-arco-theme, .mica-config-ui) {
   margin-left: 0;
 }
 
-/* Shared action menus are also used by iframe portals outside the settings scope.
-   尺寸对齐语雀的块菜单（`.ne-brick-menu`）：面板 6px 圆角、8px 内边距、180 起宽，
-   菜单项 36px 高、6px 圆角、14px 字号，悬浮底色是 grey-3（亮色 #eff0f0）。
-   语雀的面板本身没有描边，只靠阴影分层；这里留一层 6% 的线，暗色主题下才收得住边。 */
+/* Shared action menus are also used by iframe portals outside the settings scope. */
 .mica-menu {
   box-sizing: border-box;
   min-width: 180px;
   max-width: calc(100vw - 16px);
   max-height: calc(100dvh - 24px);
   overflow: auto;
-  padding: 8px;
+  padding: 6px;
   border: 1px solid var(--mica-arco-line-soft);
-  border-radius: 6px;
+  border-radius: 8px;
   outline: none;
   background: var(--mica-arco-bg);
   color: var(--mica-arco-text);
-  box-shadow: var(--shadow-popover, 0 6px 20px rgb(0 0 0 / 14%), 0 2px 6px rgb(0 0 0 / 6%));
+  box-shadow:
+    0 6px 20px color-mix(in srgb, var(--color-black) 14%, transparent),
+    0 2px 6px color-mix(in srgb, var(--color-black) 6%, transparent);
   font-family: inherit;
-  font-size: 14px;
-  line-height: 22px;
+  font-size: 12px;
+  line-height: 20px;
 }
 
 .mica-menu-item.arco-btn {
@@ -406,7 +400,7 @@ html[data-appearance='light'] :is(body.mica-arco-theme, .mica-config-ui) {
   gap: 8px;
   width: 100%;
   min-width: 0;
-  height: 36px;
+  height: 32px;
   padding: 0 8px;
   border: 0;
   border-radius: 6px;
@@ -414,8 +408,8 @@ html[data-appearance='light'] :is(body.mica-arco-theme, .mica-config-ui) {
   color: var(--mica-arco-text);
   box-shadow: none;
   font-family: inherit;
-  font-size: 14px;
-  line-height: 22px;
+  font-size: 12px;
+  line-height: 20px;
   text-align: left;
   white-space: nowrap;
 }
@@ -502,132 +496,9 @@ html[data-appearance='light'] :is(body.mica-arco-theme, .mica-config-ui) {
 
 .mica-menu .mica-menu-separator {
   height: 1px;
-  margin: 4px -8px;
+  margin: 4px 0;
   border: 0;
   background: var(--mica-arco-line-soft);
-}
-
-/*
- * 下拉列表与气泡：语雀的浮层是白底（暗色 #1f1f1f）、8px 圆角、1px 描边 + 三层阴影，
- * 选项 36px 行高、选中是品牌色 12% 的淡底而不是整块实心。
- *
- * Arco 自带的是「面板灰底 + 4px 圆角 + 4px/10px 单层阴影」，在亮色里会显得又平又脏；
- * 这里把三件套（下拉、选择、气泡）统一到同一套浮层规格，组件内部不用各写一遍。
- */
-:where(body.mica-arco-theme, .mica-config-ui) :is(.arco-select-popup, .arco-dropdown-menu, .arco-popover-content) {
-  border: 1px solid var(--mica-arco-line);
-  border-radius: var(--radius-popover, 8px);
-  background: var(--mica-arco-bg);
-  box-shadow: var(--shadow-popover, 0 1px 4px -2px rgb(0 0 0 / 13%), 0 2px 8px rgb(0 0 0 / 8%));
-}
-
-:where(body.mica-arco-theme, .mica-config-ui) :is(.arco-select-popup, .arco-dropdown-menu) {
-  padding: 6px;
-}
-
-/* 选项：圆角 6 的行块，hover 是 grey-2（亮色 #f4f5f5），选中是品牌绿 12% 淡底。 */
-:where(body.mica-arco-theme, .mica-config-ui) :is(.arco-select-popup .arco-select-option, .arco-dropdown-menu-item) {
-  border-radius: 6px;
-  background: transparent;
-  color: var(--mica-arco-text);
-  font-size: 14px;
-  line-height: 36px;
-}
-
-:where(body.mica-arco-theme, .mica-config-ui) :is(.arco-select-popup .arco-select-option-hover, .arco-dropdown-menu-item:not(.arco-dropdown-menu-disabled):hover) {
-  background: var(--mica-arco-raised);
-}
-
-:where(body.mica-arco-theme, .mica-config-ui) :is(.arco-select-popup .arco-select-option-selected, .arco-dropdown-menu-item.arco-dropdown-menu-selected) {
-  background: color-mix(in srgb, var(--mica-arco-accent) 12%, transparent);
-  color: var(--mica-arco-text);
-}
-
-/*
- * 输入类控件：语雀的表单是「白底 + 1px 灰描边 + 6px 圆角」，聚焦时描边转品牌色、
- * 外面再加一圈 2px 淡光；错误态仍是白底，只把描边换成红。Arco 默认是「灰底、无描边、
- * 2px 圆角」的实心块——压在白卡片上是一块脏灰，也不是语雀表单的样子。
- */
-:where(body.mica-arco-theme, .mica-config-ui)
-  :is(.arco-input, .arco-textarea, .arco-input-inner-wrapper, .arco-select-view, .arco-picker) {
-  border: 1px solid var(--mica-arco-line);
-  border-radius: 6px;
-  background: var(--mica-arco-bg);
-  transition:
-    border-color var(--motion-fast, 90ms) ease,
-    box-shadow var(--motion-fast, 90ms) ease;
-}
-
-/* 带前缀/后缀的输入框：描边与底色由外层 wrapper 画，里面的 input 不能再画一层。 */
-:where(body.mica-arco-theme, .mica-config-ui)
-  :is(.arco-input-inner-wrapper, .arco-textarea-wrapper) :is(.arco-input, .arco-textarea) {
-  border: 0;
-  border-radius: 0;
-  background: transparent;
-  box-shadow: none;
-}
-
-:where(body.mica-arco-theme, .mica-config-ui)
-  :is(.arco-input, .arco-textarea, .arco-input-inner-wrapper, .arco-select-view, .arco-picker):hover:not(
-    .arco-input-inner-wrapper-disabled,
-    .arco-select-disabled
-  ) {
-  border-color: var(--mica-arco-line-strong);
-}
-
-:where(body.mica-arco-theme, .mica-config-ui)
-  :is(
-    .arco-input-inner-wrapper-focus,
-    .arco-select-focused .arco-select-view,
-    .arco-picker-focused .arco-picker
-  ) {
-  border-color: var(--mica-arco-accent);
-  background: var(--mica-arco-bg);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--mica-arco-accent) 16%, transparent);
-}
-
-:where(body.mica-arco-theme, .mica-config-ui)
-  :is(.arco-input-inner-wrapper-error, .arco-textarea-error, .arco-input-error) {
-  border-color: var(--mica-arco-danger);
-  background: var(--mica-arco-bg);
-}
-
-:where(body.mica-arco-theme, .mica-config-ui)
-  :is(
-    .arco-input-disabled,
-    .arco-input-inner-wrapper-disabled,
-    .arco-textarea-disabled,
-    .arco-select-disabled .arco-select-view
-  ) {
-  border-color: transparent;
-  background: var(--mica-arco-raised);
-}
-
-/*
- * 按钮：次要按钮的文字和正文同一档（语雀 #262626，不是 secondary 灰）；禁用态退回
- * 「灰底 + 灰字」，不用品牌色 25% 的半透明块压白字——那种组合在白底上几乎读不出来。
- */
-:where(body.mica-arco-theme, .mica-config-ui) .arco-btn-secondary:not(.arco-btn-disabled) {
-  color: var(--mica-arco-text);
-}
-
-/* 文字按钮默认跟正文同色：语雀的「更多 / 取消 / 删除」都是 #262626，品牌色只留给实心主按钮
-   和链接。要强调就加 `mica-arco-action-accent`（或显式 status），不要靠 Arco 的默认主色。 */
-:where(body.mica-arco-theme, .mica-config-ui)
-  .arco-btn-text:not(.arco-btn-disabled):not(.mica-arco-action-accent) {
-  color: var(--mica-arco-text);
-}
-
-:where(body.mica-arco-theme, .mica-config-ui)
-  :is(.arco-btn-primary, .arco-btn-secondary).arco-btn-disabled {
-  border-color: transparent;
-  background: var(--mica-arco-raised);
-  color: var(--mica-arco-text-disabled);
-}
-
-:where(body.mica-arco-theme, .mica-config-ui)
-  :is(.arco-btn-outline, .arco-btn-text).arco-btn-disabled {
-  color: var(--mica-arco-text-disabled);
 }
 
 .mica-menu-popover .arco-popover-content,

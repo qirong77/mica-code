@@ -28,22 +28,22 @@
   --terminal-error-fg: #ff8785;
 }
 
-/* 亮色覆盖块：取值与 app.css 的 `html[data-theme='light']` 一一对应（语雀灰阶 + 品牌绿）。 */
+/* 亮色覆盖块：取值与 app.css 的 `html[data-theme='light']` 一一对应。 */
 html[data-theme='light'] {
   color-scheme: light;
   --terminal-bg: #ffffff;
-  --terminal-panel: #fafafa; /* grey-100 */
-  --terminal-line: #e7e9e8; /* grey-400 */
-  --terminal-fg: #262626; /* grey-900 */
-  --terminal-fg-soft: #585a5a; /* grey-800 */
-  --terminal-fg-dim: #8a8f8d; /* grey-700 */
-  --terminal-fg-faint: #8a8f8d;
-  --terminal-success: #00663b; /* green-800：白底可读 */
-  --terminal-warn: #8f6600; /* yellow-800 */
+  --terminal-panel: #f9fafb;
+  --terminal-line: #0000001a;
+  --terminal-fg: #2c2c2e;
+  --terminal-fg-soft: #43454a;
+  --terminal-fg-dim: #81858c;
+  --terminal-fg-faint: #979da6;
+  --terminal-success: #2b8a3e;
+  --terminal-warn: #b45309;
   --terminal-overlay-bg: rgb(255 255 255 / 82%);
-  --terminal-error-bg: #fdf1f3; /* red-50 */
-  --terminal-error-border: #df2a3f33; /* red-600 @ 20% */
-  --terminal-error-fg: #ad1a2b; /* red-700 */
+  --terminal-error-bg: #fef2f2;
+  --terminal-error-border: #ec131333;
+  --terminal-error-fg: #ec1313;
 }
 
 /* Catppuccin Mocha：内容面 base、外框 mantle、分界 surface1，前景 subtext 阶梯。 */

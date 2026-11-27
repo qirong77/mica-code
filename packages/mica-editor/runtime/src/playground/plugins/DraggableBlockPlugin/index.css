@@ -75,7 +75,7 @@
 }
 
 .mica-block-handle:focus-visible {
-  outline: 2px solid var(--mica-arco-accent);
+  outline: 2px solid var(--notebook-accent);
   outline-offset: 1px;
 }
 
@@ -151,20 +151,16 @@ html[data-appearance='dark'] .mica-block-handle__hint {
   max-height: calc(100dvh - 24px);
   overflow: auto;
   padding: 8px;
-  border: 1px solid var(--mica-arco-line-soft);
+  border: 1px solid var(--notebook-border-primary);
   /* 语雀的块菜单是 6px 圆角（`.ant-menu-submenu-popup.ne-brick-menu`），
      与共享菜单 `.mica-menu` 保持同一个数。 */
   border-radius: 6px;
   outline: none;
-  color: var(--mica-arco-text);
-  background: var(--mica-arco-bg);
-  /* 语雀浮层的三层阴影：1px 收边 + 8px 柔边 + 16px 扩散。 */
-  box-shadow: var(
-    --shadow-popover,
-    0 1px 4px -2px rgb(0 0 0 / 13%),
-    0 2px 8px rgb(0 0 0 / 8%),
-    0 8px 16px 4px rgb(0 0 0 / 4%)
-  );
+  color: var(--notebook-text-primary);
+  background: var(--notebook-bg-primary);
+  /* 语雀浮层的三层阴影：1px 收边 + 8px 柔边 + 16px 扩散。
+     用编辑器自己的 token，不依赖宿主主题的浮层变量。 */
+  box-shadow: var(--notebook-popup-shadow);
   font-family: inherit;
   font-size: 14px;
   line-height: 36px;
@@ -182,7 +178,7 @@ html[data-appearance='dark'] .mica-block-handle__hint {
   padding: 0 8px;
   border: 0;
   border-radius: 6px;
-  color: var(--mica-arco-text);
+  color: var(--notebook-text-primary);
   background: transparent;
   box-shadow: none;
   font-family: inherit;
@@ -193,7 +189,7 @@ html[data-appearance='dark'] .mica-block-handle__hint {
 }
 
 .mica-block-menu .mica-menu-item.arco-btn:not(:disabled):not([aria-disabled='true']):is(:hover, :focus-visible) {
-  background: var(--mica-arco-active);
+  background: var(--notebook-bg-hover);
 }
 
 /* Yuque marks the active row with the same neutral fill, not a focus ring. */
@@ -202,12 +198,12 @@ html[data-appearance='dark'] .mica-block-handle__hint {
 }
 
 .mica-block-menu .mica-menu-item.arco-btn:is(:disabled, [aria-disabled='true']) {
-  color: var(--mica-arco-text-disabled);
+  color: var(--notebook-text-disabled);
 }
 
 .mica-block-menu .mica-menu-item.arco-btn[aria-checked='true'] {
-  color: var(--mica-arco-text);
-  background: var(--mica-arco-active);
+  color: var(--notebook-text-primary);
+  background: var(--notebook-bg-hover);
   font-weight: 500;
 }
 
@@ -218,7 +214,7 @@ html[data-appearance='dark'] .mica-block-handle__hint {
   justify-content: center;
   width: 16px;
   height: 16px;
-  color: var(--mica-arco-text-soft);
+  color: var(--notebook-text-primary);
 }
 
 .mica-block-menu .mica-menu-item.arco-btn :is(.mica-menu-icon, i.icon) > svg {
@@ -228,7 +224,7 @@ html[data-appearance='dark'] .mica-block-handle__hint {
 
 /* 语雀 uses the same neutral label colour for every action, delete included. */
 .mica-block-menu .mica-menu-item.arco-btn[data-block-action='delete'] {
-  color: var(--mica-arco-text);
+  color: var(--notebook-text-primary);
 }
 
 .mica-block-menu__glyph {
@@ -281,7 +277,7 @@ html[data-appearance='dark'] .mica-block-handle__hint {
   width: 12px;
   height: 12px;
   margin-left: auto;
-  color: var(--mica-arco-text-faint);
+  color: var(--notebook-text-caption);
   background: currentColor;
   -webkit-mask: url('../../images/icons/caret-right-fill.svg') center / contain no-repeat;
   mask: url('../../images/icons/caret-right-fill.svg') center / contain no-repeat;
@@ -292,7 +288,7 @@ html[data-appearance='dark'] .mica-block-handle__hint {
   height: 1px;
   margin: 4px -8px;
   border: 0;
-  background: var(--mica-arco-line-soft);
+  background: var(--notebook-border-light);
 }
 
 .mica-block-menu.is-submenu {
@@ -302,7 +298,7 @@ html[data-appearance='dark'] .mica-block-handle__hint {
 
 .draggable-block-target-line {
   pointer-events: none;
-  background: var(--color-accent);
+  background: var(--notebook-accent);
   height: 4px;
   position: absolute;
   left: 0;

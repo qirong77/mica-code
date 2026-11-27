@@ -671,7 +671,7 @@ html[data-appearance='dark'] .notebook-page {
     inset: auto;
     flex: none;
     align-items: center;
-    border-bottom: 1px solid var(--color-line-soft);
+    border-bottom: 1px solid var(--notebook-border-primary);
   }
   .notebook-bar-lead,
   .notebook-bar-actions { border-bottom: 0; }
@@ -880,7 +880,7 @@ html[data-appearance='dark'] .notebook-page {
 .notebook-welcome {
   position: absolute;
   inset: var(--notebook-bar-height) 0 0;
-  background: var(--color-canvas);
+  background: var(--notebook-bg-primary);
   display: flex;
   flex-direction: column;
   justify-content: center;
@@ -890,25 +890,25 @@ html[data-appearance='dark'] .notebook-page {
   text-align: center;
 }
 .notebook-welcome-icon {
-  color: var(--color-fg-soft);
+  color: var(--notebook-text-body);
   display: grid;
   place-items: center;
   width: 64px;
   height: 64px;
   margin-bottom: 10px;
-  border: 1px solid var(--color-line-soft);
+  border: 1px solid var(--notebook-border-light);
   border-radius: 16px;
   background: var(--notebook-rail-bg);
 }
 .notebook-welcome h1 {
-  color: var(--color-fg-strong);
+  color: var(--notebook-text-primary);
   font-size: 18px;
   line-height: 1.4;
   font-weight: 600;
   margin: 0;
 }
 .notebook-welcome p {
-  color: var(--color-fg-muted);
+  color: var(--notebook-text-caption);
   font-size: 13px;
   margin: 0;
 }
@@ -918,7 +918,7 @@ html[data-appearance='dark'] .notebook-page {
 .notebook-error {
   flex: none;
   padding: 6px 12px;
-  border-bottom: 1px solid var(--color-line-soft);
+  border-bottom: 1px solid var(--notebook-border-primary);
   display: flex;
   gap: 6px;
   align-items: center;
@@ -948,7 +948,7 @@ html[data-appearance='dark'] .notebook-page {
   display: block;
   height: 12px;
   border-radius: 4px;
-  background: var(--color-active);
+  background: var(--notebook-bg-hover);
 }
 .notebook-tree-skeleton i:nth-child(2) {
   width: 74%;
@@ -956,7 +956,7 @@ html[data-appearance='dark'] .notebook-page {
 .notebook-editor-skeleton {
   position: absolute;
   inset: 0;
-  background: var(--color-canvas);
+  background: var(--notebook-bg-primary);
   padding: calc(var(--notebook-bar-height) + 24px) max(36px, calc((100% - 850px) / 2 + 36px)) 36px;
   /* 只在真的等了一会儿才出现，所以淡入即可；热缓存下通常根本走不到这里。 */
   animation: notebook-skeleton-in 160ms ease-out both;
@@ -985,7 +985,7 @@ html[data-appearance='dark'] .notebook-page {
 .notebook-editor-skeleton span {
   margin-top: 22px;
   font-size: 11px;
-  color: var(--color-fg-muted);
+  color: var(--notebook-text-caption);
 }
 .notebook-load-error {
   position: absolute;
@@ -994,7 +994,7 @@ html[data-appearance='dark'] .notebook-page {
   flex-direction: column;
   justify-content: center;
   align-items: center;
-  background: var(--color-canvas);
+  background: var(--notebook-bg-primary);
   padding-top: var(--notebook-bar-height);
   gap: 14px;
 }
@@ -1035,16 +1035,16 @@ html[data-appearance='dark'] .notebook-page {
 }
 .notebook-api-field > span {
   font-size: 11px;
-  color: var(--color-fg-muted);
+  color: var(--notebook-text-caption);
 }
 .notebook-api-value {
   display: flex;
   align-items: center;
   gap: 8px;
   padding: 6px 8px;
-  border: 1px solid var(--color-line-soft);
+  border: 1px solid var(--notebook-border-primary);
   border-radius: 8px;
-  background: var(--color-canvas);
+  background: var(--notebook-bg-primary);
 }
 .notebook-api-value code,
 .notebook-api-code {
@@ -1052,7 +1052,7 @@ html[data-appearance='dark'] .notebook-page {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 11px;
   line-height: 1.6;
-  color: var(--color-fg-strong);
+  color: var(--notebook-text-primary);
   overflow-wrap: anywhere;
 }
 .notebook-api-value code {
@@ -1061,9 +1061,9 @@ html[data-appearance='dark'] .notebook-page {
 .notebook-api-code {
   margin: 0;
   padding: 8px;
-  border: 1px solid var(--color-line-soft);
+  border: 1px solid var(--notebook-border-primary);
   border-radius: 8px;
-  background: var(--color-canvas);
+  background: var(--notebook-bg-primary);
   white-space: pre-wrap;
 }
 .notebook-api-actions {
@@ -1072,12 +1072,12 @@ html[data-appearance='dark'] .notebook-page {
 }
 .notebook-api-hint {
   font-size: 11px;
-  color: var(--color-fg-muted);
+  color: var(--notebook-text-caption);
 }
 .notebook-api p code {
   padding: 1px 4px;
   border-radius: 4px;
-  background: var(--color-accent-subtle);
+  background: var(--notebook-accent-subtle);
 }
 .mica-menu-popover .notebook-dialog {
   gap: 12px;
@@ -1085,7 +1085,7 @@ html[data-appearance='dark'] .notebook-page {
 }
 .mica-menu-popover .notebook-dialog label {
   gap: 6px;
-  color: var(--color-fg-muted);
+  color: var(--notebook-text-caption);
   font-size: 11px;
 }
 .mica-menu-popover .notebook-dialog footer {
@@ -1122,7 +1122,7 @@ html[data-appearance='dark'] .notebook-page {
     flex: none;
     align-items: center;
     padding: 0 6px;
-    border-bottom: 1px solid var(--color-line-soft);
+    border-bottom: 1px solid var(--notebook-border-primary);
   }
   .notebook-bar-lead,
   .notebook-bar-actions {

@@ -100,7 +100,9 @@ describe('editor chrome style contracts', () => {
     // 菜单项也是 6px；不要再回到 8。
     expect(blockStyles).toContain('border-radius: 6px;');
     expect(blockStyles).toContain("data-block-action='delete'");
-    expect(blockStyles).toContain('color: var(--mica-arco-text);');
+    // 菜单颜色只认编辑器自己的 token：宿主换主题不应该带着块菜单一起变色。
+    expect(blockStyles).toContain('color: var(--notebook-text-primary);');
+    expect(blockStyles).not.toContain('var(--mica-arco-');
 
     expect(blockSource).toContain('protectFirstBlock');
     expect(blockActionsSource).toContain('$isHeadingNode(node)');
@@ -198,7 +200,7 @@ describe('editor chrome style contracts', () => {
     // 再抵消 Lexical 固定加的 4px。
     expect(blockSource).toContain('const BLOCK_HANDLE_TEXT_GAP = 2;');
     expect(blockSource).toContain('const BLOCK_HANDLE_LEXICAL_OFFSET = 4;');
-    expect(blockStyles).toContain('background: var(--mica-arco-bg);');
+    expect(blockStyles).toContain('background: var(--notebook-bg-primary);');
     expect(blockStyles).toContain('opacity: .88;');
   });
 

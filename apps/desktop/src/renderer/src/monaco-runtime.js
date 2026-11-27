@@ -58,17 +58,16 @@ const EDITOR_SHELLS = {
   light: {
     base: 'vs',
     canvas: '#ffffff',
-    // 语雀灰阶：行号 grey-700、当前行 grey-800、行高亮 grey-200。
-    lineNumber: '#8a8f8d',
-    lineNumberActive: '#585a5a',
-    // 与 --color-accent-region（品牌绿 18%）同源的选中色。
-    selection: '#00b96b33',
-    lineHighlight: '#f4f5f5',
-    indent: '#0000000f',
-    indentActive: '#d8dad9',
+    lineNumber: '#979da6',
+    lineNumberActive: '#61666b',
+    // 与 --color-accent-region（deepseek 18%）同源的选中色。
+    selection: '#4176e633',
+    lineHighlight: '#f1f3f5',
+    indent: '#00000014',
+    indentActive: '#00000029',
     widget: '#ffffff',
-    widgetBorder: '#e7e9e8',
-    scrollbar: ['#d8dad9', '#c9cbcb', '#bec0bf']
+    widgetBorder: '#0000001a',
+    scrollbar: ['#00000029', '#0000003d', '#00000052']
   },
   mocha: {
     base: 'vs-dark',
