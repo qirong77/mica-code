@@ -32,7 +32,7 @@ describe('BrowserWindowsButton', () => {
       ]
     })
     expect(html).toContain('浏览器 · 3 个窗口（1 个已显示）')
-    expect(html).toContain('点击显示 / 收起最近用过的窗口')
+    expect(html).toContain('点击显示 / 收起固定顺序里的窗口')
     expect(html).toContain('悬停选择窗口')
     expect(html).toContain('text-[8px]')
     expect(html).toContain('>3</span>')

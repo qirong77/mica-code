@@ -69,7 +69,7 @@ export function browserButtonTitle(browsers) {
   if (!list.length) return '浏览器\n点击新建一个窗口'
   if (list.length === 1) return browserIconTitle(list[0])
   const visible = list.filter((item) => item.visible).length
-  return `浏览器 · ${list.length} 个窗口${visible ? `（${visible} 个已显示）` : ''}\n点击显示 / 收起最近用过的窗口 · 悬停选择窗口 · 行上右键关闭`
+  return `浏览器 · ${list.length} 个窗口${visible ? `（${visible} 个已显示）` : ''}\n点击显示 / 收起固定顺序里的窗口 · 悬停选择窗口 · 行上右键关闭`
 }
 
 /**
@@ -93,22 +93,18 @@ export function browserMenuRow(browser) {
 }
 
 /**
- * 下拉的整份行模型：没有 id 的条目直接丢掉（界面上点不中它），按「最近用过」排序——
- * 第一行就是按钮点一下会作用到的那扇窗口。
+ * 下拉的整份行模型：没有 id 的条目直接丢掉（界面上点不中它）。服务端的窗口创建顺序
+ * 必须保留；切换窗口只改变状态，不能把最近操作的窗口挪到第一行。
  */
 export function browserMenuRows(browsers) {
   return (Array.isArray(browsers) ? browsers : [])
     .filter((item) => item?.id)
     .map(browserMenuRow)
-    .sort((left, right) => right.lastUsedAt - left.lastUsedAt)
 }
 
 /**
- * 顶栏那枚按钮**点一下**该做什么：没有窗口就新建一个，有窗口就作用于最近用过的那一扇。
- *
- * 「最近」取服务端给的 `lastUsedAt`（每次接口调用、显示 / 收起都会刷新它），不自己攒一份
- * 时间表：窗口闲置被回收、agent 在后台用它，页面这边都可能没接到事件。旧快照没有这个字段
- * 时全是 0，退化成服务端给的顺序。
+ * 顶栏那枚按钮**点一下**该做什么：没有窗口就新建一个，有窗口就作用于固定顺序里的第一扇。
+ * 点击不会改变列表顺序；多扇窗口需要操作其它窗口时，悬停下拉后直接点对应行。
  */
 export function browserClickAction(browsers) {
   const list = Array.isArray(browsers) ? browsers : []

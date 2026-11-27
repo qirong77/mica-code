@@ -17,7 +17,7 @@ import { longPressHandlers } from './hooks'
  * ——一行一扇窗口，点哪行就显示 / 收起哪个，在行上右键仍是关闭那扇窗口（宿主会先确认）。
  *
  * 按钮**永远可点**，不按「有没有窗口」禁用：没有窗口时点一下就给当前会话新建一个（人自己
- * 想看网页，不该先去求 agent），有窗口时作用在最近用过的那一扇（见 `browserClickAction`）。
+ * 想看网页，不该先去求 agent），有窗口时作用在固定顺序里的第一扇（见 `browserClickAction`）。
  * 要多扇里挑别的，悬停出下拉。
  *
  * 窗口的开关仍然走 `browser-control` 的同一套接口；这里只决定「点的是哪一扇」。
@@ -32,6 +32,8 @@ export function BrowserWindowsButton({
   const [open, setOpen] = useState(false)
   const rows = browserMenuRows(browsers)
   const multiple = rows.length > 1
+  // 空列表也提供下拉入口；按钮本身仍支持直接点击新建。
+  const hasMenu = multiple || rows.length === 0
   // 只有一扇窗口时右键 / 长按关的就是它；多扇时「关哪个」不成立，交给下拉里的行。
   const action = browserClickAction(browsers)
   const single = multiple ? null : action.browser
@@ -44,8 +46,8 @@ export function BrowserWindowsButton({
 
   // 关到只剩一扇（或全关）时下拉没有存在的意义：跟着收起，别等再开第二扇时自己弹出来。
   useEffect(() => {
-    if (!multiple && open) setOpen(false)
-  }, [multiple, open])
+    if (!hasMenu && open) setOpen(false)
+  }, [hasMenu, open])
 
   const browserOf = (id) => browsers.find((item) => item?.id === id)
 
@@ -56,8 +58,8 @@ export function BrowserWindowsButton({
       title={title}
       aria-label={title}
       aria-pressed={visible}
-      aria-expanded={multiple ? open : undefined}
-      aria-haspopup={multiple ? 'menu' : undefined}
+      aria-expanded={hasMenu ? open : undefined}
+      aria-haspopup={hasMenu ? 'menu' : undefined}
       {...(single ? longPressHandlers(() => onClose?.(single)) : {})}
       onContextMenu={
         single
@@ -95,7 +97,7 @@ export function BrowserWindowsButton({
     </ArcoAction>
   )
 
-  if (!multiple) return button
+  if (!hasMenu) return button
 
   return (
     <ArcoPopover
@@ -106,7 +108,20 @@ export function BrowserWindowsButton({
           aria-label="浏览器窗口"
           onClose={() => setOpen(false)}
         >
-          {rows.map((row) => (
+          {!rows.length ? (
+            <MenuItem
+              className="browser-window-create"
+              onClick={() => {
+                setOpen(false)
+                onCreate?.()
+              }}
+            >
+              <span className="browser-window-text">
+                <span className="browser-window-name">新建浏览器窗口</span>
+                <span className="browser-window-detail">为当前会话打开一扇受控浏览器</span>
+              </span>
+            </MenuItem>
+          ) : rows.map((row) => (
             <MenuItem
               key={row.id}
               title={row.tooltip}
