@@ -109,13 +109,13 @@ describe('config web roles', () => {
 describe('config web sessions', () => {
   const previousMicaHome = process.env.MICA_HOME;
   const sessionHome = mkdtempSync(join(tmpdir(), 'mica-config-ui-session-'));
-  let detailsApi: typeof import('./details.js');
+  let sessions: typeof import('./sessions.js');
 
   beforeAll(async () => {
     process.env.MICA_HOME = sessionHome;
     // SESSION_DIR is bound at module load time, so re-import after setting MICA_HOME.
     vi.resetModules();
-    detailsApi = await import('./details.js');
+    sessions = await import('./sessions.js');
   });
 
   afterAll(() => {
@@ -190,7 +190,7 @@ describe('config web sessions', () => {
     const session = makeSession();
     micaSession.createStore().save(session);
 
-    const header = detailsApi.getSessionDetails(session.id);
+    const header = sessions.getSessionDetails(session.id);
     expect(header.title).toBe('Test Session');
     expect(header.messageCount).toBe(4);
     expect(header.usageCount).toBe(2);
@@ -198,18 +198,18 @@ describe('config web sessions', () => {
     expect(header.lastUsage?.inputTokens).toBe(80);
     expect(header.contextWindowSize).toBeUndefined();
 
-    const page = detailsApi.getSessionConversationPage(session.id, 0, 2);
+    const page = sessions.getSessionConversationPage(session.id, 0, 2);
     expect(page.total).toBe(5); // system + 4 messages
     expect(page.items.map((item) => item.sequence)).toEqual([1, 2]);
     expect(page.items[0].type).toBe('system');
 
-    const tailPage = detailsApi.getSessionConversationPage(session.id, 0, 2, true);
+    const tailPage = sessions.getSessionConversationPage(session.id, 0, 2, true);
     expect(tailPage.items.map((item) => item.sequence)).toEqual([4, 5]);
 
-    const item = detailsApi.getSessionItem(session.id, 2);
+    const item = sessions.getSessionItem(session.id, 2);
     expect(item).toMatchObject({ type: 'user', content: 'hello' });
 
-    const raw = detailsApi.getSessionContent(session.id);
+    const raw = sessions.getSessionContent(session.id);
     expect(JSON.parse(raw.content)).toMatchObject({ id: session.id, title: 'Test Session' });
   });
 
@@ -218,7 +218,7 @@ describe('config web sessions', () => {
     const session = makeSession();
     micaSession.createStore().save(session);
 
-    const analysis = detailsApi.getSessionContextAnalysis(session.id);
+    const analysis = sessions.getSessionContextAnalysis(session.id);
     expect(analysis.turnCount).toBe(2);
     expect(analysis.turns[0].userPreview).toBe('hello');
     expect(analysis.turns[1].contextTokens).toBe(80);
@@ -237,7 +237,7 @@ describe('config web sessions', () => {
     };
     micaSession.createStore().save(session);
 
-    expect(detailsApi.getSessionContextAnalysis(session.id).toolSchemas).toEqual([
+    expect(sessions.getSessionContextAnalysis(session.id).toolSchemas).toEqual([
       { name: 'read_file', source: 'other', tokens: 20 },
       { name: 'search', source: 'mcp', server: 'docs', tokens: 80 },
     ]);
@@ -247,7 +247,7 @@ describe('config web sessions', () => {
     const { micaSession } = await import('@packages/mica-session/index.js');
     const session = makeSession();
     micaSession.createStore().save(session);
-    detailsApi.getSessionContent(session.id);
+    sessions.getSessionContent(session.id);
 
     const updated = JSON.parse(JSON.stringify(session)) as PersistedSession;
     updated.snapshot.messages = [
@@ -257,10 +257,10 @@ describe('config web sessions', () => {
     ];
     micaSession.createStore().save(updated);
 
-    const header = detailsApi.getSessionDetails(session.id);
+    const header = sessions.getSessionDetails(session.id);
     expect(header.messageCount).toBe(6);
 
-    const page = detailsApi.getSessionConversationPage(session.id, 0, 10);
+    const page = sessions.getSessionConversationPage(session.id, 0, 10);
     expect(page.total).toBe(7);
     expect(page.items.at(-1)?.content).toBe('sure');
   });
@@ -284,15 +284,15 @@ describe('config web sessions', () => {
     session.snapshot.systemPrompt = sentPrompt;
     micaSession.createStore().save(session);
 
-    const prompt = detailsApi.getSessionSystemPrompt(session.id);
+    const prompt = sessions.getSessionSystemPrompt(session.id);
     expect(prompt.prompt).toBe(sentPrompt);
     expect(prompt.rolePrompt).not.toBe('');
 
     // 对话记录与上下文分解读的都是同一份「发出去的提示词」，不是角色文件里那一段。
-    const page = detailsApi.getSessionConversationPage(session.id, 0, 1);
+    const page = sessions.getSessionConversationPage(session.id, 0, 1);
     expect(page.items[0]).toMatchObject({ type: 'system', content: sentPrompt });
     // Context 分析的第一轮前言也读这一份：它比角色文件多出 skills 与插件段落。
-    const analysis = detailsApi.getSessionContextAnalysis(session.id);
+    const analysis = sessions.getSessionContextAnalysis(session.id);
     expect(analysis.turns[0].entries[0]?.preview).toContain('Role prompt body.');
   });
 
@@ -301,7 +301,7 @@ describe('config web sessions', () => {
     async (name) => {
       const { micaSession } = await import('@packages/mica-session/index.js');
       const { micaAgent } = await import('@packages/mica-agent/index.js');
-      if (name === 'reviewer') detailsApi.createRole(name, 'Review carefully.');
+      if (name === 'reviewer') createRole(name, 'Review carefully.');
       const session = makeSession();
       session.id = `20260801-fallback-${name}`;
       session.snapshot.role = name;
@@ -309,32 +309,32 @@ describe('config web sessions', () => {
       const path = join(micaSession.dir, `${session.id}.json`);
       const before = readFileSync(path, 'utf-8');
 
-      const reference = detailsApi.getSessionSystemPrompt(session.id);
+      const reference = sessions.getSessionSystemPrompt(session.id);
       expect(reference.prompt).toBe('');
       expect(reference.rolePrompt).toContain(micaAgent.roles.get('default')!.prompt.trim());
       expect(reference.rolePrompt.match(/<system>/g)).toHaveLength(1);
       if (name === 'reviewer') expect(reference.rolePrompt).toContain('<role>\nReview carefully.\n</role>');
       else expect(reference.rolePrompt).not.toContain('<role>');
-      expect(detailsApi.getSessionItem(session.id, 1).content).toBe(reference.rolePrompt);
-      expect(detailsApi.getSessionContextAnalysis(session.id).turns[0].entries[0]?.tokens).toBe(
+      expect(sessions.getSessionItem(session.id, 1).content).toBe(reference.rolePrompt);
+      expect(sessions.getSessionContextAnalysis(session.id).turns[0].entries[0]?.tokens).toBe(
         estimateTextTokens(reference.rolePrompt),
       );
-      expect(JSON.parse(detailsApi.getSessionContent(session.id).content).snapshot.systemPrompt).toBeUndefined();
+      expect(JSON.parse(sessions.getSessionContent(session.id).content).snapshot.systemPrompt).toBeUndefined();
       expect(readFileSync(path, 'utf-8')).toBe(before);
     },
   );
 
   it('keeps the recorded prompt after a custom role body changes', async () => {
     const { micaSession } = await import('@packages/mica-session/index.js');
-    detailsApi.createRole('archived', 'Current role body.');
+    createRole('archived', 'Current role body.');
     const session = makeSession();
     session.id = '20260801-archived-role';
     session.snapshot.role = 'archived';
     session.snapshot.systemPrompt = '<system>\nArchived base.\n</system>\n\n<role>\nArchived role.\n</role>';
     micaSession.createStore().save(session);
 
-    expect(detailsApi.getSessionSystemPrompt(session.id).prompt).toBe(session.snapshot.systemPrompt);
-    expect(detailsApi.getSessionItem(session.id, 1).content).toBe(session.snapshot.systemPrompt);
-    expect(detailsApi.getSessionContextAnalysis(session.id).turns[0].entries[0]?.preview).toContain('Archived role.');
+    expect(sessions.getSessionSystemPrompt(session.id).prompt).toBe(session.snapshot.systemPrompt);
+    expect(sessions.getSessionItem(session.id, 1).content).toBe(session.snapshot.systemPrompt);
+    expect(sessions.getSessionContextAnalysis(session.id).turns[0].entries[0]?.preview).toContain('Archived role.');
   });
 });

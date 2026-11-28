@@ -13,8 +13,9 @@
 index.ts                 Node 侧入口：数据动作、路径工具、共享类型（浏览器宿主用）
 src/shared/types.ts      页面与数据层共用的类型
 src/server/
-  actions.ts             「动作名 → 数据操作」表（HTTP 与 IPC 两个传输层的唯一语义来源）
-  details.ts             动作实现（MCP / skills / roles / sessions）
+  actions.ts             浏览器宿主的数据动作与入参校验
+  details.ts             浏览器宿主的 MCP / Skills / Roles 操作
+  sessions.ts            浏览器宿主的会话读取、校验写入与缓存
   plugins.ts             插件页数据（官方 + 用户插件、启停状态、设置项与日志路径），两个宿主共用
   providerTest.ts        服务商配置的「测试连接」（一次真实的最小模型请求），两个宿主共用
   configFiles.ts         config.json 读写与校验
@@ -22,12 +23,13 @@ src/server/
   conversation.ts        history → 可读对话项
   contextBreakdown.ts    history → 上下文逐条明细与类别汇总（chars/4 口径，含消息结构信封）
   sessionAnalysis.ts     history → 上下文占用分解与最近请求工具定义估算
-  sessionHead.ts         会话文件头只读解析（Sessions 左栏用，只读前 8KB）
+  sessionHead.ts         两端的会话列表，按修改时间排序，每份会话只读前 8KB
   capabilityDefaults.ts  能力默认值（config.capabilityDefaults）的读取与写入
-  sessionView.ts         上面两者的「纯逻辑」出口（桌面运行时可复用，见下）
+  sessionView.ts         两端共用的会话详情、对话分页与 Context 计算
 web/                     页面组件（React）
   index.tsx              宿主入口：ConfigWebApp / setConfigWebClient / setConfigWebEditor
   api.ts                 数据源接口 ConfigWebClient + 模块级注册与转发
+  actionClient.ts        共享客户端方法，把页面参数交给宿主传输
   editor.ts              编辑器接口与注册（默认给一个朴素文本域兜底）
   contextView.ts         上下文分解 → 堆叠条 / 类别表 / 工具定义与差额提示（纯换算，可单测）
   App.tsx styles.css 等  页面本体
@@ -46,7 +48,7 @@ render(<ConfigWebApp />)
 - **Appearance**（主题：跟随系统 / 浅色 / 深色）由宿主注册的主题能力提供（`setConfigWebThemeHost`，见 `web/theme.ts`）：桌面宿主存运行时 ui-state，浏览器宿主存 localStorage；页面（`web/pages/AppearancePage.tsx`）只展示与转发，点卡片立即生效。没注册时侧栏不出现这一页。
 - 插件目录的图标来自清单的 `icon` 字段，映射表在 `web/pluginIcons.tsx`（未登记的名字回落 `puzzle`）。同一张表也用来画会话右键菜单里插件项的图标（清单 `desktop.sessionMenu` 每项可写 `icon`）。桌面端插件菜单只取图标，经 `@mica-config-ui/pluginIcons` alias 引入，不把整份页面拉进主 bundle。
 
-- 浏览器宿主用 `apps/config-web/web/src/http-client.ts`（`fetch('/api/*')`）+ CDN 版 monaco（`monaco-editor.tsx`）。
+- `createConfigDataClient` 把页面方法的参数组合成具名对象。浏览器宿主的 `http-client.ts` 和 Bun 服务端共用 `apps/config-web/src/httpRoutes.ts` 中的 HTTP 方法、路径和会话视图，页面使用 CDN 版 monaco。
 - 桌面宿主用 `apps/desktop/src/renderer/src/config-web.js`（`config-web:invoke`）+ 应用自带的本地 monaco（`config-web-editor.jsx`）。
 
 ## Capabilities 与提示词控制
@@ -86,12 +88,12 @@ Plugins 贡献页列官方与用户插件；宿主内部 `builtin.*` 能力在 T
 - **样式必须限定在 `.mica-config-ui` 容器内**：`web/styles.css` 把全部规则放进 `@scope (.mica-config-ui) { … }`，自定义属性也定义在容器上而不是 `:root`。桌面端把它当普通视图内嵌渲染，规则不能泄漏到应用其余部分，也不能被应用的同名变量覆盖（应用用 `--color-*`，这里用 `--bg/--panel/--text`）。新增样式沿用这个作用域，不要写裸标签选择器到作用域之外。
   - **页面级的根高度链归宿主**：`html/body/#root { height: 100% }` 这类规则**不要**写在这份共享样式里。宿主的样式表（`apps/desktop/.../app.css`）装在 `@layer base`，而这份是后加载的无层级样式，同优先级下必然把它顶掉——桌面端移动端的根容器高度（`--vvh`，软键盘避让全靠它）会因此静默失效，表现是手机上输入条留在键盘下面。整页托管这份页面的浏览器宿主自己写：`apps/config-web/web/src/host.css`。
 - **页面不自己读数据**：所有数据操作都经 `ConfigWebClient`，宿主实现传输层；宿主没注册时页面会明确报错，不静默降级。
-- **桌面宿主的数据实现与 CLI 宿主各自独立**：`apps/desktop/src/host/configWebData.js` 直接读写本机 `$MICA_HOME`（纯文件，不依赖 CLI 的运行时包），CLI 宿主用本包的 `details.ts`（依赖 `mica-mcp`/`mica-session`/`mica-skills`/`mica-config`/`mica-agent`）。两边的返回结构由 `src/shared/types.ts` 约束，改动数据结构要同步两处。
-- **插件页是例外，两边共用 `src/server/plugins.ts`**：它要同时认识官方插件（清单在仓库 `plugins/`，编译进产物）与用户插件（`$MICA_HOME/plugins` 下的目录），自己抄一份扫描逻辑必然对不上。桌面宿主经 `@mica-config-ui/plugins` alias 引用它。
+- **宿主的数据访问**：`apps/desktop/src/host/configWebData.js` 直接读写当前运行时的 `$MICA_HOME`，浏览器宿主通过 `details.ts` 使用 MCP、技能与角色运行时。两端的会话展示逻辑都在 `sessionView.ts`，浏览器宿主的会话缓存与校验写入由 `sessions.ts` 负责。
+- **插件页两端共用 `src/server/plugins.ts`**：它要同时认识官方插件（清单在仓库 `plugins/`，编译进产物）与用户插件（`$MICA_HOME/plugins` 下的目录），自己抄一份扫描逻辑必然对不上。桌面宿主直接引用该模块。
 - **服务商配置支持四种协议**：`openai_chat_completions` / `openai_responses` / `anthropic_messages` / `google_generative_ai`。表单选项与本地校验共用 `mica-config/providerProtocol.ts`，文案由 `web/labels.ts` 显示；修改或保存原生 provider 不会把协议替换回 OpenAI。
-- **服务商的「测试连接」同样只有一份实现**（`src/server/providerTest.ts`，桌面宿主经 `@mica-config-ui/provider-test` alias 引用）：它和插件试连用同一个执行器 `probeModelConnection`，四种协议都经 `PiModelClient` 发送。请求必须在宿主里发（页面直连服务商会被 CORS 拦住），入参是页面当前填的地址 / Key / 协议 / 第一个模型，改完不用先保存。
+- **服务商的「测试连接」同样只有一份实现**（`src/server/providerTest.ts`）：它和插件试连用同一个执行器 `probeModelConnection`，四种协议都经 `PiModelClient` 发送。请求必须在宿主里发（页面直连服务商会被 CORS 拦住），入参是页面当前填的地址 / Key / 协议 / 第一个模型，改完不用先保存。
 - **插件设置在插件页内编辑**：字段来自清单的 `settings` 声明，值读写 `$MICA_HOME/plugin-settings/<id>.json`（`mica-plugin/PluginSettings.ts`），写盘走 `writePluginSettings` 动作、沿用 `useAutoSave` 的自动保存约定。声明了 `llm` 的插件由 `web/components/LlmSettingsSection.tsx` 渲染模型接口面板（「复用当前会话模型」开关、隐藏独立配置、测试连接），桌面端的会话设置复用同一个组件并通过 `overrides` 显示逐字段的「跟随默认」。插件详情同时给出今天的分片日志路径，方便排查。
 - **磁盘上的路径是可点的**：日志这类真能打开的文件用 `web/components/PathLink.tsx`，单击选「在 Finder 中打开 / 在 Mica 中打开」，⌘ / Ctrl 点击直接进编辑器——与对话区路径链接同一套手感。两个动作都是宿主的可选能力（`ConfigWebClient.revealPath` / `openPathInEditor`），宿主没有哪个就少哪个选项，都没有时退回纯文本（浏览器宿主没有窗口可开）。仓库里的相对路径（官方插件的 `location`）不做成链接：装好的应用里那个路径不存在。
-- **`sessionView.ts` 是纯逻辑出口**：桌面运行时只引它（`history → 对话项 / 上下文分解`，不碰文件系统）。四种协议的历史统一是 pi-ai `Message[]`，`conversation.ts` 复用轻量的 `PiHistoryNormalizer`，不再读取旧 OpenAI wire history；thinking 只向 Context 投影可读摘要与签名长度，不把签名传给页面。`contextBreakdown.ts` 识别 `toolCall` / `toolResult` / `thinking`，估算时排除本地 timestamp、API 身份和 usage 字段。Context 的工具定义只消费快照记录的 `lastToolSchemas`，按「其它工具 / MCP server / 工具」下钻，MCP 子项不重复计总量；没有记录时显示「未记录」，不从当前工具注册表补齐，且 compact 后注明最近请求数据与当前快照不完全对应。请求差额仍是未拆解的独立估算，不拿 schema 估算硬拆。类型导入必须写成 `import type … from '@packages/mica-agent/core/Conversation.js'` 这种**关键字形式 + 具体文件**，不要引入整个 agent 包及其 prompt 资源。
-- **会话详情只有一份实现**：`web/components/SessionDetailView.tsx`（头部 + 对话记录 / Context 分析 / 原始文件三个页签，原始文件自动保存）。配置页 Sessions 页直接渲染它，桌面端的会话详情弹窗与状态栏上下文弹窗也渲染它——宿主只负责外壳（弹窗、宽度）与额外的「用量」页签，不要另写一套会话详情或上下文分组。
+- **会话投影**。`sessionView.ts` 根据读取的快照生成详情、分页和 Context 结果。四种协议的历史统一是 pi-ai `Message[]`，`conversation.ts` 复用轻量的 `PiHistoryNormalizer`，不再读取旧 OpenAI wire history；thinking 只向 Context 投影可读摘要与签名长度，不把签名传给页面。`contextBreakdown.ts` 识别 `toolCall` / `toolResult` / `thinking`，估算时排除本地 timestamp、API 身份和 usage 字段。Context 的工具定义只消费快照记录的 `lastToolSchemas`，按「其它工具 / MCP server / 工具」下钻，MCP 子项不重复计总量；没有记录时显示「未记录」，不从当前工具注册表补齐，且 compact 后注明最近请求数据与当前快照不完全对应。请求差额仍是未拆解的独立估算，不拿 schema 估算硬拆。类型导入必须写成 `import type … from '@packages/mica-agent/core/Conversation.js'` 这种**关键字形式 + 具体文件**，不要引入整个 agent 包及其 prompt 资源。
+- 配置页 Sessions、桌面会话详情与上下文弹窗共用 `web/components/SessionDetailView.tsx`，提供对话记录、Context 分析、耗时、系统提示词和原始 JSON 编辑。桌面统计页另提供用量页签。
 - 日常源码改动不构建、不重启。用户要求构建配置页时运行 `bun run build:config-web`，生成 `apps/config-web/src/server/generatedStaticAssets.ts` 后再验证内嵌产物。

@@ -1,7 +1,7 @@
 import { createPanelTiming } from './panel-timing'
 import { clipboard, ipcMain } from 'electron'
 import { prewarmFileMentions } from '@packages/mica-file-mentions/index.js'
-import { readBtwState } from '@packages/mica-common/btwState.js'
+import { registerChatHostIpc } from './chat-host-ipc.js'
 import { resolveMicaHome } from '@packages/mica-config/index.js'
 import { spawn } from 'child_process'
 import { randomUUID } from 'crypto'
@@ -59,12 +59,10 @@ import { updateSessionCwdFile } from './session-cwd'
 import { createTurnLeaseProbe } from './session-lease'
 import {
   micaHomeDir,
-  protocolForModelId,
   protocolForProviderId,
   readDefaultMeta,
   readHistory,
   readMicaConfig,
-  readSessionCwd,
   readSessionMeta,
   sessionFile,
   sessionsDir
@@ -157,6 +155,20 @@ function liveRunIdForSession(sessionId) {
     if (runSessionId(run) === sessionId) return id
   }
   return ''
+}
+
+/**
+ * 正在服务这条会话的常驻 host（stdin 可写才算活）：改名、换目录必须交给它，直接改盘会被
+ * 它下一次保存覆盖。与 `liveRunIdForSession` 的差别是它要求进程还活着。
+ */
+function liveRunForSession(sessionId) {
+  if (!sessionId) return null
+  for (const run of runs.values()) {
+    if (run.sessionId !== sessionId && run.requestedSessionId !== sessionId) continue
+    if (!run.child?.stdin?.writable) continue
+    return run
+  }
+  return null
 }
 
 function queuedItems(id, run) {
@@ -301,6 +313,11 @@ function sessionBusyElsewhere(sessionId) {
 }
 
 const readSessionAsync = createSessionReader()
+
+/** 这条会话当时用的 provider：协议映射与 api_base 都从它来（找不到就是没有）。 */
+function configuredProvider(providerId) {
+  return readMicaConfig().providers.find((provider) => provider.id === providerId)
+}
 
 function forkSession(sessionId) {
   if (isChatSessionRunning(sessionId))
@@ -1681,6 +1698,7 @@ async function abortRun(id) {
 
 export function registerChatIpc() {
   startIdleReaper()
+  registerChatHostIpc(ipcMain, { runs, request: hostTaskRequest, ensureBtwRun, ensureCapabilityRun })
   ipcMain.handle('chat:start', (event, payload = {}) => {
     rememberChatSender(event)
     const id = payload.id
@@ -1726,242 +1744,56 @@ export function registerChatIpc() {
     return editRunMessage(event.sender, id, payload)
   })
 
-  /**
-   * 用户在输入框里敲了字（`mica/input/activity`）。
-   *
-   * 只为「会话已经空闲很久」这类提前量服务：插件拿到这条信号后可以先把历史压小，
-   * 下一轮请求就不必为膨胀的上下文付费。宿主不认识任何策略，只转发。
-   *
-   * 没有常驻进程就直接吞掉——绝不能为了几个按键去 spawn 一个 host。渲染层已经节流，
-   * 所以这里不再攒批。
-   */
-  ipcMain.handle('chat:input-activity', (event, { id } = {}) => {
+  function startResidentHost(id, event, { sessionId, cwd, role }) {
+    const target = typeof sessionId === 'string' ? sessionId.trim() : ''
+    const unavailable = sessionBusyElsewhere(target)
+    if (unavailable) return { error: unavailable }
+    const spawned = spawnChatHost(id, event.sender, { sessionId: target, cwd, role })
+    if (!spawned.ok) return { error: spawned.error }
     const run = runs.get(id)
-    if (!run?.child?.stdin?.writable) return { ok: true, forwarded: false }
-    run.sender = event.sender
-    // 不等回包：用户还在打字，这次压缩的结果与界面无关（插件自己记日志与状态）。
-    void hostTaskRequest(run, 'mica/input/activity', {}).catch(() => {})
-    return { ok: true, forwarded: true }
-  })
+    return run ? { run } : { error: 'chat host 启动失败' }
+  }
 
-  /**
-   * 用户把焦点放回了输入框（`mica/input/focus`）。
-   *
-   * 比「敲了第一个字」早一步：插件可以在用户还没开始打字时就先把落盘的历史压小，
-   * 等这一轮请求发出时上下文已经是压过的。渲染层只在没在跑的时候发；轮次运行中
-   * 漏过来的那一下由宿主的 turn lease 判定挡掉（插件拿到 `busy` 就跳过）。
-   *
-   * 和 `chat:input-activity` 一样，没有常驻进程就吞掉——不能为一次聚焦去 spawn。
-   */
-  ipcMain.handle('chat:input-focus', (event, { id } = {}) => {
-    const run = runs.get(id)
-    if (!run?.child?.stdin?.writable) return { ok: true, forwarded: false }
-    run.sender = event.sender
-    void hostTaskRequest(run, 'mica/input/focus', {}).catch(() => {})
-    return { ok: true, forwarded: true }
-  })
-
-  // Mica extensions (mica/backgroundTasks/*, mica/subagentTasks/*): the tasks
-  // live in the resident host process, so these are plain request round-trips,
-  // not turn starts. They never touch run.running/hostPending and stay usable
-  // while a turn is streaming.
-  ipcMain.handle('chat:kill-background-task', (event, { id, taskId, forceAfterMs } = {}) => {
-    if (!id || !taskId) return { ok: false, error: '参数缺失' }
-    const run = runs.get(id)
-    if (run?.child) run.sender = event.sender
-    return hostTaskRequest(run, 'mica/backgroundTasks/kill', {
-      taskId,
-      ...(forceAfterMs === undefined ? {} : { forceAfterMs })
-    })
-  })
-
-  ipcMain.handle('chat:background-task-output', (event, { id, taskId, tailBytes } = {}) => {
-    if (!id || !taskId) return { ok: false, error: '参数缺失' }
-    const run = runs.get(id)
-    if (run?.child) run.sender = event.sender
-    return hostTaskRequest(run, 'mica/backgroundTasks/output', {
-      taskId,
-      ...(tailBytes ? { tailBytes } : {})
-    })
-  })
-
-  ipcMain.handle('chat:subagent-detail', (event, { id, taskId } = {}) => {
-    if (!id || !taskId) return { ok: false, error: '参数缺失' }
-    const run = runs.get(id)
-    if (run?.child) run.sender = event.sender
-    return hostTaskRequest(run, 'mica/subagentTasks/detail', { taskId })
-  })
-
-  ipcMain.handle('chat:kill-subagent', (event, { id, taskId } = {}) => {
-    if (!id || !taskId) return { ok: false, error: '参数缺失' }
-    const run = runs.get(id)
-    if (run?.child) run.sender = event.sender
-    return hostTaskRequest(run, 'mica/subagentTasks/kill', { taskId })
-  })
-
-  ipcMain.handle('chat:restart-subagent', (event, { id, taskId } = {}) => {
-    if (!id || !taskId) return { ok: false, error: '参数缺失' }
-    const run = runs.get(id)
-    if (run?.child) run.sender = event.sender
-    return hostTaskRequest(run, 'mica/subagentTasks/restart', { taskId })
-  })
-
-  // By The Way（CLI 的 `/btw`）：一个问题一次往返，但回答**不等**在这次往返里——
-  // host 立刻回 `{ ok: true }`，答案随后经 `mica/btw/updated` 快照到达。所以这个
-  // 请求不会被 turn 在跑挡掉，也不改 run.running/hostPending。
-  //
-  // `threadId` 决定落哪条线程（抽屉的一个 tab）：带上就是在那个 tab 里追问
-  // （= `/btw -continue`），不带就是新开一个 tab。空问题 = 只建 tab 不提问。
-  /**
-   * 拿到（必要时按需起）这个节点的常驻 host。
-   *
-   * By The Way 的意义是「不往会话里发消息也能问」——刚打开一条历史会话就想问它是
-   * 最典型的用法，要求用户先随便发一条消息才能用等于把最该成立的场景挡在门外。
-   * 起法与发消息同源：按 sessionId resume（没有 sessionId 的草稿没有主流程记录可作
-   * 背景，也没有地方记这次开销，直接如实拒绝）。
-   */
+  // A cold BTW host needs a saved session for its conversation context and usage.
   function ensureBtwRun(id, event, { sessionId, cwd } = {}) {
-    let run = runs.get(id)
+    const run = runs.get(id)
     if (run?.child?.stdin?.writable) {
       run.sender = event.sender
       return { run }
     }
-    const targetSessionId = typeof sessionId === 'string' ? sessionId.trim() : ''
-    if (!targetSessionId) return { error: '先发一条消息，有了会话才能用 By The Way 提问' }
-    // 别的进程（终端里的 TUI / 另一个运行时）正持有该会话的 turn lease 时不能起：
-    // host 启动会 resume 同一个会话文件，btw 结束时还要把用量写回去。
-    const unavailable = sessionBusyElsewhere(targetSessionId)
-    if (unavailable) return { error: unavailable }
-    const spawned = spawnChatHost(id, event.sender, {
-      sessionId: targetSessionId,
-      cwd: typeof cwd === 'string' ? cwd : ''
-    })
-    if (!spawned.ok) return { error: spawned.error }
-    run = runs.get(id)
-    if (!run) return { error: 'chat host 启动失败' }
-    return { run }
+    if (!(typeof sessionId === 'string' && sessionId.trim()))
+      return { error: '先发一条消息，有了会话才能用 By The Way 提问' }
+    return startResidentHost(id, event, { sessionId, cwd })
   }
 
   /**
-   * 能力面板用的 host：有常驻进程就直接用，否则按需起一个。
-   *
-   * 与 By The Way 的区别是允许草稿会话（还没有 sessionId）：选择只存在内存里，
-   * 首轮保存会带上它——用户可以先关掉几个工具再开始第一条消息。
+   * 能力面板用的 host：与 By The Way 的区别是允许草稿会话（选择只存在内存里，首轮保存
+   * 带上它），以及角色变了要换一个宿主（插件的角色门槛在启动时定）——但正在跑的那一轮
+   * 不能被打断，等它结束再换。
    */
   function ensureCapabilityRun(id, event, { sessionId, cwd, role } = {}) {
-    let run = runs.get(id)
+    const run = runs.get(id)
     if (run?.child?.stdin?.writable) {
       run.sender = event.sender
       const requestedRole = typeof role === 'string' && role.trim() ? role.trim() : 'default'
       if (run.running || run.role === requestedRole) return { run }
       disposeHost(id)
     }
-    const targetSessionId = typeof sessionId === 'string' ? sessionId.trim() : ''
-    if (targetSessionId) {
-      const unavailable = sessionBusyElsewhere(targetSessionId)
-      if (unavailable) return { error: unavailable }
-    }
-    const spawned = spawnChatHost(id, event.sender, {
-      sessionId: targetSessionId,
-      cwd: typeof cwd === 'string' ? cwd : '',
-      role: typeof role === 'string' ? role : ''
-    })
-    if (!spawned.ok) return { error: spawned.error }
-    run = runs.get(id)
-    if (!run) return { error: 'chat host 启动失败' }
-    return { run }
+    return startResidentHost(id, event, { sessionId, cwd, role })
   }
-
-  ipcMain.handle(
-    'chat:btw-ask',
-    (event, { id, question, threadId, queue, sessionId, cwd } = {}) => {
-      const text = typeof question === 'string' ? question.trim() : ''
-      const thread = typeof threadId === 'string' ? threadId.trim() : ''
-      if (!id) return { ok: false, error: 'chat id 缺失' }
-      const ensured = ensureBtwRun(id, event, { sessionId, cwd })
-      if (!ensured.run) return { ok: false, error: ensured.error }
-      return hostTaskRequest(ensured.run, 'mica/btw/ask', {
-        question: text,
-        ...(thread ? { threadId: thread } : {}),
-        ...(queue ? { queue: true } : {})
-      })
-    }
-  )
-
-  // 抽屉的 tab 条：线程活在 host 里，客户端只知道自己的 id，所以「重开页面/重开 app
-  // 之后还有哪些 tab、各自聊了什么」只能问 host。
-  ipcMain.handle('chat:btw-threads', (event, { id, sessionId } = {}) => {
-    const run = runs.get(id)
-    if (run?.child) {
-      run.sender = event.sender
-      return hostTaskRequest(run, 'mica/btw/threads', {})
-    }
-    // 还没有常驻 host（页面刚打开一条历史会话、或者 app 刚重启）：直接读会话的落盘
-    // 快照。host 每次变更都会写、退出前还会 flush，所以它就是「关掉 app 之前的样子」；
-    // 为了一次列表去 spawn 一整个 host 进程不值当。
-    const target = typeof sessionId === 'string' ? sessionId.trim() : ''
-    if (!target) return { ok: true, threads: [] }
-    const stored = readBtwState(target)
-    return {
-      ok: true,
-      threads: stored.map((thread) => ({ id: thread.id, entries: thread.entries }))
-    }
-  })
-
-  ipcMain.handle('chat:btw-close', (event, { id, threadId } = {}) => {
-    const run = runs.get(id)
-    if (!run?.child) return { ok: true }
-    run.sender = event.sender
-    return hostTaskRequest(run, 'mica/btw/close', {
-      threadId: typeof threadId === 'string' ? threadId : ''
-    })
-  })
-
-  // By The Way 的「快速压缩」：与主对话的本地压缩同源（`toolResultsOnly`），
-  // 只动发给模型的历史——不调用模型、不丢轮次，所以可以反复执行、也不受
-  // 「线程正在回答」限制之外的任何忙守卫影响。
-  ipcMain.handle('chat:btw-compact', async (event, { id, threadId, sessionId, cwd } = {}) => {
-    const ensured = ensureBtwRun(id, event, { sessionId, cwd })
-    if (!ensured.run) return { ok: false, error: ensured.error }
-    return hostTaskRequest(ensured.run, 'mica/btw/compact', {
-      threadId: typeof threadId === 'string' ? threadId : ''
-    })
-  })
-
-  // 停止正在回答的那一问：纯命令，不启动任何东西，所以不碰 run 生命周期
-  // （turn 正在跑也要能停 btw）。
-  ipcMain.handle('chat:btw-interrupt', async (event, { id, threadId, sessionId, cwd } = {}) => {
-    const ensured = ensureBtwRun(id, event, { sessionId, cwd })
-    if (!ensured.run) return { ok: false, error: ensured.error }
-    return hostTaskRequest(ensured.run, 'mica/btw/interrupt', {
-      threadId: typeof threadId === 'string' ? threadId : ''
-    })
-  })
-
-  // 撤回排队中的问题（排队条的 ✕），同样不启动任何东西。
-  ipcMain.handle('chat:btw-recall', async (event, { id, threadId, sessionId, cwd } = {}) => {
-    const ensured = ensureBtwRun(id, event, { sessionId, cwd })
-    if (!ensured.run) return { ok: false, error: ensured.error }
-    return hostTaskRequest(ensured.run, 'mica/btw/recall', {
-      threadId: typeof threadId === 'string' ? threadId : ''
-    })
-  })
 
   ipcMain.handle('chat:history', (_event, { sessionId } = {}) => {
     rememberChatSender(_event)
     if (!sessionId) return []
-    return readSessionAsync(sessionFile(sessionId)).then((result) => {
-      const provider = readMicaConfig().providers.find(
-        (item) => item.id === result.meta?.providerId
-      )
-      return filterCurrentThinking(result.history, provider)
-    })
+    return readSessionAsync(sessionFile(sessionId)).then((result) =>
+      filterCurrentThinking(result.history, configuredProvider(result.meta?.providerId))
+    )
   })
 
   async function readChatHistoryPage({ sessionId, id, ...options } = {}, snapshot) {
     if (!sessionId) return historyPage([])
     const result = await (snapshot ?? readSessionAsync(sessionFile(sessionId)))
-    const provider = readMicaConfig().providers.find((item) => item.id === result.meta?.providerId)
+    const provider = configuredProvider(result.meta?.providerId)
     const run = runs.get(id || liveRunIdForSession(sessionId)) || (id ? completedRuns.get(id) : null)
     return historyPage(filterCurrentThinking(result.history, provider), {
       ...options, replayPrompt: runSessionId(run) === sessionId ? run.prompt : null
@@ -2115,11 +1947,10 @@ export function registerChatIpc() {
       }
     }
     if (!isValidSessionId(target)) return { ok: false, error: '会话标题无效' }
-    for (const run of runs.values()) {
-      if (run.sessionId !== target && run.requestedSessionId !== target) continue
-      if (!run.child?.stdin?.writable) continue
-      run.sender = event.sender
-      const result = await hostTaskRequest(run, 'mica/session/rename', { title: nextTitle })
+    const liveRun = liveRunForSession(target)
+    if (liveRun) {
+      liveRun.sender = event.sender
+      const result = await hostTaskRequest(liveRun, 'mica/session/rename', { title: nextTitle })
       if (result?.ok === false) return { ok: false, error: result.error || '重命名失败' }
       return { ok: true, title: typeof result?.title === 'string' ? result.title : nextTitle }
     }
@@ -2153,9 +1984,7 @@ export function registerChatIpc() {
                 ? null
                 : readTodoCheckpointInput(micaHomeDir(), sessionId)),
             protocol: protocolForProviderId(meta.providerId),
-            apiBase:
-              readMicaConfig().providers.find((provider) => provider.id === meta.providerId)
-                ?.api_base || ''
+            apiBase: configuredProvider(meta.providerId)?.api_base || ''
           }
         : null
     )
@@ -2342,78 +2171,6 @@ export function registerChatIpc() {
 
   ipcMain.handle('chat:roles', () => listRoles())
 
-  // 会话级能力（skills / tools / MCP servers）。目录与开关都只有常驻 host 知道，
-  // 所以这里必要时按需起一个（与 By The Way 同一条路），再走一次普通请求。
-  ipcMain.handle('chat:capabilities', async (event, { id, sessionId, cwd, role } = {}) => {
-    if (!id) return { ok: false, error: 'chat id 缺失' }
-    const ensured = ensureCapabilityRun(id, event, { sessionId, cwd, role })
-    if (!ensured.run) return { ok: false, error: ensured.error }
-    // hostTaskRequest 回的是 `{ ok, result }` 这一层信封，app-server 的载荷在
-    // `result` 里。面板要的是载荷本身，所以这里拆包——否则读到的全是 undefined，
-    // 表现为「三页签都是 0/0」。
-    return unwrapHostResult(await hostTaskRequest(ensured.run, 'mica/capabilities/get', {}))
-  })
-
-  ipcMain.handle('chat:set-capabilities', async (event, { id, sessionId, cwd, role, selection } = {}) => {
-    if (!id) return { ok: false, error: 'chat id 缺失' }
-    const ensured = ensureCapabilityRun(id, event, { sessionId, cwd, role })
-    if (!ensured.run) return { ok: false, error: ensured.error }
-    return unwrapHostResult(
-      await hostTaskRequest(ensured.run, 'mica/capabilities/set', { selection })
-    )
-  })
-
-  // 插件的会话级状态：存在会话快照里（不在对话历史里），所以压缩不会动它。读写都走
-  // 常驻 host —— 它手里的快照才是唯一事实来源，直接改 session 文件会被下一次保存覆盖。
-  // 内核不解析这份 JSON：插件声明它是什么形状，插件的桌面卡片自己读写。
-  ipcMain.handle('chat:session-state', async (event, { id, sessionId, cwd, pluginId } = {}) => {
-    if (!id) return { ok: false, error: 'chat id 缺失' }
-    if (typeof pluginId !== 'string' || !pluginId) return { ok: false, error: 'pluginId 缺失' }
-    const ensured = ensureCapabilityRun(id, event, { sessionId, cwd })
-    if (!ensured.run) return { ok: false, error: ensured.error }
-    return unwrapHostResult(
-      await hostTaskRequest(ensured.run, 'mica/sessionState/get', { pluginId })
-    )
-  })
-
-  ipcMain.handle(
-    'chat:set-session-state',
-    async (event, { id, sessionId, cwd, pluginId, value } = {}) => {
-      if (!id) return { ok: false, error: 'chat id 缺失' }
-      if (typeof pluginId !== 'string' || !pluginId) return { ok: false, error: 'pluginId 缺失' }
-      const ensured = ensureCapabilityRun(id, event, { sessionId, cwd })
-      if (!ensured.run) return { ok: false, error: ensured.error }
-      return unwrapHostResult(
-        await hostTaskRequest(ensured.run, 'mica/sessionState/set', {
-          pluginId,
-          value: value ?? null
-        })
-      )
-    }
-  )
-
-  // 插件的会话级设置：清单里标了 perSession 的字段才出现。默认值在插件设置里
-  // （配置页写），这里读写的是本会话的覆盖，跟会话快照一起落盘。
-  ipcMain.handle('chat:plugin-settings', async (event, { id, sessionId, cwd } = {}) => {
-    if (!id) return { ok: false, error: 'chat id 缺失' }
-    const ensured = ensureCapabilityRun(id, event, { sessionId, cwd })
-    if (!ensured.run) return { ok: false, error: ensured.error }
-    return unwrapHostResult(await hostTaskRequest(ensured.run, 'mica/pluginSettings/get', {}))
-  })
-
-  ipcMain.handle(
-    'chat:set-plugin-settings',
-    async (event, { id, sessionId, cwd, pluginId, values } = {}) => {
-      if (!id) return { ok: false, error: 'chat id 缺失' }
-      if (typeof pluginId !== 'string' || !pluginId) return { ok: false, error: 'pluginId 缺失' }
-      const ensured = ensureCapabilityRun(id, event, { sessionId, cwd })
-      if (!ensured.run) return { ok: false, error: ensured.error }
-      return unwrapHostResult(
-        await hostTaskRequest(ensured.run, 'mica/pluginSettings/set', { pluginId, values })
-      )
-    }
-  )
-
   ipcMain.handle('chat:compact', async (_event, { sessionId, mode } = {}) => {
     if (!sessionId || typeof sessionId !== 'string') return { ok: false, error: 'sessionId 缺失' }
     const resolvedMode = mode === 'local' ? 'local' : 'model'
@@ -2455,15 +2212,7 @@ export function registerChatIpc() {
     if (target && !isValidSessionId(target)) return { ok: false, error: '会话 id 无效' }
 
     // 这条会话开在某个页签里：它的宿主同时持有快照与进程 cwd，交给它去做。
-    let run = nodeId && runs.has(nodeId) ? runs.get(nodeId) : null
-    if (!run && target) {
-      for (const candidate of runs.values()) {
-        if (candidate.sessionId !== target && candidate.requestedSessionId !== target) continue
-        if (!candidate.child?.stdin?.writable) continue
-        run = candidate
-        break
-      }
-    }
+    const run = (nodeId && runs.get(nodeId)) || liveRunForSession(target)
     if (run?.child?.stdin?.writable) {
       run.sender = event.sender
       return unwrapHostResult(await hostTaskRequest(run, 'mica/session/cwd', { cwd: dir }))

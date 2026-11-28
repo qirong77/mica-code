@@ -28,12 +28,12 @@
 | `mica-commands`               | 通用命令机制                                                            |
 | `mica-builtin-commands`       | 产品命令、运行期插件、启动扩展                                          |
 | `mica-skills` / `mica-plugin` | skills 扫描解析缓存 / 插件机制与能力面                                  |
-| `mica-common`                 | 跨端纯逻辑（loop 参数、引用、消息定位、自动链接、能力开关、会话笔记等） |
+| `mica-common`                 | 跨端纯逻辑（loop 参数、引用、消息定位、自动链接、能力开关等） |
 | `mica-pty`                    | PTY 驱动与 Node helper；native binding 只在 Node 子进程加载             |
 | `mica-web-shared`             | desktop renderer 与运行时共享的展示、状态、搜索、地址约定               |
 | `mica-file-mentions`          | CLI / desktop 共用的文件补全触发、扫描、排序、插入                      |
 | `mica-config-ui`              | 配置页唯一实现：页面、数据动作、共享类型                                |
-| `mica-editor`                 | 共享 Lexical 编辑器：富文本与 Markdown 两种模式、隔离 runtime、CDN 依赖  |
+| `mica-editor`                 | 共享 Lexical Markdown 编辑器、隔离 runtime、CDN 依赖  |
 | `mica-diagnostics`            | 诊断日志唯一写入器：JSONL 落盘、慢操作聚合、进程内存采样（node-only）   |
 | `mica-official-plugins`       | 官方插件目录：`manifests.js` 只含清单，`index.js` 才带入口              |
 | `@anthropic/ink`              | 仓库内 vendored 的 Ink 分支：终端渲染原语，`mica-ui` 的唯一 Ink 来源    |

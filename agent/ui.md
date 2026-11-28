@@ -20,7 +20,8 @@
 - MCP 页没有左列表：`mcpServers` 的协议与字段是固定的，一页就一个 `SettingsGroup`，一个 server 一张可折叠的 `entry-row`（与服务商同一套行），折叠行显示名称 / 连接方式 / 命令或地址 / 连接状态，展开接字段行。类型用 `Segmented`，本地进程填命令 / 参数 / 环境变量 / 工作目录 / 标准错误，HTTP 填地址 / 请求头；切类型会删掉另一侧的已知键（文件里同时留着 `command` 与 `url` 的条目说不清是哪种）。连接状态与工具列表只属于磁盘上那份配置，类型换掉后不再显示。右上角「编辑 JSON」是**整份** `mcpServers`（也接受文档里抄来的 `{ "mcpServers": { … } }`），与表单是同一份内容的两种形态；转换唯一实现是 `web/mcpDraft.ts`。
 - MCP 的读写都走整份：`readMcpDetails` 返回文件里的 `mcpServers` 原文（`content`，不展开 `${VAR}`——按展开后的值写回去会把占位符换成这一台机器的端口），保存是 `writeMcpServers(content)` 一次写整份。逐条写会把改名 / 删除拆成两次请求。
 - 服务商在分组里是一行：折叠显示 id（唯一的名称，不再另设显示名称）/协议/地址/模型数，展开接字段行；有错误强制展开并标「待修正」。模型列表全靠手填（没有「模型列表地址」），展开体最后一行是「测试连接」：它用页面上当前的地址 / Key / 协议 / 第一个模型发一次最小请求，结论就写在按钮右边。
-- Sessions 左栏的会话信息由 `src/server/sessionHead.ts` 只读文件头 8KB 解析，两个宿主共用。
+- 配置页的公共客户端方法在 `mica-config-ui/web/actionClient.ts`。浏览器客户端和 Bun 服务端按 `apps/config-web/src/httpRoutes.ts` 中相同的方法、路径和视图收发请求。普通模式由 Bun 接受 `/api/events` 心跳，开发模式由 Vite 的 HTTP 监听器直接完成握手，普通 API 经代理到相同的动作处理器。
+- Sessions 左栏两端都经 `src/server/sessionHead.ts` 扫描文件头 8KB，详情、对话分页与 Context 共用 `sessionView.ts`。浏览器宿主的文件与投影缓存归 `sessions.ts`，桌面设置页按需读文件并清理展示标题。
 - Roles 保持左列表 + 右编辑器：`default` 保留选择，明确标为「默认系统提示词」，正文只读且可复制；选择它不重复追加。自定义 Role 只编辑追加正文，页面说明它位于默认正文之后、同属系统提示词，不替换默认正文。两个宿主都拒绝创建、写入、删除 `default` 及其大小写 / `.md` 后缀 / 首尾空白别名。
 - 会话提示词有 `snapshot.systemPrompt` 时以存档为准；没有记录时，对话与 Context 分析只以「当前默认正文 + Role 追加正文」作展示参考，不写回快照。系统提示词页仍明确显示「没有记录」，参考内容不冒充当时发出的完整提示词。
 - Context 分析的工具定义只读 `snapshot.lastToolSchemas` 的最近一次请求记录，Tool Schema 总数独立展示，MCP server / 工具是其子项，不重复计总量；旧会话显示「未记录」，compact 后说明这组数据与当前快照不完全对应，不拿当前工具集冒充历史。

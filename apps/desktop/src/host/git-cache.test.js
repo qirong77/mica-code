@@ -331,10 +331,31 @@ describe('cachedWorktreeRead', () => {
     expect(runs).toBe(2)
   })
 
+  it('shares a queued base across invalidation and starts it after a failed scan', async () => {
+    const dir = repo()
+    const gate = deferred()
+    const scans = []
+    const failed = cachedWorktreeRead(dir, 'summary:HEAD', async () => {
+      scans.push('HEAD')
+      await gate.promise
+      throw new Error('scan failed')
+    })
+    const readMain = () => cachedWorktreeRead(dir, 'summary:main', async () => scans.push('main'))
+    const first = readMain()
+    noteWorktreeChange(dir)
+    const joined = readMain()
+    expect(scans).toEqual(['HEAD'])
+    gate.resolve()
+    await expect(failed).rejects.toThrow('scan failed')
+    expect(await Promise.all([first, joined])).toEqual([2, 2])
+    expect(await readMain()).toBe(2)
+    expect(scans).toEqual(['HEAD', 'main'])
+  })
+
   it('records how long a full-tree scan took, ignoring the cheap ones', async () => {
     const dir = repo()
     const slow = () =>
-      cachedWorktreeRead(dir, 'summary', async () => {
+      cachedWorktreeRead(dir, 'summary:HEAD', async () => {
         await new Promise((resolvePromise) => setTimeout(resolvePromise, 30))
         return 1
       })

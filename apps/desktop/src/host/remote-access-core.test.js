@@ -196,8 +196,8 @@ describe('remoteAccessDecision', () => {
       'not-found'
     )
     // 分享会话不授予独立插件接口（MCP 与机读 HTTP API）的入口权限。
-    expect(remoteAccessDecision({ policy: off, pathname: '/plugin/notebook/api/overview', hasShare: true })).toBe('not-found')
-    expect(remoteAccessDecision({ policy: on, pathname: '/plugin/notebook/api/overview', hasShare: true })).toBe('login')
+    expect(remoteAccessDecision({ policy: off, pathname: '/plugin/demo/api/overview', hasShare: true })).toBe('not-found')
+    expect(remoteAccessDecision({ policy: on, pathname: '/plugin/demo/api/overview', hasShare: true })).toBe('login')
   })
 
   // 侧栏 Connections 连另一台机器时，是先探活再开窗的：探活若被口令挡住，

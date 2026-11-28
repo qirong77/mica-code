@@ -1,5 +1,6 @@
-import { closeSync, openSync, readSync, statSync } from 'node:fs';
-import type { ConfigWebSessionOption } from '../shared/types.js';
+import { closeSync, existsSync, openSync, readdirSync, readSync, statSync } from 'node:fs';
+import { basename, join } from 'node:path';
+import type { ConfigWebSessionOption, ConfigWebSessionsDetails } from '../shared/types.js';
 
 /** 只读文件头这么多字节：标题、cwd、模型、状态都出现在会话 JSON 的最前面。 */
 const HEAD_BYTES = 8192;
@@ -60,6 +61,24 @@ export function summarizeSessionFile(path: string, id: string): ConfigWebSession
     turnState: head.turnState,
     sizeBytes: stat.size,
   };
+}
+
+export function listConfigWebSessions(root: string, formatTitle?: (title: string) => string): ConfigWebSessionsDetails {
+  const sessions: ConfigWebSessionOption[] = [];
+  if (existsSync(root)) {
+    for (const entry of readdirSync(root, { withFileTypes: true })) {
+      if (!entry.isFile() || !entry.name.endsWith('.json')) continue;
+      try {
+        const summary = summarizeSessionFile(join(root, entry.name), basename(entry.name, '.json'));
+        if (formatTitle) summary.title = formatTitle(summary.title);
+        sessions.push(summary);
+      } catch {
+        // A session may have been removed between readdir and open.
+      }
+    }
+    sessions.sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+  }
+  return { root, sessions };
 }
 
 /** 取第一个匹配。 */

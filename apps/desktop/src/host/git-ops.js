@@ -82,7 +82,6 @@ const worktreeInFlight = new Map()
  * that also covers requests waiting for the slot.
  */
 const worktreeQueues = new Map()
-let worktreeRequestId = 0
 /**
  * 每个仓库「一次全树扫描」实测花了多久。
  *
@@ -274,8 +273,8 @@ export async function cachedWorktreeRead(root, key, run, { refresh = false, inva
 
   // Only repository-wide summary reads need the FIFO.  Keep this generic
   // helper's cheap status/diagnostic callers independent.
+  const inFlightKey = `${root}\u0000${key}`
   if (!key.startsWith('summary:')) {
-    const inFlightKey = `${root}\u0000${key}`
     const previous = worktreeInFlight.get(inFlightKey)
     if (!refresh && previous && previous.signature === signature && previous.epoch === epoch) {
       if (diagnostics) diagnostics.cache = 'wait'
@@ -300,118 +299,85 @@ export async function cachedWorktreeRead(root, key, run, { refresh = false, inva
     }
   }
 
-  // `refresh: true` 是用户主动点刷新：既不读缓存，也不搭别人那次还没跑完的顺风车。
-  const inFlightKey = `${root}\u0000${key}`
-  const queue = worktreeQueues.get(root) || { running: null, queued: [] }
-  worktreeQueues.set(root, queue)
-
+  const queue = worktreeQueues.get(root)
   if (!refresh) {
-    const running = worktreeInFlight.get(inFlightKey)
-    if (running && running.signature === signature && running.epoch === epoch && !running.refresh) {
-      if (diagnostics) diagnostics.cache = 'wait'
-      const startedWaiting = Date.now()
-      return running.promise.then(
-        (value) => {
-          if (diagnostics) diagnostics.cachewait = Date.now() - startedWaiting
-          return value
-        },
-        (error) => {
-          if (diagnostics) diagnostics.cachewait = Date.now() - startedWaiting
-          throw error
-        }
-      )
+    const existing = worktreeInFlight.get(inFlightKey)
+    if (existing && existing.signature === signature && existing.epoch === epoch) {
+      return waitForSummary(existing.promise, diagnostics)
     }
-    // A request which has not started yet can safely adopt the newest identity.
-    // This avoids a second scan when several file-change notifications arrive
-    // while another base is occupying the repository slot.
-    const queued = queue.queued.find((item) => item.key === key && !item.refresh)
+    // A queued scan may adopt a newer generation before its reader starts.
+    const queued = queue?.find((item) => item.key === key && !item.refresh)
     if (queued) {
       queued.signature = signature
       queued.epoch = epoch
-      if (diagnostics) diagnostics.cache = 'wait'
-      const startedWaiting = Date.now()
-      return queued.promise.then(
-        (value) => {
-          if (diagnostics) diagnostics.cachewait = Date.now() - startedWaiting
-          return value
-        },
-        (error) => {
-          if (diagnostics) diagnostics.cachewait = Date.now() - startedWaiting
-          throw error
-        }
-      )
+      return waitForSummary(queued.promise, diagnostics)
     }
   }
 
   if (diagnostics) diagnostics.cache = 'miss'
   let resolvePending
   let rejectPending
+  const promise = new Promise((resolve, reject) => {
+    resolvePending = resolve
+    rejectPending = reject
+  })
   const pending = {
-    key,
-    refresh,
-    signature,
-    epoch,
-    requestId: ++worktreeRequestId,
-    promise: new Promise((resolve, reject) => {
-      resolvePending = resolve
-      rejectPending = reject
-    }),
-    run,
+    key, refresh, signature, epoch, promise, run,
     resolve: resolvePending,
     reject: rejectPending
   }
-  queue.queued.push(pending)
   if (!refresh) worktreeInFlight.set(inFlightKey, pending)
-
-  const pump = () => {
-    if (queue.running || !queue.queued.length) return
-    const current = queue.queued.shift()
-    queue.running = current
-    // Only the currently running request may publish a result.  An older
-    // request can still resolve its own callers, but never evict a queued
-    // replacement from the identity/cache maps.
-    ;(async () => {
-      const startedAt = Date.now()
-      try {
-        const value = await current.run()
-        if (current.key.startsWith('summary')) summaryScanCost.set(root, Date.now() - startedAt)
-        const stillCurrent =
-          queue.running === current &&
-          (!current.signature || headSignature(root) === current.signature) &&
-          (current.key === 'workspace-status' || worktreeEpochOf(root) === current.epoch)
-        if (stillCurrent) {
-          const values = worktreeState.get(root) || new Map()
-          for (const [otherKey, other] of values) {
-            if (other.signature !== current.signature) values.delete(otherKey)
-          }
-          values.set(current.key, {
-            signature: current.signature,
-            epoch: current.epoch,
-            at: Date.now(),
-            value
-          })
-          worktreeState.set(root, values)
-        }
-        current.resolve(value)
-      } catch (error) {
-        // Wait for the task itself to settle before releasing the repository
-        // slot.  Callers of `run` are responsible for settling their own
-        // parallel IO (readSummary uses allSettled for this reason).
-        current.reject(error)
-      } finally {
-        if (worktreeInFlight.get(`${root}\u0000${current.key}`) === current) {
-          worktreeInFlight.delete(`${root}\u0000${current.key}`)
-        }
-        queue.running = null
-        if (!queue.running && !queue.queued.length && worktreeQueues.get(root) === queue) {
-          worktreeQueues.delete(root)
-        }
-        pump()
-      }
-    })()
+  if (queue) queue.push(pending)
+  else {
+    const first = [pending]
+    worktreeQueues.set(root, first)
+    void drainSummaryQueue(root, first)
   }
-  pump()
-  return pending.promise
+  return promise
+}
+
+async function waitForSummary(promise, diagnostics) {
+  if (!diagnostics) return promise
+  diagnostics.cache = 'wait'
+  const start = Date.now()
+  try {
+    return await promise
+  } finally {
+    diagnostics.cachewait = Date.now() - start
+  }
+}
+
+/** One drainer owns this root until its last queued scan settles. */
+async function drainSummaryQueue(root, queue) {
+  while (queue.length) {
+    const current = queue.shift()
+    const startedAt = Date.now()
+    try {
+      const value = await current.run()
+      summaryScanCost.set(root, Date.now() - startedAt)
+      const sameHead = !current.signature || headSignature(root) === current.signature
+      if (sameHead && worktreeEpochOf(root) === current.epoch) {
+        const values = worktreeState.get(root) || new Map()
+        for (const [key, entry] of values) {
+          if (entry.signature !== current.signature) values.delete(key)
+        }
+        values.set(current.key, {
+          signature: current.signature,
+          epoch: current.epoch,
+          at: Date.now(),
+          value
+        })
+        worktreeState.set(root, values)
+      }
+      current.resolve(value)
+    } catch (error) {
+      current.reject(error)
+    } finally {
+      const inFlightKey = `${root}\u0000${current.key}`
+      if (worktreeInFlight.get(inFlightKey) === current) worktreeInFlight.delete(inFlightKey)
+    }
+  }
+  worktreeQueues.delete(root)
 }
 
 function errorText(error) {

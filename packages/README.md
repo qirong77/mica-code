@@ -58,7 +58,7 @@
 - `mica-web-shared`：`apps/desktop` renderer 与其运行时共用的纯函数（端口常量与「本机」地址、单端口上的路径约定、时间/token/工具图标与展示名格式化、界面状态的补丁语义、侧栏会话搜索的匹配/高亮/片段、模型用量来源分类与无会话用量账本的解析），无 React、无运行时依赖。
 - `mica-editor`：共享 Lexical Markdown 编辑器（只收发 Markdown 字符串，文件视图 `.md` 与配置页 Role / Skill 用）。runtime 在无 `allow-same-origin` 的 sandbox iframe 中运行，宿主通过 `MarkdownEditor`、`flush()` 及可选 `onSave` 接入保存；第三方库按固定版本走 CDN，宿主用 `build.mjs` 的 `editorWebAssets()` 产出 `/editor/` 资源。代码块与 Mermaid 预览共用同一套插件；Markdown 表格支持按内容自适应与拖拽，列宽不写入 Markdown。文本进出的唯一口径在 `runtime/src/markdown/markdownDocument.ts`，不保留 Markdown 空行、沿用原文件收尾换行；无损不了的写法由 `markdownPolicy.ts` 留在源码模式。细节见 [包 README](./mica-editor/README.md)。
 - `mica-file-mentions`：`@` 文件补全的唯一实现（触发判定、工作区扫描 + 缓存、评分排序、插入文本）。CLI 输入框/插件与 `apps/desktop` 的聊天输入框共用它，纯逻辑在 `rank.ts`，Node 侧扫描在 `search.ts`。
-- `mica-config-ui`：配置页（Mica Config）的唯一实现——页面组件、数据动作与共享类型；Web 基础控件统一以 Arco Design React 实现，公开 `Input` / `InputNumber` / `Select`、全应用 `ArcoProvider`、富内容浮层 `ArcoPopover`、共享动作菜单 `MenuList` / `MenuItem` / `MenuSeparator`、透传原生按钮事件与 ref 的 `ArcoAction` 和保留业务接口的按钮、开关、下拉、日期、表格供宿主与插件复用，布局不由组件库接管。浏览器宿主 `apps/config-web` 用它托管页面（HTTP `/api/*`），桌面宿主 `apps/desktop` 直接渲染它的组件、数据走运行时 IPC，两边各有一份数据实现（见该包 README）。
+- `mica-config-ui`：配置页（Mica Config）的唯一实现——页面组件、数据动作与共享类型；Web 基础控件统一以 Arco Design React 实现，公开 `Input` / `InputNumber` / `Select`、全应用 `ArcoProvider`、富内容浮层 `ArcoPopover`、共享动作菜单 `MenuList` / `MenuItem` / `MenuSeparator`、透传原生按钮事件与 ref 的 `ArcoAction` 和保留业务接口的按钮、开关、下拉、日期、表格供宿主与插件复用，布局不由组件库接管。浏览器宿主 `apps/config-web` 用它托管页面（HTTP `/api/*`），桌面宿主 `apps/desktop` 直接渲染它的组件、数据走运行时 IPC，两端共用 `web/actionClient.ts` 传递具名参数，`sessionView.ts` 提供相同的会话详情、分页与上下文计算。
 
   `Segmented` 复用 Arco Radio.Group，`variant` 提供 `segmented` / `radio` / `cards` 三种单选布局，选项标签接受 ReactNode；图文卡片与紧凑设置项也使用这一份控件，默认外观保持原样。
 

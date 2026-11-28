@@ -1,52 +1,21 @@
 import { isRecord } from '@packages/mica-common/guards.js';
-import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join, resolve, sep } from 'node:path';
 import { micaAgent } from '@packages/mica-agent/index.js';
 import { micaMcp } from '@packages/mica-mcp/index.js';
-import { micaSession } from '@packages/mica-session/index.js';
 import { micaConfig } from '@packages/mica-config/index.js';
-import { applyBrandTemplate } from '@packages/mica-agent/prompt/brandTemplate.js';
-import { wrapPromptXml } from '@packages/mica-common/promptXml.js';
-import { buildConfigWebConversationItems } from './conversation.js';
-import { summarizeSessionFile } from './sessionHead.js';
 import { micaSkills } from '@packages/mica-skills/index.js';
 import { getSkillsRootPath } from './paths.js';
-import { countUsageRequests } from '@packages/mica-web-shared/usage-source.js';
 import type { McpServerConfig } from '@packages/mica-mcp/index.js';
 import type { Skill } from '@packages/mica-skills/index.js';
 import type {
   ConfigWebMcpDetails,
   ConfigWebMcpServer,
   ConfigWebRolesDetails,
-  ConfigWebContextAnalysis,
-  ConfigWebConversationItem,
-  ConfigWebConversationPage,
-  ConfigWebSessionDetails,
-  ConfigWebSessionPrompt,
-  ConfigWebSessionsDetails,
   ConfigWebSkillsDetails,
 } from '../shared/types.js';
-import type { PersistedRuntimeSnapshot, PersistedSession } from '@packages/mica-session/index.js';
-import { buildConfigWebContextAnalysis } from './sessionAnalysis.js';
-export { getCapabilityDefaultsDetails, writeCapabilityDefaults } from './capabilityDefaults.js';
-export { getPluginsDetails, setPluginEnabled, setPluginSettings, testPluginLlm } from './plugins.js';
-export { testProviderConnection } from './providerTest.js';
 
 let mcpInitialized = false;
-
-const SESSION_CACHE_BYTES_BUDGET = 64 * 1024 * 1024;
-const ITEMS_CACHE_BYTES_BUDGET = 48 * 1024 * 1024;
-const CONTENT_CACHE_ENTRIES = 2;
-
-type CachedEntry<T> = {
-  mtimeMs: number;
-  size: number;
-  value: T;
-};
-
-const sessionCache = new Map<string, CachedEntry<PersistedSession>>();
-const itemsCache = new Map<string, CachedEntry<ConfigWebConversationItem[]>>();
-const contentCache = new Map<string, CachedEntry<string>>();
 
 export async function getMcpDetails(): Promise<ConfigWebMcpDetails> {
   if (!mcpInitialized) {
@@ -88,17 +57,15 @@ export async function writeMcpServers(content: string): Promise<ConfigWebMcpDeta
   } catch (error) {
     throw new Error(error instanceof Error ? error.message : 'mcpServers 不是有效的 JSON');
   }
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new Error('mcpServers must be a JSON object');
-  }
+  if (!isRecord(parsed)) throw new Error('mcpServers must be a JSON object');
 
   const servers: Record<string, McpServerConfig> = {};
-  for (const [name, config] of Object.entries(parsed as Record<string, unknown>)) {
+  for (const [name, config] of Object.entries(parsed)) {
     const normalizedName = normalizeMcpName(name);
     if (normalizedName in servers) throw new Error(`Duplicate MCP server: ${normalizedName}`);
-    servers[normalizedName] = parseMcpServerConfig(JSON.stringify(config), normalizedName);
+    servers[normalizedName] = validateMcpServer(config, normalizedName);
   }
-  await persistMcpServers(servers);
+  persistMcpServers(servers);
   return getMcpDetails();
 }
 
@@ -127,7 +94,6 @@ export function writeSkill(name: string, content: string): ConfigWebSkillsDetail
   const skill = findEditableSkill(name);
   const skillFile = join(skill.baseDir, 'SKILL.md');
   writeTextFileAtomic(skillFile, content);
-  micaSkills.reload();
   return getSkillsDetails();
 }
 
@@ -150,228 +116,13 @@ description: ${normalizedName}
 Describe how to use this skill.
 `;
   writeTextFileAtomic(join(baseDir, 'SKILL.md'), skillContent);
-  micaSkills.reload();
   return getSkillsDetails();
 }
 
 export function deleteSkill(name: string): ConfigWebSkillsDetails {
   const skill = findEditableSkill(name);
   rmSync(skill.baseDir, { recursive: true, force: true });
-  micaSkills.reload();
   return getSkillsDetails();
-}
-
-export function getSessionsDetails(): ConfigWebSessionsDetails {
-  return { root: micaSession.dir, sessions: listRecentSessions() };
-}
-
-export function getSessionDetails(id: string): ConfigWebSessionDetails {
-  const { value: session } = loadSessionCached(id);
-  const lastUsage = session.snapshot.lastUsage;
-  return {
-    id: session.id,
-    title: session.title,
-    createdAt: session.createdAt,
-    updatedAt: session.updatedAt,
-    cwd: session.cwd,
-    turnState: session.turnState,
-    providerId: session.snapshot.providerId,
-    model: session.snapshot.model,
-    role: session.snapshot.role,
-    fileSizeBytes: statSessionFile(session.id).size,
-    messageCount: session.snapshot.messages.length,
-    // 委派与插件的请求也是这条会话花的钱，只数主对话会让标题栏和「用量」页签对不上。
-    usageCount: countUsageRequests(session.snapshot),
-    contextWindowSize: session.snapshot.contextWindowSize,
-    lastUsage: lastUsage
-      ? {
-          inputTokens: lastUsage.inputTokens,
-          cachedInputTokens: lastUsage.cachedInputTokens,
-          outputTokens: lastUsage.outputTokens,
-          totalTokens: lastUsage.totalTokens,
-        }
-      : undefined,
-    turnTimings: session.snapshot.turnTimings,
-  };
-}
-
-export function writeSessionDetails(id: string, content: string): ConfigWebSessionDetails {
-  const session = micaSession.createStore().replaceValidated(id, content);
-  invalidateSessionCaches(session.id);
-  return getSessionDetails(id);
-}
-
-export function getSessionConversationPage(
-  id: string,
-  offset: number,
-  limit: number,
-  tail = false,
-): ConfigWebConversationPage {
-  const { value: session } = loadSessionCached(id);
-  const items = loadConversationItemsCached(id, session);
-  const total = items.length;
-  const start = tail ? Math.max(0, total - limit) : clampInt(offset, 0, Math.max(0, total - 1));
-  const end = Math.min(total, start + clampInt(limit, 1, 500));
-  return {
-    id: session.id,
-    total,
-    offset: start,
-    limit: end - start,
-    items: items.slice(start, end),
-  };
-}
-
-export function getSessionItem(id: string, sequence: number): ConfigWebConversationItem {
-  const { value: session } = loadSessionCached(id);
-  const items = loadConversationItemsCached(id, session);
-  const item = items[clampInt(sequence, 1, items.length) - 1];
-  if (!item) throw new Error(`Conversation item not found: sequence ${sequence}`);
-  return item;
-}
-
-export function getSessionContextAnalysis(id: string): ConfigWebContextAnalysis {
-  const { value: session } = loadSessionCached(id);
-  return buildConfigWebContextAnalysis(
-    {
-      providerId: session.snapshot.providerId,
-      protocol: session.snapshot.protocol,
-      model: session.snapshot.model,
-      systemPrompt: sessionSystemPrompt(session),
-      messages: session.snapshot.messages,
-    },
-    {
-      usageHistory: session.snapshot.usageHistory,
-      contextWindowSize: session.snapshot.contextWindowSize,
-      lastUsage: session.snapshot.lastUsage,
-      displayUsage: session.snapshot.displayUsage,
-      // 只读快照里记录的最近一次请求，不用当前运行时工具集冒充历史。
-      lastToolSchemas: (session.snapshot as PersistedRuntimeSnapshot & { lastToolSchemas?: unknown }).lastToolSchemas,
-    },
-  );
-}
-
-/**
- * 这条会话最近一次请求发出的完整提示词。
- *
- * 会话快照里存着真正发出去的那一份（含 skills 索引、AGENT.md 与插件段落）；旧会话没有记录，
- * 此时 `prompt` 为空串、`rolePrompt` 只提供当前默认正文与 Role 的参考，不冒充历史存档。
- */
-export function getSessionSystemPrompt(id: string): ConfigWebSessionPrompt {
-  const { value: session } = loadSessionCached(id);
-  return {
-    prompt: session.snapshot.systemPrompt ?? '',
-    rolePrompt: currentRolePrompt(session.snapshot.role),
-  };
-}
-
-/** 展示参考不重建环境、skills 或插件注入，也不写回快照。 */
-function currentRolePrompt(name: string): string {
-  const base = wrapPromptXml('system', micaAgent.roles.get('default')?.prompt ?? '');
-  const role = micaAgent.roles.get(name);
-  return role && role.name !== 'default' && role.prompt.trim()
-    ? `${base}\n\n${wrapPromptXml('role', applyBrandTemplate(role.prompt))}`
-    : base;
-}
-
-function sessionSystemPrompt(session: PersistedSession): string {
-  return session.snapshot.systemPrompt ?? currentRolePrompt(session.snapshot.role);
-}
-
-export function getSessionContent(id: string): { content: string } {
-  const { value: session, mtimeMs, size } = loadSessionCached(id);
-  const cached = contentCache.get(session.id);
-  if (cached && cached.mtimeMs === mtimeMs && cached.size === size) return { content: cached.value };
-  const content = JSON.stringify(session, null, 2);
-  contentCache.set(session.id, { mtimeMs, size, value: content });
-  evictByCount(contentCache, CONTENT_CACHE_ENTRIES);
-  return { content };
-}
-
-function listRecentSessions(): ConfigWebSessionsDetails['sessions'] {
-  if (!existsSync(micaSession.dir)) return [];
-  return readdirSync(micaSession.dir, { withFileTypes: true })
-    .filter((entry) => entry.isFile() && entry.name.endsWith('.json'))
-    .flatMap((entry) => {
-      const id = basename(entry.name, '.json');
-      const path = join(micaSession.dir, entry.name);
-      try {
-        return [summarizeSessionFile(path, id)];
-      } catch {
-        return [];
-      }
-    })
-    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
-}
-
-function loadSessionCached(id: string): CachedEntry<PersistedSession> {
-  const safeId = sanitizeSessionId(id);
-  if (!safeId) throw new Error(`Session not found: ${id}`);
-  const stat = statSessionFile(safeId);
-  const cached = sessionCache.get(safeId);
-  if (cached && cached.mtimeMs === stat.mtimeMs && cached.size === stat.size) return cached;
-  const session = micaSession.createStore().load(safeId);
-  if (!session) throw new Error(`Session not found: ${id}`);
-  const entry = { mtimeMs: stat.mtimeMs, size: stat.size, value: session };
-  sessionCache.set(safeId, entry);
-  evictByBytes(sessionCache, SESSION_CACHE_BYTES_BUDGET);
-  return entry;
-}
-
-function statSessionFile(id: string): { mtimeMs: number; size: number } {
-  const path = join(micaSession.dir, `${id}.json`);
-  if (!existsSync(path)) throw new Error(`Session not found: ${id}`);
-  const stat = statSync(path);
-  return { mtimeMs: stat.mtimeMs, size: stat.size };
-}
-
-function loadConversationItemsCached(id: string, session: PersistedSession): ConfigWebConversationItem[] {
-  const { mtimeMs, size } = statSessionFile(id);
-  const cached = itemsCache.get(id);
-  if (cached && cached.mtimeMs === mtimeMs && cached.size === size) return cached.value;
-  const items = buildConfigWebConversationItems({
-    providerId: session.snapshot.providerId,
-    protocol: session.snapshot.protocol,
-    model: session.snapshot.model,
-    systemPrompt: sessionSystemPrompt(session),
-    messages: session.snapshot.messages,
-  });
-  const entry = { mtimeMs, size, value: items };
-  itemsCache.set(id, entry);
-  evictByBytes(itemsCache, ITEMS_CACHE_BYTES_BUDGET);
-  return items;
-}
-
-function invalidateSessionCaches(id: string): void {
-  sessionCache.delete(id);
-  itemsCache.delete(id);
-  contentCache.delete(id);
-}
-
-function evictByBytes<T>(cache: Map<string, CachedEntry<T>>, budget: number): void {
-  let total = 0;
-  for (const entry of cache.values()) total += entry.size;
-  for (const key of cache.keys()) {
-    if (total <= budget) break;
-    total -= cache.get(key)?.size ?? 0;
-    cache.delete(key);
-  }
-}
-
-function evictByCount<T>(cache: Map<string, CachedEntry<T>>, maxEntries: number): void {
-  while (cache.size > maxEntries) {
-    const oldestKey = cache.keys().next().value;
-    if (oldestKey === undefined) break;
-    cache.delete(oldestKey);
-  }
-}
-
-function sanitizeSessionId(id: string): string | null {
-  const trimmed = id.trim().replace(/\.json$/, '');
-  return trimmed && /^[a-zA-Z0-9_.-]+$/.test(trimmed) ? trimmed : null;
-}
-
-function clampInt(value: number, min: number, max: number): number {
-  return Number.isFinite(value) ? Math.min(max, Math.max(min, Math.trunc(value))) : min;
 }
 
 export function getRolesDetails(): ConfigWebRolesDetails {
@@ -386,15 +137,16 @@ export function getRolesDetails(): ConfigWebRolesDetails {
   };
 }
 
-export function writeRole(name: string, content: string): ConfigWebRolesDetails {
+function editableRolePath(name: string): string {
   const normalizedName = normalizeRoleName(name);
   const role = micaAgent.roles.get(normalizedName);
   if (!role || role.builtIn || !role.path) throw new Error(`Editable role not found: ${name}`);
   if (basename(role.path) !== `${normalizedName}.md`) throw new Error('Invalid role path');
+  return role.path;
+}
 
-  const temporaryPath = `${role.path}.${process.pid}.tmp`;
-  writeFileSync(temporaryPath, content, 'utf-8');
-  renameSync(temporaryPath, role.path);
+export function writeRole(name: string, content: string): ConfigWebRolesDetails {
+  writeTextFileAtomic(editableRolePath(name), content);
   return getRolesDetails();
 }
 
@@ -409,11 +161,7 @@ export function createRole(name: string, content = ''): ConfigWebRolesDetails {
 }
 
 export function deleteRole(name: string): ConfigWebRolesDetails {
-  const normalizedName = normalizeRoleName(name);
-  const role = micaAgent.roles.get(normalizedName);
-  if (!role || role.builtIn || !role.path) throw new Error(`Editable role not found: ${name}`);
-  if (basename(role.path) !== `${normalizedName}.md`) throw new Error('Invalid role path');
-  rmSync(role.path, { force: true });
+  rmSync(editableRolePath(name), { force: true });
   return getRolesDetails();
 }
 
@@ -467,27 +215,16 @@ function readMcpServersText(): string {
   }
 }
 
-async function persistMcpServers(servers: Record<string, McpServerConfig>): Promise<void> {
+function persistMcpServers(servers: Record<string, McpServerConfig>): void {
   const path = micaConfig.path;
   const current = existsSync(path) ? JSON.parse(readFileSync(path, 'utf-8')) : {};
-  if (!current || typeof current !== 'object' || Array.isArray(current)) {
-    throw new Error('Invalid config file');
-  }
-  const next = { ...(current as Record<string, unknown>), mcpServers: servers };
+  if (!isRecord(current)) throw new Error('Invalid config file');
+  const next = { ...current, mcpServers: servers };
   writeTextFileAtomic(path, `${JSON.stringify(next, null, 2)}\n`);
 }
 
-function parseMcpServerConfig(content: string, name: string): McpServerConfig {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(content);
-  } catch (error) {
-    throw new Error(error instanceof Error ? error.message : 'Invalid MCP server JSON');
-  }
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new Error(`MCP server "${name}" must be a JSON object`);
-  }
-  const server = parsed as Record<string, unknown>;
+function validateMcpServer(server: unknown, name: string): McpServerConfig {
+  if (!isRecord(server)) throw new Error(`MCP server "${name}" must be a JSON object`);
   if ('url' in server) {
     if (typeof server.url !== 'string' || !server.url.trim()) {
       throw new Error(`MCP server "${name}" url must be a non-empty string`);
@@ -558,12 +295,7 @@ function isPathInside(target: string, root: string): boolean {
 }
 
 function isStringRecord(value: unknown): value is Record<string, string> {
-  return (
-    Boolean(value) &&
-    typeof value === 'object' &&
-    !Array.isArray(value) &&
-    Object.values(value as Record<string, unknown>).every((item) => typeof item === 'string')
-  );
+  return isRecord(value) && Object.values(value).every((item) => typeof item === 'string');
 }
 
 function isStringArray(value: unknown): value is string[] {

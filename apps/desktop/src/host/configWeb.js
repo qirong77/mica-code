@@ -1,5 +1,5 @@
 import { ipcMain } from 'electron'
-import { isConfigWebAction, runConfigWebAction } from './configWebData.js'
+import { runConfigWebAction } from './configWebData.js'
 
 /**
  * 配置页（packages/mica-config-ui）在桌面端的数据面。
@@ -9,9 +9,5 @@ import { isConfigWebAction, runConfigWebAction } from './configWebData.js'
  * 改的就是那一台的配置。浏览器端有另一份传输层实现（apps/config-web 的 HTTP 路由）。
  */
 export function registerConfigWebIpc() {
-  ipcMain.handle('config-web:invoke', (_event, payload) => {
-    const action = payload?.action
-    if (!isConfigWebAction(action)) throw new Error(`未知的配置操作：${String(action)}`)
-    return runConfigWebAction(action, payload?.input ?? {})
-  })
+  ipcMain.handle('config-web:invoke', (_event, payload) => runConfigWebAction(payload?.action, payload?.input))
 }

@@ -40,24 +40,12 @@ afterEach(() => {
 })
 
 describe('插件的按需 URI 文档', () => {
-  it('官方插件声明的文档在候选里，指向运行时自己的接口根', () => {
-    const entry = listPluginUriApis('').find((item) => item.name === 'notebook')
-    expect(entry).toMatchObject({
-      pluginId: 'notebook',
-      uri: '/plugin/notebook/api',
-      source: { kind: 'plugin', label: 'notebook', detail: 'notebook' }
-    })
-  })
-
-  it('把「不常用的能力」都收在按需文档里：排期与视频同样只留一条 URI', () => {
+  it('列出官方插件声明的 URI 与来源', () => {
     const entries = listPluginUriApis('')
-    for (const [name, uri] of [
-      ['notebook', '/plugin/notebook/api'],
-      ['schedule', '/plugin/schedule/api'],
-      ['video', '/plugin/video/api']
-    ]) {
-      const entry = entries.find((item) => item.name === name)
-      expect(entry).toMatchObject({ uri, source: { kind: 'plugin', label: name } })
+    for (const name of ['schedule', 'video']) {
+      expect(entries.find((item) => item.name === name)).toMatchObject({
+        pluginId: name, uri: `/plugin/${name}/api`, source: { kind: 'plugin', label: name, detail: name }
+      })
     }
   })
 
@@ -95,20 +83,20 @@ describe('插件的按需 URI 文档', () => {
   })
 
   it('同名文档用户插件优先：本地跑着的接口比随包的更贴近手头的数据', () => {
-    writePlugin('notebook', {
+    writePlugin('schedule', {
       uriApis: [
         {
-          name: 'notebook',
+          name: 'schedule',
           description: '我自己的',
-          uri: 'https://mica.qirong77.com/plugin/notebook/api'
+          uri: 'https://example.test/plugin/schedule/api'
         }
       ]
     })
-    const entries = listPluginUriApis('').filter((entry) => entry.name === 'notebook')
+    const entries = listPluginUriApis('').filter((entry) => entry.name === 'schedule')
     expect(entries).toHaveLength(1)
     expect(entries[0]).toMatchObject({
       description: '我自己的',
-      uri: 'https://mica.qirong77.com/plugin/notebook/api'
+      uri: 'https://example.test/plugin/schedule/api'
     })
   })
 })

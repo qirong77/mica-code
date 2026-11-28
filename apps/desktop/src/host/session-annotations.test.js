@@ -26,7 +26,7 @@ beforeEach(() => {
     target,
     JSON.stringify({
       version: 1,
-      name: 'Session Tags',
+      name: 'Labels',
       options: [
         { id: 'red', label: 'Red', color: '#FF3B30' },
         { id: 'blue', label: 'Blue', color: '#007AFF' }

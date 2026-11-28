@@ -1,4 +1,5 @@
-import { isRecord } from '@packages/mica-common/guards.js';
+import { isRecord } from '@packages/mica-common/guards.js'
+import { comparableText } from '@packages/mica-common/promptText.js'
 import {
   existsSync,
   mkdirSync,
@@ -9,17 +10,19 @@ import {
   statSync,
   writeFileSync
 } from 'node:fs'
-import { basename, dirname, extname, join, resolve } from 'node:path'
-import { homedir } from 'node:os'
-import { countUsageRequests } from '@packages/mica-web-shared/usage-source.js'
+import { basename, dirname, extname, join } from 'node:path'
+import { resolveMicaHomePath } from '@packages/mica-config/brand.js'
 import {
-  buildConfigWebConversationItems,
-  buildConfigWebContextAnalysis
-} from '@mica-config-ui/session-view'
+  buildSessionHeader,
+  conversationItemAt,
+  sessionContextAnalysis,
+  sessionConversationItems,
+  sliceConversationPage
+} from '@packages/mica-config-ui/src/server/sessionView.ts'
 import {
   getCapabilityDefaultsDetails,
   writeCapabilityDefaults
-} from '@mica-config-ui/capability-defaults'
+} from '@packages/mica-config-ui/src/server/capabilityDefaults.ts'
 // 插件列表要同时认识官方插件（清单编译进产物）和用户插件（磁盘上的目录），因此和
 // config-web 共用同一份实现，不再在这里抄一遍扫描逻辑。
 import {
@@ -27,13 +30,13 @@ import {
   setPluginEnabled as setPluginEnabledInStore,
   setPluginSettings as setPluginSettingsInStore,
   testPluginLlm as testPluginLlmInStore
-} from '@mica-config-ui/plugins'
-import { testProviderConnection } from '@mica-config-ui/provider-test'
-import { runPluginAction as runPluginActionProcess } from '@mica-config-ui/plugin-action'
-import { summarizeSessionFile } from '@mica-config-ui/session-head'
+} from '@packages/mica-config-ui/src/server/plugins.ts'
+import { testProviderConnection } from '@packages/mica-config-ui/src/server/providerTest.ts'
+import { runPluginAction as runPluginActionProcess } from '@packages/mica-config-ui/src/server/pluginAction.ts'
+import { listConfigWebSessions } from '@packages/mica-config-ui/src/server/sessionHead.ts'
 // 内置 default role 与 CLI 同源：提示词模板就是 packages/mica-agent/prompt/system.md，
 // 展开品牌占位符后原样展示（只读），桌面宿主不自己留一份副本。
-import defaultSystemPromptTemplate from '@packages/mica-agent/prompt/system.md?raw'
+import defaultSystemPromptTemplate from '@packages/mica-agent/prompt/system.md' with { type: 'text' }
 import { applyBrandTemplate } from '@packages/mica-agent/prompt/brandTemplate.js'
 import { wrapPromptXml } from '@packages/mica-common/promptXml.js'
 import { readPromptControls, writePromptControls } from '@packages/mica-config/promptControls.js'
@@ -49,28 +52,11 @@ import {
 import { probeMcpServers } from './mcp-probe.js'
 import { clearLogs, readPerformanceSummaryAsync } from './log.js'
 
-/**
- * 配置页在桌面运行时的数据层。
- *
- * 直接读写本机的 `$MICA_HOME`（config.json / role / skills / plugins / sessions），不依赖
- * CLI 的那些运行时包 —— 页面组件来自 packages/mica-config-ui，但它引用的数据操作在这里
- * 用最朴素的文件读写实现，和 CLI 侧（apps/config-web 的 server.ts）各自对着一份数据。
- *
- * 受控浏览器的窗口活在 Electron 主进程（host/browser-control.js），运行时是纯 Node，
- * 两边只能靠本机 HTTP 服务通信 —— 这里转发「读详情」，窗口的开 / 显示 / 隐藏 / 关闭
- * 全归 agent 经那套接口（与主区顶栏图标）做，配置页不提供入口。
- *
- * 会话视图的「history → 对话项 / 上下文分解」是纯逻辑，直接复用包里的实现。
- */
-
-function micaHome() {
-  return process.env.MICA_HOME ? resolve(process.env.MICA_HOME) : join(homedir(), '.mica')
-}
-
-const configPath = () => join(micaHome(), 'config.json')
-const sessionsDir = () => join(micaHome(), 'sessions')
-const rolesDir = () => join(micaHome(), 'role')
-const skillsRoot = () => join(micaHome(), 'skills')
+/** 桌面设置读当前运行时的文件，复用共享会话投影。系统检查与窗口详情由原生宿主提供。 */
+const configPath = () => resolveMicaHomePath('config.json')
+const sessionsDir = () => resolveMicaHomePath('sessions')
+const rolesDir = () => resolveMicaHomePath('role')
+const skillsRoot = () => resolveMicaHomePath('skills')
 
 function writeTextAtomic(file, content) {
   const temporary = join(dirname(file), `.${basename(file)}.${process.pid}.tmp`)
@@ -100,14 +86,10 @@ function writeConfigFile(content) {
 }
 
 /** 只改 mcpServers 一段，其余字段原样保留 */
-function updateMcpServers(mutate) {
+function replaceMcpServers(servers) {
   const path = configPath()
   const current = existsSync(path) ? readJson(path) : {}
-  if (!current || typeof current !== 'object' || Array.isArray(current)) {
-    throw new Error('config.json 不是 JSON 对象')
-  }
-  const servers = { ...(current.mcpServers ?? {}) }
-  mutate(servers)
+  if (!isRecord(current)) throw new Error('config.json 不是 JSON 对象')
   writeTextAtomic(path, `${JSON.stringify({ ...current, mcpServers: servers }, null, 2)}\n`)
 }
 
@@ -119,20 +101,12 @@ const normalizeMcpName = (name) => {
   return trimmed
 }
 
-function parseMcpServerConfig(content, name) {
-  let parsed
-  try {
-    parsed = JSON.parse(content)
-  } catch {
-    throw new Error(`MCP server ${name} 的配置不是合法 JSON`)
-  }
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new Error(`MCP server ${name} 的配置必须是 JSON 对象`)
-  }
-  if (typeof parsed.url !== 'string' && typeof parsed.command !== 'string') {
+function validateMcpServer(config, name) {
+  if (!isRecord(config)) throw new Error(`MCP server ${name} 的配置必须是 JSON 对象`)
+  if (typeof config.url !== 'string' && typeof config.command !== 'string') {
     throw new Error(`MCP server ${name} 需要 url 或 command`)
   }
-  return parsed
+  return config
 }
 
 /**
@@ -350,71 +324,13 @@ function loadSession(id) {
   return { session: readJson(path), path }
 }
 
-/**
- * 老会话的标题可能从带图片的输入原样截出来（`[Image](/Users/…/a.png) 帮我看下`）。
- * 本地路径对列表毫无意义，读取时剥掉占位符即可，不必改写用户文件。
- */
 function cleanSessionTitle(title) {
-  const stripped = String(title ?? '')
-    .replace(/\[Image\]\([^)]*\)|\[图片\]|\[Image\]|\[image omitted[^\]]*\]/gi, '')
-    .replace(/\s+/g, ' ')
-    .trim()
-  return stripped || String(title ?? '')
+  return comparableText(title) || String(title ?? '')
 }
-
-function listRecentSessions() {
-  const directory = sessionsDir()
-  if (!existsSync(directory)) return []
-  return readdirSync(directory, { withFileTypes: true })
-    .filter((entry) => entry.isFile() && entry.name.endsWith('.json'))
-    .flatMap((entry) => {
-      const path = join(directory, entry.name)
-      const id = basename(entry.name, '.json')
-      try {
-        const summary = summarizeSessionFile(path, id)
-        return [{ ...summary, title: cleanSessionTitle(summary.title) }]
-      } catch {
-        return []
-      }
-    })
-    .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
-}
-
-const readSessionsDetails = () => ({ root: sessionsDir(), sessions: listRecentSessions() })
-
-const sessionUsage = (session) => ({
-  id: session.id,
-  title: cleanSessionTitle(session.title),
-  createdAt: session.createdAt,
-  updatedAt: session.updatedAt,
-  turnState: session.turnState,
-  providerId: session.snapshot.providerId,
-  model: session.snapshot.model,
-  role: session.snapshot.role
-})
 
 function readSessionDetails(id) {
   const { session, path } = loadSession(id)
-  const lastUsage = session.snapshot.lastUsage
-  return {
-    ...sessionUsage(session),
-    cwd: session.cwd,
-    fileSizeBytes: statSync(path).size,
-    messageCount: session.snapshot.messages.length,
-    // 同一个口径：主对话 + 委派 + 插件 + 内核后台的请求数（见 usage-source）。
-    usageCount: countUsageRequests(session.snapshot),
-    contextWindowSize: session.snapshot.contextWindowSize,
-    // 「耗时」页签与「耗时分析」弹窗都读这一份（会话详情 = 唯一入口）。
-    turnTimings: session.snapshot.turnTimings,
-    lastUsage: lastUsage
-      ? {
-          inputTokens: lastUsage.inputTokens,
-          cachedInputTokens: lastUsage.cachedInputTokens,
-          outputTokens: lastUsage.outputTokens,
-          totalTokens: lastUsage.totalTokens
-        }
-      : undefined
-  }
+  return buildSessionHeader(session, statSync(path).size, cleanSessionTitle(session.title))
 }
 
 const readSessionContent = (id) => ({ content: JSON.stringify(loadSession(id).session, null, 2) })
@@ -430,49 +346,14 @@ function writeSession(id, content) {
   return readSessionDetails(safeId)
 }
 
-function conversationSource(session) {
-  return {
-    providerId: session.snapshot.providerId,
-    protocol: session.snapshot.protocol,
-    model: session.snapshot.model,
-    // 空串也是存档；只有没有记录时才展示当前默认正文与 Role 的参考。
-    systemPrompt: session.snapshot.systemPrompt ?? rolePromptOf(session.snapshot.role),
-    messages: session.snapshot.messages
-  }
-}
-
 function conversationItems(id) {
-  const { session } = loadSession(id)
-  return buildConfigWebConversationItems(conversationSource(session))
-}
-
-function readSessionConversationPage(id, offset, limit, tail = false) {
-  const items = conversationItems(id)
-  const total = items.length
-  const start = tail
-    ? Math.max(0, total - limit)
-    : Math.min(Math.max(0, offset), Math.max(0, total - 1))
-  const end = Math.min(total, start + Math.max(1, Math.min(500, limit)))
-  return { id, total, offset: start, limit: end - start, items: items.slice(start, end) }
+  return sessionConversationItems(loadSession(id).session.snapshot, rolePromptOf)
 }
 
 function readSessionItem(id, sequence) {
-  const items = conversationItems(id)
-  const index = Math.min(Math.max(1, sequence), items.length) - 1
-  if (!items[index]) throw new Error(`会话条目不存在：sequence ${sequence}`)
-  return items[index]
-}
-
-function readSessionContextAnalysis(id) {
-  const { session } = loadSession(id)
-  return buildConfigWebContextAnalysis(conversationSource(session), {
-    usageHistory: session.snapshot.usageHistory,
-    contextWindowSize: session.snapshot.contextWindowSize,
-    lastUsage: session.snapshot.lastUsage,
-    displayUsage: session.snapshot.displayUsage,
-    // 只读快照里记录的最近一次请求，不用当前运行时工具集冒充历史。
-    lastToolSchemas: session.snapshot.lastToolSchemas
-  })
+  const item = conversationItemAt(conversationItems(id), sequence)
+  if (!item) throw new Error(`会话条目不存在：sequence ${sequence}`)
+  return item
 }
 
 function readSessionSystemPrompt(id) {
@@ -482,8 +363,6 @@ function readSessionSystemPrompt(id) {
     rolePrompt: rolePromptOf(session.snapshot.role)
   }
 }
-
-/* ------------------------------------------------------------ 受控浏览器 */
 
 /* ------------------------------------------------------------------ 动作表 */
 
@@ -502,12 +381,9 @@ async function saveMcpServers(content) {
   for (const [name, config] of Object.entries(parsed)) {
     const normalized = normalizeMcpName(name)
     if (normalized in servers) throw new Error(`MCP server 重名：${normalized}`)
-    servers[normalized] = parseMcpServerConfig(JSON.stringify(config), normalized)
+    servers[normalized] = validateMcpServer(config, normalized)
   }
-  updateMcpServers((current) => {
-    for (const name of Object.keys(current)) delete current[name]
-    Object.assign(current, servers)
-  })
+  replaceMcpServers(servers)
   return readMcpDetails()
 }
 
@@ -578,7 +454,7 @@ export const configWebActions = {
   pickDirectory: (input) =>
     pickDirectoryNative({ title: optionalText(input, 'title'), defaultPath: optionalText(input, 'defaultPath') }),
 
-  readSessionsDetails: () => readSessionsDetails(),
+  readSessionsDetails: () => listConfigWebSessions(sessionsDir(), cleanSessionTitle),
   readSessionDetails: (input) => readSessionDetails(text(input, 'id')),
   readSessionContent: (input) => readSessionContent(text(input, 'id')),
 
@@ -591,15 +467,19 @@ export const configWebActions = {
   // 渲染层的内存只有主进程拍得到（`webContents.takeHeapSnapshot`），结果落在日志目录。
   takeHeapSnapshot: (input) => takeHeapSnapshot({ windowId: input?.windowId }),
 
-  readSessionConversationPage: (input) =>
-    readSessionConversationPage(
-      text(input, 'id'),
+  readSessionConversationPage: (input) => {
+    const id = text(input, 'id')
+    return sliceConversationPage(
+      id,
+      conversationItems(id),
       integer(input, 'offset', 0),
       integer(input, 'limit', 80),
       input.tail === true
-    ),
+    )
+  },
   readSessionItem: (input) => readSessionItem(text(input, 'id'), integer(input, 'sequence', 1)),
-  readSessionContextAnalysis: (input) => readSessionContextAnalysis(text(input, 'id')),
+  readSessionContextAnalysis: (input) =>
+    sessionContextAnalysis(loadSession(text(input, 'id')).session.snapshot, rolePromptOf),
   readSessionSystemPrompt: (input) => readSessionSystemPrompt(text(input, 'id')),
   writeSession: (input) => writeSession(text(input, 'id'), text(input, 'content'))
 }
@@ -608,10 +488,9 @@ export function isConfigWebAction(action) {
   return typeof action === 'string' && Object.hasOwn(configWebActions, action)
 }
 
-export function runConfigWebAction(action, input = {}) {
-  const handler = configWebActions[action]
-  if (!handler) throw new Error(`未知的配置操作：${action}`)
-  return handler(input ?? {})
+export function runConfigWebAction(action, input) {
+  if (!isConfigWebAction(action)) throw new Error(`未知的配置操作：${String(action)}`)
+  return configWebActions[action](input ?? {})
 }
 
 function text(input, field) {

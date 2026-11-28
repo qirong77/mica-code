@@ -118,12 +118,6 @@ export type ConfigWebClient = {
   pickDirectory?(options?: ConfigWebPickDirectoryOptions): Promise<ConfigWebPickDirectory>;
 
   /**
-   * 自动压缩（输入框上方那个齿轮曾经管的东西）现在只在这台机器的运行时里：设置与按会话
-   * 记账的计数都在运行时的 userData 目录下。浏览器宿主（apps/config-web）没有这份数据，
-   * 所以这三个方法是可选的，缺了就不显示这一节。
-   */
-
-  /**
    * 受控浏览器（Mica 里那套能真正打开的浏览器）只在桌面运行时里：窗口活在 Electron 主进程，
    * 运行时通过本机 HTTP 服务读写。浏览器宿主（apps/config-web）拿不到这份数据，所以这些方法
    * 是可选的，缺了就不显示这一节。

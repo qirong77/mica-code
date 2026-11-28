@@ -1,6 +1,6 @@
 import { ipcMain } from 'electron'
 import { resolveMicaHome } from '@packages/mica-config/index.js'
-import { runPluginAction } from '@mica-config-ui/plugin-action'
+import { runPluginAction } from '@packages/mica-config-ui/src/server/pluginAction.ts'
 import { probeRuntime } from './runtime-probe-core'
 import { isValidPluginId } from './plugin-data-core'
 import { readPagePluginData, readPluginDataVersion, writePluginData } from './plugin-data-store.js'

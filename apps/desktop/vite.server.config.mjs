@@ -56,36 +56,6 @@ export default defineConfig({
   resolve: {
     alias: [
       { find: /^electron$/, replacement: resolve('src/server/electron-shim.js') },
-      // 配置页的数据层与页面组件来自 packages/mica-config-ui：显式指向 .ts 入口，
-      // 这个项目的宿主代码是 .js，写 `.../index.js` 不会回退到 TypeScript 源码。
-      {
-        find: '@mica-config-ui/session-view',
-        replacement: resolve('../../packages/mica-config-ui/src/server/sessionView.ts')
-      },
-      {
-        find: '@mica-config-ui/capability-defaults',
-        replacement: resolve('../../packages/mica-config-ui/src/server/capabilityDefaults.ts')
-      },
-      {
-        find: '@mica-config-ui/plugins',
-        replacement: resolve('../../packages/mica-config-ui/src/server/plugins.ts')
-      },
-      // 服务商试连（配置页的「测试连接」）：与插件试连同一条执行器，只在宿主里发请求。
-      {
-        find: '@mica-config-ui/provider-test',
-        replacement: resolve('../../packages/mica-config-ui/src/server/providerTest.ts')
-      },
-      // 配置页的插件动作：宿主没有插件运行时，实际执行交给一次性的 `mica plugin-action`。
-      {
-        find: '@mica-config-ui/plugin-action',
-        replacement: resolve('../../packages/mica-config-ui/src/server/pluginAction.ts')
-      },
-      // 会话列表行（标题 / cwd / 模型 / 状态）在两边是同一套解析：都只读文件头一个窗口，
-      // 不整份解析几 MB 的快照。
-      {
-        find: '@mica-config-ui/session-head',
-        replacement: resolve('../../packages/mica-config-ui/src/server/sessionHead.ts')
-      },
       { find: '@packages', replacement: resolve('../../packages') }
     ]
   },

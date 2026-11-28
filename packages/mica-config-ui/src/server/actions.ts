@@ -7,10 +7,22 @@ import {
   createSkill,
   deleteRole,
   deleteSkill,
-  getCapabilityDefaultsDetails,
   getMcpDetails,
-  getPluginsDetails,
   getRolesDetails,
+  getSkillsDetails,
+  writeMcpServers,
+  writeRole,
+  writeSkill,
+} from './details.js';
+import { getCapabilityDefaultsDetails, writeCapabilityDefaults } from './capabilityDefaults.js';
+import { testProviderConnection } from './providerTest.js';
+import {
+  setPluginEnabled as setPluginEnabledInStore,
+  testPluginLlm as testPluginLlmInStore,
+  setPluginSettings as setPluginSettingsInStore,
+  getPluginsDetails,
+} from './plugins.js';
+import {
   getSessionContent,
   getSessionContextAnalysis,
   getSessionConversationPage,
@@ -18,17 +30,8 @@ import {
   getSessionItem,
   getSessionsDetails,
   getSessionSystemPrompt,
-  getSkillsDetails,
-  writeMcpServers,
-  writeRole,
   writeSessionDetails,
-  writeSkill,
-  writeCapabilityDefaults,
-  setPluginEnabled as setPluginEnabledInStore,
-  testPluginLlm as testPluginLlmInStore,
-  setPluginSettings as setPluginSettingsInStore,
-  testProviderConnection,
-} from './details.js';
+} from './sessions.js';
 
 export type ConfigWebActionInput = {
   [key: string]: unknown;
@@ -36,13 +39,7 @@ export type ConfigWebActionInput = {
 
 type ConfigWebAction = (input: ConfigWebActionInput) => unknown;
 
-/**
- * 配置页的全部数据操作。
- *
- * 页面本身不关心数据从哪来：浏览器里是 HTTP（apps/config-web 的 server.ts），桌面端是
- * 运行时的 IPC（apps/desktop 的 host/configWeb.js），两条传输层都收敛到这一张表，所以
- * 参数校验、错误语义、返回值只在这里定义一次。
- */
+/** Browser-host actions. Each handler selects and validates the fields used by its operation. */
 export const configWebActions = {
   ping: (_input: ConfigWebActionInput) => ({ ok: true }),
 

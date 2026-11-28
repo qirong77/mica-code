@@ -1,95 +1,14 @@
-import type { ConfigWebClient } from '@packages/mica-config-ui/web/index.js';
-import type { PromptControls } from '@packages/mica-common/promptControls.js';
-import type {
-  ConfigWebCapabilityDefaults,
-  ConfigWebContextAnalysis,
-  ConfigWebConversationItem,
-  ConfigWebConversationPage,
-  ConfigWebFilePayload,
-  ConfigWebMcpDetails,
-  ConfigWebPluginLlmTest,
-  ConfigWebPluginActionResult,
-  ConfigWebProviderTest,
-  ConfigWebPluginsDetails,
-  ConfigWebRolesDetails,
-  ConfigWebSessionDetails,
-  ConfigWebSessionPrompt,
-  ConfigWebSessionsDetails,
-  ConfigWebSkillsDetails,
-} from '@packages/mica-config-ui/src/shared/types.js';
+import type { ConfigWebClient } from '@packages/mica-config-ui/web/api.js';
+import type { ConfigWebActionName } from '@packages/mica-config-ui/src/server/actions.js';
+import { createConfigDataClient } from '@packages/mica-config-ui/web/actionClient.js';
+import { CONFIG_WEB_EVENTS_PATH, httpRoutes } from '../../src/httpRoutes.js';
 
-/**
- * 浏览器端的 Config Web 数据源：走同源的 `/api/*`（由 apps/config-web 的 Bun 服务转发到
- * 共享动作表）。桌面端有另一份实现走运行时 IPC，页面组件对两者一视同仁。
- */
 export function createHttpConfigWebClient(): ConfigWebClient {
   return {
-    readConfigFile: () => request<ConfigWebFilePayload>('/api/files/config'),
-    writeConfigFile: (content) =>
-      request<ConfigWebFilePayload>('/api/files/config', { method: 'PUT', body: { content } }),
-    testProvider: (input) => request<ConfigWebProviderTest>('/api/provider-test', { method: 'POST', body: input }),
-
-    readMcpDetails: () => request<ConfigWebMcpDetails>('/api/details/mcp'),
-    writeMcpServers: (content) =>
-      request<ConfigWebMcpDetails>('/api/details/mcp', { method: 'PUT', body: { content } }),
-
-    readCapabilityDefaults: () => request<ConfigWebCapabilityDefaults>('/api/details/capabilities'),
-    readPromptControls: () => request<PromptControls>('/api/details/prompt-controls'),
-    writePromptControls: (controls) =>
-      request<PromptControls>('/api/details/prompt-controls', { method: 'PUT', body: { controls } }),
-    writeCapabilityDefaults: (input) =>
-      request<ConfigWebCapabilityDefaults>('/api/details/capabilities', { method: 'PUT', body: input }),
-
-    readSkillsDetails: () => request<ConfigWebSkillsDetails>('/api/details/skills'),
-    createSkill: (name, content = '') =>
-      request<ConfigWebSkillsDetails>('/api/files/skill', { method: 'POST', body: { name, content } }),
-    writeSkill: (name, content) =>
-      request<ConfigWebSkillsDetails>('/api/files/skill', { method: 'PUT', body: { name, content } }),
-    deleteSkill: (name) => request<ConfigWebSkillsDetails>('/api/files/skill', { method: 'DELETE', body: { name } }),
-
-    readRolesDetails: () => request<ConfigWebRolesDetails>('/api/details/roles'),
-    createRole: (name, content = '') =>
-      request<ConfigWebRolesDetails>('/api/files/role', { method: 'POST', body: { name, content } }),
-    writeRole: (name, content) =>
-      request<ConfigWebRolesDetails>('/api/files/role', { method: 'PUT', body: { name, content } }),
-    deleteRole: (name) => request<ConfigWebRolesDetails>('/api/files/role', { method: 'DELETE', body: { name } }),
-
-    readPluginsDetails: () => request<ConfigWebPluginsDetails>('/api/details/plugins'),
-    setPluginEnabled: (id, enabled) =>
-      request<ConfigWebPluginsDetails>('/api/details/plugins', { method: 'PUT', body: { id, enabled } }),
-    writePluginSettings: (id, values) =>
-      request<ConfigWebPluginsDetails>('/api/details/plugin-settings', { method: 'PUT', body: { id, values } }),
-    testPluginLlm: (id, values) =>
-      request<ConfigWebPluginLlmTest>('/api/details/plugin-llm-test', { method: 'POST', body: { id, values } }),
-    runPluginAction: (id, action, values, cwd) =>
-      request<ConfigWebPluginActionResult>('/api/details/plugin-action', {
-        method: 'POST',
-        body: { id, action, values, cwd },
-      }),
-
-    readSessionsDetails: () => request<ConfigWebSessionsDetails>('/api/details/sessions'),
-    readSessionDetails: (id) => request<ConfigWebSessionDetails>(`/api/details/session?id=${encodeURIComponent(id)}`),
-    readSessionContent: (id) =>
-      request<{ content: string }>(`/api/details/session?id=${encodeURIComponent(id)}&view=json`),
-    readSessionConversationPage: (id, offset, limit, tail = false) =>
-      request<ConfigWebConversationPage>(
-        `/api/details/session?id=${encodeURIComponent(id)}&view=conversation&offset=${offset}&limit=${limit}${
-          tail ? '&tail=1' : ''
-        }`,
-      ),
-    readSessionItem: (id, sequence) =>
-      request<ConfigWebConversationItem>(
-        `/api/details/session?id=${encodeURIComponent(id)}&view=item&sequence=${encodeURIComponent(String(sequence))}`,
-      ),
-    readSessionContextAnalysis: (id) =>
-      request<ConfigWebContextAnalysis>(`/api/details/session?id=${encodeURIComponent(id)}&view=context`),
-    readSessionSystemPrompt: (id) =>
-      request<ConfigWebSessionPrompt>(`/api/details/session?id=${encodeURIComponent(id)}&view=prompt`),
-    writeSession: (id, content) => request<unknown>('/api/files/session', { method: 'PUT', body: { id, content } }),
-
+    ...createConfigDataClient(request),
     connectHeartbeat: (onEvent) => {
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const socket = new WebSocket(`${protocol}//${window.location.host}/api/events`);
+      const socket = new WebSocket(`${protocol}//${window.location.host}${CONFIG_WEB_EVENTS_PATH}`);
       if (onEvent) {
         socket.addEventListener('message', (message) => {
           try {
@@ -104,16 +23,26 @@ export function createHttpConfigWebClient(): ConfigWebClient {
   };
 }
 
-async function request<T>(path: string, options: { method?: string; body?: unknown } = {}): Promise<T> {
-  const response = await fetch(path, {
-    method: options.method ?? 'GET',
-    ...(options.body === undefined
-      ? {}
-      : { headers: { 'content-type': 'application/json' }, body: JSON.stringify(options.body) }),
+async function request(action: ConfigWebActionName, input: Record<string, unknown> = {}) {
+  const { method, path, view } = httpRoutes[action];
+  const query = new URLSearchParams();
+  if (view) query.set('view', view);
+  if (method === 'GET') {
+    for (const [key, value] of Object.entries(input)) {
+      if (key === 'tail') {
+        if (value === true) query.set(key, '1');
+      } else if (value !== undefined) {
+        query.set(key, String(value));
+      }
+    }
+  }
+  const response = await fetch(query.size ? `${path}?${query}` : path, {
+    method,
+    ...(method === 'GET' ? {} : { headers: { 'content-type': 'application/json' }, body: JSON.stringify(input) }),
   });
   if (!response.ok) {
     const payload = (await response.json().catch(() => null)) as { error?: string } | null;
     throw new Error(payload?.error ?? `Request failed: ${response.status}`);
   }
-  return (await response.json()) as T;
+  return response.json();
 }

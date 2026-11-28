@@ -9,6 +9,7 @@ const root = dirname(fileURLToPath(import.meta.url));
 export default defineConfig({
   root,
   plugins: [editorWebAssets(), react()],
+  optimizeDeps: { entries: ['index.html'] },
   resolve: {
     // 页面组件与数据层来自 packages/mica-config-ui，桌面端用同一份源码（见 apps/desktop）
     alias: { '@packages': resolve(root, '../../../packages') },
