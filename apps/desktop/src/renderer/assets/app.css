@@ -7931,48 +7931,29 @@ html body #root {
 
 /* ------------------------------------------------- 顶栏浏览器的窗口列表
 
-   共享菜单表面（`.mica-menu`）上的两行变体：这里选的是「哪一扇窗口」，名字和地址
-   得同时看得见，单行只放得下其中一个。行本身仍是 `MenuItem`，不另起一套菜单。 */
+   行就是组件库菜单项的单行形态（`.mica-menu` 的 32px 行高、16px 图标位、6px 圆角
+   高亮），与设置页菜单、浏览器顶栏的「最近访问」同一套表面：左边名字，右边去掉协议
+   的地址——窗口名字经常是「新标签页」这种，地址才是分辨哪一扇的线索。
+   「显示 / 隐藏」由行的选中态（`aria-checked`）表达，不再自带一套两行字与状态文字。 */
 .browser-windows-menu {
   min-width: 248px;
   max-width: min(380px, calc(100vw - 16px));
 }
 
-.browser-windows-menu .mica-menu-item.arco-btn {
-  height: auto;
-  min-height: 36px;
-  padding: 5px 8px;
-  white-space: normal;
-}
-
-.browser-window-text {
-  display: flex;
-  flex: 1;
+/* 地址只占它需要的那一段：名字是主角，地址再长也只会被省略（完整地址在行的 tooltip 里） */
+.browser-windows-menu .browser-window-url {
+  flex: 0 1 auto;
   min-width: 0;
-  flex-direction: column;
-  line-height: 1.35;
-}
-
-.browser-window-name,
-.browser-window-detail {
+  max-width: 55%;
   overflow: hidden;
+  padding-left: 10px;
+  color: var(--mica-arco-text-faint);
+  font-size: 11px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.browser-window-detail {
-  color: var(--mica-arco-text-faint);
-  font-size: 11px;
-}
-
-.browser-window-status {
-  flex: none;
-  padding-left: 12px;
-  color: var(--mica-arco-text-faint);
-  font-size: 11px;
-}
-
-.browser-windows-menu .mica-menu-item[aria-checked='true'] :is(.browser-window-detail, .browser-window-status) {
+.browser-windows-menu .mica-menu-item[aria-checked='true'] .browser-window-url {
   color: inherit;
   opacity: 0.75;
 }

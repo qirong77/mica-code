@@ -2085,9 +2085,9 @@ export default function App() {
   // 顶栏图标按「当前这条会话」归属：只显示这条会话自己开的窗口，切走就一起消失。
   // 没有归属的窗口不在这里出现——主进程会直接把它们销毁（归属是图标的唯一依据）。
   const activeBrowsers = useMemo(() => nodeBrowsers(browsers, activeNode), [browsers, activeNode])
-  // 顶栏按钮在没有窗口时点一下就是这里：给当前会话新建一扇并直接显示（人点了就是要看）。
-  // 归属写会话 id，与 agent 建窗口时同一套——不这样写，新建的窗口就不会归到这条会话下，
-  // 顶栏按钮里也看不到它。
+  // 顶栏那一枚浏览器按钮下拉里的「新建浏览器窗口」就是这里：给当前会话新建一扇并直接显示
+  // （人点了就是要看）。归属写会话 id，与 agent 建窗口时同一套——不这样写，新建的窗口就不会
+  // 归到这条会话下，顶栏按钮里也看不到它。
   const createBrowser = useCallback(() => {
     const owner = String(activeNode?.sessionId || activeNode?.id || '')
     if (!owner) return
@@ -2979,8 +2979,8 @@ export default function App() {
                   </ArcoAction>
                 )
               })}
-              {/* 浏览器常驻一枚按钮：多开窗口只在右下角标数量，悬停出窗口列表，
-                  没有窗口时点一下就给这条会话新建一个（见 BrowserWindowsButton）。
+              {/* 浏览器常驻一枚按钮：右下角标窗口数量（有一扇就写 1），点一下展开窗口
+                  列表，新建与切到哪一扇都在列表里选（见 BrowserWindowsButton）。
                   终端仍按窗口/会话一枚图标。 */}
               <BrowserWindowsButton
                 browsers={activeBrowsers}

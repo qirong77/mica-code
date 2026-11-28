@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'bun:test'
 import {
   browserButtonTitle,
-  browserClickAction,
   browserCountBadge,
   browserIconTitle,
   browserMenuRow,
@@ -106,44 +105,46 @@ describe('browserIconTitle', () => {
 })
 
 describe('browserCountBadge', () => {
-  it('writes the count only when more than one window is open', () => {
+  it('writes the count as soon as one window is open', () => {
     expect(browserCountBadge([])).toBe('')
-    expect(browserCountBadge([{ id: 'brw-1' }])).toBe('')
+    // 一扇也要写：数量是「这条会话有窗口」的唯一线索
+    expect(browserCountBadge([{ id: 'brw-1' }])).toBe('1')
     expect(browserCountBadge([{ id: 'brw-1' }, { id: 'brw-2' }])).toBe('2')
     expect(browserCountBadge([{ id: 'brw-1' }, { id: 'brw-2' }, { id: 'brw-3' }])).toBe('3')
     // 没有 id 的条目点不中，不参与计数
-    expect(browserCountBadge([{ id: 'brw-1' }, {}])).toBe('')
+    expect(browserCountBadge([{ id: 'brw-1' }, {}])).toBe('1')
+    expect(browserCountBadge([{}])).toBe('')
     expect(browserCountBadge(null)).toBe('')
   })
 })
 
 describe('browserButtonTitle', () => {
-  it('offers to create a window when there is none, so the always-on button is not a dead end', () => {
-    expect(browserButtonTitle([])).toBe('浏览器\n点击新建一个窗口')
+  it('says the click only opens the list when the session has no window', () => {
+    const title = browserButtonTitle([])
+    expect(title.startsWith('浏览器\n点击展开窗口列表')).toBe(true)
+    expect(title).toContain('新建')
   })
 
-  it('reuses the single-window wording so click and right-click stay explained', () => {
+  it('does not claim a click opens a particular window', () => {
     const title = browserButtonTitle([
       { id: 'brw-1', label: '订单页', url: 'https://e.example/a', visible: false }
     ])
-    expect(title).toContain('订单页')
-    expect(title).toContain('点击唤出')
-    expect(title).toContain('右键关闭')
+    expect(title).toBe(
+      '浏览器 · 1 个窗口\n点击展开窗口列表：点哪一行就显示 / 收起哪一扇，行上右键关闭'
+    )
+    expect(title).not.toContain('点击唤出')
+    expect(title).not.toContain('悬停')
   })
 
-  it('explains the dropdown once there is more than one window', () => {
+  it('counts windows and how many are on screen', () => {
     const title = browserButtonTitle([
       { id: 'brw-1', visible: true },
       { id: 'brw-2', visible: false },
       { id: 'brw-3', visible: false }
     ])
-    expect(title).toBe(
-      '浏览器 · 3 个窗口（1 个已显示）\n点击显示 / 收起固定顺序里的窗口 · 悬停选择窗口 · 行上右键关闭'
-    )
+    expect(title.startsWith('浏览器 · 3 个窗口（1 个已显示）')).toBe(true)
     // 一个都没显示时不写括号，别在 tooltip 里出现「（0 个已显示）」
-    expect(browserButtonTitle([{ id: 'brw-1' }, { id: 'brw-2' }])).toBe(
-      '浏览器 · 2 个窗口\n点击显示 / 收起固定顺序里的窗口 · 悬停选择窗口 · 行上右键关闭'
-    )
+    expect(browserButtonTitle([{ id: 'brw-1' }, { id: 'brw-2' }])).not.toContain('个已显示')
   })
 })
 
@@ -163,19 +164,26 @@ describe('browserMenuRows', () => {
       id: 'brw-1',
       name: '订单页',
       detail: 'example.com/order/1?x=1',
-      status: '已显示',
       visible: true
     })
     expect(row.tooltip).toContain('订单详情')
+    expect(row.tooltip).toContain('已显示')
   })
 
   it('falls back to the page title when the agent gave no label', () => {
     expect(browserMenuRow({ id: 'brw-2', title: '新标签页', visible: false })).toMatchObject({
       name: '新标签页',
-      detail: '',
-      status: '已隐藏'
+      detail: ''
     })
     expect(browserMenuRow({ id: 'brw-3' }).name).toBe('受控浏览器')
+  })
+
+  it('treats the default label as "no name": the page title tells windows apart', () => {
+    // 用户自己点出来的窗口都叫这个名字，拿它当名字几扇窗口就长得一模一样
+    expect(browserMenuRow({ id: 'brw-4', label: '受控浏览器', title: '订单详情' }).name).toBe(
+      '订单详情'
+    )
+    expect(browserMenuRow({ id: 'brw-5', label: '受控浏览器' }).name).toBe('受控浏览器')
   })
 
   it('drops entries the list could not point at', () => {
@@ -195,28 +203,5 @@ describe('browserMenuRows', () => {
       'brw-1',
       'brw-2'
     ])
-  })
-})
-
-describe('browserClickAction', () => {
-  it('creates a window when the session has none', () => {
-    expect(browserClickAction([])).toEqual({ kind: 'create', browser: null })
-    expect(browserClickAction([{ label: '没有 id' }])).toEqual({ kind: 'create', browser: null })
-  })
-
-  it('toggles the first window in the fixed list order', () => {
-    const browsers = [
-      { id: 'brw-1', label: '订单页', visible: true, lastUsedAt: 1000 },
-      { id: 'brw-2', label: '登录页', visible: false, lastUsedAt: 8000 }
-    ]
-    const action = browserClickAction(browsers)
-    expect(action.kind).toBe('toggle')
-    // 拿的是原始对象：调用方要按它的 visible 决定显示还是收起
-    expect(action.browser).toBe(browsers[0])
-  })
-
-  it('falls back to the first window for snapshots without a timestamp', () => {
-    const browsers = [{ id: 'brw-1' }, { id: 'brw-2' }]
-    expect(browserClickAction(browsers).browser).toBe(browsers[0])
   })
 })

@@ -75,7 +75,9 @@ describe('App header icon actions', () => {
       ]
     ]) {
       // 两个角标实现在「没内容」时都必须给空串：空串会被 Arco 当成第二格内容。
-      expect(badgeOf([{ id: 'one' }], { id: 'one' })).toBe('')
+      // 浏览器那枚有一扇窗口就写 1（见 browser-control 的 browserCountBadge），
+      // 所以「没有内容」指的是没有窗口；终端是列表里的序号，一扇时不写。
+      expect(badgeOf([], { id: 'one' })).toBe('')
       expect(action).toContain('{badge ? (')
       expect(action).toContain(') : null}')
       expect(action).not.toContain('{badge && (')

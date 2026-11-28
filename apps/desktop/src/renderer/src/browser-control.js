@@ -51,40 +51,46 @@ export function browserIconTitle(browser) {
 }
 
 /**
- * 顶栏只有一枚常驻的浏览器按钮，窗口数量写在它的右下角：一个窗口时不用写，
- * 两个以上才下标——用户要看的是「是不是不止一个」。
+ * 顶栏只有一枚常驻的浏览器按钮，窗口数量写在它的右下角：**有一扇就写 1**。
+ * 之前一扇时不写、两扇起才出现，用户看不出「这枚图标现在归谁」——数量是这枚按钮
+ * 唯一的「当前会话有窗口」证据，不能等第二个窗口才出现。
  */
 export function browserCountBadge(browsers) {
   const count = (Array.isArray(browsers) ? browsers : []).filter((item) => item?.id).length
-  return count > 1 ? String(count) : ''
+  return count ? String(count) : ''
 }
 
 /**
- * 常驻按钮的 tooltip。没有窗口时说清「没有」而不是让按钮无声无息；一个窗口时沿用逐窗口
- * 那份说明（点击收起 / 唤出、右键关闭）；多个时说清按钮和下拉各自做什么。
+ * 常驻按钮的 tooltip。按钮点一下只展开窗口列表（不再直接新建 / 显示某一扇），
+ * 所以两行说的是「点开会看到什么」：没有窗口时列表里只有新建，有窗口时一行一扇。
  */
 export function browserButtonTitle(browsers) {
   const list = (Array.isArray(browsers) ? browsers : []).filter((item) => item?.id)
-  // 没有窗口时按钮照样能点：点一下就新建一个，tooltip 先把这件事说明白
-  if (!list.length) return '浏览器\n点击新建一个窗口'
-  if (list.length === 1) return browserIconTitle(list[0])
   const visible = list.filter((item) => item.visible).length
-  return `浏览器 · ${list.length} 个窗口${visible ? `（${visible} 个已显示）` : ''}\n点击显示 / 收起固定顺序里的窗口 · 悬停选择窗口 · 行上右键关闭`
+  if (!list.length) return '浏览器\n点击展开窗口列表（当前会话还没有窗口，列表里可以新建）'
+  const head = `浏览器 · ${list.length} 个窗口${visible ? `（${visible} 个已显示）` : ''}`
+  return `${head}\n点击展开窗口列表：点哪一行就显示 / 收起哪一扇，行上右键关闭`
 }
 
+/** 窗口没有 agent 给的名字时的默认名（`normalizeLabel` 的兜底值） */
+export const DEFAULT_BROWSER_LABEL = '受控浏览器'
+
 /**
- * 下拉里的一行：agent 给的名字优先，第二行是去掉协议的地址，右边是状态。
- * 名字与地址都缺时退回「受控浏览器」，行不会变成一片空白。
+ * 下拉里的一行（组件库菜单项的单行形态）：名字 + 右侧去掉协议的地址。
+ *
+ * 名字优先用 agent 给的那个；没有就退回当前页面标题——**默认名不算名字**：用户点出来的
+ * 每一扇窗口都叫「受控浏览器」，拿它当名字，几扇窗口在列表里就长得一模一样，地址才是
+ * 唯一能分辨的线索。显示 / 隐藏由行的选中态表达，状态文字留在 tooltip 里。
  */
 export function browserMenuRow(browser) {
   const label = String(browser?.label || '').trim()
   const title = String(browser?.title || '').trim()
   const url = String(browser?.url || '').trim()
+  const named = label && label !== DEFAULT_BROWSER_LABEL
   return {
     id: String(browser?.id || ''),
-    name: label || title || '受控浏览器',
+    name: (named ? label : title || label) || DEFAULT_BROWSER_LABEL,
     detail: url && url !== 'about:blank' ? compactUrl(url) : '',
-    status: browserStatusLabel(browser),
     tooltip: browserIconTitle(browser),
     visible: Boolean(browser?.visible),
     loading: Boolean(browser?.loading),
@@ -97,18 +103,5 @@ export function browserMenuRow(browser) {
  * 必须保留；切换窗口只改变状态，不能把最近操作的窗口挪到第一行。
  */
 export function browserMenuRows(browsers) {
-  return (Array.isArray(browsers) ? browsers : [])
-    .filter((item) => item?.id)
-    .map(browserMenuRow)
-}
-
-/**
- * 顶栏那枚按钮**点一下**该做什么：没有窗口就新建一个，有窗口就作用于固定顺序里的第一扇。
- * 点击不会改变列表顺序；多扇窗口需要操作其它窗口时，悬停下拉后直接点对应行。
- */
-export function browserClickAction(browsers) {
-  const list = Array.isArray(browsers) ? browsers : []
-  const [row] = browserMenuRows(list)
-  if (!row) return { kind: 'create', browser: null }
-  return { kind: 'toggle', browser: list.find((item) => item?.id === row.id) || null }
+  return (Array.isArray(browsers) ? browsers : []).filter((item) => item?.id).map(browserMenuRow)
 }
