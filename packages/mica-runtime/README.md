@@ -36,7 +36,6 @@ queue.enqueue({ text: '继续' });
 - `RuntimeController.ts`：运行时控制器接口。
 - `RuntimeInput.ts`：用户输入类型。
 - `RuntimeEvent.ts`、`RuntimeEventBus.ts`：运行时事件定义与事件总线。
-- `Rewind.ts`：会话回退（回滚）相关类型与结果。
 - `RuntimeStatus.ts`：运行状态类型。
 - `RuntimeViewSnapshot.ts`：运行时视图快照。
 - `SubmitResult.ts`：提交结果。

@@ -16,8 +16,4 @@ describe('official plugin registration', () => {
     expect(todo).toMatchObject({ version: '1.0.0', required: true });
   });
 
-  it('embeds the Notebook role for bundled runtime hosts', () => {
-    const notebook = officialPlugins.find((plugin) => plugin.id === 'notebook');
-    expect(notebook?.embeddedRoles).toEqual([{ name: '笔记', prompt: expect.stringContaining('Notebook') }]);
-  });
 });

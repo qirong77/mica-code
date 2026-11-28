@@ -84,22 +84,6 @@ export type ModelRule = {
 
 export type ResolvedEffortParams = Record<string, unknown>;
 
-export function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value && typeof value === 'object' && !Array.isArray(value));
-}
-
-export function isNonEmptyString(value: unknown): value is string {
-  return typeof value === 'string' && value.trim().length > 0;
-}
-
-export function isNonEmptyStringArray(value: unknown): value is string[] {
-  return Array.isArray(value) && value.length > 0 && value.every(isNonEmptyString);
-}
-
-export function isPositiveNumber(value: unknown): value is number {
-  return typeof value === 'number' && Number.isFinite(value) && value > 0;
-}
-
 /**
  * 档位名的语法校验。
  *
@@ -142,7 +126,9 @@ export function providerForModel(
 }
 
 export function firstProviderModel(provider: ProviderDefinition | Record<string, unknown>): string | undefined {
-  if (Array.isArray(provider.models)) return provider.models.find(isNonEmptyString);
+  if (Array.isArray(provider.models)) {
+    return provider.models.find((model): model is string => typeof model === 'string' && model.trim().length > 0);
+  }
   return undefined;
 }
 

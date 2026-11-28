@@ -108,18 +108,18 @@ describe('磁盘读写', () => {
   it('写进插件自己的数据目录，再读回来一致', () => {
     const data: ReturnType<typeof normalizeSessionAnnotations> = {
       version: 1,
-      name: 'Session Tags',
+      name: 'Labels',
       options: [{ id: 'red', label: '红', color: '#FF3B30' }],
       assignments: { s1: ['red'] },
     };
-    writeSessionAnnotations(home, 'session-tags', data);
-    expect(sessionAnnotationsPath(home, 'session-tags')).toBe(
-      join(pluginDataDir(home, 'session-tags'), 'session-annotations.json'),
+    writeSessionAnnotations(home, 'labels', data);
+    expect(sessionAnnotationsPath(home, 'labels')).toBe(
+      join(pluginDataDir(home, 'labels'), 'session-annotations.json'),
     );
-    expect(readSessionAnnotations(home, 'session-tags')).toEqual(data);
+    expect(readSessionAnnotations(home, 'labels')).toEqual(data);
     // 落盘的是合法 JSON，用户手改能看懂。
-    expect(JSON.parse(readFileSync(sessionAnnotationsPath(home, 'session-tags'), 'utf8')).name).toBe(
-      'Session Tags',
+    expect(JSON.parse(readFileSync(sessionAnnotationsPath(home, 'labels'), 'utf8')).name).toBe(
+      'Labels',
     );
   });
 

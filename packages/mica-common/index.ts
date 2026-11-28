@@ -21,18 +21,6 @@ import {
 } from './git.js';
 import { comparableContentText, comparableMessageText, comparableText, stripMediaPlaceholders } from './promptText.js';
 import { splitAutolinkPunctuation } from './autolink.js';
-import {
-  MAX_SESSION_NOTES_LENGTH,
-  SESSION_NOTES_PLUGIN_ID,
-  SESSION_NOTES_TAG,
-  appendSessionNotes,
-  locateNotesSection,
-  normalizeSessionNotes,
-  notesSections,
-  removeNotesSection,
-  replaceNotesSection,
-  sessionNotesSummary,
-} from './sessionNotes.js';
 import { BTW_STATE_VERSION, btwStatePath, deleteBtwState, readBtwState, writeBtwState } from './btwState.js';
 import {
   CAPABILITY_SELECTION_VERSION,
@@ -71,16 +59,6 @@ export const micaCommon = {
   comparableText,
   stripMediaPlaceholders,
   splitAutolinkPunctuation,
-  MAX_SESSION_NOTES_LENGTH,
-  SESSION_NOTES_TAG,
-  SESSION_NOTES_PLUGIN_ID,
-  appendSessionNotes,
-  locateNotesSection,
-  normalizeSessionNotes,
-  notesSections,
-  removeNotesSection,
-  replaceNotesSection,
-  sessionNotesSummary,
   BTW_STATE_VERSION,
   btwStatePath,
   deleteBtwState,
@@ -119,19 +97,6 @@ export type { ProcessedImage, SupportedImageMediaType } from './image.js';
 export { comparableContentText, comparableMessageText, comparableText, stripMediaPlaceholders } from './promptText.js';
 export { findAutolinks, splitAutolinkPunctuation } from './autolink.js';
 export type { AutolinkMatch, AutolinkPunctuationSplit } from './autolink.js';
-export {
-  MAX_SESSION_NOTES_LENGTH,
-  SESSION_NOTES_PLUGIN_ID,
-  SESSION_NOTES_TAG,
-  appendSessionNotes,
-  locateNotesSection,
-  normalizeSessionNotes,
-  notesSections,
-  removeNotesSection,
-  replaceNotesSection,
-  sessionNotesSummary,
-} from './sessionNotes.js';
-export type { NotesSection } from './sessionNotes.js';
 export { BTW_STATE_VERSION, btwStatePath, deleteBtwState, readBtwState, writeBtwState } from './btwState.js';
 export type { StoredBtwThread } from './btwState.js';
 export { isValidSubagentSessionId, readStoredSubagentTasks, storedSubagentTasksStamp, writeStoredSubagentTasks } from './subagentState.js';
@@ -172,7 +137,6 @@ export {
   setCapabilityEnabled,
 } from './capabilities.js';
 export type { CapabilityKind, CapabilitySelection } from './capabilities.js';
-export { LEGACY_TOOL_NAMES, normalizeToolName } from './toolNames.js';
 export { DEFAULT_TOOL_ICON, MCP_TOOL_ICON, toolIcon } from './toolIcons.js';
 export type { ToolIconLookup } from './toolIcons.js';
 export { acquireProcessLock } from './processLock.js';
@@ -203,3 +167,4 @@ export type {
 } from './turnTiming.js';
 
 export { escapePromptXml, wrapPromptXml } from './promptXml.js';
+export { isRecord } from './guards.js';

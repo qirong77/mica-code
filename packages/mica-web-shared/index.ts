@@ -83,7 +83,6 @@ export {
   sanitizeUiStateKeys,
   uiStateChangeSet,
   uiStateValuesEqual,
-  resolveLegacyWorkspace,
 } from './ui-state.js';
 export {
   DEFAULT_DARK_THEME,

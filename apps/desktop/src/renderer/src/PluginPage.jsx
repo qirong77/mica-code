@@ -11,7 +11,7 @@ import { PluginSurface } from './PluginSurface'
 // 插件只依赖宿主组件能力，不直接 import ChatView 或另造对话渲染器。
 const EMPTY_CALLBACKS = Object.freeze({})
 const PageMarkdown = lazyView(() => import('./ChatView'), 'Markdown')
-// Notebook 等不嵌入对话的页面不应为 Conversation 把 ChatView 相关代码带进首屏。
+// 不嵌入对话的插件页不应为 Conversation 把 ChatView 相关代码带进首屏。
 // 只有插件实际渲染 api.ui.Conversation 时，外层 PluginPage 的 Suspense 才会触发这次加载。
 const LazyPluginConversation = lazyView(() => import('./PluginConversation'), 'PluginConversation')
 

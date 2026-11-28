@@ -63,21 +63,6 @@ export type AppServerCliInvocation = {
   thinking: boolean;
 };
 
-export type RemoteCliInvocation = {
-  mode: 'remote';
-  command: 'serve' | 'pair' | 'list' | 'history' | 'status' | 'revoke';
-  relay?: string;
-  invite?: string;
-  name?: string;
-  workspaces: string[];
-  code?: string;
-  machine?: string;
-  sessionRef?: string;
-  cursor?: number;
-  limit?: number;
-  json: boolean;
-};
-
 export type CliInvocation =
   | { mode: 'interactive'; sessionId?: string }
   | ExecCliInvocation
@@ -85,7 +70,6 @@ export type CliInvocation =
   | CommitCliInvocation
   | PluginActionCliInvocation
   | AppServerCliInvocation
-  | RemoteCliInvocation
   | { mode: 'models'; verbose: boolean; json: boolean }
   | { mode: 'version' }
   | { mode: 'help' }
@@ -103,12 +87,6 @@ export const CLI_USAGE = [
   `  ${RUNTIME_NAME} commit [--dir <path>]`,
   `  ${RUNTIME_NAME} app-server [--session <id>] [--dir <path>] [--model <id>] [--variant <effort>] [--role <name>]`,
   '                                    [--parent <session-id>]',
-  `  ${RUNTIME_NAME} remote serve --relay <url> [--invite <code>] [--workspace <path>]...`,
-  `  ${RUNTIME_NAME} remote pair <code> [--relay <url>] [--invite <code>]`,
-  `  ${RUNTIME_NAME} remote list [--json]`,
-  `  ${RUNTIME_NAME} remote history <sessionRef> [--machine <id>] [--limit <n>] [--json]`,
-  `  ${RUNTIME_NAME} remote status [--json]`,
-  `  ${RUNTIME_NAME} remote revoke <machineId>`,
   '',
   'Run options:',
   '  --session <id>                    Resume a Mica session',
@@ -254,7 +232,6 @@ export function parseCliArgs(argv: string[]): CliInvocation {
     if (!action) return cliError('plugin-action 缺少 --action');
     return { mode: 'plugin-action', pluginId, action, values, ...(cwd ? { cwd } : {}) };
   }
-  if (argv[0] === 'remote') return parseRemoteArgs(argv.slice(1));
   if (argv[0] === 'app-server') {
     let sessionId: string | undefined;
     let parentSessionId: string | undefined;
@@ -493,103 +470,6 @@ export function parseCliArgs(argv: string[]): CliInvocation {
     strictMcpConfig,
     mcpInitTimeoutMs,
   };
-}
-
-function parseRemoteArgs(argv: string[]): CliInvocation {
-  if (argv[0] === '--help' || argv[0] === '-h') return { mode: 'help' };
-  const command = argv[0];
-  if (
-    command !== 'serve' &&
-    command !== 'pair' &&
-    command !== 'list' &&
-    command !== 'history' &&
-    command !== 'status' &&
-    command !== 'revoke'
-  ) {
-    return cliError(`Unknown remote command: ${command ?? '(missing)'}`);
-  }
-  const workspaces: string[] = [];
-  const positionals: string[] = [];
-  let relay: string | undefined;
-  let invite: string | undefined;
-  let name: string | undefined;
-  let machine: string | undefined;
-  let cursor: number | undefined;
-  let limit: number | undefined;
-  let json = false;
-  for (let index = 1; index < argv.length; index++) {
-    const arg = argv[index]!;
-    if (arg === '--json') {
-      json = true;
-      continue;
-    }
-    if (arg === '--help' || arg === '-h') return { mode: 'help' };
-    const valueOption = parseValueOption(arg, argv, index, [
-      '--relay',
-      '--invite',
-      '--name',
-      '--workspace',
-      '--machine',
-      '--cursor',
-      '--limit',
-    ]);
-    if (valueOption) {
-      if (!valueOption.ok) return valueOption.error;
-      index = valueOption.nextIndex;
-      switch (valueOption.name) {
-        case '--relay':
-          relay = valueOption.value;
-          break;
-        case '--invite':
-          invite = valueOption.value;
-          break;
-        case '--name':
-          name = valueOption.value;
-          break;
-        case '--workspace':
-          workspaces.push(valueOption.value);
-          break;
-        case '--machine':
-          machine = valueOption.value;
-          break;
-        case '--cursor': {
-          const parsed = Number(valueOption.value);
-          if (!Number.isInteger(parsed) || parsed < 0) return cliError('--cursor must be a non-negative integer.');
-          cursor = parsed;
-          break;
-        }
-        case '--limit': {
-          const parsed = Number(valueOption.value);
-          if (!Number.isInteger(parsed) || parsed <= 0) return cliError('--limit must be a positive integer.');
-          limit = parsed;
-          break;
-        }
-      }
-      continue;
-    }
-    if (arg.startsWith('-')) return cliError(`Unknown remote option: ${arg}`);
-    positionals.push(arg);
-  }
-  if (command === 'pair') {
-    const code = positionals[0];
-    if (!code) return cliError('remote pair 缺少配对码');
-    if (positionals.length > 1) return cliError(`Unexpected argument: ${positionals.slice(1).join(' ')}`);
-    return { mode: 'remote', command, workspaces, code, json, relay, invite, name, machine, cursor, limit };
-  }
-  if (command === 'history') {
-    const sessionRef = positionals[0];
-    if (!sessionRef) return cliError('remote history 缺少 sessionRef');
-    if (positionals.length > 1) return cliError(`Unexpected argument: ${positionals.slice(1).join(' ')}`);
-    return { mode: 'remote', command, workspaces, sessionRef, json, relay, invite, name, machine, cursor, limit };
-  }
-  if (command === 'revoke') {
-    const machineId = positionals[0];
-    if (!machineId) return cliError('remote revoke 缺少 machineId');
-    if (positionals.length > 1) return cliError(`Unexpected argument: ${positionals.slice(1).join(' ')}`);
-    return { mode: 'remote', command, workspaces, machine: machineId, json, relay, invite, name, cursor, limit };
-  }
-  if (positionals.length > 0) return cliError(`Unexpected argument: ${positionals.join(' ')}`);
-  return { mode: 'remote', command, workspaces, json, relay, invite, name, machine, cursor, limit };
 }
 
 function parseValueOption(

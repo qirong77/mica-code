@@ -1,3 +1,4 @@
+import { isRecord } from '@packages/mica-common/guards.js';
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -362,6 +363,3 @@ function readStoredValues(pluginId: string, configDir: string | undefined): Reco
   }
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}

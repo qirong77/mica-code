@@ -38,7 +38,7 @@ function mockAgent(overrides: Record<string, unknown> = {}): AgentRuntime {
     abort: () => {},
     preserveAbortedTurn: () => true,
     promptSections: new micaPlugin.PluginPromptSections(),
-    // 官方插件在渲染提示词段落时读自己的会话状态（session-notes 就这么做）。
+    // 官方插件在渲染提示词段落时读自己的会话状态（memory 就这么做）。
     getPluginState: () => undefined,
     setPluginState: () => {},
     clearPluginState: () => {},

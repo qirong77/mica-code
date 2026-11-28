@@ -124,7 +124,7 @@
 
 按钮 id 是小写 slug（`open-demand`、`button-1`），它是页面上的 React key 与 `shortcutStates` 的键；点击时回传的 key 另外带内容指纹。历史数据里 id 不合法的条目在读取时就被丢掉，宁可少一枚按钮也不要一枚点不动的。
 
-历史按钮缺失的 `style.color` 由 Evolution 的 `quick-buttons-accent-color` 会话迁移补为 `accent`；迁移只补颜色，不重排、不删按钮，也不改内容或动作。
+按钮缺失 `style.color` 时按 `accent` 读取，不改写原数据。
 
 ## 文件
 

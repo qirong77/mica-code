@@ -19,19 +19,12 @@
 | ------------------------------------------------------------------ | ----------------------------------------------- |
 | [Headless 执行层设计](./headless-design.md)                        | 无界面执行层、队列、重试、中止与 Codex 事件投影 |
 | [Codex 系驱动接入](./multica-runtime.md)                           | 参数兼容、模型解析、会话复用与错误处理          |
-| [远程 Agent 上下文方案](./remote-agent-design.md)                   | A/B 机器、加密中转、实时执行、断线恢复与权限边界 |
 | [共享包索引](../packages/README.md)                                | 包的职责、公共入口及依赖边界                    |
 | [交互式架构图](https://qirong77.github.io/mica-code/architecture/) | CLI 与 Desktop 运行时地图、节点搜索与依赖追踪   |
 | [演示素材复现](./demo-assets.md)                                   | 隔离示例项目、脚本化 provider、运行时与截图流程 |
 | [官网开发说明](../apps/website/README.md)                          | 页面结构、主题、文档导航和构建验证              |
 
 ## 文档维护
-
-最近维护记录：[2026-11-20 整体审查与修复](./maintenance-review-2026-11-20.md)。
-
-上一轮记录：[2026-11-11 整体审查与修复](./maintenance-review-2026-11-11.md)。
-
-历史评审单独保存在 [archive/](./archive/README.md)，其中的功能说明、性能数字与测试结果只对应当时基线。
 
 - 产品介绍放在[项目 README](../README.md)与官网首页；操作步骤放在[官网文档源码](../apps/website/src/pages/docs/)，设计细节放在本目录或包 README。
 - 使用指南围绕读者任务组织，说明前提、可复制示例与预期结果。一个主题保留一个主要位置，其余页面通过链接进入。

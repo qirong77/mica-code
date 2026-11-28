@@ -437,31 +437,31 @@ describe('composer completions', () => {
   it('按需 URI 文档插入链接本身，不插入正文', () => {
     const uriApis = [
       {
-        name: 'notebook',
-        description: '笔记本的机读接口文档',
-        uri: '/plugin/notebook/api',
-        pluginId: 'notebook',
-        source: { kind: 'plugin', label: 'notebook' }
+        name: 'schedule',
+        description: '计划表的机读接口文档',
+        uri: '/plugin/schedule/api',
+        pluginId: 'schedule',
+        source: { kind: 'plugin', label: 'schedule' }
       },
       {
-        name: 'notes-site',
-        description: '线上笔记站的接口文档',
-        uri: 'https://mica.qirong77.com/plugin/notebook/api',
-        pluginId: 'notebook',
-        source: { kind: 'plugin', label: 'notebook' }
+        name: 'schedule-site',
+        description: '线上计划站的接口文档',
+        uri: 'https://mica.qirong77.com/plugin/schedule/api',
+        pluginId: 'schedule',
+        source: { kind: 'plugin', label: 'schedule' }
       }
     ]
-    const options = slashCompletionOptions({ uriApis }, 'note')
+    const options = slashCompletionOptions({ uriApis }, 'schedule')
     expect(options.map((option) => option.kind)).toEqual(['uri-api', 'uri-api'])
     expect(options[0]).toMatchObject({
-      label: 'api:notebook',
-      uri: '/plugin/notebook/api',
+      label: 'api:schedule',
+      uri: '/plugin/schedule/api',
       // 来源原样留着：悬停提示用它说明是哪家插件给的文档
-      source: { kind: 'plugin', label: 'notebook' }
+      source: { kind: 'plugin', label: 'schedule' }
     })
-    expect(completionInsertText(options[0])).toBe('/plugin/notebook/api ')
+    expect(completionInsertText(options[0])).toBe('/plugin/schedule/api ')
     // 完整的 http 地址原样插入，不拼当前端口
-    expect(completionInsertText(options[1])).toBe('https://mica.qirong77.com/plugin/notebook/api ')
+    expect(completionInsertText(options[1])).toBe('https://mica.qirong77.com/plugin/schedule/api ')
   })
 
   it('按插件名也能搜到它给的 API 文档', () => {

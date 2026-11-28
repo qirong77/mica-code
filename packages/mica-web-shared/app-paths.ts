@@ -88,7 +88,7 @@ export function isBrowserChromePagePath(pathname: unknown): boolean {
 }
 
 /**
- * 插件整页的地址。插件 id 就是清单里的 `id`（`notebook`、`user.foo`），
+ * 插件整页的地址。插件 id 就是清单里的 `id`（`schedule`、`user.foo`），
  * 路径按 URL 段编码，所以带点号 / 下划线的用户插件 id 也能原样往返。
  */
 export function pluginPagePath(id: string, route?: string): string {
@@ -119,7 +119,7 @@ export function matchesPluginPagePath(pathname: unknown, id: string, route?: str
 }
 
 /**
- * 从地址里取出插件 id：`/plugins/pages/notebook?note=…` → `notebook`。
+ * 从地址里取出插件 id：`/plugins/pages/schedule?task=…` → `schedule`。
  * 不是插件页、或者 id 形状不合法（可能带路径穿越）时返回 null。
  */
 export function readPluginPageId(pathname: unknown): string | null {

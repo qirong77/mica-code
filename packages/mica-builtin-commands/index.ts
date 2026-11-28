@@ -47,7 +47,6 @@ export { createForkCommand } from './commands/fork.js';
 export { createNewCommand } from './commands/new.js';
 export { createRenameCommand } from './commands/rename.js';
 export { createResumeCommand, formatResumeSessionTitle } from './commands/resume.js';
-export { createRewindCommand, rewindCheckpointCells } from './commands/rewind.js';
 // btw 的纯逻辑单独成文件：headless 的 btw 面板（app-server）与官方插件 `btw`
 // 各自按需从这个子路径取，见那里的说明（插件不能经本入口，那会把 Ink 拖进去）。
 export { buildBtwSystemPrompt, createBtwThread, messagesToTranscript } from './shared/btwThread.js';
@@ -70,7 +69,6 @@ export type {
   SubagentTaskStatus,
   SubagentTaskSummary,
 } from './services.js';
-export type { RewindApplyResult, RewindFileChange, RewindPreviewResult } from '@packages/mica-runtime/index.js';
 export { commandHostToken } from './commandHost.js';
 export type { BuiltInCommandItem, CommandHostService } from './commandHost.js';
 export { recordHelperSubagentUsage } from './subagentUsage.js';
@@ -84,7 +82,6 @@ export { default as setupCommandFork } from './plugins/command-fork.js';
 export { default as setupCommandNew } from './plugins/command-new.js';
 export { default as setupCommandRename } from './plugins/command-rename.js';
 export { default as setupCommandResume } from './plugins/command-resume.js';
-export { default as setupCommandRewind } from './plugins/command-rewind.js';
 export { default as setupLoop } from './plugins/loop.js';
 export { default as setupMcp } from './plugins/mcp.js';
 export { default as setupMessageQueue } from './plugins/message-queue.js';

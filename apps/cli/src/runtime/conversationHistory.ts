@@ -1,10 +1,8 @@
 /**
  * 会话历史的纯函数工具：从消息数组里挑出用户消息、按文本定位某一条、算出截断点。
  *
- * 两个调用方共用这套判断：
- * - `RewindCheckpointManager`（`/rewind`）：把 provider history 切成一轮轮回退点；
- * - `mica app-server` 的 `mica/turn/editMessage`（desktop 双击编辑重发）：定位被
- *   编辑的用户消息，截掉它及其之后的内容，再用新文本重跑。
+ * 调用方是 `mica app-server` 的 `mica/turn/editMessage`（desktop 双击编辑重发）：
+ * 定位被编辑的用户消息，截掉它及其之后的内容，再用新文本重跑。
  *
  * 另有一个共用的判断是「turn 里哪些流式文本还没进历史」
  * （`uncommittedResponseText`）：中止一个 turn 时要把没提交的那段回答补进

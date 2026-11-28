@@ -7,23 +7,10 @@ import type {
 import type { EffortOption, ProviderDefinition } from '@packages/mica-config/index.js';
 import type { CompactOptions, CompactResult } from '@packages/mica-context/index.js';
 import type {
-  RewindApplyRequest,
-  RewindApplyResult,
-  RewindCheckpointSummary,
-  RewindPreviewResult,
   SubmitResult,
 } from '@packages/mica-runtime/index.js';
 import type { MicaUiWorkingStatus } from '@packages/mica-ui/index.js';
 import type { CapabilitySelection } from '@packages/mica-common/index.js';
-
-export type {
-  RewindApplyRequest,
-  RewindApplyResult,
-  RewindCheckpointSummary,
-  RewindFileChange,
-  RewindMode,
-  RewindPreviewResult,
-} from '@packages/mica-runtime/index.js';
 
 export type CommandProvider = ProviderDefinition & { contextWindowSize: number };
 
@@ -225,10 +212,6 @@ export type CommandRuntimeServices = {
   switchAgentSession(id: string): RunningAgentRecord;
   refreshCurrentAgentSessionUi(): void;
   syncAgentStatusItems?(): void;
-  listRewindCheckpoints(): RewindCheckpointSummary[];
-  getRewindPreview(id?: string): RewindPreviewResult;
-  applyRewind(request: RewindApplyRequest): RewindApplyResult;
-  clearRewindCheckpoints?(): void;
   runExclusiveTask<T>(agent: CommandAgent, options: ExclusiveTaskOptions, task: () => Promise<T>): Promise<T>;
   compact(
     agent: CommandAgent,

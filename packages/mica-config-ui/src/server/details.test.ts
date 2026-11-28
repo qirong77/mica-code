@@ -277,9 +277,9 @@ describe('config web sessions', () => {
       '- demo: does demo things',
       '</skills>',
       '',
-      '<session_notes>',
+      '<tool_prefs>',
       'ship on Friday',
-      '</session_notes>',
+      '</tool_prefs>',
     ].join('\n');
     session.snapshot.systemPrompt = sentPrompt;
     micaSession.createStore().save(session);

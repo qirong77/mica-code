@@ -31,7 +31,7 @@ import {
 import {$createParagraphNode, $createTextNode, $getState, $isElementNode, $setState, createState, type ElementNode, type LexicalNode} from 'lexical';
 import {closesMarkdownFence, markdownTableAlignments, readMarkdownFence, splitMarkdownTableRow} from './markdownPolicy';
 
-/** No notebook decorators or nested editors are registered in Markdown mode. */
+/** No rich-text decorators or nested editors are registered in Markdown mode. */
 export const MARKDOWN_NODES = [
   HeadingNode, QuoteNode, ListNode, ListItemNode, LinkNode, AutoLinkNode,
   CodeNode, CodeHighlightNode, TableNode, TableRowNode, TableCellNode, HorizontalRuleNode,

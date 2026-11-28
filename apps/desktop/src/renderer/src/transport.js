@@ -609,7 +609,7 @@ function createWebApi(env) {
       // 所以评审别人的分支不会把评审人自己的未提交改动混进来。
       refSummary: (cwd, options = null) => invoke('git:ref-summary', { cwd, ...(options || {}) }),
       // snapshot + summary.compareRef pins the original commit; staged is HEAD → index,
-      // worktree is index → disk. Legacy head/branch/ref modes are also supported.
+      // worktree is index → disk. head/branch/ref modes are also supported.
       file: (cwd, filePath, base = null) => invoke('git:file', { cwd, filePath, base }),
       // 行悬停的 blame：`{ ref, index, line }` 决定读哪一份内容（提交 / 索引 / 工作区）。
       blame: (cwd, filePath, options = null) =>

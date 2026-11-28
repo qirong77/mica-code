@@ -1,3 +1,4 @@
+import { isRecord } from '@packages/mica-common/guards.js';
 import { resolve } from 'node:path';
 import { micaCommands } from '@packages/mica-commands/index.js';
 import { formatExecError } from '@packages/mica-common/index.js';
@@ -101,6 +102,3 @@ function unknownCommandMessage(command: string, report: PluginSetupReport) {
   return `没有找到命令 ${command}：已加载插件 ${loaded}${skipped ? `；跳过 ${skipped}` : ''}`;
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
-}

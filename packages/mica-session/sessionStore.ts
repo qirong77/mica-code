@@ -277,7 +277,7 @@ export class SessionStore implements SessionStoreLike {
       .map((session) => ({ ...session }));
   }
 
-  /** Read only current snapshots; evolution owns all session format conversion. */
+  /** Read only current snapshots. */
   listAllForUsage(): PersistedSession[] {
     ensureSessionDir();
     return readdirSync(SESSION_DIR)
@@ -404,7 +404,7 @@ export class SessionStore implements SessionStoreLike {
 
   /** Returns the on-disk index when it is complete and current, otherwise
    * rebuilds it from the session files so entries dropped by concurrent
-   * writers (or missing legacy files) are reconciled. */
+   * writers (or missing files) are reconciled. */
   private buildIndexFromDiskOrRebuild(): SessionSummary[] {
     const fromDisk = this.readIndexFromDisk();
     if (fromDisk && this.indexMatchesDisk(fromDisk)) {
@@ -911,7 +911,7 @@ export function parsePersistedSession(value: unknown): PersistedSession | null {
     return null;
   }
   if (!session.snapshot || typeof session.snapshot !== 'object') return null;
-  // Legacy wire histories are converted once by evolution, never while loading.
+  // 只接受当前的消息形态，加载时不做旧格式转换。
   if (session.snapshot.messageFormat !== PI_MESSAGE_FORMAT) return null;
   if (!isNonEmptyString(session.snapshot.providerId) || !isNonEmptyString(session.snapshot.model)) return null;
   if (!Array.isArray(session.snapshot.messages)) return null;

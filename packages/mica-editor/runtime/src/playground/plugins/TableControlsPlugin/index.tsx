@@ -97,20 +97,6 @@ export default function TableControlsPlugin({markdownOnly = false}: {markdownOnl
   }, [popup, menu.refs]);
 
   useEffect(() => {
-    const body = editor.getRootElement()?.ownerDocument.body;
-    if (!body) return;
-    const closeWhenStylePanelOpens = () => {
-      if (body.dataset.notebookStyle !== 'open') return;
-      popupRef.current = null;
-      setPopup(null);
-    };
-    closeWhenStylePanelOpens();
-    const observer = new MutationObserver(closeWhenStylePanelOpens);
-    observer.observe(body, {attributes: true, attributeFilter: ['data-notebook-style']});
-    return () => observer.disconnect();
-  }, [editor]);
-
-  useEffect(() => {
     if (editable) return;
     setPopup(null);
     setContext(null);

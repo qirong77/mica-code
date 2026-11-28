@@ -25,7 +25,7 @@ describe('Markdown table starting widths', () => {
     expect(calculateMarkdownTableColumnWidths([['ID', '状态'], ['1', '完成']], 900)).toEqual([64, 64]);
   });
 
-  it('fills the Notebook reading column while retaining content weighting', () => {
+  it('fills the reading column while retaining content weighting', () => {
     const widths = calculateMarkdownTableColumnWidths([['时刻', '关注', '状态'], ['晨间', '整理思路', '清醒 · 从容']], 700, true);
     expect(widths.reduce((sum, width) => sum + width, 0)).toBe(699);
     expect(widths[0]).toBeLessThan(widths[1]);
@@ -104,7 +104,7 @@ function layoutFixture(initialWidth = 600, savedWidths?: number[], fill = false)
 }
 
 describe('runtime-only table layout', () => {
-  it('fills short Notebook tables, refits them, and still respects a manual resize', async () => {
+  it('fills short tables, refits them, and still respects a manual resize', async () => {
     const {editor, root, flush, resize} = layoutFixture(600, undefined, true);
     editor.update(() => $importMarkdown('| 时刻 | 关注 | 状态 |\n| --- | --- | --- |\n| 晨间 | 整理思路 | 清醒 · 从容 |\n'), {discrete: true});
     const markdown = editor.getEditorState().read(() => $exportMarkdown(true));

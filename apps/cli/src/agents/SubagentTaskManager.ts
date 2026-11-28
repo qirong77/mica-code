@@ -387,8 +387,7 @@ export class SubagentTaskManager {
   }
 
   private refreshRestored(owner: AgentRuntime): void {
-    // Evolution may publish the first task files after an empty startup restore.
-    // The directory stamp still gates I/O; existing local executions win in restore().
+    // The directory stamp gates I/O; existing local executions win in restore().
     if (!this.readRestoredTasks) return;
     if (this.readRestoredStamp) {
       const stamp = this.readRestoredStamp(owner);

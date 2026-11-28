@@ -561,7 +561,7 @@ export type MicaBtwThreadUpdated = MicaBtwThread & {
  *
  * - `mica/turn/editMessage`: the Codex protocol can only append turns, so an
  *   "edit a message that was already sent" affordance (the desktop app's
- *   double-click editor) needs a way to rewind the conversation first. The
+ *   double-click editor) needs a way to truncate the conversation first. The
  *   message is located by its (whitespace-folded) text — persisted histories
  *   carry no per-message id — then truncated together with everything after it,
  *   saved, and rerun with the edited text.

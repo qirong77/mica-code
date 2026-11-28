@@ -129,7 +129,7 @@ describe('parseSessionMenuAction', () => {
   })
 
   test('returns null for actions that belong to something else', () => {
-    expect(parseSessionMenuAction('annotation:session-tags:red')).toBeNull()
+    expect(parseSessionMenuAction('annotation:labels:red')).toBeNull()
     expect(parseSessionMenuAction('pin')).toBeNull()
     expect(parseSessionMenuAction('session-menu:')).toBeNull()
     expect(parseSessionMenuAction('session-menu:only-plugin')).toBeNull()

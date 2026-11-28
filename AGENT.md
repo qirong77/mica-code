@@ -18,7 +18,7 @@
 - 用户要求构建时按 `agent/build.md` 的命令做：构建只产出新产物，不会让运行中的实例自我重载；什么时候重启由用户自己决定。
 - 产品能力优先做成插件：内核里不出现具体插件名词，插件也不靠改别人的数据伪造界面。
 - 插件系统本身仍在迭代：现有 `PluginContext` 承载不了时先重构能力面，再在新机制上实现；不为单个插件在宿主里写死分支（见 `agent/plugins.md`）。
-- 不为旧形态保留兼容分支：改了数据形态、目录布局、协议字段或插件格式，就删掉旧的解析与回退，只留一句「这个形态不再支持」；同次在 `plugins/evolution/migrations.ts` 加一条迁移并更新它的 README 迁移表。
+- 不为旧形态保留兼容分支：改了数据形态、目录布局、协议字段或插件格式，就删掉旧的解析、回退与迁移代码；旧形态直接报「这个形态不再支持」，让用户重来。
 - prompt、skills 索引与工具描述参与 prompt cache 前缀，改时保持前缀稳定。
 - 文档与代码同次更新：改到 `agent/**` 的架构 / 路径 / 命令 / 配置 / 协议 / 流程 → 改对应文件；用户可见命令 → 根 `README.md`、`packages/mica-builtin-commands/README.md`、`apps/website/src/pages/docs/commands.astro`；公共 API → `packages/README.md` 与包 README；插件系统 → `plugins/README.md`。
 

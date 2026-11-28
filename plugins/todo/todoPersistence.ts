@@ -54,18 +54,3 @@ export function writeTodoCheckpoint(configDir: string, checkpoint: StoredTodo): 
   }
 }
 
-/**
- * Drop the checkpoint a rewind just undid: the session state rolled back, and
- * this file did not, so the next turn would read the undone plan as "interrupted
- * progress" and inject it again. Returns false when the file is still there.
- */
-export function removeTodoCheckpoint(configDir: string, sessionId: string): boolean {
-  const path = todoCheckpointPath(configDir, sessionId);
-  if (!path) return true;
-  try {
-    rmSync(path, { force: true });
-    return true;
-  } catch {
-    return false;
-  }
-}

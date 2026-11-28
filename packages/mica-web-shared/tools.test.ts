@@ -10,11 +10,6 @@ describe('tool display vocabulary', () => {
     expect(toolIcon('read_file', icons)).toBe('📖');
   });
 
-  it('resolves legacy names to the current tool', () => {
-    expect(toolIcon('Skill', icons)).toBe('✨');
-    expect(toolIcon('Skill', icons)).toBe(toolIcon('skill', icons));
-  });
-
   it('falls back to the default gear when the projection has no entry', () => {
     expect(toolIcon('unknown_tool', icons)).toBe('⚙️');
     expect(toolIcon('unknown_tool')).toBe('⚙️');
@@ -25,14 +20,6 @@ describe('tool display vocabulary', () => {
     expect(toolLabel('skill')).toBe('Load skill');
     expect(toolLabel('agent')).toBe('Subagent');
     expect(toolLabel('todo_write')).toBe('Plan');
-    expect(toolLabel('session_notes')).toBe('Session notes');
-  });
-
-  it('still resolves labels for legacy tool names in old conversations', () => {
-    expect(toolLabel('Skill')).toBe('Load skill');
-    expect(toolLabel('Agent')).toBe('Subagent');
-    expect(toolLabel('TodoWrite')).toBe('Plan');
-    expect(toolLabel('SessionNotes')).toBe('Session notes');
   });
 
   it('falls back to the raw name for unknown tools', () => {

@@ -10,8 +10,8 @@ import {
 
 const providers = [
   {
-    pluginId: 'session-tags',
-    name: 'Session Tags',
+    pluginId: 'labels',
+    name: 'Labels',
     options: [
       { id: 'red', label: '阻塞', color: '#FF3B30' },
       { id: 'blue', label: '参考', color: '#007AFF' },
@@ -30,14 +30,14 @@ const providers = [
 describe('annotationBadges', () => {
   it('按插件与选项顺序摊平，跳过没有 options 的插件', () => {
     expect(annotationBadges(providers, 's1')).toEqual([
-      { key: 'session-tags:red', label: '阻塞', color: '#FF3B30', providerName: 'Session Tags' },
-      { key: 'session-tags:blue', label: '参考', color: '#007AFF', providerName: 'Session Tags' }
+      { key: 'labels:red', label: '阻塞', color: '#FF3B30', providerName: 'Labels' },
+      { key: 'labels:blue', label: '参考', color: '#007AFF', providerName: 'Labels' }
     ])
   })
 
   it('空名字退回 id；没有会话或没有归属时是空数组', () => {
     expect(annotationBadges(providers, 's2')[0]).toMatchObject({
-      key: 'session-tags:gray',
+      key: 'labels:gray',
       label: 'gray'
     })
     expect(annotationBadges(providers, 'nope')).toEqual([])
@@ -65,7 +65,7 @@ describe('annotationMenuItems', () => {
     const items = annotationMenuItems(providers, 's1')
     expect(items).toHaveLength(3)
     expect(items[0]).toEqual({
-      action: 'annotation:session-tags:red',
+      action: 'annotation:labels:red',
       label: '阻塞',
       dot: '#FF3B30',
       checked: true
@@ -80,8 +80,8 @@ describe('annotationMenuItems', () => {
 
 describe('parseAnnotationAction', () => {
   it('拆出 pluginId 与 optionId，其它动作返回 null', () => {
-    expect(parseAnnotationAction('annotation:session-tags:red')).toEqual({
-      pluginId: 'session-tags',
+    expect(parseAnnotationAction('annotation:labels:red')).toEqual({
+      pluginId: 'labels',
       optionId: 'red'
     })
     expect(parseAnnotationAction('pin')).toBeNull()
@@ -92,13 +92,13 @@ describe('parseAnnotationAction', () => {
 
 describe('toggleTarget', () => {
   it('已挂上的改成去掉，没挂的改成加上', () => {
-    expect(toggleTarget(providers, 's1', { pluginId: 'session-tags', optionId: 'red' })).toEqual({
-      pluginId: 'session-tags',
+    expect(toggleTarget(providers, 's1', { pluginId: 'labels', optionId: 'red' })).toEqual({
+      pluginId: 'labels',
       optionId: 'red',
       on: false
     })
-    expect(toggleTarget(providers, 's1', { pluginId: 'session-tags', optionId: 'gray' })).toEqual({
-      pluginId: 'session-tags',
+    expect(toggleTarget(providers, 's1', { pluginId: 'labels', optionId: 'gray' })).toEqual({
+      pluginId: 'labels',
       optionId: 'gray',
       on: true
     })

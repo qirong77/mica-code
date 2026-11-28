@@ -282,7 +282,6 @@ async function resumeSession(
     return;
   }
   const cwd = switchToSessionCwd(result.session.cwd, services);
-  services.clearRewindCheckpoints?.();
   services.syncModelDisplay(agent);
   services.refreshCurrentAgentSessionUi();
   const roleMessage = result.roleFallback

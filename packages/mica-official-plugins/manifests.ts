@@ -6,24 +6,19 @@ import commitManifest from '../../plugins/commit/plugin.json';
 import computerUseManifest from '../../plugins/computer-use/plugin.json';
 import connectionsManifest from '../../plugins/connections/plugin.json';
 import deepseekHarnessManifest from '../../plugins/deepseek-harness/plugin.json';
-import evolutionManifest from '../../plugins/evolution/plugin.json';
 import floatingWindowManifest from '../../plugins/floatingwindow/plugin.json';
 import globalSearchManifest from '../../plugins/global-search/plugin.json';
 import harnessReviewManifest from '../../plugins/harness-review/plugin.json';
 import memoryManifest from '../../plugins/memory/plugin.json';
 import maccyManifest from '../../plugins/mica-maccy/plugin.json';
-import notebookManifest from '../../plugins/notebook/plugin.json';
 import quickButtonsManifest from '../../plugins/quick-buttons/plugin.json';
 import replyDigestManifest from '../../plugins/reply-digest/plugin.json';
 import scheduleManifest from '../../plugins/schedule/plugin.json';
 import sessionCompactManifest from '../../plugins/session-compact/plugin.json';
 import sessionRenameManifest from '../../plugins/session-rename/plugin.json';
-import sessionNotesManifest from '../../plugins/session-notes/plugin.json';
 import sessionCopyManifest from '../../plugins/session-copy/plugin.json';
-import sessionTagsManifest from '../../plugins/session-tags/plugin.json';
 import sshManifest from '../../plugins/ssh/plugin.json';
 import subagentManifest from '../../plugins/subagent/plugin.json';
-import subagentLegacyManifest from '../../plugins/subagent-legacy/plugin.json';
 import todoManifest from '../../plugins/todo/plugin.json';
 import videoManifest from '../../plugins/video/plugin.json';
 import webSearchManifest from '../../plugins/web-search/plugin.json';
@@ -47,21 +42,16 @@ export const officialPluginManifests: PluginManifest[] = [
   readManifest(memoryManifest),
   readManifest(webSearchManifest),
   readManifest(todoManifest),
-  readManifest(sessionNotesManifest),
   readManifest(sessionCopyManifest),
   readManifest(sessionRenameManifest),
-  readManifest(sessionTagsManifest),
   readManifest(sshManifest),
   readManifest(subagentManifest),
-  readManifest(subagentLegacyManifest),
   readManifest(computerUseManifest),
   readManifest(connectionsManifest),
   readManifest(deepseekHarnessManifest),
-  readManifest(evolutionManifest),
   readManifest(floatingWindowManifest),
   readManifest(globalSearchManifest),
   readManifest(maccyManifest),
-  readManifest(notebookManifest),
   readManifest(quickButtonsManifest),
   readManifest(replyDigestManifest),
   readManifest(scheduleManifest),

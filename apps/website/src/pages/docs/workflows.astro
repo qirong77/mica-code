@@ -135,13 +135,6 @@ const loopExample = `/loop 30m 检查构建结果，只汇报新增失败和需�
           </td>
           <td>新会话继承已有上下文，后续对话独立推进。</td>
         </tr>
-        <tr>
-          <td>回到某一轮结束时</td>
-          <td>
-            终端执行 <code>/rewind</code>，选择回退点与范围。
-          </td>
-          <td>保留所选输入及该轮回复，移除之后的对话；文件能否恢复取决于该点是否有可用快照。</td>
-        </tr>
       </tbody>
     </table>
   </div>
@@ -189,11 +182,6 @@ const loopExample = `/loop 30m 检查构建结果，只汇报新增失败和需�
       </thead>
       <tbody>
         <tr>
-          <td>Session Notes 会话笔记</td>
-          <td>本任务目标、已确认方案、验证进展和待办事项。</td>
-          <td>随会话保存，恢复与分叉时沿用，回退时随回退点恢复；压缩不会改写它。</td>
-        </tr>
-        <tr>
           <td>Memory 跨会话记忆</td>
           <td>沟通偏好、长期环境事实和当前项目中可复用的经验。</td>
           <td>存为独立 Markdown 文件，供其他会话读取；压缩、分叉与回退不会撤销已经写入的记忆。</td>
@@ -202,8 +190,7 @@ const loopExample = `/loop 30m 检查构建结果，只汇报新增失败和需�
     </table>
   </div>
   <p>
-    启用 Session Notes 后，可以在桌面笔记面板编辑，也可以要求 Mica 更新会话笔记。Memory
-    将用户档案、通用经验与项目记忆分开保存，项目记忆跟随工作目录。 可让 Mica 读取或修订记忆，终端的{' '}
+    Memory 将用户档案、通用经验与项目记忆分开保存，项目记忆跟随工作目录。 可让 Mica 读取或修订记忆，终端的{' '}
     <code>/memory path</code> 可以查看文件位置。
   </p>
   <p>
@@ -223,11 +210,6 @@ const loopExample = `/loop 30m 检查构建结果，只汇报新增失败和需�
         </tr>
       </thead>
       <tbody>
-        <tr>
-          <td>进程内子代理（Subagent Legacy）</td>
-          <td>主任务中的并行探索、独立审阅、明确范围的实现或测试。</td>
-          <td>目标、必要背景、输出要求；可写任务还要分配文件范围。结果由主代理验收并汇总。</td>
-        </tr>
         <tr>
           <td>Subagent 子会话</td>
           <td>需要独立上下文、单独保存历史，并可能连续追问的完整任务。</td>
@@ -251,7 +233,7 @@ const loopExample = `/loop 30m 检查构建结果，只汇报新增失败和需�
   <p>
     桌面端从 By The Way 抽屉旁问；终端使用 <code>/btw 问题</code>，以 <code>/btw -continue 追问</code> 延续话题，
     <code>/btw -stop</code> 停止旁问。
-    旁问隔离的是对话上下文，涉及文件或命令时仍应说明操作范围。协作能力的启停与委派倾向见{' '}
+    旁问隔离的是对话上下文，涉及文件或命令时仍应说明操作范围。协作能力的启停见{' '}
     <a href={`${base}docs/plugins/`}>插件设置</a>。
   </p>
 

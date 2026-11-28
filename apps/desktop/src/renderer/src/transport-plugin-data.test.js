@@ -12,7 +12,7 @@ afterEach(() => {
   }
 })
 
-it('routes a notebook-sized document update check through the version-only invoke channel', async () => {
+it('routes a document-sized update check through the version-only invoke channel', async () => {
   globalThis.window = { location: { pathname: '/', href: 'http://test/' }, addEventListener() {} }
   globalThis.document = { addEventListener() {}, hidden: false }
   globalThis.EventSource = class {

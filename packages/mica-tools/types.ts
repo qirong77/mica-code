@@ -22,7 +22,7 @@ export type ToolResultImageBlock = {
 
 export type ToolResultBlock = ToolResultTextBlock | ToolResultImageBlock;
 
-/** A tool result may include media for provider adapters while legacy tools keep returning strings. */
+/** 工具结果可以是纯文本，也可以带图片块。 */
 export type ToolResult = string | ToolResultBlock[];
 
 export function toolResultToText(result: ToolResult): string {

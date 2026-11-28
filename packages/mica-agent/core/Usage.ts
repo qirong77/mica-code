@@ -14,7 +14,7 @@ export type AgentUsageSummary = {
  * and analytics can reconstruct exact per-request usage after the process
  * exits. Kept separate from `AgentUsageRecord[]` (the parent usageHistory)
  * because subagent `turnId`/`messageCount` are relative to the subagent's own
- * message array and must not participate in parent rewind trimming.
+ * message array and must not participate in parent history trimming.
  */
 export type SubagentUsageRecord = {
   /** The subagent task id; equals the Agent tool's `task_id`. */

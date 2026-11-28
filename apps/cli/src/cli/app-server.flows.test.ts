@@ -2593,69 +2593,6 @@ suite('mica app-server real-user flows (mock provider)', () => {
     expect(persisted.snapshot?.capabilitySelection?.disabledTools).toEqual(['run_shell']);
   });
 
-  itE2E('session notes round-trip through the protocol, the session file and the next prompt', async () => {
-    mock!.state.mode = 'ok';
-    mock!.state.requests = [];
-    mock!.state.responsesFinished = 0;
-    mock!.state.delayBeforeTextMs = 0;
-
-    const host = spawnHost('session-notes');
-    hosts.push(host);
-    await waitFor(host, hostReady, 'host ready or error', 30_000);
-
-    // 工具必须在这个进程里注册好，否则模型根本看不到有什么可写。
-    await send(host, 99, 'mica/capabilities/get', {});
-    const capabilities = await waitFor(host, (m) => m.id === 99, 'capabilities/get (notes)');
-    expect((capabilities.result as { tools?: { name: string }[] }).tools?.map((tool) => tool.name)).toContain(
-      'session_notes',
-    );
-
-    // 草稿会话（还没有 session id）就能读写：面板不必等第一条消息才可用。
-    // 协议是通用的会话级状态，内核不认识「笔记」——归一化与形状由插件与它的卡片负责。
-    await send(host, 1, 'mica/sessionState/get', { pluginId: 'session-notes' });
-    const empty = await waitFor(host, (m) => m.id === 1, 'sessionState/get (empty)');
-    expect(empty.result).toMatchObject({ ok: true, value: null });
-
-    await send(host, 2, 'mica/sessionState/set', {
-      pluginId: 'session-notes',
-      value: '# 决策\n\n- 用 Bun 跑测试',
-    });
-    const saved = await waitFor(host, (m) => m.id === 2, 'sessionState/set');
-    expect(saved.result).toMatchObject({ ok: true, pluginId: 'session-notes' });
-    await waitFor(host, (m) => m.method === 'mica/sessionState/updated', 'sessionState/updated');
-
-    // 下一轮请求的 system prompt 末尾必须带上它 —— 这是「压缩不掉」的落点。
-    await send(host, 3, 'turn/start', { threadId: '', input: [{ type: 'text', text: '开始干活' }] });
-    const started = await waitFor(host, (m) => m.method === 'turn/started', 'notes turn started', 30_000);
-    await waitFor(host, turnCompleted((started.params?.turn as { id?: string }).id!), 'notes turn completed', 30_000);
-    const instructions = systemPromptOf(mock!.state.requests[0]);
-    expect(instructions).toContain('<session-notes>');
-    expect(instructions).toContain('- 用 Bun 跑测试');
-    // 插件段落由宿主包在 <injection> 里，段落正文之后紧跟的是这层边界。
-    expect(instructions.trimEnd().endsWith('</injection>')).toBe(true);
-
-    // 落在会话快照里、不在 messages 里：所以 compact 改不到它。
-    const sessionFile = readdirSync(join(host.home, 'sessions')).filter((f) => f.endsWith('.json'))[0]!;
-    const sessionId = sessionFile.replace(/\.json$/, '');
-    const persisted = JSON.parse(readFileSync(join(host.home, 'sessions', sessionFile), 'utf8')) as {
-      snapshot?: { pluginState?: Record<string, unknown>; messages?: unknown[] };
-    };
-    expect(persisted.snapshot?.pluginState?.['session-notes']).toBe('# 决策\n\n- 用 Bun 跑测试');
-    expect(JSON.stringify(persisted.snapshot?.messages ?? [])).not.toContain('<session-notes>');
-
-    // 换一个宿主重开同一会话：笔记跟着回来（resume 走的是快照，不是配置文件）。
-    // 同一个 MICA_HOME 起第二个宿主：验证的是「从会话文件恢复」，不是换了个家目录
-    const reopened = spawnHost('session-notes-reopen', [], host.home);
-    hosts.push(reopened);
-    await waitFor(reopened, hostReady, 'reopened host ready or error', 30_000);
-    await send(reopened, 1, 'thread/resume', { threadId: sessionId });
-    const resumed = await waitFor(reopened, (m) => m.id === 1, 'thread/resume (notes)');
-    expect(resumed.error, JSON.stringify(resumed.error)).toBeUndefined();
-    await send(reopened, 2, 'mica/sessionState/get', { pluginId: 'session-notes' });
-    const restored = await waitFor(reopened, (m) => m.id === 2, 'sessionState/get (reopened)');
-    expect(restored.result).toMatchObject({ ok: true, value: '# 决策\n\n- 用 Bun 跑测试' });
-  });
-
   itE2E('disabling a plugin takes its tools away without waiting for a turn', async () => {
     mock!.state.mode = 'ok';
     mock!.state.requests = [];
@@ -2671,19 +2608,19 @@ suite('mica app-server real-user flows (mock provider)', () => {
       const response = await waitFor(host, (m) => m.id === id, 'capabilities/get');
       return ((response.result as { tools?: { name: string }[] }).tools ?? []).map((tool) => tool.name);
     };
-    expect(await tools(1)).toContain('session_notes');
+    expect(await tools(1)).toContain('todo_write');
 
     // 用户在配置页点了开关：只写名单文件，不重开进程、也不发消息。
-    writeFileSync(join(host.home, 'plugins-state.json'), JSON.stringify({ disabled: ['session-notes'] }));
+    writeFileSync(join(host.home, 'plugins-state.json'), JSON.stringify({ disabled: ['todo'] }));
 
     // 宿主的状态文件监听（400ms 轮询 + 120ms 去抖）应当很快把它卸下来。
     let remaining: string[] = [];
     for (let attempt = 0; attempt < 20; attempt += 1) {
       remaining = await tools(10 + attempt);
-      if (!remaining.includes('session_notes')) break;
+      if (!remaining.includes('todo_write')) break;
       await new Promise((resolve) => setTimeout(resolve, 250));
     }
-    expect(remaining).not.toContain('session_notes');
+    expect(remaining).not.toContain('todo_write');
   });
 
   itE2E('rapid second send while busy is rejected with an error, host stays usable', async () => {

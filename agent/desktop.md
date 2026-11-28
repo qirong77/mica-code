@@ -75,7 +75,7 @@
 
 ## 对话与输入
 
-- chat run 按 nodeId 存于 `host/chat.js`；请求级发送错误走 `chat:queue-error`，回滚乐观消息并恢复草稿。host 进程在应答 `turn/start` 之前就退出时走同一条路径（`chat-host-requests.js` 结算未应答请求）：那一轮从未跑过，气泡必须撤回，否则消息看起来已发送、会话里却不存在，双击编辑只会得到「找不到要编辑的消息」。
+- chat run 按 nodeId 存于 `host/chat.js`（run 编排与 IPC 注册）；会话文件读取在 `chat-session-read.js`，模型目录 / 角色 / 压缩命令在 `chat-commands.js`。请求级发送错误走 `chat:queue-error`，回滚乐观消息并恢复草稿。host 进程在应答 `turn/start` 之前就退出时走同一条路径（`chat-host-requests.js` 结算未应答请求）：那一轮从未跑过，气泡必须撤回，否则消息看起来已发送、会话里却不存在，双击编辑只会得到「找不到要编辑的消息」。
 - 常驻宿主预热：渲染层每换到一个节点调一次 `chat:warm`，宿主侧只保证「App 开着就至少有一个宿主」（`chat-warm.js` 的 `resolveWarmAction`，已有活着的宿主就跳过，切页签不会各自养一个进程）。插件只载在会话宿主里，而宿主是按需 spawn 的——没有预热时重启桌面端后不发消息就没有宿主，桥与定时循环停摆，手机端显示「暂时不可用」。
 - 闲置宿主回收（`chat-idle.js` 的 `resolveIdleReap`，每分钟扫一次）：开着不用的页签会一直占着 app-server（一个 50–270MB），一天下来能堆到几百 MB。判定只收「没在干活」的：有轮次 / 压缩 / 中止进行中、`hostPending` 或本地排队里有消息、btw 线程在跑的一律不动；按最近活动时间留最新的一个（插件只活在会话宿主里，收干净会让手机桥与定时循环停摆）；默认闲置 30 分钟才收，`MICA_CHAT_IDLE_REAP_MS` 可调。另有一条硬上限 `IDLE_MAX_KEEP = 3`：排在前 3 之外的宿主不看闲置时长、只要空着就收——进程数量本身就是代价，而插件只活在最近活动的那个里。收掉之后用户再发消息由 `startRun` 按需 spawn 并带原 sessionId 续跑，只多一次冷启动，历史不受影响。
 - 队列唯一投影 `chat-queue.js.mergeQueuedItems`：host after_iteration 在前，本地 after_turn 在后；宿主占着会话时（轮次之外的会话压缩）条目带 `waitingFor: 'maintenance'` 与 `waitingLabel`，排队行据此说「<label>结束后发送」而不是等迭代边界。
@@ -110,7 +110,6 @@
 - 输入条齿轮与时钟打开 `SessionSettingsDialog`：会话能力（Tools / Skills / MCP 三页签）/ 定时任务 / 插件。声明了 `perSession` 的插件是左侧导航「插件」下面的子项，内容区只画选中的那一个；按会话可调的项就在这里，默认值仍在配置页 Plugins。插件声明 `llm` 的字段由 `LlmSettingsSection` 按会话渲染（与配置页同一组件，摘要写会话当前模型、逐字段可「跟随默认」），不要在会话设置里另写一套模型表单。
 - 会话设置、耗时分析与上下文详情模块通过 `lazyView` 延迟到实际打开时导入；上下文详情的共享 `SessionDetailView` 只在 `ContextDetailDialog.jsx` 中引入，避免把整套详情面板带进聊天首屏。Suspense 占位仍可关闭，失败/重试由共享边界处理。
 - 能力目录仅在进入「会话能力」分类时读取，同一目标的分类切换复用在途/已加载结果；`nodeId/sessionId/cwd/role` 变化时重建内容实例，避免旧目标的目录、选择和异步回包进入新目标。插件设置仍只在插件分类读取。
-- 顶栏的「会话笔记」入口由官方插件 `session-notes` 声明（清单 `desktop.entry.placement: "header"` + 插件目录的 `desktop.jsx`），内核没有笔记专属界面：停用插件后图标与编辑器一起消失，工具与 prompt 段落也一起撤下。卡片经 `api.session.state` 读写会话快照，700ms 防抖、无保存按钮。
 - 插件入口是**输入框正上方那排胶囊按钮**（`PluginQuickBar`，清单 `desktop.panel.shortcuts` + 视图在运行期给的 `shortcuts`）：`action` 类按钮点一下直接调插件动作（立即返回，不在页面里跑外部命令或等模型），`section` 类按钮打开盖在对话区右侧的抽屉并展开那一块（`PluginPanels`，宽 340、不挤窄对话），`items` / `menu` 类按钮悬停（停 140ms 才展开，划过不算）或点击展开一层子项。`menu` 的子项是本地事实、由插件现算（这个会话涉及哪些分支），所以**不能等悬停才去要**：页面挂载后先预热一次视图，条目按会话缓存在 `renderer/src/plugin-panels.js`（60s TTL、过期也先画旧的再后台刷新），抽屉复用同一份整块视图（30s）开局——点开看到的必须是内容而不是一句「正在读取」，只有真没有缓存时才画骨架（不写「正在读取」这种像在等网络的字）。请求失败重试一次再放弃；缓存键里带着 `nodeId + sessionId + cwd + role`，换会话自然不会命中上一条的条目，容量上限（24 条菜单 / 16 份视图）负责回收。这一排是横向滚动容器，子项菜单因此画在 body 上（`createPortal` + 按钮矩形定位），不要塞回按钮里；抽屉折叠状态与 ChatView 的 `pluginPanelOpen` / `pluginPanelSection` 共用。哪些插件有面板、`roles` 门槛、是否停用都从 `readPluginsDetails` 拿（用户插件也在里面），规则在 `renderer/src/plugin-panels.js`；RPC 走 `window.mica.chat.pluginPanels.view|action` → `chat:plugin-panel-view|action`。host 侧返回的载荷在 `hostTaskRequest` 的信封里，必须过 `unwrapHostResult`，否则页面只看到 `{ok:true}`、视图全 undefined。
 
   清单里按钮的数量是静态的；**运行期的按钮**（模型在会话里现建的一排）走 `desktop.panel.dynamicShortcuts: true` + 视图的 `shortcuts`：合并与 key 在 `renderer/src/plugin-panels.js` 的 `pluginQuickbarItems`（清单的在前、运行期的 key 带 `view:` 前缀），拉视图的时机与 `status` 同一套（首屏预热、工具完成后刷新、30s 与可见性变化轮询），点击时把按钮的 `key` 一起交给插件动作。声明了 `dynamicShortcuts` 的面板即使此刻一枚按钮都没有也要接工具完成事件——那一排就是工具跑完才出现的。
@@ -140,7 +139,7 @@
 - 日聚合与区间裁剪仍在 `scope.js`，`overview.js` 从这份结果投影总量 / 模型 / 项目，账本只加用量、不计会话；项目身份用完整 cwd。`usage-charts.jsx` / `chart-model.js` 按需使用现有 ECharts SVG 模块，颜色与顺序只认 `stats/usage-series.js` 的共享定义，订阅主题即时重绘并在卸载时清理实例 / observer。日期点选仅展示精确值，不暗改全页筛选；缺失日期补零，单日不推测小时数据，缓存命中率以输入为分母、环图占比以全部 Tokens 为分母。模型点击进入模型明细、项目点击筛出它的会话。`StatsPanel` 与 `stats.css` 只负责本页 Arco 卡片和布局，不叠旧自绘卡片皮肤。
 - 模型速度按请求的 `providerId` 与模型分组，一行固定显示「供应商 / 模型」（未记录供应商如实标明），不能把同名模型在不同供应商下并成一行；响应等待是从原请求开始到最终成功尝试首个正文或思考增量的平均时间，包含 provider 内重试；生成速率是有效样本的 `generationOutputTokens` 总量除以正文首末增量时间总和，分子扣除推理与首 token，仅为客户端估算（仍受格式 tokens 与网络分块影响）。只采纳推理明细明确、至少 32 个非推理输出 tokens、两个正文增量、500ms 且无工具/其它输出的成功请求，旧时长没有新分子不参与，不从总用量补算。呈现是**一模型一行的进度条**（`stats/SpeedBars.jsx`）：条长按同批最大值等比缩放、数值同时用文字给出，行按指标从优到劣排（响应等待升序、生成速率降序），首行标「最快 / 最高」，每行给样本数；不做时间序列折线，也不再按分钟/按天聚合出趋势（`scope.js` 只留 `modelSpeed`）。缺少服务商身份不从协议或父会话推断。统计索引版本变更时重建聚合。
 - 「By source」是**两层树**（`stats/source-groups.js`）：父行是「谁发起的」——主对话（App 自己）、某个插件；子行是它底下的具体请求，缩进一层挂在父行后面。所有请求都要经过 App，只摊成一串 `Implementer` / `compact` 时看不出这笔钱是谁花的，所以父级优先：组间顺序固定为「主对话 → 各插件（按组总量）→ 内核」，指标排序只作用在组内子项（分组是结构，不是排序）。父行数字是整组之和（插件自身请求、以及功能 id 就等于插件 id 的后台请求都并进父行，不单列成子项），卡片总量只累父行，展开时不重复计数；卡片因此不分页（分页会把父行与子项劈到两页）。
-- **名字一律用插件自己的**：父行取清单里的 `name`（`By The Way`，不是「旁问」），子行用记账里原样的 id / 类型名（`Explore`、`btw`）。统计页不翻译、不起别名——同一个东西在插件页、日志与统计页叫三个名字时，用户对不上账。父级靠记账里的 `pluginId`（委派记录写类型提供者 `subagent`、插件触发的摘要写触发它的插件），老记录由 `evolution` 的 `usage-source-owner` 迁移一次性补齐（含 `auto-compact` → `session-compact` 改名），所以运行时不需要「没有归属」的回退分支；真正没有插件的只剩内核自带命令（`/compact`、`mica compact`），它按功能 id 自成一组，Type 写「内核」。来源的类别名只有一份（`mica-web-shared/usage-source` 的 `USAGE_SOURCE_LABELS`），表格、图例与会话详情共用；卡片底部图例解释四类各自是什么（`SOURCE_KIND_HINTS`）。
+- **名字一律用插件自己的**：父行取清单里的 `name`（`By The Way`，不是「旁问」），子行用记账里原样的 id / 类型名（`Explore`、`btw`）。统计页不翻译、不起别名——同一个东西在插件页、日志与统计页叫三个名字时，用户对不上账。父级靠记账里的 `pluginId`（委派记录写提供者、插件触发的摘要写触发它的插件）；真正没有插件的只剩内核自带命令（`/compact`、`mica compact`），它按功能 id 自成一组，Type 写「内核」。来源的类别名只有一份（`mica-web-shared/usage-source` 的 `USAGE_SOURCE_LABELS`），表格、图例与会话详情共用；卡片底部图例解释四类各自是什么（`SOURCE_KIND_HINTS`）。
 - 表格统一用 `@mica-config-ui/web` 的 `DataTable`（列定义、受控排序、内置翻页、窄容器退列）：统计页的 By source 与 By session 都用它，宿主负责包一层 `.mica-config-ui`。**不横向滚动**——卡片变窄时先让次要列退场（`narrow: 'secondary'` 在 ≤720px 退，`'tertiary'` 在 ≤540px 再退），表头在窄容器换 `narrowLabel`。规则按容器宽度写在 `styles.css` 的 `.data-table-scope` 下，不看视口；分页的页码夹紧与区间文案在 `dataTableModel.ts`（有单测）。
 
 ## 展示
@@ -165,7 +164,7 @@
 - 代码块统一 `CodeView` + `code-highlight.js`，只读着色，不引编辑器运行时。
 - 「在编辑器中打开」把内容作为只读虚拟文档放进应用里唯一的 monaco 实例。
 - 轻量浮层统一用 `Popover`；会话级设置是弹窗而不是浮层。
-- 电脑隐藏发送/排队按钮，移动端保留；后台任务 dock 只列运行项与需要看一眼的结束（判定唯一实现在 `mica-common/backgroundTaskVisibility.ts`：`killed` 是模型 kill 或宿主退出时的统一收尾，不占位置；失败、非零退出码、进程失踪才留着）。子代理 dock **只列运行中**的（`mica-common/subagentVisibility.ts`）：`completed`、`partial`、`failed`、模型或用户 kill 的一律不留——一次失败攒几轮就把运行中的子代理挤出视野。失败原因、部分结果与最近活动仍可从对话里那条 `agent` 工具结果读到；详情弹窗开着时（运行中点开、跑完留在原地）照样能「创建替代任务」，任务记录本身照旧落盘供 `mica/subagentTasks/detail` 与 `restart` 使用。
+- 电脑隐藏发送/排队按钮，移动端保留；后台任务 dock 只列运行项与需要看一眼的结束（判定唯一实现在 `mica-common/backgroundTaskVisibility.ts`：`killed` 是模型 kill 或宿主退出时的统一收尾，不占位置；失败、非零退出码、进程失踪才留着）。子代理 dock **只列运行中**的（`mica-common/subagentVisibility.ts`）：`completed`、`partial`、`failed`、模型或用户 kill 的一律不留——一次失败攒几轮就把运行中的子代理挤出视野。失败原因、部分结果与最近活动仍可从任务记录读到；详情弹窗开着时（运行中点开、跑完留在原地）照样能「创建替代任务」，任务记录本身照旧落盘供 `mica/subagentTasks/detail` 与 `restart` 使用。
 
 - 桌面宿主对 `mica/subagentTasks/updated` 只推 `running`（`apps/desktop/src/host/chat-subagent-display.js`），并在当前这一轮以 `completed` 收尾时清空 dock——收尾瞬间仍挂在快照里的行不会留在那儿。持久任务历史不受影响。详情的「创建替代任务」是新任务，不是断点续跑。
 
@@ -201,16 +200,13 @@
 - 会话行右键与对话区右键（`ChatView` 的 `ChatContextMenu`）用的是同一份插件项和同一个执行器 `runSessionMenuPluginAction`：两处各写一遍会让同一个插件在两个入口表现不一样；哪一处出现哪一项由清单 `surface` 决定（`sidebar` 侧栏会话行 / `chat` 对话区，省略＝两处都出，取项时在 `session-menu-plugins.js` 里过滤，会话压缩的两项只标了 `chat`）。插件项默认插在「分享链接」之后、Clear 之前（危险项永远排最后），清单写了 `position: "top"` 的（会话压缩的快速压缩 / 模型压缩）反过来摆在菜单最上面、与其余项之间隔一条分隔线；没有会话时禁用。图标同理来自清单：每一项可以用 `icon` 声明自己的图标名（`session-menu-plugins.js` 传名字，`ChatContextMenu` 用 `resolvePluginIcon` 取组件），省略才回落到插件图标，都省略时用拼图占位。对话区点插件动作立即落「正在…」notice，回包后原位更新；压缩推送历史替换期间保留这条进度。侧栏那处结果进顶部通知。固定项里还有一个「查看详情」，和侧栏会话行的「查看详情」是同一个弹窗（按需加载的 `stats/SessionDetailModal`，含用量页签）；两个入口渲染同一个组件，不要为其中一处另写一份详情。
 - 父子关系（`parentSessionId`）是会话树的唯一事实来源，只改渲染顺序，**不区分来源**：subagent 派出的子会话、fork 分支与手动拖出来的层级共用这一个字段，侧栏不给它们加标签或图标。父行在前、紧跟它的子树（`session-nesting.js` 的 `nestSessions`），父会话不在当前分区时子会话当顶层，环与自指都退化成顶层。折叠状态是页面内 Set，父行折叠时用 `mergeRowStates` 代显子行状态；子行继承父行的分区与搜索命中，也不参与手动排序——拖到会话行正中＝成为它的子会话（拖进自己的子树会被拒），拖到别处＝先解除父子关系再换分区。写盘走 `stats:set-session-parent`（`host/session-parent.js`）：空闲时独占 turn lease 改文件；这一轮正在跑（lease 被别人持有）时明确拒绝，提示本轮结束后再调整。读前读后比较文件身份不是跨进程 CAS，不能绕过 lease 整文件覆盖，否则会吞掉宿主刚保存的新对话。`parentSessionId` 固定写在 `snapshot` 之前（头部读取靠这个位置判成环），`updatedAt` 不动，否则调整层级会把会话顶到 Recent 最前面。
 - 会话搜索共用 `mica-web-shared/session-search.ts`；正文搜索每会话最多 20k 字符，默认最近 3 日、最多 600 个候选，截断须告知。
-- 上下文统计按整条消息 JSON 估算并排除媒体 payload；工具定义在实际请求时按工具 / MCP server 记录独立估算（MCP 是 Tool Schema 子项，不重复计总量）；compact / rewind 后用 staleInput 说明来源已不是当前快照。
+- 上下文统计按整条消息 JSON 估算并排除媒体 payload；工具定义在实际请求时按工具 / MCP server 记录独立估算（MCP 是 Tool Schema 子项，不重复计总量）；compact 后用 staleInput 说明来源已不是当前快照。
 
 插件整页各自是一个可复制、可收藏的地址（默认 `/plugins/pages/<插件 id>` 或清单声明的 `/plugins/<id>/<route>`，路由与 `api.page` 见 `plugins.md`），桌面端把地址和复制按钮放在返回按钮、页面标题所在的同一行。顶栏空白处可拖动窗口，macOS 客户端在左侧为系统窗口按钮留位。
 
 ## 侧栏入口与整页设置
 
-- Notebook 的目录、保存队列与文档栏在 `plugins/notebook/desktop.jsx`；篇名只保留大号纯文本，粘贴与 Markdown 快捷输入不在篇名内生成格式；实际编辑区不超过 580px 时文档栏与工具栏分行。富文本排版、块首键盘行为与文档样式统一在 `packages/mica-editor/runtime/src/workspace/WorkspaceShell.tsx` 装配，仅属于笔记 composer。宿主用经 noteId/loadId 校验的 `action` 消息触发样式设置，业务不进入桌面内核。正文按约 650ms 防抖自动保存，顶栏不显示保存状态，失败时才在正文上方给出带重试的提示；文档样式使用 Lexical root NodeState；数据与交互口径见 `packages/mica-editor/README.md`、`plugins/notebook/README.md`。
 
-- Notebook 的桌面目录默认宽 260px，右边缘可拖动调宽（200–460px，按可用区域收紧上限；双击复位，支持方向键与 Home / End），通过插件自己的版本化文档通道保存宽度；偏好格式见 `plugins/notebook/README.md`。窄屏抽屉仍宽 260px。普通目录行高 36px，当前笔记以整行中性底色标记，更多菜单默认向按钮右下展开、边缘自动避让。标题搜索结果显示所属文件夹路径，选中后展开祖先文件夹并返回目录树。目录标题旁提供当前笔记定位和整树折叠、展开。正文顶栏常驻当前篇名，不放任何大纲开关：大纲是右侧常驻面板（占位、不是浮层），隐藏按钮只在大纲被悬停或键盘聚焦时才出现在面板标题行。收起后右缘是一条大纲彩虹条（每个标题一段刻度、按顺序取色、按级别定长短、当前位置不透明），点击整条即恢复面板，悬停才浮出展开按钮。窄屏面板更窄，没有 hover 的设备上按钮常显，目录才走带遮罩的抽屉。
-- Notebook 的目录拖放判定在 `plugins/notebook/tree-dnd.ts`，节点位置变更在 `model.ts` 的 `placeNode`：同级排序沿用 `nodes` 数组顺序，不新增存储字段。目录树提供根目录落点和文件夹悬停展开，排序只用拖动、不添加上移/下移按钮；搜索与最近删除不接拖动排序。所有结构写入复用原有索引 CAS 队列，拖动不触碰正文。
 
 - 会话侧栏顶部保持一行入口的固定顺序：New Session / Stats / Settings / 插件声明的侧栏入口 / Plugins。插件入口由清单 `desktop.entry` 声明、按清单顺序渲染（`Connections` 是浮层卡片）；`placement: "header"` 的入口不占侧栏位置，画在主区顶栏右侧那一簇的最左边（`Schedule` 是整页 + 顶栏图标——顶栏只有 32px 高，所以只画图标，窗口类图标仍贴最右），宿主只画一行与容器，不知道里面是什么；加一个桌面插件只改插件目录，不改侧栏代码。只声明 `desktop.page`、不写 `entry` 的插件不占这一列：它的整页入口是 Plugins 页里那张卡的「打开…」按钮（`plugin-entries.js` 的 `loadPluginPageEntry` 按 id 现取模块，`SettingsView` 经 `onOpenPluginPage` 交回 `App` 打开；标签就这样，不再占侧栏一行）。Plugins 虽然在最末，但它只是一个页面入口——点它进插件整页（目录 → 点一张卡进详情），不做下拉面板、不在侧栏里列插件。
 - 设置与插件页都以覆盖整窗的一层打开（`configPage` 状态 + `fixed inset-0` + 顶部拖拽条），不在对话区右侧再开一栏：配置页自带侧栏导航，套两层侧栏只会把内容挤窄。返回走配置页侧栏顶部的「返回对话」，主区顶栏的返回只管 Files / Stats。

@@ -13,6 +13,7 @@
  *   空数组报错（`models: []` 不合法）。
  */
 
+import { isRecord } from '@packages/mica-common/guards.js';
 import {
   PROVIDER_PROTOCOLS,
   isProviderProtocol,
@@ -259,10 +260,6 @@ function orderKeys(record: ConfigDraft, order: readonly string[]): ConfigDraft {
     if (!order.includes(key)) ordered[key] = value;
   }
   return ordered;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value && typeof value === 'object' && !Array.isArray(value));
 }
 
 function isNonEmptyText(value: unknown): value is string {

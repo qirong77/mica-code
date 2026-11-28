@@ -13,7 +13,6 @@ import {
   setupCommandNew,
   setupCommandRename,
   setupCommandResume,
-  setupCommandRewind,
   setupFileMention,
   setupLoop,
   setupMcp,
@@ -58,7 +57,6 @@ function builtinCommandFilePlugins(): MicaPlugin[] {
     createBuiltinCommandFilePlugin('new', setupCommandNew),
     createBuiltinCommandFilePlugin('rename', setupCommandRename),
     createBuiltinCommandFilePlugin('resume', setupCommandResume),
-    createBuiltinCommandFilePlugin('rewind', setupCommandRewind),
     createBuiltinCommandFilePlugin('loop', setupLoop),
   ];
 }

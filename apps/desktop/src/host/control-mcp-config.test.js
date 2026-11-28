@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
@@ -7,8 +7,6 @@ import {
   buildControlMcpServers,
   controlMcpConfigPath,
   controlMcpUrl,
-  legacySkillPath,
-  removeLegacyControlSkills,
   writeControlMcpConfig
 } from './control-mcp-config.js'
 
@@ -114,50 +112,5 @@ describe('writeControlMcpConfig', () => {
         kinds: []
       })
     ).toBe(null)
-  })
-})
-
-describe('removeLegacyControlSkills', () => {
-  function writeSkill(home, name, text) {
-    const path = legacySkillPath(home, name)
-    mkdirSync(join(home, 'skills', name), { recursive: true })
-    writeFileSync(path, text, 'utf8')
-    return path
-  }
-
-  it('removes the generated skill documents now that the capability is an MCP server', () => {
-    const home = mkdtempSync(join(tmpdir(), 'mica-home-'))
-    const browser = writeSkill(
-      home,
-      'mica-browser',
-      '---\nname: mica-browser\n---\n\nhttp://127.0.0.1:8787/remote/control\n'
-    )
-    const terminal = writeSkill(
-      home,
-      'mica-terminal',
-      '---\nname: mica-terminal\n---\n\n$MICA_TERMINAL_URL\n'
-    )
-
-    const removed = removeLegacyControlSkills({ homeDir: home })
-    expect(removed.sort()).toEqual([browser, terminal].sort())
-    expect(existsSync(browser)).toBe(false)
-    expect(existsSync(join(home, 'skills', 'mica-browser'))).toBe(false)
-  })
-
-  // 用户自己改过的技能不是我们写的，删掉等于删人家的内容
-  it('leaves a hand-edited skill document alone', () => {
-    const home = mkdtempSync(join(tmpdir(), 'mica-home-'))
-    const path = writeSkill(
-      home,
-      'mica-browser',
-      '---\nname: mica-browser\n---\n\n# 我自己的笔记\n先打开登录页。\n'
-    )
-    expect(removeLegacyControlSkills({ homeDir: home })).toEqual([])
-    expect(existsSync(path)).toBe(true)
-  })
-
-  it('tolerates a home directory with no skills at all', () => {
-    const home = mkdtempSync(join(tmpdir(), 'mica-home-'))
-    expect(removeLegacyControlSkills({ homeDir: home })).toEqual([])
   })
 })

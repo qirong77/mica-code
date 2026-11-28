@@ -1,3 +1,4 @@
+import { isRecord } from '@packages/mica-common/guards.js';
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { resolveMicaHomePath } from '@packages/mica-config/brand.js';
@@ -72,6 +73,3 @@ export function normalizePluginState(input: unknown): PluginState {
   return { disabled: [...disabled].sort() };
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}

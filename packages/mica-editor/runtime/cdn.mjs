@@ -57,7 +57,7 @@ for (const name of ['bash', 'c', 'clike', 'cpp', 'css', 'diff', 'go', 'java', 'j
 }
 
 export const cdnStyles = [
-  // Arco is used by both the Notebook and Markdown editor on the first
-  // screen. Feature-specific styles are injected by their lazy components.
+  // Arco is used by the Markdown editor on the first screen. Feature-specific
+  // styles are injected by their lazy components.
   'https://cdn.jsdelivr.net/npm/@arco-design/web-react@2.66.18/dist/css/arco.css'
 ]

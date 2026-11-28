@@ -7,7 +7,7 @@
 - 提供 `IAgent`、conversation message 等公共 agent 类型。
 - `IAgent.getSnapshot({ includeConversation: false })` 只取 provider 状态，省去展示消息投影；默认仍包含 `conversationMessages`。保存和回滚热路径可按需关闭投影。
 - `PiModelClient` 通过 `@earendil-works/pi-ai` 统一支持 OpenAI Chat Completions、OpenAI Responses、Anthropic Messages 和 Google Generative AI；请求编码、SSE、思考重放、工具参数的增量 JSON 解析和多模态工具结果编码由 pi 处理。
-- `ModelMessage` 是 pi-ai 的消息类型，所有协议使用同一种历史；`PiHistoryNormalizer` 投影成展示用的正文与工具记录。快照写 `messageFormat: 'pi-ai-v1'`。旧 OpenAI 原生历史不再直接加载，由 `evolution` 一次性迁移。
+- `ModelMessage` 是 pi-ai 的消息类型，所有协议使用同一种历史；`PiHistoryNormalizer` 投影成展示用的正文与工具记录。快照写 `messageFormat: 'pi-ai-v1'`，旧 OpenAI 原生历史不再读取。
 - `AgentCallbacks.onToolInput` 提供模型生成工具输入的 start/delta/end 事件；`onToolCall` / `onToolResult` 继续表示实际执行。思考显示按 pi 内容块有序提交 checkpoint，签名与加密数据保存在模型历史中。
 - `AgentQueryOptions.onRequestStart` 在实际发起每轮请求前提供消息数量与本轮工具定义；包括首个失败请求，transport 重试另走 `onRetry`，观察回调抛错不影响请求。
 - 宿主可把 `onRequestStart.tools`（provider 实际 payload 的工具定义）压缩为 `AgentToolSchemas`：只保存工具名、`mcp` / `other` 来源、registry 可信的 MCP server 原名与本地近似 token 数，不保存完整 schema；缺失记录不能用当前 registry 冒充历史。

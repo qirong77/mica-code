@@ -6,25 +6,19 @@ import commitSetup from '../../plugins/commit/index.js';
 import computerUseSetup from '../../plugins/computer-use/index.js';
 import connectionsSetup from '../../plugins/connections/index.js';
 import deepseekHarnessSetup from '../../plugins/deepseek-harness/index.js';
-import evolutionSetup from '../../plugins/evolution/index.js';
 import floatingWindowSetup from '../../plugins/floatingwindow/index.js';
 import globalSearchSetup from '../../plugins/global-search/index.js';
 import harnessReviewSetup from '../../plugins/harness-review/index.js';
 import memorySetup from '../../plugins/memory/index.js';
 import maccySetup from '../../plugins/mica-maccy/index.js';
-import notebookSetup from '../../plugins/notebook/index.js';
-import notebookRole from '../../plugins/notebook/roles/笔记.md' with { type: 'text' };
 import quickButtonsSetup from '../../plugins/quick-buttons/index.js';
 import replyDigestSetup from '../../plugins/reply-digest/index.js';
 import scheduleSetup from '../../plugins/schedule/index.js';
 import sessionCompactSetup from '../../plugins/session-compact/index.js';
 import sessionRenameSetup from '../../plugins/session-rename/index.js';
-import sessionNotesSetup from '../../plugins/session-notes/index.js';
 import sessionCopySetup from '../../plugins/session-copy/index.js';
-import sessionTagsSetup from '../../plugins/session-tags/index.js';
 import sshSetup from '../../plugins/ssh/index.js';
 import subagentSetup from '../../plugins/subagent/index.js';
-import subagentLegacySetup from '../../plugins/subagent-legacy/index.js';
 import todoSetup from '../../plugins/todo/index.js';
 import videoSetup from '../../plugins/video/index.js';
 import webSearchSetup from '../../plugins/web-search/index.js';
@@ -48,21 +42,16 @@ const officialSetups: Record<string, MicaPlugin['setup']> = {
   memory: memorySetup,
   'web-search': webSearchSetup,
   todo: todoSetup,
-  'session-notes': sessionNotesSetup,
   'session-copy': sessionCopySetup,
   'session-rename': sessionRenameSetup,
-  'session-tags': sessionTagsSetup,
   ssh: sshSetup,
   subagent: subagentSetup,
-  'subagent-legacy': subagentLegacySetup,
   'computer-use': computerUseSetup,
   connections: connectionsSetup,
   'deepseek-harness': deepseekHarnessSetup,
-  evolution: evolutionSetup,
   floatingwindow: floatingWindowSetup,
   'global-search': globalSearchSetup,
   'mica-maccy': maccySetup,
-  notebook: notebookSetup,
   'quick-buttons': quickButtonsSetup,
   'reply-digest': replyDigestSetup,
   schedule: scheduleSetup,
@@ -80,7 +69,6 @@ export const officialPlugins: MicaPlugin[] = officialPluginManifests.map((manife
     dependencies: manifest.dependencies.length > 0 ? manifest.dependencies : undefined,
     required: manifest.required,
     manifest,
-    ...(manifest.id === 'notebook' ? { embeddedRoles: [{ name: '笔记', prompt: notebookRole }] } : {}),
     setup,
   };
 });

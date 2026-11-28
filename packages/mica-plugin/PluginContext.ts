@@ -177,7 +177,7 @@ export type PluginContext = {
   /**
    * 本插件自有的跨宿主共享 JSON 数据，绑定当前 pluginId，由 paths.config 提供存储目录。
    * 页面、launcher 与 headless 共用数据、版本和跨进程锁；不是 sessionState，
-   * 不随新会话清空或随 fork/rewind 复制。缺少存储路径的宿主不提供此能力。
+   * 不随新会话清空或随 fork 复制。缺少存储路径的宿主不提供此能力。
    */
   data?: PluginDataApi;
   /**

@@ -332,7 +332,7 @@ function reportStorageError(action: string, error: unknown): void {
 }
 
 /**
- * 磁盘上任务记录的轻量指纹。旧单文件由 evolution 一次性迁移，运行时只读任务目录。
+ * 磁盘上任务记录的轻量指纹。运行时只读任务目录。
  *
  * 常驻宿主每秒推一次任务快照，而 `readStoredSubagentTasks()` 要把每份记录（单条
  * result 上限 200k 字符）读出来并 JSON.parse。调用方先比这个指纹，没变就不重读。

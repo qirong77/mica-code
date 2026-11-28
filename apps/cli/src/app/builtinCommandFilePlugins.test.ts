@@ -10,7 +10,6 @@ import {
   setupCommandNew,
   setupCommandRename,
   setupCommandResume,
-  setupCommandRewind,
 } from '@packages/mica-builtin-commands/index.js';
 import { useBuiltinPlugins } from './builtinPlugins.js';
 
@@ -23,7 +22,6 @@ const FILE_COMMANDS = [
   ['new', setupCommandNew, true],
   ['rename', setupCommandRename, true],
   ['resume', setupCommandResume, undefined],
-  ['rewind', setupCommandRewind, undefined],
 ] as const;
 
 describe('built-in command file plugins', () => {

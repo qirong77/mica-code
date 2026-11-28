@@ -221,7 +221,7 @@ suite('mica real-user flows (PTY)', () => {
     }
   }, 300_000);
 
-  it('real turns: file create → append → read-back, then /compact and /rewind', async () => {
+  it('real turns: file create → append → read-back, then /compact', async () => {
     const home = seededHome('files');
     const cwd = makeWork('files');
     const driver = spawnMica(home, cwd, 'files');
@@ -260,13 +260,6 @@ suite('mica real-user flows (PTY)', () => {
       await driver.typeText('/compact', 8);
       driver.enter();
       await sleep(4_000);
-      expect(driver.isExited).toBe(false);
-
-      // /rewind opens the rewind dialog; Esc closes it.
-      await driver.typeText('/rewind', 8);
-      driver.enter();
-      await sleep(3_000);
-      driver.esc();
       expect(driver.isExited).toBe(false);
 
       await exitViaCommand(driver);

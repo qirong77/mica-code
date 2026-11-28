@@ -34,7 +34,7 @@ const CONFIG_TOKENS: Record<string, string> = {
   '--color-danger': '--red',
 };
 
-/** Resolve var()/relative colors in the host, just as the notebook host does. */
+/** Resolve var()/relative colors in the host, as the editor page does. */
 export function readEditorTheme(container: HTMLElement) {
   const root = document.documentElement;
   const style = getComputedStyle(container);

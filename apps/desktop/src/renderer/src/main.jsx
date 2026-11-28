@@ -27,7 +27,7 @@ const startup = createStartupTiming(window)
 startup.mark('main')
 
 // 不要把所有页面的动态 import 写在一个条件表达式里。Rolldown 会把这类表达式的
-// 依赖合并成一张 preload 表，打开 Notebook 也会先拉 App / ChatView / Monaco 等
+// 依赖合并成一张 preload 表，打开插件页也会先拉 App / ChatView / Monaco 等
 // 其它页面的 chunk。每条路由各自一个 loader，才能让 modulepreload 保持按页面隔离。
 const VIEW_LOADERS = {
   editor: () => import('./EditorWindow'),

@@ -10,8 +10,8 @@
  */
 
 import { createHash } from 'node:crypto'
-import { mkdirSync, readFileSync, rmSync, rmdirSync, writeFileSync } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { mkdirSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
 
 /** MCP server 名：会出现在工具名 `mcp__<server>__<tool>` 里，别带空格与斜杠。 */
 export const CONTROL_MCP_SERVERS = {
@@ -96,58 +96,3 @@ export function writeControlMcpConfig({
   return path
 }
 
-/** 旧版以 skill 形式接入时，应用自己写的两个技能目录。 */
-const LEGACY_SKILLS = [
-  { name: 'mica-browser', envName: 'MICA_BROWSER_URL' },
-  { name: 'mica-terminal', envName: 'MICA_TERMINAL_URL' }
-]
-
-export function legacySkillPath(homeDir, name, separator = '/') {
-  if (!homeDir || !name) return ''
-  return [homeDir, 'skills', name, 'SKILL.md'].join(separator)
-}
-
-/**
- * 旧技能正文的模板：front matter 只有 name，正文只有服务地址（环境变量占位符或真实 URL）。
- *
- * 判据刻意收得很窄：用户手工改过的 SKILL.md 宁可留着（不再影响 agent，MCP 才是入口），
- * 也不去删一份可能是人家自己写的内容。
- */
-function isLegacySkillDocument(text, { name, envName }) {
-  const pattern = new RegExp(
-    `^---\\s*\\nname:\\s*${name}\\s*\\n---\\s*\\n+\\s*(?:\\$${envName}|https?://\\S+)\\s*$`
-  )
-  return pattern.test(String(text || '').trim())
-}
-
-/**
- * 清掉旧版写入的两个技能文件：能力改成 MCP 之后，留着它们会让 agent 同时看到
- * 「技能」和「MCP 工具」两套入口。只在内容仍是应用自己写的那一版时删除。
- */
-export function removeLegacyControlSkills({ homeDir, separator = '/' } = {}) {
-  const removed = []
-  for (const skill of LEGACY_SKILLS) {
-    const path = legacySkillPath(homeDir, skill.name, separator)
-    if (!path) continue
-    let text = null
-    try {
-      text = readFileSync(path, 'utf8')
-    } catch {
-      continue
-    }
-    if (!isLegacySkillDocument(text, skill)) continue
-    try {
-      rmSync(path, { force: true })
-      // 目录空着才收掉；里面还有别的文件就留着
-      try {
-        rmdirSync(dirname(path))
-      } catch {
-        // directory not empty
-      }
-      removed.push(path)
-    } catch {
-      // 删不掉就算了：MCP 已经生效，残留的技能只是多一份过期说明
-    }
-  }
-  return removed
-}

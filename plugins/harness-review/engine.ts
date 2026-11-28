@@ -438,11 +438,8 @@ function argText(args: string, key: string): string | undefined {
  * Calls that observe state someone else advances — polls, waits, subagent reads. Repeating
  * them is how they work, so they never take part in repeated-call counting.
  */
-function isPollingCall(name: string, args: string): boolean {
-  if (POLLING.test(name)) return true;
-  if (baseName(name) !== 'agent') return false;
-  const operation = argText(args, 'operation');
-  return operation === 'await' || operation === 'join' || operation === 'read' || operation === 'list';
+function isPollingCall(name: string): boolean {
+  return POLLING.test(name);
 }
 
 function isWritingCall(name: string): boolean {
@@ -1145,8 +1142,7 @@ function envelopeCategory(item: Record<string, unknown>, name: string): string |
     outcome === 'failed' ||
     outcome === 'failure';
   const explicitSuccess = item.success === true || item.ok === true || outcome === 'completed' || outcome === 'success';
-  // Legacy snake_case process keys without an outcome discriminator belong only to
-  // run_shell. A read tool may return a JSON source file containing exactly those keys.
+  // snake_case 的进程键只属于 run_shell；读文件的工具可能返回恰好含这些键的 JSON 源码。
   const execution =
     SHELL_TOOL.test(name) ||
     explicitFailure ||
@@ -1872,7 +1868,7 @@ export class HarnessRecorder {
       ...(command === undefined ? {} : { command: textOf(command) }),
     });
     // Polls (and subagent reads) repeat by design; they are not repetition candidates.
-    if (isPollingCall(name, args)) return argsHash;
+    if (isPollingCall(name)) return argsHash;
     const key = `${name}\n${argsHash}`;
     let call = state.calls.get(key);
     if (!call) {
@@ -2412,8 +2408,7 @@ export class HarnessRecorder {
         const pluginId = typeof item?.pluginId === 'string' ? boundedText(item.pluginId, 200).trim() : '';
         const taskId = typeof item?.taskId === 'string' ? boundedText(item.taskId, 200).trim() : '';
         const at = typeof item?.at === 'string' && Number.isFinite(Date.parse(item.at)) ? item.at : '';
-        // Unversioned failure streams are no longer supported. Evolution adds
-        // explicit unknown identities without guessing a current version/PID.
+        // 只接受带版本与显式身份的失败行。
         if (item?.schemaVersion !== 2 || !pluginId || !taskId || !at) {
           corrupt++;
           continue;

@@ -15,7 +15,7 @@ export type PluginUriApi = {
   name: string;
   /** 一行说明这份文档提供什么能力。 */
   description: string;
-  /** 绝对 URI，或当前运行时同源的根路径（例如 `/plugin/notebook/api`）。 */
+  /** 绝对 URI，或当前运行时同源的根路径（例如 `/plugin/schedule/api`）。 */
   uri: string;
   /** 只在这些角色下出现；空数组表示所有角色。 */
   roles: string[];

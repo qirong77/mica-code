@@ -1,3 +1,4 @@
+import { isRecord } from '@packages/mica-common/guards.js';
 import {
   existsSync,
   mkdirSync,
@@ -623,11 +624,6 @@ function optionalText(input, field) {
   const value = input?.[field]
   if (value === undefined) return ''
   return text(input, field)
-}
-
-/** 插件设置是一张键值表；不是对象就当空表，别把半截数据写进设置文件。 */
-function isRecord(value) {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 function integer(input, field, fallback) {

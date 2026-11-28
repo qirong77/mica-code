@@ -233,25 +233,25 @@ describe('SessionController late model usage', () => {
     external.release();
   });
 
-  it('does not union pre-rewind usage back into a rewound snapshot', async () => {
+  it('does not union usage from a truncated history back into the snapshot', async () => {
     const local = harness();
     const kept = usage('kept');
-    const removed = usage('removed-by-rewind');
+    const removed = usage('removed-by-edit');
     local.setSnapshot(snapshot('later turn', [kept, removed]));
     local.controller.saveCurrent();
     const lease = local.controller.acquireTurnLease()!;
     try {
-      // Rewind replaces the runtime snapshot, including its usage history.
+      // Editing a sent message replaces the runtime snapshot, including its usage history.
       local.setSnapshot(snapshot('earlier checkpoint', [kept]));
       local.controller.saveCurrent();
-      const late = usage('arrived-after-rewind');
+      const late = usage('arrived-after-edit');
       const id = local.controller.getCurrentSessionId();
       expect(await local.controller.recordSubagentUsageForSession(id, late)).toBe(true);
       local.controller.saveCurrent();
       expect(local.store.load(id)!.snapshot.messages).toEqual([piUser('earlier checkpoint')]);
       expect(local.store.load(id)!.snapshot.subagentUsageHistory).toEqual([kept, late]);
 
-      // A subsequent rewind can remove that new row too. No pending overlay or
+      // A subsequent truncation can remove that new row too. No pending overlay or
       // permanent usage union is allowed to resurrect it on the next save.
       local.setSnapshot(snapshot('earlier checkpoint', [kept]));
       local.controller.saveCurrent();

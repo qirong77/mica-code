@@ -15,7 +15,7 @@ import {
   type TodoStatus,
 } from '@packages/mica-common/todoState.js';
 import { TodoWriteTool } from './TodoTool.js';
-import { readTodoCheckpoint, removeTodoCheckpoint, writeTodoCheckpoint } from './todoPersistence.js';
+import { readTodoCheckpoint, writeTodoCheckpoint } from './todoPersistence.js';
 
 export { formatTodoSummary, parseTodoInput, resolveTodoPanel } from '@packages/mica-common/todoState.js';
 export type { TodoItem, TodoStatus } from '@packages/mica-common/todoState.js';
@@ -195,17 +195,6 @@ export class TodoPlugin implements MicaPlugin {
     const eventSubscription = ctx.events.on('event', (event) => {
       if (event.type === 'session:cleared' || event.type === 'session:invalidated') {
         const owner = eventOwner(event);
-        // rewind 把会话状态一起滚回去了，磁盘上这份 checkpoint 不会：不清掉它，
-        // 下一轮就会把用户刚撤销的计划当成「上次被中断的进度」再注入一遍。
-        // resume 不能清，那正是要接着上次进度的场景。
-        if (event.type === 'session:invalidated' && event.reason === 'rewind') {
-          const session = identity(owner);
-          if (session?.persistent && ctx.paths?.config) {
-            if (!removeTodoCheckpoint(ctx.paths.config, session.id))
-              reportCheckpointFailure('remove', new Error('checkpoint file is still there'));
-            else checkpointRecovered('remove');
-          }
-        }
         patch(owner, (current) => ({ ...createTodoViewState(), sessionId: current.sessionId }));
       } else if (event.type === 'session:disposed') {
         const views = new Map(todos.get());

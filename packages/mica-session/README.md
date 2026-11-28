@@ -33,7 +33,7 @@ const sessions = store.list(10);
 - turn 锁是「某个进程正在跑这一轮」的唯一跨进程事实来源；空闲实例不持锁，因此不在列表里。
 - 会话 ID 和路径需要做安全处理，避免越权读取任意文件。
 - 保存内容应是可序列化快照，便于后续 resume、fork 或 session graph 扩展。
-- 当前 `snapshot.messages` 统一保存 `@earendil-works/pi-ai` 的 `Message[]`，每份快照必须明确写 `messageFormat: 'pi-ai-v1'`。协议只决定下一次请求的传输；跨协议切换保留消息、工具结果和签名。没有标记的旧 Chat / Responses wire 历史只由 evolution 的 `pi-messages-v1` 一次性迁移，加载时不做旧格式回退；未知标记或非法协议拒绝读取。
+- 当前 `snapshot.messages` 统一保存 `@earendil-works/pi-ai` 的 `Message[]`，每份快照必须明确写 `messageFormat: 'pi-ai-v1'`。协议只决定下一次请求的传输；跨协议切换保留消息、工具结果和签名。没有标记的旧 Chat / Responses wire 历史不再支持；未知标记或非法协议拒绝读取。
 - `interruptedThinking` / `activeThinking` 保存完整思考边界的展示进度，四种协议都可用；恢复时仍核对 provider、协议、模型与 endpoint，避免把另一模型的进度接到当前思考。`activeTurn` 在 `running` 状态保留输入及提交标志，所有协议共用中断恢复规则。
 - `turnState` 记录最近一轮是 `running`、`completed`、`aborted` 还是 `error`；旧会话缺少该字段时按 `completed` 读取。
 - 列表里的垃圾会话（`list`/`listRecent` 不展示、重建索引时删文件）指**占位标题 `Untitled session` + 无 user/assistant 对话 + 无 usage** 的空占位；`SessionSummary` 的 `hasConversation`/`hasUsage` 承载后两项，隐藏与删除共用同一谓词。`turnState === 'running'` 的会话一律保留且照常列出：那是异常终止留下的、需要用户找回并续跑的会话。

@@ -83,9 +83,8 @@ npm run start:web -- --host 127.0.0.1 --port 8787 --no-share
 - 侧栏首次取得完整轻量索引，后续小范围变化只传变更行、删除 ID 和排序 ID；运行时重启或基线过期后重新获取完整索引。所有会话仍可用于搜索、项目分组和快速打开。
 - 文件、终端、设置和统计界面按需加载；统计页首次打开后保留界面状态。会话设置、耗时分析和上下文详情也在打开时才加载，下载期间仍可关闭。整页插件的按钮先根据清单显示，实际打开才加载页面代码，卡片入口独立到位即显示。
 - 会话设置只在进入「会话能力」分类时读取能力目录；从定时任务或插件分类打开时不预读这份目录。同一弹窗内复用在途读取和已取得的数据，换会话目标后隔离旧结果。
-- Notebook 的目录与正文分离，正文按篇读取，只有选中笔记时才启动编辑器。后台更新检查只查询文档版本、不重复传输全文；检查合并密集事件、隐藏时暂停，自动保存继续独立执行。
 
-这些机制减少远程传输和初始渲染工作，不改变会话与笔记文件格式。会话底层仍以现有 JSON 快照读取，分页暂不等于磁盘层的局部解析；编辑器首次打开也仍受第三方 CDN 可达性影响。
+这些机制减少远程传输和初始渲染工作，不改变会话文件格式。会话底层仍以现有 JSON 快照读取，分页暂不等于磁盘层的局部解析；编辑器首次打开也仍受第三方 CDN 可达性影响。
 
 ## 源码边界
 
@@ -98,7 +97,7 @@ npm run start:web -- --host 127.0.0.1 --port 8787 --no-share
 | `src/renderer/`                   | 页面、HTTP/SSE transport 与视图状态                          |
 | `../../packages/mica-web-shared/` | 跨宿主的地址、主题、状态、展示和用量纯逻辑                   |
 | `../../packages/mica-config-ui/`  | 配置页及 Arco 共享控件                                       |
-| `../../packages/mica-editor/`     | Notebook 与 Markdown 共用的隔离 Lexical 编辑器               |
+| `../../packages/mica-editor/`     | 隔离的 Lexical Markdown 编辑器                               |
 | `../../plugins/`                  | 清单驱动的产品能力及其桌面模块                               |
 
 对话宿主使用 CLI 的 `mica app-server`，通过 stdio 交换 Codex v2 风格协议子集；浏览器页面使用 HTTP/SSE 访问 Web 运行时。两个接口的用途与支持范围见 [Headless 设计](../../docs/headless-design.md) 与 [客户端接入](../../docs/multica-runtime.md)。
@@ -115,7 +114,7 @@ npm run start:web -- --host 127.0.0.1 --port 8787 --no-share
 
 整页可用 `desktop.page.route` 注册 `/plugins/<id>/<route>`，只读数据模块用 `web: true` 与随包 `web.ts` 注册 `GET /plugins/<id>/api/<query>`；两者均复用主端口和访问守卫，不启动聊天会话或额外服务。Harness Review 的 [Arco 运行控制台](../../plugins/harness-review/README.md#web-运行控制台) 位于 `/plugins/harness-review/console`，从 Plugins 详情也能打开。分享 cookie 不开放该私有命名空间，Mobile Relay 不会自动转发新增接口。
 
-Notebook 的目录与正文存储归插件。目录可按标题查找和定位笔记，正文顶栏显示当前笔记名称，右侧大纲面板可按标题跳转，隐藏按钮只在大纲被悬停时出现；收起后右缘是一条按标题取色的彩虹条，点它恢复面板。共享编辑器运行在 sandbox iframe 中，第三方依赖首次从 CDN 加载。机读接口是同端口的 `/plugin/notebook/api`：根路径返回接口文档，`/overview` 给出完整目录树，其余端点读写笔记，回包统一 `{ ok, data }`。桌面与 Web 会话的 `笔记` 角色按这份文档操作，其它 HTTP 客户端用同一个地址；接口在笔记页面关闭时也可访问，沿用应用的访问守卫，分享 cookie 不开放该命名空间。文件视图的 Markdown、配置页 Role/Skill 与 Notebook 共享编辑能力，说明见 [mica-editor](../../packages/mica-editor/README.md) 和 [Notebook](../../plugins/notebook/README.md)。
+文件视图的 Markdown 与配置页 Role/Skill 共用同一份编辑器能力：它运行在 sandbox iframe 中，第三方依赖首次从 CDN 加载，说明见 [mica-editor](../../packages/mica-editor/README.md)。
 
 会话压缩由 [Session Compact](../../plugins/session-compact/README.md) 提供。快速压缩聚合较早工具过程并移除思考/媒体载荷，保留用户和助手正文；模型压缩保存摘要加最近几轮，界面同步显示当前持久化记录。切换服务商/模型后，插件在下一次发送前快速压缩；没有按占用阈值或空闲时间自动生成摘要的设置。
 

@@ -15,13 +15,10 @@ import {
   type RuntimeStatus,
   type RuntimeTurnAfterHookEvent,
   type RuntimeViewSnapshot,
-  type RewindApplyResult,
-  type RewindPreviewResult,
   type SubmitOptions,
   type SubmitResult,
   type TurnOutcome,
 } from '@packages/mica-runtime/index.js';
-import type { RewindApplyRequest, RewindCheckpointSummary } from '@packages/mica-runtime/Rewind.js';
 import { AgentAbortError, type AgentRuntime } from '../../agent/AgentRuntime.js';
 import type { SubagentTaskManager } from '../../agents/SubagentTaskManager.js';
 import type { SessionController } from '../../session/SessionController.js';
@@ -31,7 +28,6 @@ import {
   type TerminalAgentSession,
   type TerminalAgentTurnOutcome,
 } from '../../agents/terminalAgentSessions.js';
-import { RewindCheckpointManager } from '../../runtime/RewindCheckpointManager.js';
 import { uncommittedResponseText } from '../../runtime/conversationHistory.js';
 
 const ALLOW_DURING_EXCLUSIVE_TASK_COMMANDS = new Set(['status', 'task', 'agents', 'new']);
@@ -71,7 +67,6 @@ export class LocalRuntimeController implements RuntimeController {
   /** 本会话设置了压缩覆盖时才会创建（CLI 默认不自动压缩）。 */
   private readonly clearingAgents = new Set<AgentRuntime>();
   private readonly exclusiveTasks = new Map<AgentRuntime, { id: number; label: string }>();
-  private readonly rewindCheckpoints = new RewindCheckpointManager();
   private readonly activeTurns = new Set<Promise<void>>();
   private hookAgent: AgentRuntime | null = null;
   private nextExclusiveTaskId = 1;
@@ -131,7 +126,6 @@ export class LocalRuntimeController implements RuntimeController {
     this.sessionControllers.delete(agent);
     this.clearingAgents.delete(agent);
     this.exclusiveTasks.delete(agent);
-    this.rewindCheckpoints.clear(agent);
     this.runningAgents.delete(agent);
   }
 
@@ -187,7 +181,6 @@ export class LocalRuntimeController implements RuntimeController {
   clear(): void {
     const isRunning = this.runningAgents.has(this.agent);
     this.responseBuffers.set(this.agent, '');
-    this.rewindCheckpoints.clear(this.agent);
     if (isRunning) {
       this.clearingAgents.add(this.agent);
     } else {
@@ -265,42 +258,6 @@ export class LocalRuntimeController implements RuntimeController {
     const input = this.queueFor(owner).removeLast();
     this.events.publish({ type: 'queue:changed', pendingInputs: this.queueFor(owner).list(), owner });
     return input?.text ?? null;
-  }
-
-  listRewindCheckpoints(): RewindCheckpointSummary[] {
-    this.ensureRewindConversationHistory(this.agent);
-    return this.rewindCheckpoints.list(this.agent);
-  }
-
-  getRewindPreview(id?: string): RewindPreviewResult {
-    this.ensureRewindConversationHistory(this.agent);
-    return this.rewindCheckpoints.preview(this.agent, id);
-  }
-
-  clearRewindCheckpoints(): void {
-    this.rewindCheckpoints.clear(this.agent);
-  }
-
-  applyRewind(request: RewindApplyRequest): RewindApplyResult {
-    const result = this.rewindCheckpoints.apply(this.agent, request);
-    this.responseBuffers.set(this.agent, '');
-    this.queue.clear();
-    this.events.publish({ type: 'queue:changed', pendingInputs: this.queue.list(), owner: this.agent });
-    return result;
-  }
-
-  private ensureRewindConversationHistory(agent: AgentRuntime): void {
-    if (this.rewindCheckpoints.list(agent).length > 0) return;
-    try {
-      const session = getActiveContext<RuntimeActiveContext>()?.agentSessions.findByAgent(agent);
-      const conversationMessages = session?.uiState.conversationMessages.length
-        ? session.uiState.conversationMessages
-        : agent.toConversationMessages();
-      this.rewindCheckpoints.restoreConversationHistory(agent, conversationMessages);
-    } catch {
-      // History recovery is best-effort; a malformed persisted history must
-      // not break the command or prevent future live checkpoints.
-    }
   }
 
   async submit(rawText: string, options: SubmitOptions = {}): Promise<SubmitResult> {
@@ -494,7 +451,6 @@ export class LocalRuntimeController implements RuntimeController {
         lastTurnOutcome: turnState === 'aborted' ? 'aborted' : turnState === 'error' ? 'error' : 'completed',
       });
     }
-    this.rewindCheckpoints.clear(agent);
   }
 
   private async trackTurn(turn: Promise<void>): Promise<void> {
@@ -534,7 +490,6 @@ export class LocalRuntimeController implements RuntimeController {
     let runId: number | null = null;
     let hasError = false;
     let wasAborted = false;
-    let rewindCheckpointId: string | null = null;
     // provider 重试提示在会话里的位置，以及一共重试了几次：失败收尾时把同一条就地
     // 改成结论，而不是再追加一条看起来像第二件事的错误。
     let providerRetryNoticeIndex = -1;
@@ -557,9 +512,6 @@ export class LocalRuntimeController implements RuntimeController {
       }
       const clearPreviousTurnUi = shouldClearPreviousTurnUi(session?.uiState.lastTurnOutcome);
       const previousConversationMessages = displayConversationMessages(session, agent);
-      if (input.source !== 'system') {
-        rewindCheckpointId = await this.rewindCheckpoints.capture(agent, input, previousConversationMessages);
-      }
       if (!agent.isCurrent(reservedRunId)) throw new AgentAbortError(reservedRunId);
       if (session) {
         session.uiState = normalizeUiState({
@@ -769,9 +721,6 @@ export class LocalRuntimeController implements RuntimeController {
           micaUi.panels.clearAgentTurnLogItems();
           micaUi.panels.thinkingText.set('');
         }
-      }
-      if (rewindCheckpointId) {
-        await this.rewindCheckpoints.finalize(agent, rewindCheckpointId, displayConversationMessages(session, agent));
       }
       const elapsedMs = Date.now() - startedAt;
       this.events.publish({ type: 'turn:finished', input, elapsedMs, owner: agent });

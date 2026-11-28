@@ -1,3 +1,4 @@
+import { isRecord } from '@packages/mica-common/guards.js';
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { resolveMicaHome } from '@packages/mica-config/brand.js';
@@ -199,10 +200,6 @@ export function readPublishedPluginSkills(options: PluginSkillsOptions = {}): Pu
   }
 
   return skills.sort((left, right) => left.name.localeCompare(right.name));
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 /**

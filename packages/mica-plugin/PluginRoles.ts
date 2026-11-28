@@ -1,3 +1,4 @@
+import { isRecord } from '@packages/mica-common/guards.js';
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, isAbsolute, join, relative } from 'node:path';
 import { resolveMicaHome } from '@packages/mica-config/brand.js';
@@ -202,10 +203,6 @@ function indexFileName(pluginId: string): string {
     .replace(/[^A-Za-z0-9._-]/g, '_')
     .replace(/^\.+/, '');
   return safe ? `${safe}.json` : '';
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
 
 export const pluginRoleInternals = { roleNameOf, indexFileName, dirname };

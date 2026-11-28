@@ -38,7 +38,7 @@ describe('工具行 emoji', () => {
     expect(missing).toEqual([]);
   });
 
-  it('插件的图标来自注册选项，历史工具名仍能查到', () => {
+  it('插件的图标来自注册选项', () => {
     const tool = demoPluginTool('🧪');
     try {
       expect(getToolIcon('demo_plugin_tool')).toBe('🧪');
@@ -46,7 +46,6 @@ describe('工具行 emoji', () => {
     } finally {
       unregisterRuntimeTool(tool);
     }
-    expect(getToolIcon('Skill')).toBe('✨');
     expect(getToolIcon('mcp__mica-browser__control')).toBe('🔌');
     expect(getToolIcon('not_a_tool')).toBe('⚙️');
   });

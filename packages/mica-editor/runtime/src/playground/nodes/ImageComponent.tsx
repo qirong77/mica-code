@@ -37,7 +37,6 @@ import {
 } from 'lexical';
 import {type JSX, Suspense, useCallback, useEffect, useRef, useState} from 'react';
 
-import {useNotebookNestedEditor} from '../../workspace/NotebookBridge';
 import {createWebsocketProvider, skipCollaborationInit} from '../collaboration';
 import {useSettings} from '../context/SettingsContext';
 import TreeViewPlugin from '../plugins/TreeViewPlugin';
@@ -117,7 +116,6 @@ function ImageEditor({
   captionsEnabled,
 }: Props) {
   const status = useSuspenseImage(src);
-  useNotebookNestedEditor(caption);
   const [editor] = useLexicalComposerContext();
   const isEditable = useLexicalEditable();
   const {isCollabActive} = useCollaborationContext();

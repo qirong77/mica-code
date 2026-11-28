@@ -1,3 +1,4 @@
+import { isRecord } from '@packages/mica-common/guards.js';
 import { MicaTool, type ToolExecuteCallbacks, type ToolInput } from '@packages/mica-tools/index.js';
 import { resolvePathRepoIdentity } from './repo.js';
 import {
@@ -343,10 +344,6 @@ function formatRejection(error: MemoryRejection): string {
 
 function truncate(text: string): string {
   return text.length <= MAX_CANDIDATE_CHARS ? text : `${text.slice(0, MAX_CANDIDATE_CHARS - 1)}…`;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 export function summarizeSnapshot(snapshot: MemoryStoreSnapshot): string {

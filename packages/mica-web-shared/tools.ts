@@ -1,4 +1,3 @@
-import { normalizeToolName } from '@packages/mica-common/toolNames.js';
 import { toolIcon as resolveToolIcon } from '@packages/mica-common/toolIcons.js';
 
 // Tool display vocabulary shared by the desktop renderer and runtime.
@@ -33,7 +32,6 @@ const TOOL_LABELS: Record<string, string> = {
   skill: 'Load skill',
   agent: 'Subagent',
   todo_write: 'Plan',
-  session_notes: 'Session notes',
   background_tasks_list: 'List tasks',
   background_tasks_kill: 'Stop task',
   background_tasks_read: 'Task output',
@@ -42,7 +40,7 @@ const TOOL_LABELS: Record<string, string> = {
 
 /** Human label for a tool name; MCP tools render as `[MCP:server] tool` (hash suffix stripped). */
 export function toolLabel(toolName: string | null | undefined): string {
-  const name = normalizeToolName(toolName);
+  const name = String(toolName ?? '');
   if (name.startsWith('mcp__')) {
     const match = /^mcp__([^_]+)__(.+)$/.exec(name);
     if (match) {

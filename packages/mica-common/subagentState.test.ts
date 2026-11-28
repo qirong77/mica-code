@@ -114,7 +114,7 @@ describe('subagent state', () => {
     expect(child.status).toBe(0);
     expect(() => claimSubagentRestart('claimed')).toThrow('claimed');
   });
-  it('only reads the current per-task layout; legacy arrays require evolution', () => {
+  it('only reads the current per-task layout', () => {
     const dir = home();
     mkdirSync(join(dir, 'subagent-tasks'));
     writeFileSync(join(dir, 'subagent-tasks', 'session.json'), JSON.stringify([task('one'), task('two')]));

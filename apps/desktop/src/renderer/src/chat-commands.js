@@ -60,11 +60,6 @@ export const CHAT_COMMANDS = [
     argument: '[--force]'
   },
   {
-    name: 'rewind',
-    description: '回退对话与文件 checkpoint',
-    availability: 'terminal'
-  },
-  {
     name: 'task',
     description: '查看 agent、subagent 与后台 shell',
     availability: 'terminal'

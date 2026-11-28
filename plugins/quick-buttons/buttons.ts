@@ -7,6 +7,7 @@
  * 为什么是会话级而不是项目级：按钮回答的是「这一轮要做什么」——刚查到的那个页面、刚写好
  * 的那段话、刚发现的那份文件。挂在一个项目上，一周之后就是一堆没人敢删的垃圾入口。
  */
+import { isRecord } from '@packages/mica-common/guards.js';
 
 export const QUICK_BUTTONS_STATE_VERSION = 1;
 
@@ -592,10 +593,6 @@ function trimTo(value: unknown, max: number): string {
 /** 正文类落点压成一行：工具结果与面板的一行里不该出现换行。 */
 export function oneLine(value: string): string {
   return value.replace(/\s+/g, ' ').trim();
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function isTimestamp(value: unknown): value is number {

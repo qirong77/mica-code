@@ -20,8 +20,8 @@ beforeEach(() => {
   directory = mkdtempSync(join(tmpdir(), 'mica-session-annotations-'))
   previousHome = process.env.MICA_HOME
   process.env.MICA_HOME = directory
-  const target = sessionAnnotationsPath(directory, 'session-tags')
-  mkdirSync(join(directory, 'plugin-data', 'session-tags'), { recursive: true })
+  const target = sessionAnnotationsPath(directory, 'labels')
+  mkdirSync(join(directory, 'plugin-data', 'labels'), { recursive: true })
   writeFileSync(
     target,
     JSON.stringify({
@@ -45,7 +45,7 @@ afterEach(() => {
 describe('session annotation host writes', () => {
   it('applies an explicit state without toggling it back', () => {
     const result = setSessionAnnotation({
-      pluginId: 'session-tags',
+      pluginId: 'labels',
       sessionId: 'session-1',
       optionId: 'red',
       on: true
@@ -56,10 +56,10 @@ describe('session annotation host writes', () => {
   })
 
   it('refuses to read-modify-write while a plugin command holds the same lock', () => {
-    const release = acquireProcessLock(`${sessionAnnotationsPath(directory, 'session-tags')}.lock`)
+    const release = acquireProcessLock(`${sessionAnnotationsPath(directory, 'labels')}.lock`)
     try {
       const result = setSessionAnnotation({
-        pluginId: 'session-tags',
+        pluginId: 'labels',
         sessionId: 'session-1',
         optionId: 'blue'
       })
@@ -76,8 +76,8 @@ describe('session annotation options', () => {
   })
 
   it('reads the plugin options with per-option usage counts', () => {
-    setSessionAnnotation({ pluginId: 'session-tags', sessionId: 'session-1', optionId: 'red', on: true })
-    const result = readAnnotationOptions({ pluginId: 'session-tags' })
+    setSessionAnnotation({ pluginId: 'labels', sessionId: 'session-1', optionId: 'red', on: true })
+    const result = readAnnotationOptions({ pluginId: 'labels' })
     expect(result.ok).toBe(true)
     expect(result.options).toHaveLength(2)
     expect(result.counts).toEqual({ red: 1, blue: 0 })
@@ -85,7 +85,7 @@ describe('session annotation options', () => {
 
   it('replaces the whole option list and reports the normalized result', () => {
     const result = replaceAnnotationOptions({
-      pluginId: 'session-tags',
+      pluginId: 'labels',
       options: [
         { id: 'tag-1', label: '待办', color: '#FF3B30' },
         // 非法颜色由宿主归一化退成灰色，插件那边拿到的是落盘的真实值
@@ -95,17 +95,17 @@ describe('session annotation options', () => {
     expect(result.ok).toBe(true)
     expect(result.options.map((option) => option.label)).toEqual(['待办', '进行中'])
     expect(result.options[1].color).toBe('#8E8E93')
-    expect(readSessionAnnotations(directory, 'session-tags').options).toHaveLength(2)
+    expect(readSessionAnnotations(directory, 'labels').options).toHaveLength(2)
   })
 
   it('drops assignments of deleted options instead of leaving dead ids', () => {
-    setSessionAnnotation({ pluginId: 'session-tags', sessionId: 'session-1', optionId: 'red', on: true })
+    setSessionAnnotation({ pluginId: 'labels', sessionId: 'session-1', optionId: 'red', on: true })
     const result = replaceAnnotationOptions({
-      pluginId: 'session-tags',
+      pluginId: 'labels',
       options: [{ id: 'blue', label: 'Blue', color: '#007AFF' }]
     })
     expect(result.ok).toBe(true)
-    const stored = readSessionAnnotations(directory, 'session-tags')
+    const stored = readSessionAnnotations(directory, 'labels')
     expect(stored.options.map((option) => option.id)).toEqual(['blue'])
     expect(stored.assignments).toEqual({})
   })
@@ -113,20 +113,20 @@ describe('session annotation options', () => {
   it('broadcasts after a successful write so every window redraws the dots', () => {
     const seen = []
     setAnnotationBroadcaster((channel, payload) => seen.push({ channel, payload }))
-    replaceAnnotationOptions({ pluginId: 'session-tags', options: [] })
-    expect(seen).toEqual([{ channel: 'annotations:changed', payload: { pluginId: 'session-tags' } }])
+    replaceAnnotationOptions({ pluginId: 'labels', options: [] })
+    expect(seen).toEqual([{ channel: 'annotations:changed', payload: { pluginId: 'labels' } }])
   })
 
   it('refuses unknown plugins and non-array payloads', () => {
     expect(readAnnotationOptions({ pluginId: 'nope' })).toEqual({ ok: false, error: '插件还没有标记数据' })
     expect(readAnnotationOptions({ pluginId: '../evil' }).ok).toBe(false)
-    expect(replaceAnnotationOptions({ pluginId: 'session-tags', options: null }).ok).toBe(false)
+    expect(replaceAnnotationOptions({ pluginId: 'labels', options: null }).ok).toBe(false)
   })
 
   it('refuses to read-modify-write while a plugin command holds the same lock', () => {
-    const release = acquireProcessLock(`${sessionAnnotationsPath(directory, 'session-tags')}.lock`)
+    const release = acquireProcessLock(`${sessionAnnotationsPath(directory, 'labels')}.lock`)
     try {
-      expect(replaceAnnotationOptions({ pluginId: 'session-tags', options: [] })).toEqual({
+      expect(replaceAnnotationOptions({ pluginId: 'labels', options: [] })).toEqual({
         ok: false,
         error: '其他会话正在更新标记，稍后重试'
       })

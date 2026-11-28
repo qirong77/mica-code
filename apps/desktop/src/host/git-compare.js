@@ -442,7 +442,7 @@ async function indexBlob(root, filePath) {
   return Buffer.alloc(0)
 }
 
-/** Legacy head/branch/ref modes remain supported; snapshot uses the exact summary compareRef. */
+/** head/branch/ref modes remain supported; snapshot uses the exact summary compareRef. */
 export async function getFile(cwd, filePath, requested = null) {
   const { root, base: head } = await cachedRepository(cwd)
   safeFilePath(root, filePath)

@@ -58,7 +58,7 @@ type Harness = {
   setUsage: (tokens: number | null) => void;
   setMessages: (messages: UiMessage[]) => void;
   setQueue: (texts: string[]) => void;
-  rewindPhase: (ms: number) => void;
+  shiftPhase: (ms: number) => void;
   input: (text: string, source?: RuntimeInputSource) => RuntimeInput;
 };
 
@@ -255,7 +255,7 @@ function createHarness(
     setQueue: (texts) => {
       queue.splice(0, queue.length, ...texts);
     },
-    rewindPhase: (ms) => {
+    shiftPhase: (ms) => {
       if (state?.phaseAt !== undefined) state = { ...state, phaseAt: state.phaseAt - ms };
     },
     input,
@@ -437,7 +437,7 @@ describe('自动交接压缩', () => {
     expect(harness.state()).toMatchObject({ phase: 'resume', compactedTokens: 40_000 });
     expect(harness.submitted).toHaveLength(1);
 
-    harness.rewindPhase(5_000);
+    harness.shiftPhase(5_000);
     await harness.tick();
     expect(harness.submitted).toHaveLength(2);
     expect(harness.submitted[1]!.text.startsWith(RESUME_MARKER)).toBe(true);
@@ -518,7 +518,7 @@ describe('自动交接压缩', () => {
 
     await harness.tick();
     expect(harness.calls.map((call) => call.mode)).toEqual(['quick']);
-    harness.rewindPhase(5_000);
+    harness.shiftPhase(5_000);
     await harness.tick();
 
     expect(harness.state()).toMatchObject({ phase: 'idle' });

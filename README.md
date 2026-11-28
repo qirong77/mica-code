@@ -46,8 +46,7 @@ Mica 是一个可以实际动手的 coding agent：阅读项目、修改代码�
 ## 围绕真实任务构建
 
 - **从理解到验证**：搜索和引用文件、修改代码、运行 Shell 或交互式终端，并查看实际输出。
-- **为长任务保留线索**：恢复或分叉会话、回退检查点；用会话笔记记录决定，用记忆保存跨会话的偏好和项目经验。
-- **整理自己的笔记**：Notebook 提供左侧目录树和完整富文本／表格编辑器，正文保存在本机，界面跟随 Mica 主题；AI 可通过应用同端口的 `/plugin/notebook/api` 读取、整理和编辑笔记——根地址就是接口文档，`/overview` 一次给出完整目录与版本。编辑器依赖首次从 CDN 加载。[使用说明](./plugins/notebook/README.md)
+- **为长任务保留线索**：恢复或分叉会话；用记忆保存跨会话的偏好和项目经验。
 - **缓存优先的上下文**：保持请求前缀稳定，先在本地清理冗长工具输出，再按需生成模型摘要。实际缓存效果取决于模型服务。
 - **让工作并行推进**：用子代理分担探索、实现、审查和测试；用 Subagent 派一条可以持续追问的独立子会话。
 - **选择适合的入口**：终端 TUI、桌面与 Web 工作区、手机连接、Headless 自动化，各自面向不同工作场景。
@@ -72,7 +71,7 @@ mica --version
 
 在项目目录启动 Mica，输入 `/config` 打开配置页，填写服务商的 API 地址、API key 和可用的模型 ID，按服务实际支持的接口选择 `openai_chat_completions`、`openai_responses`、`anthropic_messages` 或 `google_generative_ai`。模型请求通过开源 pi-ai 统一适配，支持实时正文、服务端返回的思考内容和工具调用。模型列表需要手动配置。配置页会自动保存有效设置；回到终端后用 `/model` 选择模型。
 
-模型历史统一使用 pi-ai 消息格式；升级后的旧会话由内置 `evolution` 迁移后恢复。旧的 OpenAI 原生历史格式不再直接加载；若升级后某条旧会话尚未就绪，可在新会话执行 `/evolution run` 后恢复。
+模型历史统一使用 pi-ai 消息格式。旧的原生历史格式不再支持，也不会在加载时转换。
 
 ```bash
 cd your-project
@@ -160,27 +159,12 @@ mica app-server
 
 `exec` 默认输出文本，`--json` 输出 ThreadEvent JSONL；`app-server` 通过 stdin/stdout 提供 Codex v2 风格协议子集，用于客户端持续会话。它不是浏览器 HTTP 服务。工具使用宿主的文件与命令环境；参数、事件和集成示例见[自动化与协议](https://qirong77.github.io/mica-code/docs/headless/)。
 
-需要从另一台机器查看某个工作区时，先在中转机上运行 `apps/relay/src/entry.ts`，再在执行机 A 和控制端 B 分别注册设备：
-
-```bash
-# A：显式启动远程 Worker，打印本次运行的配对码；停止进程即下线
-mica remote serve --relay https://relay.example.com --workspace ~/project
-
-# B：用配对码建立设备授权，之后列出目录、按页读取历史
-mica remote pair <配对码> --relay https://relay.example.com --invite <邀请码>
-mica remote list
-mica remote history <sessionRef> --machine <machineId>
-mica remote revoke <machineId>
-```
-
-第一版只开放目录与只读历史：消息正文经端到端加密，按页传输并受大小/频率限制；不上传项目文件或完整会话 JSON。执行机离线时目录显示最后同步时间，读取历史会明确失败。远程执行（`turn.operate`）尚未开放，边界与后续阶段见[远程 Agent 设计](./docs/remote-agent-design.md)。
-
 ## 扩展你的工作方式
 
 - **Skills 与项目指令**：将可复用的流程写入 `.mica/skills/<name>/SKILL.md`，将项目约定放在 `AGENT.md` 或 `AGENTS.md`。
 - **MCP 与角色**：连接外部服务与工具，为规划、实现或审查选择合适的工作方式。
 - **插件与会话能力**：管理官方和用户插件，在会话设置中选择工具、Skills 和 MCP；Capabilities 可查看当前会话实际携带的能力与完整提示词，按插件或段落控制注入并编辑正文。部分插件设置可以按会话覆盖。
-- **笔记与记忆**：会话笔记保留当前任务的决定，Memory 保存跨会话的偏好与经验。自动整理会产生额外模型请求，可在插件设置中调整。
+- **记忆**：Memory 保存跨会话的偏好与经验。自动整理会产生额外模型请求，可在插件设置中调整。
 - **运行复盘**：Harness Review 在本地记录工具失败、重复调用与重试，可导出带证据的报告并记录人工评估；同端口的 `/plugins/harness-review/console` 提供 Arco 只读运行控制台，也可从 Plugins 中打开。
 
 从[插件与能力管理](https://qirong77.github.io/mica-code/docs/plugins/)或 [Skills、MCP 与角色](https://qirong77.github.io/mica-code/docs/extensions/)开始。

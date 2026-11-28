@@ -58,7 +58,6 @@ const SECTION_LABELS: Record<string, string> = {
   'project-instructions': '项目说明（AGENT.md）',
   skills: 'Skills 索引',
   context: '环境信息',
-  session_notes: '会话笔记',
 };
 
 const GAP_LABEL = '插件段落 / 其它注入';

@@ -97,12 +97,12 @@ function isAuditEntry(input: unknown): input is AuditEntry {
   );
 }
 
-/** Pure, one-way projection for Evolution and producer inputs, never a legacy reader. */
+/** 把生产者输入投影成当前记录；不是旧格式读取器。 */
 export function projectAuditEntry(input: unknown): StoredAuditEntry | null {
   return isAuditEntry(input) ? safeEntry(input) : null;
 }
 
-/** Only this explicit current shape is accepted at runtime. Old records need Evolution. */
+/** 运行时只接受当前形态。 */
 export function storedAuditEntry(input: unknown): StoredAuditEntry | null {
   if (
     !isAuditEntry(input) ||

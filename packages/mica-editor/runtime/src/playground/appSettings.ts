@@ -34,7 +34,7 @@ export const DEFAULT_SETTINGS = {
   useCollabV2: false,
 } as const;
 
-// Notebook defaults are not read from the URL: its hash authenticates the host bridge.
+// Editor defaults are not read from the URL: its hash authenticates the host bridge.
 export const INITIAL_SETTINGS: Record<SettingName, boolean> = {
   ...DEFAULT_SETTINGS,
 };

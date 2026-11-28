@@ -29,7 +29,6 @@ describe('formatResumeSessionTitle', () => {
   });
 
   it('loads the target model rule before resuming another persisted session', async () => {
-    const clearRewindCheckpoints = vi.fn();
     const sessionController = {
       load: vi.fn(() => ({ snapshot: { model: 'test-model' } })),
       resume: vi.fn(() => ({
@@ -39,7 +38,6 @@ describe('formatResumeSessionTitle', () => {
     } as unknown as CommandSessionController;
     const services = {
       isAgentBusy: () => false,
-      clearRewindCheckpoints,
       ensureModelRule: vi.fn().mockResolvedValue(undefined),
       syncModelDisplay: vi.fn(),
       refreshCurrentAgentSessionUi: vi.fn(),
@@ -51,7 +49,6 @@ describe('formatResumeSessionTitle', () => {
 
     expect(services.ensureModelRule).toHaveBeenCalledWith('test-model');
     expect(sessionController.resume).toHaveBeenCalledWith('session-2');
-    expect(clearRewindCheckpoints).toHaveBeenCalledOnce();
   });
 
   it('switches the process working directory to the resumed session cwd', async () => {

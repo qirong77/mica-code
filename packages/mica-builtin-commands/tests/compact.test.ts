@@ -270,8 +270,6 @@ function makeServices(options: {
     forkCurrentAgent: vi.fn(),
     switchAgentSession: vi.fn(),
     refreshCurrentAgentSessionUi: vi.fn(),
-    getRewindPreview: vi.fn(),
-    applyRewind: vi.fn(),
     runExclusiveTask: vi.fn(async (_agent, _taskOptions, task) => task()),
     compact: vi.fn(async () => {
       if (options.error) throw options.error;

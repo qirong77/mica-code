@@ -11,7 +11,7 @@ export default defineConfig({
   base: './',
   publicDir: false,
   plugins: [{
-    name: 'notebook:cdn-dependencies',
+    name: 'mica-editor:cdn-dependencies',
     enforce: 'pre',
     resolveId(id) {
       return id === 'virtual:mica-arco-theme.css' ? '\0mica-arco-theme.css' : null

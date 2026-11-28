@@ -33,12 +33,12 @@ describe('embedded conversation state', () => {
     }
   })
   test('uses a distinct bounded ui-state key for every plugin scope', () => {
-    const first = conversationStateKey('notebook', 'note:one')
-    const second = conversationStateKey('notebook', 'note:two')
+    const first = conversationStateKey('schedule', 'item:one')
+    const second = conversationStateKey('schedule', 'item:two')
     expect(first).not.toBe(second)
     expect(first.length).toBeLessThanOrEqual(128)
-    expect(conversationStateKey('notebook', 'note:one')).toBe(first)
-    expect(conversationStateKey('notebook', 'x'.repeat(400)).length).toBeLessThanOrEqual(128)
+    expect(conversationStateKey('schedule', 'item:one')).toBe(first)
+    expect(conversationStateKey('schedule', 'x'.repeat(400)).length).toBeLessThanOrEqual(128)
   })
 
   test('normalizes malformed state without discarding valid old sessions', () => {

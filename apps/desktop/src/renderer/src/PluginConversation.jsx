@@ -67,7 +67,7 @@ function unavailable(label) {
  * Build the component placed at `api.ui.Conversation`.
  *
  * The optional callbacks are supplied by the application page shell. They are intentionally
- * generic (file/settings/review), never Notebook-specific; a standalone plugin page gets the
+ * generic (file/settings/review), never tied to one plugin; a standalone plugin page gets the
  * explicit fallback notice instead of a button that silently does nothing.
  */
 export function createPluginConversation(api, callbacks = {}) {

@@ -11,6 +11,7 @@
  * - `activeForm` 可选（中文没有进行时变形，必填只会逼模型把同一句话写两遍），
  *   `id` 可选（缺省由内容派生）。
  */
+import { isRecord } from './guards.js';
 
 export const TODO_TOOL_NAME = 'todo_write';
 
@@ -281,6 +282,3 @@ function isTodoStatus(value: unknown): value is TodoStatus {
   return value === 'pending' || value === 'in_progress' || value === 'completed';
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value && typeof value === 'object' && !Array.isArray(value));
-}

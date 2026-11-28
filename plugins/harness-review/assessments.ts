@@ -1,3 +1,4 @@
+import { isRecord } from '@packages/mica-common/guards.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { constants } from 'node:fs';
 import { chmod, lstat, mkdir, open, readdir, rename, unlink } from 'node:fs/promises';
@@ -20,10 +21,6 @@ const MAX_RUNS = 2000;
 const MAX_HISTORY = 1000;
 const MAX_FILE_BYTES = 256 * 1024;
 const JSON_FILE = /^[A-Za-z0-9_-][A-Za-z0-9._-]*\.json$/;
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === 'object' && !Array.isArray(value);
-}
 
 function hasKeys(value: Record<string, unknown>, keys: string[]): boolean {
   return Object.keys(value).length === keys.length && keys.every((key) => Object.hasOwn(value, key));
@@ -168,7 +165,7 @@ export async function readAssessments(
       await lstat(join(decisions, `${key}.json`));
       signal?.throwIfAborted();
       warnings.push(
-        `Legacy decision ${id}: single-file decisions are no longer supported; run /evolution run to migrate.`,
+        `Legacy decision ${id}: single-file decisions are no longer supported.`,
       );
     } catch (error) {
       rethrowAbort(error, signal);

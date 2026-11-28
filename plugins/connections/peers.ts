@@ -1,3 +1,4 @@
+import { isRecord } from '@packages/mica-common/guards.js';
 import {
   DEFAULT_RUNTIME_URL,
   isLoopbackRuntime,
@@ -73,8 +74,7 @@ export function samePeer(a: unknown, b: unknown): boolean {
 /**
  * 当前清单被手改过时：非法项丢掉、同 host 去重、超上限截断。
  *
- * 旧版本由 Evolution 一次性迁移；运行时只认 version 1 的当前对象形态，避免每次打开卡片
- * 都再次承担旧数据的解析责任。
+ * 运行时只认 version 1 的当前对象形态，不解析旧地址数组。
  */
 export function normalizePeerStore(raw: unknown): PeerStore {
   if (!isRecord(raw) || raw.version !== PEER_STORE_VERSION || !Array.isArray(raw.peers)) {
@@ -218,6 +218,3 @@ function webEntryAddress(value: unknown): string | null {
   return null;
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}

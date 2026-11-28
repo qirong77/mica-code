@@ -3,7 +3,7 @@
 ## 启动
 
 1. `apps/cli/src/app/configWebWorker.ts` 优先分派 Config Web worker。
-2. `apps/cli/src/index.ts` 在加载 config/runtime 前分派 version、models、exec、compact、插件命令（`mica commit`）、`remote` 与交互模式；`startup/validate-config.js` 补齐默认值。
+2. `apps/cli/src/index.ts` 在加载 config/runtime 前分派 version、models、exec、compact、插件命令（`mica commit`）与交互模式；`startup/validate-config.js` 补齐默认值。
 3. `Application.start()`：Ink → 配置校验 → 必要时选初始模型 → runtime、session、registry、hooks、services、agent/session manager、UI bridge、subagent manager。
 4. 设 active context → 注册内置插件 → 用户插件 `setupAll` 并写 `plugin-status.json` → 启动 UI bridge 与 runtime。
 5. 失败时显示修复提示、清理资源、设置 `process.exitCode = 1`。
@@ -12,7 +12,7 @@
 - 多 agent 命令使用 `createActiveAgentProxy` / `createActiveSessionControllerProxy`。
 - 插件 `ctx.onDispose()` 登记的资源在正常卸载与启动失败时都按注册逆序释放；单项清理失败仍继续释放其余资源，正常卸载结束后汇总抛错。`actions.register`、`desktop.panel` 与 `desktop.sessionMenu` 的登记由 manager 自动回收，新增 capability 同步登记 disposer。
 - provider/model/effort/role 切换先 busy guard，完成后 `reloadConfig(false)`、保存 session、同步 UI。
-- 所有协议共享 pi-ai 消息历史；跨协议切换保留历史，由 pi 按目标模型转换工具 ID、图片与思考签名。旧原生 OpenAI 历史只经 `evolution` 一次性迁移，运行时不保留旧格式分支。
+- 所有协议共享 pi-ai 消息历史；跨协议切换保留历史，由 pi 按目标模型转换工具 ID、图片与思考签名。运行时不保留旧原生历史格式分支。
 - `/resume` 与 `--resume` 切到会话自己的 `cwd`（目录缺失时保留当前目录并提示）；app-server 的 resume 以客户端传入的 cwd 为准。
 
 ## Turn 与队列
@@ -57,7 +57,7 @@
 - 图片有三道闸：**工具/输入准备** `prepareImageForApi`（`mica-common/image.ts`）统一识别实际格式、校验正尺寸；PNG 完整解码验证，长边压到 1568，再无损重编码。PNG 源图超过 16,777,216 像素在分配前拒绝，inflate 输出不能超过头部声明的扫描线长度；不支持的 PNG 编码变体仍可在 8192 长边以内透传，损坏数据不回退。JPEG/GIF/WebP 不重编码，但都检查长边 8192（WebP 覆盖 VP8/VP8L/VP8X）。MCP 图片逐张走同一准备入口，缩放时附原始/实际尺寸与分段查看提示，单图失败只替换该块。**请求副本准备** `createRequestImagePreparer`（`mica-agent/providers/imageBudget.ts`）覆盖旧会话与插件工具图片，失败换成可操作的占位文本，不改落盘历史；query 内用弱引用缓存避免工具迭代重复解码，纯文本不增加异步等待。**字节预算** `applyImageBudget` 在请求准备前后运行，正文（文本 + 内联图片）上限 20MB、单张 6MB，优先保留最新图、被移除图留说明；先限字节避免解码本就会丢掉的图，后限字节覆盖缩放及占位文本后的实际载荷。尺寸、解码资源与字节预算分别兜底，不能用 token 预算替代。参考与取舍见 `docs/image-processing.md`。
 - Responses 带 reasoning 参数时请求 summary 与 encrypted content；签名、原生 item ID 和工具关联保存在 pi assistant 消息中，同模型重放由 pi 处理。思考显示按内容块 checkpoint，和协议重放数据独立。
 - `buildSystemPrompt()` 始终以 `mica-agent/prompt/system.md` 构建固定的 `<system>` 默认正文，不接受 `baseSystemPrompt` 覆盖；内置 `default` 只读，Role 页面展示其正文。磁盘与插件的非默认 role 统一通过 `rolePrompt` 追加为紧接 `<system>` 的 `<role>` 段，两段同属 system prompt，默认角色不重复追加；cwd 的 `AGENT.md` / `AGENTS.md` 合并注入，路径按 live cwd 解析。会话角色名是**配置**：`loadSnapshot` 与 `resolveCurrentRole` 解析不到它时只保留默认正文、不追加 Role，但绝不把名字改写成 `default`（插件 role 由插件 setup 之后才发布，那一刻查不到很正常；改写会让下一次保存真的把角色丢掉）。`agent.role` 因此报配置里的名字。
-- base prompt 只放通用协作底座：通用助手身份、指令与事实边界、工具与权限、任务推进与成果保护、验证与沟通；专业职责与工作风格由 Role 补充，不替换通用约束。工具用法与计划纪律由对应工具描述提供；委派倾向、会话笔记、适用记忆与历史回查等额外策略或动态事实由对应插件注册 `ctx.prompt.section()` 注入，随插件停用一起消失——不要为了「提示词完整」把工具用法抄回 base。
+- base prompt 只放通用协作底座：通用助手身份、指令与事实边界、工具与权限、任务推进与成果保护、验证与沟通；专业职责与工作风格由 Role 补充，不替换通用约束。工具用法与计划纪律由对应工具描述提供；适用记忆与历史回查等额外策略或动态事实由对应插件注册 `ctx.prompt.section()` 注入，随插件停用一起消失——不要为了「提示词完整」把工具用法抄回 base。
 - 工具用法（参数、超时、并发、等待语义）只写在工具 schema 描述里，base prompt 不重复：两处都写必然漂移，且每次改工具都在改 prompt cache 前缀。
 - skills 只以索引进入 system prompt。
 - 提示词段落可声明只用于展示的 `label`，归属名称由 manager 传入快照的 `pluginName`；不改变控制键、XML 或稳定前缀。历史回查由官方 Memory 的 `history` 段提供，不再单独装配 `builtin.command-memory`。
@@ -76,12 +76,3 @@
 - 档位的**字段名**跟着「谁在服务这次请求」走（`isGatewayEntry`）：厂商直连的条目（`deepseek-flash`）用 `thinking` / `reasoning_effort`，聚合网关的条目（`z-ai/glm-4.6` 这类带前缀的键）只能用 `reasoning.effort`——网关会静默忽略 `thinking`，推理照跑。两边一起发更糟，网关会先命中 `thinking` / `reasoning_effort` 而把 `none` 顶掉。
 - models.dev 的档位是社区数据，未必等于某台网关的真实枚举（`openai/gpt-6.1-terra` 在一处声明 `none`，某台 codex 网关只认 low…max）。provider 用 400/422 明确拒绝本次带上的推理参数时，客户端丢掉推理参数重发一次，并经 `markEffortLevelRejected` 记住「这台服务商的这个模型不收这一档」，`resolveEffortParams` 之后直接不发——压缩摘要、起标题、子代理这些每次新建客户端、effort 又不是用户选的路径因此不会反复撞同一个 400。
 - 模型列表全部来自 `config.json` 里手填的 `providers[].models`：没有任何探测 / 拉取路径，配置页也不再提供「模型列表地址」。
-
-## 远程上下文（`mica remote`）
-
-- 入口在 `apps/cli/src/remote/`：`serve` 是执行机 Worker，`pair` / `list` / `history` / `status` / `revoke` 是控制端命令；协议与加密在 `packages/mica-remote-protocol`，中转服务在 `apps/relay`。`serve` 显式启动、显式停止，不注册系统服务，也不依赖某个聊天窗口。
-- `serve` 只向中转机出站连接，不监听端口。它发布的是工作区/会话的不透明引用、手动标题和状态；自动标题、系统提示词、推理、工具结果、图片数据和完整 session JSON 都不进入目录或历史页。
-- 控制端每次命令重新连一次中转机；`pair` 用一次性配对码建立 X25519 设备密钥，之后 RPC 走 AES-256-GCM 信封。中转机只看到设备 id、授权、目录元数据、帧大小和时序。
-- `history` 按 `(sessionRef, cursor)` 从最新消息向前分页，单页正文与帧大小都有上限；A 离线时目录显示最后同步时间并标「缓存」，任何读取历史或文件的请求都直接报离线，不回退到 B 的同名目录。
-- 目录里的 `running` 只认本地 turn 租约：持有进程已消失的残留 running 在发布前降级为 `unknown`，历史仍返回已保存的消息，不把崩溃会话伪装成正在执行。
-- 首版只开放 `directory.read` / `history.read`。`turn.operate` 尚未实现；远程执行必须先补齐受限工具集、执行隔离和请求回执去重，不能把本机 `app-server` 的全部 RPC 透传出去。

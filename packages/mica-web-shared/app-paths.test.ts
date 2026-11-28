@@ -157,7 +157,7 @@ describe('plugin pages', () => {
   });
 
   it('builds a readable address per plugin id', () => {
-    expect(pluginPagePath('notebook')).toBe('/plugins/pages/notebook');
+    expect(pluginPagePath('schedule')).toBe('/plugins/pages/schedule');
     // 用户插件 id 带点号，编码后仍是一个路径段，读回来是同一个 id。
     expect(pluginPagePath('user.demo')).toBe('/plugins/pages/user.demo');
     expect(readPluginPageId(pluginPagePath('user.demo'))).toBe('user.demo');
@@ -166,9 +166,9 @@ describe('plugin pages', () => {
   it('only accepts the page path itself', () => {
     expect(isPluginPagePath('/plugins/pages')).toBe(false);
     expect(isPluginPagePath('/plugins/pages/')).toBe(false);
-    expect(isPluginPagePath('/plugins/pages/notebook')).toBe(true);
-    expect(isPluginPagePath('/plugins/pages/notebook/')).toBe(true);
-    expect(isPluginPagePath('/plugins/pages/notebook/extra')).toBe(false);
+    expect(isPluginPagePath('/plugins/pages/schedule')).toBe(true);
+    expect(isPluginPagePath('/plugins/pages/schedule/')).toBe(true);
+    expect(isPluginPagePath('/plugins/pages/schedule/extra')).toBe(false);
     expect(isPluginPagePath('/plugins/pagesX')).toBe(false);
   });
 

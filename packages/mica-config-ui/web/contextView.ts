@@ -147,7 +147,7 @@ export function toolSchemaReferenceNote(analysis: ConfigWebContextAnalysis | nul
     return '来自快照中记录的最近一次请求；之后发生过 compact，与当前快照不完全对应，不代表当前工具集，也不把 MCP 明细重复计入总量。';
   }
   if (stale?.reason === 'truncated') {
-    return '来自快照中记录的最近一次请求；之后发生过裁剪 / rewind，与当前快照不完全对应，不代表当前工具集，也不把 MCP 明细重复计入总量。';
+    return '来自快照中记录的最近一次请求；之后发生过裁剪 / 编辑重发，与当前快照不完全对应，不代表当前工具集，也不把 MCP 明细重复计入总量。';
   }
   return '来自快照中记录的最近一次请求（估算），不代表当前工具集；运行中随下次会话检查点更新。MCP server / 工具明细已包含在 MCP 工具总数内。';
 }

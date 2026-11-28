@@ -116,7 +116,7 @@ export type ConfigWebContextAnalysisOptions = {
 /**
  * 最近一次请求的 input 还能代表当前快照吗？不能则返回作废原因：
  * - `compacted`：快照在那次请求之后被 compact 改写过（`displayUsage.compactedAt` 更晚）；
- * - `truncated`：那次请求看到的消息比快照现在多（prune / rewind 裁掉了轮次）。
+ * - `truncated`：那次请求看到的消息比快照现在多（prune / 编辑重发裁掉了轮次）。
  *
  * 两种情况里 `lastUsage.inputTokens` 描述的都是**另一份**上下文：拿它当分母/被减数会把
  * 「已经被清理掉的内容」显示成「系统提示词 / 工具 schema」或其它单一来源。

@@ -2,9 +2,9 @@ import { describe, expect, it } from 'vitest';
 import { readPluginUriApis, uriApiVisibleToRole } from './PluginUriApis.js';
 
 const entry = (extra: Record<string, unknown> = {}) => ({
-  name: 'notebook',
-  description: '笔记本的机读接口文档',
-  uri: '/plugin/notebook/api',
+  name: 'schedule',
+  description: '计划表的机读接口文档',
+  uri: '/plugin/schedule/api',
   ...extra,
 });
 
@@ -21,9 +21,9 @@ describe('readPluginUriApis', () => {
     if (!result.ok) return;
     expect(result.value).toEqual([
       {
-        name: 'notebook',
-        description: '笔记本的机读接口文档',
-        uri: '/plugin/notebook/api',
+        name: 'schedule',
+        description: '计划表的机读接口文档',
+        uri: '/plugin/schedule/api',
         roles: ['需求开发'],
       },
     ]);
@@ -31,10 +31,10 @@ describe('readPluginUriApis', () => {
 
   it('接受 http(s)、file 与同源根路径三种写法', () => {
     const uris = [
-      'https://mica.qirong77.com/plugin/notebook/api',
-      'http://127.0.0.1:8787/plugin/notebook/api',
-      'file:///Users/me/docs/notebook.md',
-      '/plugin/notebook/api',
+      'https://mica.qirong77.com/plugin/schedule/api',
+      'http://127.0.0.1:8787/plugin/schedule/api',
+      'file:///Users/me/docs/schedule.md',
+      '/plugin/schedule/api',
     ];
     for (const uri of uris) {
       const result = readPluginUriApis([entry({ uri })]);
@@ -44,7 +44,7 @@ describe('readPluginUriApis', () => {
   });
 
   it('拒绝插不进输入框的协议：选中后模型读不到的地址没有意义', () => {
-    for (const uri of ['javascript:alert(1)', 'ftp://example.com/doc', 'notebook', '//host/path']) {
+    for (const uri of ['javascript:alert(1)', 'ftp://example.com/doc', 'schedule', '//host/path']) {
       const result = readPluginUriApis([entry({ uri })]);
       expect(result.ok).toBe(false);
       if (!result.ok) expect(result.error).toContain('uri');
@@ -64,7 +64,7 @@ describe('readPluginUriApis', () => {
   });
 
   it('同名条目只留一条：列表里两条同名文档分不清点哪条', () => {
-    const result = readPluginUriApis([entry(), entry({ uri: '/plugin/notebook/api/guide' })]);
+    const result = readPluginUriApis([entry(), entry({ uri: '/plugin/schedule/api/guide' })]);
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error).toContain('同名');
   });

@@ -1,5 +1,6 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { isRecord } from '@packages/mica-common/guards.js';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { PROVIDER_PROTOCOLS, isEffortLevelName, isProviderProtocol } from '@packages/mica-config/types.js';
 
 export { PROVIDER_PROTOCOLS };
@@ -65,50 +66,6 @@ export default function setupValidateConfig(ctx: ValidateConfigContext): void {
 }
 
 /**
- * 旧版本把 SearXNG 地址放在 `config.json.searxngUrl`；搜索改成插件后只有
- * `plugin-settings/web-search.json` 会生效。把旧值搬过去，再删掉这个死键：
- * 留着它只会让人以为改配置还能影响搜索。
- */
-export function migrateLegacySearchSetting(
-  configRoot: string,
-  configPath: string,
-): void {
-  let config: Record<string, unknown>;
-  try {
-    const parsed: unknown = JSON.parse(readFileSync(configPath, 'utf-8'));
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return;
-    config = parsed as Record<string, unknown>;
-  } catch {
-    return;
-  }
-  const legacy = typeof config.searxngUrl === 'string' ? config.searxngUrl.trim() : '';
-  if (!legacy) return;
-
-  const settingsPath = join(configRoot, 'plugin-settings', 'web-search.json');
-  let settings: Record<string, unknown> = {};
-  try {
-    const parsed: unknown = JSON.parse(readFileSync(settingsPath, 'utf-8'));
-    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-      settings = parsed as Record<string, unknown>;
-    }
-  } catch {
-    // 还没写过插件设置：下面按空对象写入
-  }
-
-  try {
-    if (typeof settings.searxngUrl !== 'string' || !settings.searxngUrl.trim()) {
-      settings.searxngUrl = legacy;
-      mkdirSync(dirname(settingsPath), { recursive: true });
-      writeFileSync(settingsPath, `${JSON.stringify(settings, null, 2)}\n`, 'utf-8');
-    }
-    delete config.searxngUrl;
-    writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`, 'utf-8');
-  } catch {
-    // 写不进去就保持原样，下次启动再试；迁移失败不该阻断启动
-  }
-}
-
-/**
  * Applies backwards-compatible defaults without rejecting other semantic issues.
  * This runs before mica-config is imported so its module-level snapshot sees the
  * migrated file. Invalid JSON is left to mica-config's existing backup recovery.
@@ -122,7 +79,6 @@ export function applyConfigDefaultsToFile(configPath: string): ConfigValidationR
 
   const result = validateConfig(parsed.config);
   if (result.changed) writeConfigFile(configPath, result.config);
-  if (result.ok) migrateLegacySearchSetting(dirname(configPath), configPath);
   return result;
 }
 
@@ -438,10 +394,6 @@ function emptyFileResult(): ConfigValidationResult {
 
 function writeConfigFile(configPath: string, config: unknown): void {
   writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`, 'utf-8');
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value && typeof value === 'object' && !Array.isArray(value));
 }
 
 function isNonEmptyString(value: unknown): value is string {

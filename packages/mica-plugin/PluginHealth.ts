@@ -1,6 +1,5 @@
-import { readFileSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
-import { basename, dirname, join } from 'node:path';
-import { createHash } from 'node:crypto';
+import { readFileSync, existsSync } from 'node:fs';
+import { join } from 'node:path';
 import { writeTextFileAtomic } from '@packages/mica-config/atomicWrite.js';
 import { acquireProcessLock } from '@packages/mica-common/processLock.js';
 
@@ -57,7 +56,6 @@ function flushHealth(file: string, pending: PendingHealth): void {
   try {
     // Read inside the same cross-process lock as the write. Never queue a whole
     // document: another host may update a different issue before this lock is free.
-    preserveUnsupportedHealth(file);
     const document = readHealthDocument(file);
     for (const [issueKey, report] of pending.updates) {
       if (report) document.issues[issueKey] = report;
@@ -182,7 +180,7 @@ function readHealthDocument(file: string): HealthDocument {
     const input: unknown = JSON.parse(readFileSync(file, 'utf-8'));
     if (!input || typeof input !== 'object' || Array.isArray(input)) return empty;
     const document = input as Record<string, unknown>;
-    // The old single-report shape is no longer supported; Evolution migrates it.
+    // 只认当前形态；其它形态当作没有上报过。
     if (document.schemaVersion !== 2 || !document.issues || typeof document.issues !== 'object' ||
       Array.isArray(document.issues)) return empty;
     for (const [issueKey, value] of Object.entries(document.issues)) {
@@ -194,22 +192,6 @@ function readHealthDocument(file: string): HealthDocument {
     // Health is derived state; a missing or corrupt document cannot stop startup.
   }
   return empty;
-}
-
-/** A runtime can report before Evolution. Preserve old bytes rather than overwrite them first. */
-function preserveUnsupportedHealth(file: string): void {
-  let raw: string;
-  try { raw = readFileSync(file, 'utf8'); }
-  catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return; throw error; }
-  try {
-    const value = JSON.parse(raw);
-    if (value?.schemaVersion === 2 && value.issues && typeof value.issues === 'object' && !Array.isArray(value.issues)) return;
-  } catch { /* unsupported/corrupt derived state is archived, never interpreted */ }
-  const archive = join(dirname(file), 'archive');
-  mkdirSync(archive, { recursive: true, mode: 0o700 });
-  const target = join(archive, `${basename(file)}.${createHash('sha256').update(raw).digest('hex')}`);
-  try { writeFileSync(target, raw, { flag: 'wx', mode: 0o600 }); }
-  catch (error) { if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error; }
 }
 
 function normalizeHealthReport(input: unknown, issueKey: string): PluginHealthReport | null {

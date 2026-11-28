@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, it, vi } from 'vitest';
 import { createPluginHealthStore } from './PluginHealth.js';
@@ -28,7 +28,7 @@ it('merges pending issues after another writer releases the lock', async () => {
   expect(store.read('a')?.message).toBe('a');
 });
 
-it('archives unsupported bytes if a report arrives before Evolution, without parsing legacy state', () => {
+it('ignores unsupported bytes and overwrites them with the current shape', () => {
   const home = process.env.MICA_HOME!;
   const root = join(home, 'plugin-health');
   mkdirSync(root, { recursive: true });
@@ -37,7 +37,6 @@ it('archives unsupported bytes if a report arrives before Evolution, without par
   const store = createPluginHealthStore('early', { configDir: home });
   expect(store.read()).toBeNull();
   store.report({ level: 'ok', message: 'current' });
-  const archived = readdirSync(join(root, 'archive')).find((name) => name.startsWith('early.json.'))!;
-  expect(readFileSync(join(root, 'archive', archived), 'utf8')).toBe(original);
   expect(store.read()?.message).toBe('current');
+  expect(JSON.parse(readFileSync(join(root, 'early.json'), 'utf8')).schemaVersion).toBe(2);
 });

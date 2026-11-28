@@ -2350,15 +2350,11 @@ test('derivation limits count omitted call observations and findings in live rev
   assert.ok(unknown.warnings.some((warning) => warning.includes('previous overflow is unknown')));
 });
 
-test('polling tools and subagent reads never become repeated-call candidates', async (t) => {
+test('polling tools never become repeated-call candidates', async (t) => {
   const { recorder } = await fixture(t);
   const run = runner(recorder, { runId: 1 });
   run.start('polling semantics');
   const polls: Array<[string, string]> = [
-    ['agent', '{"operation":"await","task_id":"t1"}'],
-    ['agent', '{"operation":"join","task_ids":["t1"]}'],
-    ['agent', '{"operation":"read","task_id":"t1"}'],
-    ['agent', '{"operation":"list"}'],
     ['background_tasks_read', '{"task_id":"t1"}'],
     ['background_tasks_list', '{}'],
     ['wait_for', '{"kind":"port","port":3000}'],

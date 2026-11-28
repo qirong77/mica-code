@@ -32,7 +32,7 @@ Capabilities 中显示「历史会话 · Memory」和「已知记忆 · Memory�
 | `project` | `projects/<仓库>.md` | 一个仓库的目录结构、运行命令、架构决策及其理由、非显然的坑       | 会话在一个 git 仓库里，且按仓库身份匹配        |
 
 **没有第四层「任务」**。本次需求的中间发现、待办、进度不写进记忆——那是会话自己的事，
-用 `session_notes` 或对话本身承载。会话结束后它就该消失。
+用对话本身承载。会话结束后它就该消失。
 
 ### 项目身份 = 仓库，不是 cwd
 
@@ -169,19 +169,6 @@ $MICA_HOME/memory/
 | `/memory review`                                 | 立即整理一次                                                            |
 | `/memory refresh`                                | 丢弃本会话快照，下一轮重读文件                                          |
 | `/memory path`                                   | 显示各层文件路径                                                        |
-
-## 旧布局
-
-旧版是三块按「有没有项目」分开的文件：`USER.md`、`MEMORY.md`、`projects/<cwd 哈希>/MEMORY.md`。
-运行时不认识这个形态；升级后由 `evolution` 插件在启动时迁到当前布局：
-
-- `USER.md` 与 `MEMORY.md` 的条目并进 `PROFILE.md`（旧设计里两者都是「每个会话都注入」的
-  全局层，对应现在的 profile）；
-- `projects/<cwd 哈希>/MEMORY.md` 按目录名里的仓库名并入同名的 `projects/<仓库>.md`。
-
-同名仓库找不到唯一目标（仓库已经不用了、或同名 clone 有多个）时，旧目录**原样留着**并在
-插件日志里记一条 `evolution:memory-project-unmatched`——旧哈希是 cwd 的 sha1，推不出仓库
-身份，写进别处只会把项目事实注入到错误的会话里。
 
 ## 边界
 

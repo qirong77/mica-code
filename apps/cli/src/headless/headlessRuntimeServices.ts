@@ -151,16 +151,6 @@ export function createHeadlessRuntimeServices(options: HeadlessRuntimeServicesOp
       throw new Error('switchAgentSession is not available in headless mode');
     },
     refreshCurrentAgentSessionUi() {},
-    listRewindCheckpoints() {
-      return [];
-    },
-    getRewindPreview() {
-      return { ok: false, message: '/rewind is not available in headless mode' };
-    },
-    applyRewind(): never {
-      throw new Error('/rewind is not available in headless mode');
-    },
-    clearRewindCheckpoints() {},
     async runExclusiveTask(_agent, _options, task) {
       return task();
     },

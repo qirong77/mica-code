@@ -53,13 +53,13 @@ describe('parsePluginManifest desktop checks', () => {
   it('清单里的 uriApis 进 ` / ` 的 API 文档候选，坏条目让整份清单不通过', () => {
     const ok = parsePluginManifest(
       base({
-        uriApis: [{ name: 'notebook', description: '笔记的机读接口', uri: '/plugin/notebook/api' }],
+        uriApis: [{ name: 'schedule', description: '计划表的机读接口', uri: '/plugin/schedule/api' }],
       }),
     );
     expect(ok.ok).toBe(true);
     if (ok.ok) expect(ok.manifest.uriApis).toHaveLength(1);
 
-    const broken = parsePluginManifest(base({ uriApis: [{ name: 'notebook' }] }));
+    const broken = parsePluginManifest(base({ uriApis: [{ name: 'schedule' }] }));
     expect(broken.ok).toBe(false);
     if (!broken.ok) expect(broken.error).toContain('uri 不能为空');
   });

@@ -26,7 +26,6 @@ describe('chat slash commands', () => {
     expect(findChatCommand('status').availability).toBe('chat')
     expect(findChatCommand('role').availability).toBe('chat')
     expect(findChatCommand('compact').availability).toBe('chat')
-    expect(findChatCommand('rewind').availability).toBe('terminal')
     expect(commandInputValue(findChatCommand('rename'))).toBe('/rename ')
   })
 

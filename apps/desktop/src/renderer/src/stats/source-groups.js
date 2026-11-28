@@ -84,8 +84,7 @@ function countLabel(count, noun) {
  *
  * - 主对话自成一组，它就是 App 自己；
  * - 插件自己的请求（`kind === 'plugin'`）归到它自己；
- * - 子代理与插件后台请求归到记账里的 `pluginId`——那是发起它的插件，老记录由
- *   `evolution` 的 `usage-source-owner` 迁移补齐；
+ * - 子代理与插件后台请求归到记账里的 `pluginId`——那是发起它的插件；
  * - 没有 `pluginId` 的只剩内核自带命令（`/compact`、`mica compact`），按功能 id 自成一组。
  */
 export function sourceGroupOf(row, pluginNames) {

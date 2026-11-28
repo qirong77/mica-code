@@ -103,7 +103,7 @@ describe('SSH private audit', () => {
     expect(readFileSync(file, 'utf8')).toBe(raw);
   });
 
-  it('does not maintain unsupported history as though it were current; Evolution must archive it first', () => {
+  it('does not treat unsupported history as current', () => {
     const file = join(dir, AUDIT_FILE);
     const original = `${Array.from({ length: 201 }, () => JSON.stringify({ ...entry, script: 'echo LEGACY_SECRET' })).join('\n')}\n`;
     writeFileSync(file, original);

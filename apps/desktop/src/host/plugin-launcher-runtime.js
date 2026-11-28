@@ -1,3 +1,4 @@
+import { isRecord } from '@packages/mica-common/guards.js';
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { chmodSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
@@ -27,10 +28,6 @@ const ISSUE_KEY_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9:._-]{0,119}$/
 
 function messageOf(error) {
   return error instanceof Error ? error.message : String(error)
-}
-
-function isRecord(value) {
-  return !!value && typeof value === 'object' && !Array.isArray(value)
 }
 
 /** `background:<taskId>`, or null when the task id cannot form a valid issue key. */

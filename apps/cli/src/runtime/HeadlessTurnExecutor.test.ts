@@ -1013,8 +1013,8 @@ describe('LocalRuntimeController stale turn finalization', () => {
       if (boundary === 'before-persist') hooks.on('turn:beforePersist', () => agent.abort());
 
       try {
-        // System inputs bypass rewind's filesystem snapshots in this focused
-        // lifecycle test; the provider/run-id path is the same as user input.
+        // The provider/run-id path is the same as user input in this focused
+        // lifecycle test.
         const submission = runtime.submit('stale local turn', { source: 'system' });
         if (boundary === 'after-resolve') {
           await vi.waitFor(() => expect(resolveRun).toBeTypeOf('function'));

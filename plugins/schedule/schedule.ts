@@ -124,8 +124,7 @@ export function normalizeZoom(value: unknown): number {
  * 这份文件可能被别的版本写过、被 `$MICA_HOME` 拷来拷去、也可能被手改坏：认不出的部分
  * 丢掉，能显示的照常显示——一条坏任务不该让整张时间线消失。
  *
- * 旧形态（`plans` / `stages`）不再支持：这里只读当前的 `tasks`，旧文件要先由 Evolution
- * 迁移；否则显示为空且写盘会拒绝它。
+ * 只读当前的 `tasks`；旧形态（`plans` / `stages`）显示为空，写盘也会拒绝它。
  */
 export function normalizeData(value: unknown): ScheduleData {
   const record = asRecord(value);
@@ -370,7 +369,7 @@ export function exportDocument(data: ScheduleData): ScheduleDocument {
 
 /**
  * 导入：解析失败或没有任何合法任务都直接报错，避免用户以为导入成功了。
- * 认不出的字段被丢掉；旧形态（`plans` / `stages`）不再接受，必须先由 Evolution 迁移；
+ * 认不出的字段被丢掉；旧形态（`plans` / `stages`）不再接受；
  * 颜色、日期不合法的任务不会进来。
  */
 export function parseImport(value: unknown): { title: string; scale: ScheduleScale; tasks: ScheduleTask[] } {

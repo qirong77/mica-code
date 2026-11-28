@@ -1,3 +1,4 @@
+import { isRecord } from '@packages/mica-common/guards.js';
 import { MicaTool, type ToolInput } from '@packages/mica-tools/index.js';
 import {
   QUICK_BUTTON_COLORS,
@@ -311,6 +312,3 @@ function readString(input: ToolInput, key: string): string {
   return typeof value === 'string' ? value.trim() : '';
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}

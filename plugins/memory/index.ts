@@ -88,7 +88,7 @@ export default function setupMemory(ctx: PluginContext): void {
     ].join('|');
 
   // primaryAgentOnly：记忆属于这条会话/用户，子代理写它会让归属变模糊
-  // （临时发现未必长期成立），与 session-notes 同一取舍。
+  // （临时发现未必长期成立）。
   let disposed = false;
   let active: AbortController | null = null;
   let tool: Disposable | undefined;

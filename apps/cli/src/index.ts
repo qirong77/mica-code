@@ -196,12 +196,6 @@ if (invocation.mode === 'plugin-action') {
   await exitAfterStdoutFlush(exitCode);
 }
 
-if (invocation.mode === 'remote') {
-  const { runRemote } = await import('./remote/runRemote.js');
-  const exitCode = await runRemote(invocation);
-  await exitAfterStdoutFlush(exitCode);
-}
-
 if (invocation.mode === 'app-server') {
   const { runAppServer } = await import('./cli/runAppServer.js');
   const { encodeCodexNotification, CODEX_NOTIFICATIONS } = await import('@packages/mica-runtime/index.js');

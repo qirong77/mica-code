@@ -1168,18 +1168,14 @@ function attachSubagentActivityTracking(options: {
   options.child.onToolCall = (name, args, id) => {
     previousOnToolCall?.(name, args, id);
     if (disposed) return;
-    // 嵌套委派不是这个子代理自己的工作，进活动行/时间线只会让父代理误读进度。
-    if (name !== 'agent') {
-      options.taskManager.appendTimeline(options.taskId, options.owner, {
-        id: `tool:${id ?? name}`,
-        kind: 'tool',
-        text: args ?? '',
-        toolName: name,
-      });
-    }
+    options.taskManager.appendTimeline(options.taskId, options.owner, {
+      id: `tool:${id ?? name}`,
+      kind: 'tool',
+      text: args ?? '',
+      toolName: name,
+    });
     clearWaiting();
     clearResponse();
-    if (name === 'agent') return;
     toolCalls.push({ name, args });
     scheduleActivity();
   };

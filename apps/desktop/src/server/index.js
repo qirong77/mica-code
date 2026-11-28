@@ -74,7 +74,7 @@ import {
 } from '../host/terminal-control-proxy.js'
 import { CONTROL_MCP_PREFIX, createControlMcpHandler } from '../host/control-mcp.js'
 import { requestJson } from '../host/control-client.js'
-import { CONTROL_ORIGIN_ENV, removeLegacyControlSkills } from '../host/control-mcp-config.js'
+import { CONTROL_ORIGIN_ENV } from '../host/control-mcp-config.js'
 import { createPluginMcpRuntime } from '../host/plugin-mcp-runtime.js'
 import { createPluginMcpHandler } from '../host/plugin-mcp.js'
 import { withPluginLauncherRequest } from '../host/plugin-launcher-runtime.js'
@@ -764,13 +764,6 @@ export async function startDesktopServer(options = {}) {
   stripContainerEnv()
   initializeDesktopProcessPath()
   warmShellEnv()
-  // 这两个能力以前以 skill 形式接入：清掉应用自己写的那两个技能文件，避免 agent
-  // 同时看到「技能」和「MCP 工具」两套入口（用户改过的文件不动，见 control-mcp-config.js）。
-  removeLegacyControlSkills({
-    homeDir: resolveMicaHome(),
-    separator: process.platform === 'win32' ? '\\' : '/'
-  })
-
   const notifyServer = await createNotifyServer()
   setNotifyServer(notifyServer)
   setChatNotifyServer(notifyServer)

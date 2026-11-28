@@ -1,5 +1,3 @@
-import { normalizeToolName } from './toolNames.js';
-
 /**
  * 没有声明 emoji 的工具用这个兜底：工具行左侧不能空着，否则各行的文字起点会错位。
  *
@@ -20,16 +18,14 @@ export type ToolIconLookup = (name: string) => string | undefined;
  *
  * 事实来源是工具自己的声明（`MicaTool.icon`），这里只做三件展示层的事：
  *
- * - 历史工具名归一：`Skill` / `TodoWrite` 这些改名前留下的记录仍要画对（`normalizeToolName`）。
  * - MCP 前缀统一成插头：`mcp__server__tool` 的图标与名字无关。
  * - 查不到时兜底 `DEFAULT_TOOL_ICON`，绝不返回空串。
  */
 export function toolIcon(name: string | null | undefined, lookup?: ToolIconLookup): string {
   const raw = String(name ?? '').trim();
   if (!raw) return DEFAULT_TOOL_ICON;
-  const normalized = normalizeToolName(raw);
-  if (normalized.startsWith('mcp__')) return MCP_TOOL_ICON;
-  const declared = lookup?.(normalized) ?? (normalized === raw ? undefined : lookup?.(raw));
+  if (raw.startsWith('mcp__')) return MCP_TOOL_ICON;
+  const declared = lookup?.(raw);
   const icon = (declared ?? '').trim();
   return icon || DEFAULT_TOOL_ICON;
 }

@@ -164,7 +164,7 @@ export class SessionController {
    * Charge the captured session, borrowing only our own live turn's lease. A
    * different writer (including another controller in this PID) must finish
    * first. The latest disk snapshot supplies everything except the new usage;
-   * the idle agent's conversation or a pre-rewind history is never written back.
+   * the idle agent's conversation or a truncated history is never written back.
    */
   async recordSubagentUsageForSession(sessionId: string, record: SubagentUsageRecord): Promise<boolean> {
     let acquired: SessionTurnLease | null = null;
@@ -207,7 +207,7 @@ export class SessionController {
       if (sessionId === this.currentSessionId) {
         this.currentSessionHasBeenPersisted = true;
         // Keep the live turn's next checkpoint in sync without reloading its
-        // messages or unioning disk usage into an intentional rewind. When
+        // messages or unioning disk usage into an intentional history rewrite. When
         // another writer changed the baseline, leave its signature outstanding
         // so the next leased refresh loads that writer's complete history.
         this.agent.recordSubagentUsage?.(record);

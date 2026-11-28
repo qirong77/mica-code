@@ -300,14 +300,14 @@ describe('Markdown link URL strategy', () => {
     expect(normalizeLinkUrl('  ./README.md  ', 'markdown')).toEqual({ok: true, url: './README.md'});
     expect(normalizeLinkUrl('README.md')).toEqual({ok: true, url: 'https://readme.md/'});
     // A bare path without a prefix keeps the web policy; an explicitly prefixed
-    // target is an in-document link in the notebook as well.
+    // target is an in-document link as well.
     expect(normalizeLinkUrl('docs/guide.md').ok).toBe(false);
     for (const input of ['./README.md', '../README.md', '/docs/guide.md', '#anchor', '/']) {
       expect(normalizeLinkUrl(input)).toEqual({ok: true, url: input});
     }
   });
 
-  it('round-trips an in-document link the notebook already holds', () => {
+  it('round-trips an in-document link the document already holds', () => {
     const editor = makeEditor();
     let linkKey = '';
     update(editor, () => {

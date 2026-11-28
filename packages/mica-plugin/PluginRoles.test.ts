@@ -65,11 +65,11 @@ describe('publishPluginRoles', () => {
   });
 
   it('materializes embedded role text for bundled plugins', () => {
-    publishPluginRoles('notebook', [{ name: '笔记', prompt: '# Notebook' }], { configDir: root });
+    publishPluginRoles('schedule', [{ name: '计划', prompt: '# Schedule' }], { configDir: root });
 
     const roles = readPublishedPluginRoles({ configDir: root });
-    expect(roles).toMatchObject([{ pluginId: 'notebook', name: '笔记' }]);
-    expect(readFileSync(roles[0].path, 'utf-8')).toBe('# Notebook');
+    expect(roles).toMatchObject([{ pluginId: 'schedule', name: '计划' }]);
+    expect(readFileSync(roles[0].path, 'utf-8')).toBe('# Schedule');
   });
 
   it('drops the index when the plugin stops shipping roles', () => {

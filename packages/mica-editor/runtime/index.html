@@ -13,8 +13,7 @@
   <div id="root"><div id="boot" aria-label="编辑器骨架"><i></i><i></i><i></i></div></div>
   <script type="module">
     import('./src/main.tsx').catch(error => {
-      const channel = new URLSearchParams(location.search).get('mode') === 'markdown' ? 'mica-markdown' : 'mica-notebook';
-      window.parent.postMessage({channel,token:location.hash.slice(1),type:'error',message:'编辑器依赖加载失败，请检查网络后重试。'+error.message}, '*');
+      window.parent.postMessage({channel:'mica-markdown',token:location.hash.slice(1),type:'error',message:'编辑器依赖加载失败，请检查网络后重试。'+error.message}, '*');
       document.getElementById('root').textContent='编辑器暂时无法加载，请重试。原文不会被替换。';
     });
   </script>

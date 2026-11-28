@@ -87,36 +87,13 @@ describe('TodoPlugin', () => {
     expect(harness.showMessage).toHaveBeenCalledWith('Todo list is empty.');
   });
 
-  it('clears retained todo state after resume and rewind replace the session history', async () => {
+  it('clears retained todo state after resume replaces the session history', async () => {
     const harness = createTodoHarness(disposeCallbacks);
 
-    for (const reason of ['resume', 'rewind'] as const) {
-      await micaTools.execute('todo_write', { todos: [{ content: 'Old task', status: 'pending' }] });
-      harness.events.publish({ type: 'session:invalidated', reason });
-      await harness.commands.execute('/todo show');
-      expect(harness.showMessage).toHaveBeenLastCalledWith('Todo list is empty.');
-    }
-  });
-
-  it('drops the checkpoint a rewind undid instead of injecting it next turn', async () => {
-    const configDir = temporaryDir();
-    const harness = createTodoHarness(disposeCallbacks, true, { configDir });
-    const owner = {};
-    harness.setOwner(owner);
-    bindTodoSessionOwner(owner, () => ({ id: 'session-a', persistent: true }));
-
-    const first = micaRuntime.createRuntimeInput('first', 'ui');
-    await harness.hooks.emit('turn:before', { owner, runtime: {}, input: first });
-    await micaTools.execute('todo_write', { todos: [{ content: 'Undone work', status: 'pending' }] });
-    const second = micaRuntime.createRuntimeInput('second', 'ui');
-    await harness.hooks.emit('turn:before', { owner, runtime: {}, input: second });
-    await micaTools.execute('todo_write', { todos: [{ content: 'Later work', status: 'in_progress' }] });
-
-    harness.events.publish({ type: 'session:invalidated', reason: 'rewind', owner });
-
-    const third = micaRuntime.createRuntimeInput('third', 'ui');
-    await harness.hooks.emit('turn:before', { owner, runtime: {}, input: third });
-    expect(harness.rewrite([{ role: 'user', content: 'third' }], { owner, sessionId: 'session-a' })).toBeNull();
+    await micaTools.execute('todo_write', { todos: [{ content: 'Old task', status: 'pending' }] });
+    harness.events.publish({ type: 'session:invalidated', reason: 'resume' });
+    await harness.commands.execute('/todo show');
+    expect(harness.showMessage).toHaveBeenLastCalledWith('Todo list is empty.');
   });
 
   it('does not read a checkpoint in a host that never persists sessions', async () => {

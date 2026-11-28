@@ -143,7 +143,6 @@ export async function executeProviderToolCalls(params: {
  * (write/exec tools) must stay serial.
  */
 function isParallelSafeTool(name: string): boolean {
-  if (name === 'agent') return true;
   try {
     return micaTools.isReadOnly(name);
   } catch {

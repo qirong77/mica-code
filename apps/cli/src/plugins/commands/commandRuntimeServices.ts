@@ -564,52 +564,6 @@ export function createCommandRuntimeServices(): CommandRuntimeServices {
     syncAgentStatusItems() {
       currentContext()?.uiBridge.syncAgentStatusItems();
     },
-    listRewindCheckpoints() {
-      return currentContext()?.runtime.listRewindCheckpoints() ?? [];
-    },
-    getRewindPreview(id) {
-      const runtime = currentContext()?.runtime;
-      if (!runtime) return { ok: false, message: 'rewind: Application is not ready' };
-      return runtime.getRewindPreview(id);
-    },
-    applyRewind(request) {
-      const context = currentContext();
-      if (!context) throw new Error('Application is not ready');
-      const session = context.agentSessions.current();
-      const result = context.runtime.applyRewind(request);
-      context.events.publish({ type: 'session:invalidated', reason: 'rewind', owner: session.agent });
-      try {
-        const snapshot = session.agent.getSnapshot();
-        session.uiState = normalizeUiState({
-          ...session.uiState,
-          conversationMessages: result.conversationMessagesBefore as MicaUiConversationMessage[],
-          responseText: '',
-          pendingInputs: [],
-          pendingQueueMode: null,
-          messageBarMessages: [],
-          agentTurnLogItems: [],
-          commandPanelItems: [],
-          thinkingText: '',
-          pluginUIs: [],
-          workingStatus: { type: 'idle' },
-          lastTurnOutcome: 'idle',
-          contextSize: snapshot.lastUsage?.totalTokens ?? 0,
-          cachedTokenRate: calculateCachedTokenRate(snapshot.usageHistory),
-        });
-        restoreSessionUi(session.agent, session.uiState);
-        micaBuiltinCommands.syncConfigFromAgent(session.agent);
-        syncModelDisplay(session.agent);
-        session.sessionController.saveCurrent({ allowEmpty: true, turnState: 'completed' });
-        context.uiBridge.syncAgentStatusItems();
-        return result;
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        return { ...result, postApplyWarning: `rewind completed, but UI/session sync failed: ${message}` };
-      }
-    },
-    clearRewindCheckpoints() {
-      currentContext()?.runtime.clearRewindCheckpoints();
-    },
     async runExclusiveTask(agent, options, task) {
       const context = currentContext();
       if (!context) return task();

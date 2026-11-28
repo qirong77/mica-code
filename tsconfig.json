@@ -24,8 +24,6 @@
     "packages/mica-web-shared",
     "packages/mica-diagnostics",
     "packages/mica-file-mentions",
-    "packages/mica-remote-protocol",
-    "apps/relay",
     "packages/@anthropic/ink/src"
   ],
   "exclude": ["**/dist", "**/node_modules", "packages/mica-editor/runtime"]

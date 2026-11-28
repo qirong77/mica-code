@@ -19,6 +19,7 @@
  *   都把整段配置重排一遍。
  * - **空值即删键**：可选字段留空时不写 `""`，直接删掉键。
  */
+import { isRecord } from '@packages/mica-common/guards.js';
 
 export const MCP_SERVER_TYPE_VALUES = ['stdio', 'http'] as const;
 export type McpServerType = (typeof MCP_SERVER_TYPE_VALUES)[number];
@@ -268,10 +269,6 @@ function recordPairs(value: unknown): McpKeyValue[] {
     key,
     value: typeof entry === 'string' ? entry : String(entry ?? ''),
   }));
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function isString(value: unknown): value is string {

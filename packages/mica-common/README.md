@@ -48,14 +48,12 @@ import { prepareImageForApi } from '@packages/mica-common/index.js';
 - `chatQuote.ts`：「引用对话」文本约定的唯一实现（格式化、解析、插入草稿、移除、标题派生时剥离前导引用块），CLI 与桌面端按子路径 `@packages/mica-common/chatQuote.js` 引入。
 - `capabilities.ts`：会话级能力选择（只保存被关掉的 skills / tools / MCP server），归一化与比较规则两端共用。
 - `promptControls.ts`：浏览器安全的全局 `PromptControls`、来源快照与运行时提示词检查类型，插件段键 `promptSectionKey(pluginId, sectionId)`，以及排序唯一实现 `orderPromptSections(sections, order)`——`system` 永远最前、未列入顺序表的段落排在已列出段落之后。
-- `toolNames.ts`：工具名规范（snake_case 全小写）与历史大驼峰名的 `normalizeToolName` 映射。
 - `loopArgs.ts`：`/loop` 参数解析与间隔上下限，CLI 与桌面端斜杠命令共用同一套写法。
 - `todoState.ts`：待办解析归一化与展示投影的唯一实现，TUI 面板与 desktop 计划 dock 共用；宿主只渲染，不改写模型给的状态。
-- `subagentState.ts`：子代理任务按 `subagent-tasks/<sessionId>/<taskId>.json` 独立原子写入，目录指纹供轮询跳过未变记录；`isStoredSubagentTask` 与 Evolution 共用记录校验。旧单文件数组不再支持，由 Evolution 拆分并归档。
+- `subagentState.ts`：子代理任务按 `subagent-tasks/<sessionId>/<taskId>.json` 独立原子写入，目录指纹供轮询跳过未变记录；`isStoredSubagentTask` 统一校验记录。旧单文件数组不再支持。
 - `btwState.ts`：By The Way 线程的落盘路径与读写（`$MICA_HOME/btw/<sessionId>.json`），常驻 host 写入与会话删除时的清理共用。
 - `image.ts`：共享图片准备入口 `prepareImageForApi`：识别实际格式和有效尺寸；PNG 先完整解码验证，再按面积平均把长边缩到 1568、无损重编码。够小的 PNG 保留原始字节；16bit 解码降到 8bit，不透明重编码图去掉 alpha。源 PNG 超过 16,777,216 像素在解码前拒绝，损坏 PNG 拒绝；不支持的 PNG 编码变体在尺寸安全时原样透传。JPEG/GIF/WebP 不重编码，WebP 覆盖 VP8/VP8L/VP8X。所有格式最终长边不得超过 8192，否则提示裁剪/分段。MCP 工具与 provider 请求副本共用这份策略。
 - `imagePng.ts`：PNG 解码/编码（非隔行，灰度 / RGB / 灰度+alpha / RGBA 的 8bit 与 16bit，以及任意位深调色板）；在像素分配前检查上限，zlib 解压以声明扫描线字节数为输出上限。`imageResample.ts`：沿两个轴的面积平均降采样，半透明按预乘 alpha 平均。两者不依赖原生图像库。
-- `sessionNotes.ts`：会话笔记的归一化、追加、长度上限与 prompt 片段，唯一实现在这里，工具与桌面面板都调它。
 - `index.ts`：公共 API 聚合导出。
 
 提示词 XML 共用 `escapePromptXml(text)` 和 `wrapPromptXml(tag, content, attributes?)`（公共入口导出；浏览器可从纯模块 `promptXml.js` 导入）。前者转义动态数据，后者保留正文的语义标签、转义属性并保护所指定的外层标签；它不解析或验证正文 XML。

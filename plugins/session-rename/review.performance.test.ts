@@ -3,11 +3,10 @@ import { describe, expect, it } from 'vitest';
 import type { MicaUiConversationMessage } from '@packages/mica-ui/index.js';
 import { buildTranscript } from './transcript.js';
 import { messageText, sessionMarkdown } from '../session-copy/markdown.js';
-import { emptyTagStore, resolveTagTokens } from '../session-tags/model.js';
 
 // Opt in to reproducible timing samples; correctness is covered by the regular regression tests.
 describe.skipIf(process.env.MICA_PLUGIN_REVIEW_BENCH !== '1')('session plugin performance samples', () => {
-  it('samples bounded title context, full exports, malformed image references and tag commands', () => {
+  it('samples bounded title context, full exports and malformed image references', () => {
     const sample = (name: string, size: number, run: () => unknown) => {
       run();
       const timings: number[] = [];
@@ -32,11 +31,6 @@ describe.skipIf(process.env.MICA_PLUGIN_REVIEW_BENCH !== '1')('session plugin pe
       const text = '[Image]('.repeat(size);
       expect(messageText(text)).toBe(text);
       sample('copy-unclosed-images', size, () => messageText(text));
-    }
-    const store = emptyTagStore();
-    for (const size of [200, 800]) {
-      const tokens = Array.from({ length: size }, () => 'unknown');
-      sample('tags-unknown', size, () => resolveTagTokens(store, tokens));
     }
   });
 });

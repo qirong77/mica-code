@@ -19,19 +19,9 @@
 
 所有插件（含用户插件和一次性动作）自动接入宿主的 `operation.start/finish` 元数据日志， 新信封绑定装载版本及 pid/generation，后台重复 success/skipped/waiting合并为每分钟心跳计数；首次终态、失败、取消与状态转换不采样。覆盖工具/命令、面板/动作、菜单、后台 tick、数据、hook 与装配/释放；独立 MCP/launcher 不依赖主对话轨迹。内部步骤可调用 `ctx.operations?.run('固定操作名', task, { signal })`。禁止传正文、命令、路径、地址或异常原文；处理器完成不代表业务验收。随包页面/卡片/启动器的实际曝光与点击由共享容器记录，预取和轮询不算曝光。
 
-[Subagent Legacy](subagent-legacy/README.md) 是旧的进程内委派（7 种内置子代理类型 + `agent` 工具 + 委派 prompt 段落）：子代理活在父会话的进程里，共享父会话的模型与工具。它的文件租约限定文件工具的写入路径；shell 可从工作区内包含租约的目录执行，文件租约也能运行测试。外部 checkout 的祖先以最近 `.git` 为界，独立外部路径只放行到直接父目录；cwd 检查不是 shell 沙箱，命令仍须遵守写策略。
-
 [Subagent](subagent/README.md) 派一个独立的 mica 会话去干活并观测它：子会话是常驻的 `mica app-server` 进程，四个动词一个主语（`drive` / `inspect` / `wait` / `stop`），读内容按成本分三档（`inspect` 的 `turns` → `grep` → `transcript`），`inspect({ full: true })` 一次收齐全部结论。它还**反向汇报**：轮次结束、进程退出、停滞都记成一条动态，父会话下一轮开工时由 prompt 段落注入一次、读后即清；`subagent_wait` 超时会把条件登记成后台提醒，所以长任务不必把父会话钉在阻塞等待上。桌面端右侧面板与输入框上方的状态行让用户能直接看住、打断、收掉这些进程；空闲回收与 `subagent_drive`（`thread/resume` 接管任意已落盘会话——用户自己的会话、别处收掉的子会话都行——历史从会话文件补）负责让它们既不常驻烧内存，也不至于丢了线索。
 
 面板视图可返回 `cards`（每插件最多 3 张）：`{ id, title, summary?, detail?, tone?, revision, actions?, impressionAction? }`。卡片动作 `{ id, label, key?, tone? }` 复用面板动作通道；`key` 应携带版本并由插件校验，拒绝旧界面执行新内容。`impressionAction` 仅用于记录实际展示，不应产生用户可见操作。清单声明 `desktop.panel.dynamicShortcuts: true` 让快捷区获取卡片视图。卡片里显示摘要，详细清单仍放 `sections`。
-
-## Notebook 本地笔记本
-
-随包 `notebook` 在顶栏右侧（与 Schedule 同一排）提供 Notebook 整页：目录树、本地富文本与表格编辑，和会话笔记相互独立；通过应用同端口的 `/plugin/notebook/api` 暴露机读 HTTP 接口——根地址就是接口文档，`/overview` 一次给出完整目录树、计数与最近删除，其余端点按 `node_id` 查找、读取、创建、整理、软删除、恢复和编辑正文，回包统一 `{ ok, data }`。它不是 MCP 工具：没有预置工具或 skill，模型（以及任何 HTTP 客户端）拿到 `$MICA_DESKTOP_ORIGIN` 后先读文档再调用。正文写入沿用页面的版本比较（`expected_version`，冲突回 409），删除只是可恢复的最近删除，不直接改插件 JSON。
-编辑器是共享包 `packages/mica-editor`（笔记用其富文本模式，配置页 Role / Skill 用同一份运行时的 Markdown 模式），第三方依赖固定版本从 CDN 运行时加载；数据在 `plugin-data/notebook/data.json` 与 `documents/<id>.json`。首次打开需要 CDN 网络。
-目录按标题搜索并列出所属文件夹路径，选中结果会展开沿途文件夹。目录标题旁可定位当前笔记、折叠或展开所有文件夹。同级拖动排序和跨目录移动沿用索引数组顺序与 CAS 写入。具体能力、限制与开发方式见 [Notebook](./notebook/README.md)。
-
-Notebook 的 HTTP API 文档与端点说明见 [Notebook](./notebook/README.md)。Markdown 写入会返回大纲、结构统计与降级警告。AI 也可从 `/modules/blocks` 按 `capabilities` 挑选可运行的组件模板，通过 `/notes/:id/blocks` 单独读写一个块，不必传输整篇富文本；块路径只在读到的正文版本内有效。
 
 ## 目录结构
 
@@ -162,7 +152,7 @@ setup 先注册不依赖会话的动作，再检查 `ctx.tools/session` 等能�
 ### 运行状态（`status`）
 
 装配失败只记宿主装配报告，不写共享运行健康；钩子错误的健康记录带当前插件版本。
-旧启动错误由 evolution 的 `plugin-startup-health` 迁移归档，成功装配不清除真实运行故障。
+旧启动错误不再当作当前运行健康；成功装配不清除真实运行故障。
 `ctx.pluginStatus?.()` 提供本宿主内存里的装配快照（包含动态启停），用于运行归因；不要读取共享 `plugin-status.json` 来推断当前会话装了什么。
 Harness Review 的插件页状态是所有工作区的全局汇总，工具与新会话复盘仍按明确的工作区筛选；候选不等于已确认缺陷，未登记评估也不等于从未讨论过。
 
@@ -315,7 +305,7 @@ checkpoint 摘要（工具过程不进摘要输入）。它只在能独占写会
 `subagents` 是委派子代理的入口（`ctx.subagents`）：注册类型、前台/后台跑一个、管后台任务。类型可用 `maxTurnContinuations` 指定达到默认 `maxTurns` 后的同上下文续跑次数（最多 2）；请求显式指定 `maxTurns` 时始终是硬上限。
 
 `ctx.subagents.tasks.restart(taskId)` 在原 owner 下创建带原任务和最近活动的替代任务，返回新任务 ID；这是新执行，不是断点续跑。它与 `tasks.get` 一样只能访问本插件的任务，任务不存在、仍在运行或无法重启时抛错；路径租约和跨进程防重复检查仍由宿主执行。
-机制（建子代理、用量记账、路径租约、完成回注）在宿主，插件只决定有哪些类型、`agent` 工具长什么样。
+机制（建子代理、用量记账、路径租约、完成回注）在宿主，插件只决定是否调用它、调用哪一类。
 需要一条能反复追问的隔离上下文（旁问、连续修订）时用 `ctx.subagents.thread()`：一次建线程、多次
 `ask()`，同一线程串行、`usage()` 读请求数、`dispose()` 收尾；它不进任务列表、不拿路径租约，每次 ask
 的用量同样以 `origin: 'plugin'` 记账。system prompt 是整体替换，插件要自己带上需要的上下文。
@@ -458,7 +448,7 @@ export default function createApi(ctx: PluginApiContext): PluginApiHandler {
 - 路由在 remoteGate 与独立 MCP **之前**分派（MCP 接管整个 `/plugin/*` 命名空间，排在后面就
   轮不到），沿用 Host/Origin 校验，未知路径 404、不回落 SPA，分享 cookie 不开放。它只跑在应用
   运行时里（桌面 / Web 宿主），不占新端口、不启动会话；TUI 与外部客户端要等应用在运行。
-- 当前只加载随包模块。Notebook、Schedule、Video 是使用方：三家都不再提供工具，能力只剩接口，
+- 当前只加载随包模块。Schedule、Video 是使用方：两家都不再提供工具，能力只剩接口，
   清单里各挂一条 `uriApis`，模型按 `$MICA_DESKTOP_ORIGIN`（或插入的 URI）直连文档与端点。
   视频这类要交付图片的能力因此改成「接口回本地路径 + `read_image`」，代价是 30 秒上限与多一次往返。
 
@@ -570,9 +560,9 @@ skill 与 MCP 工具是常驻的：每一轮都进 prompt 索引，哪怕这个�
 {
   "uriApis": [
     {
-      "name": "notebook",
-      "description": "笔记的机读接口：先读文档目录，再照它建/改/搜/翻页",
-      "uri": "/plugin/notebook/api"
+      "name": "schedule",
+      "description": "计划表的机读接口：先读文档目录，再照它增删改任务",
+      "uri": "/plugin/schedule/api"
     }
   ]
 }
@@ -707,8 +697,8 @@ export function summary(api) { return api.currentHost() } // 可选：入口行�
 
 - 入口的文案来自清单，图标用清单的 `icon`；`label` 不写就退化成插件的 `name`。
 - 入口是**可选**的：只想提供一个整页（下文的 `page`）而不占侧栏一行时，不写 `entry` 就
-  行——整页这时从配置页 **Settings → Plugins → 该插件** 的「打开…」按钮进（标签就是这么
-  做的：打标签在会话右键，重看标签表才需要那个页面，不该常驻侧栏）。
+  行——整页这时从配置页 **Settings → Plugins → 该插件** 的「打开…」按钮进。整份数据只在
+  少数场合才需要改的插件走这条，日常操作留在会话右键或面板里。
 - `placement` 决定入口画在哪一侧：`sidebar`（默认）是侧栏里的一行，`header` 是主区顶栏右侧
   的一枚图标按钮（32px 高的顶栏只容得下图标，文案进 tooltip）。两处用的是同一个
   `desktop.jsx`，卡片与整页的行为不随位置改变。
@@ -738,7 +728,7 @@ export function summary(api) { return api.currentHost() } // 可选：入口行�
   `action(key)`（执行清单 `actions` 里声明过的一个动作，结果是 `{ ok, message?, link?, error? }`）。
 - 会话行标记：`annotations`（`read()` / `writeOptions(options)`）。插件用
   `session-annotations.json` 的 `options` 在自己的会话行上画点、生成右键菜单项；颜色与名字
-  要由用户在页面里定义时（标签这类），页面整份写回那份 `options`。宿主只做跨进程互斥、
+  要由用户在页面里定义时（分类、优先级这类），页面整份写回那份 `options`。宿主只做跨进程互斥、
   按通用结构归一化、把删掉的项同时从会话归属里摘掉，并广播 `annotations:changed` 让所有窗口
   重画。返回值带 `counts`（每个 option 挂着多少个会话），删之前就能说清会摘掉多少。
 - 当前会话：`session`（没有打开会话时为 `null`）——`id()` / `sessionId()` / `cwd()`、
@@ -1092,7 +1082,7 @@ ctx.desktop.sessionMenu({
   页面上让人去修一个已经不存在的问题（`readPluginHealth(..., { version })`）。
   健康文件是 `schemaVersion: 2` 的 issues 映射；默认业务项 `runtime`，依赖故障单独用固定 key。
   `read()` 聚合最高严重度，`read(key)` / `clear(key)` 仅操作指定项；业务成功不清除模型降级。
-  旧单条形态由 Evolution 归档迁移，不在运行期保留解析分支。
+  旧单条形态不在运行期解析。
 - 装配失败（setup 抛错、入口加载不了）不是健康状态：那条走 `plugin-status.json`，
   卡片上写「加载失败」。两者混成一句话会出现「开关亮着、脚注却写着加载失败」。
 - 只上报插件自己的状态：缺宿主能力由宿主记进 `plugin-status.json` 的 `skipped`，
@@ -1234,7 +1224,7 @@ const child = spawn(micaExecutable, ['app-server', '--dir', cwd, '--parent', thi
 用户正文覆盖，界面快照带对应可用性。仅返回空正文不代表不可用，仍允许用户覆盖。
 
 工具参数、操作顺序与调用纪律统一写在工具描述中，不再额外注入同一份提示词或用 skill 包装同一个工具。
-提示词段落保留工具无法提供的动态事实和额外策略：例如 Memory 的适用记忆与历史回查、SSH 的会话主机范围、并发会话提醒、可配置的委派倾向。Todo 的计划纪律与 Web Search 的查证步骤归工具描述；Video 的抽帧用法与 Schedule 的调用纪律写在各自 `api.ts` 的 `description` / `guide` 里（接口文档即说明书，不再分发重复的说明 skill）。历史回查归 Memory，宿主不再另装 `builtin.command-memory`。
+提示词段落保留工具无法提供的动态事实和额外策略：例如 Memory 的适用记忆与历史回查、SSH 的会话主机范围、并发会话提醒。Todo 的计划纪律与 Web Search 的查证步骤归工具描述；Video 的抽帧用法与 Schedule 的调用纪律写在各自 `api.ts` 的 `description` / `guide` 里（接口文档即说明书，不再分发重复的说明 skill）。历史回查归 Memory。
 
 Capabilities 会显示当前会话各插件的工具、技能与提示词来源。用户可在 Plugins 页签开关整个插件的提示词注入，或在提示词控制中逐段开关、覆盖正文与恢复原文；插件的工具保持注册。控制存全局 `prompt-controls.json`，下一轮开始生效。覆盖正文后该段使用固定内容，恢复原文后继续由 `render()` 动态生成；完整预览与最近实际发送的存档分开。
 

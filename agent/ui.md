@@ -23,7 +23,7 @@
 - Sessions 左栏的会话信息由 `src/server/sessionHead.ts` 只读文件头 8KB 解析，两个宿主共用。
 - Roles 保持左列表 + 右编辑器：`default` 保留选择，明确标为「默认系统提示词」，正文只读且可复制；选择它不重复追加。自定义 Role 只编辑追加正文，页面说明它位于默认正文之后、同属系统提示词，不替换默认正文。两个宿主都拒绝创建、写入、删除 `default` 及其大小写 / `.md` 后缀 / 首尾空白别名。
 - 会话提示词有 `snapshot.systemPrompt` 时以存档为准；没有记录时，对话与 Context 分析只以「当前默认正文 + Role 追加正文」作展示参考，不写回快照。系统提示词页仍明确显示「没有记录」，参考内容不冒充当时发出的完整提示词。
-- Context 分析的工具定义只读 `snapshot.lastToolSchemas` 的最近一次请求记录，Tool Schema 总数独立展示，MCP server / 工具是其子项，不重复计总量；旧会话显示「未记录」，compact / rewind 后说明这组数据与当前快照不完全对应，不拿当前工具集冒充历史。
+- Context 分析的工具定义只读 `snapshot.lastToolSchemas` 的最近一次请求记录，Tool Schema 总数独立展示，MCP server / 工具是其子项，不重复计总量；旧会话显示「未记录」，compact 后说明这组数据与当前快照不完全对应，不拿当前工具集冒充历史。
 - 浏览器侧（`web/`）只能 import 纯子模块：`mica-plugin` / `mica-common` 的包入口会顺带导出读写文件的模块，dev 下整页白屏且 tsc 与单测都看不出来（`web/browserImports.test.ts` 静态挡住）。
 - 密钥类输入统一用 `web/components/SecretInput.tsx`：默认密文 + 眼睛按钮切明文，明文状态在组件内，收起或换页自动回到密文。
 - 配置页不提供 effort 开关：由模型规则按模型名决定。

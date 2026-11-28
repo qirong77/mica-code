@@ -231,12 +231,6 @@ body.mica-arco-theme {
 .table-selection-drop-line { background: var(--color-accent); box-shadow: 0 0 0 1px var(--color-canvas); }
 }
 
-/* The style inspector is a modal editor state. Portalled table controls must
-   not float above it merely because their generic z-index is larger. */
-body[data-notebook-style='open'] :is(.table-selection-handles, .table-scroll-fades, .table-context-toolbar, .table-control-popup) {
-  visibility: hidden;
-  pointer-events: none;
-}
 
 /* Menu geometry is local; its surface and rows come from the shared ActionMenu. */
 .editor-dropdown { position: fixed; z-index: 100; }

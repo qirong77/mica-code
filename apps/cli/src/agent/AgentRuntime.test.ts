@@ -221,7 +221,7 @@ describe('AgentRuntime tool status', () => {
     });
     try {
       // Failed attempts changed messages/reasoning and appended real requests.
-      // Repeated restores must rewind only the former, not replay baseline usage.
+      // Repeated restores must drop only the former, not replay baseline usage.
       const expectedUsage = [baselineUsage];
       for (const record of [firstRetryUsage, secondRetryUsage]) {
         modelClient.messages.push(piAssistant('retry output'));

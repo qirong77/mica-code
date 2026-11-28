@@ -4,7 +4,7 @@ export type RuntimeEvent =
   | { type: 'queue:changed'; pendingInputs: RuntimeInput[]; owner?: unknown }
   | { type: 'session:cleared'; owner?: unknown }
   /** Session history changed outside a model turn; owner-scoped plugin state should reset. */
-  | { type: 'session:invalidated'; reason: 'resume' | 'rewind'; owner?: unknown }
+  | { type: 'session:invalidated'; reason: 'resume'; owner?: unknown }
   | { type: 'session:disposed'; owner: unknown }
   /**
    * 用户在输入框里敲了字。不是一次提交，只是「这个人回来了」的信号——会话空闲很久之后

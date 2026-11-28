@@ -295,7 +295,7 @@ export function pluginQuickbarItems(panels, runtimeShortcuts) {
     const shortcuts = [
       ...statics.map((shortcut, index) => ({
         shortcut,
-        key: `${panel.id}:${shortcut.id || `legacy-${index}`}`
+        key: `${panel.id}:${shortcut.id || `shortcut-${index}`}`
       })),
       ...(Array.isArray(dynamic) ? dynamic : []).map((shortcut) => ({
         shortcut,

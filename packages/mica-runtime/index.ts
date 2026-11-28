@@ -26,14 +26,5 @@ export type {
   RuntimeTurnBeforeHookEvent,
   TurnOutcome,
 } from './PluginRuntime.js';
-export type {
-  RewindApplyRequest,
-  RewindApplyResult,
-  RewindCheckpointSummary,
-  RewindFileAction,
-  RewindFileChange,
-  RewindMode,
-  RewindPreviewResult,
-} from './Rewind.js';
 export type { CodexExecEvent, CodexExecEventWriter, CodexExecItem, CodexExecUsage } from './codexExecEvents.js';
 export { createStdoutCodexExecWriter, emptyCodexExecUsage, encodeCodexExecLine } from './codexExecEvents.js';

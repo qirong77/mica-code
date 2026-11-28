@@ -1,3 +1,4 @@
+import { isRecord } from '@packages/mica-common/guards.js';
 import mitt from 'mitt';
 import type { Message } from '@earendil-works/pi-ai';
 import { AsyncLocalStorage } from 'node:async_hooks';
@@ -149,7 +150,7 @@ export type AgentClientSnapshot = Omit<AgentSnapshot<unknown, AgentUsageRecord>,
 export type RestoreClientSnapshotOptions = {
   /**
    * Keep usage records produced since the checkpoint was captured.  A whole
-   * turn retry rewinds provider messages/reasoning, but the requests already
+   * turn retry rolls provider messages/reasoning back, but the requests already
    * sent to the provider still happened and must remain billable.
    */
   preserveUsage?: boolean;
@@ -1638,10 +1639,6 @@ function safeJson(value: unknown): string {
   } catch {
     return '';
   }
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return !!value && typeof value === 'object' && !Array.isArray(value);
 }
 
 function cloneJson<T>(value: T): T {

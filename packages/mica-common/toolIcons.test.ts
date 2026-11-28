@@ -14,12 +14,6 @@ describe('toolIcon', () => {
     expect(toolIcon('memory', lookup)).toBe('🧠');
   });
 
-  it('resolves legacy tool names to the same icon as the current name', () => {
-    // 改名前留下的历史消息：`Skill` 与 `skill` 是同一个工具
-    expect(toolIcon('Skill', lookup)).toBe('✨');
-    expect(toolIcon('Skill', lookup)).toBe(toolIcon('skill', lookup));
-  });
-
   it('renders every MCP tool with the plug, whatever the server calls it', () => {
     expect(toolIcon('mcp__mica-browser__control_4e54cce9', lookup)).toBe(MCP_TOOL_ICON);
   });

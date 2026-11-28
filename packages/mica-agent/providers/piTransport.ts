@@ -1,3 +1,4 @@
+import { isRecord } from '@packages/mica-common/guards.js';
 import type { Api, AssistantMessageEvent, Context, Model, StreamOptions } from '@earendil-works/pi-ai';
 import { normalizeContext } from '@earendil-works/pi-ai/utils/transcript';
 import { stream as chatStream } from '@earendil-works/pi-ai/api/openai-completions';
@@ -133,6 +134,3 @@ function mergeRequest(target: Record<string, unknown>, patch: Record<string, unk
   return result;
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return !!value && typeof value === 'object' && !Array.isArray(value);
-}

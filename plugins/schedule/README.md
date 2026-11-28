@@ -38,11 +38,7 @@
 `YYYY-MM-DD`。写盘不能拿这种容错当校验：页面与接口读取已存在的文件时，损坏 JSON、非法
 结构、坏任务或重复 id 都会报错，不会先丢掉条目再保存。
 
-旧形态（`plans` / `stages`）不再由排期运行时读取。Evolution 在宿主启动时先拿与排期写入相同的
-`data.json.lock`，把每个计划的阶段转换成扁平任务（计划名并入任务名、计划备注放在第一条任务上，
-颜色按计划顺序分配），并以原子写替换文件；无法映射的旧计划级信息与原文一起私有归档到
-`plugin-data/evolution/legacy-schedule/`。迁移失败时原文件保持不变，迁移完成后这里只认
-`version: 1` + `tasks`，旧形态不再支持。
+旧形态（`plans` / `stages`）不再由排期运行时读取：这里只认 `version: 1` + `tasks`，旧文件显示为空，写盘会拒绝。
 导出的 JSON 与 `qirong-application/apps/gantt` 同形（`title` / `scale` / `tasks`），两边可以互相导入。
 
 ## 机读接口

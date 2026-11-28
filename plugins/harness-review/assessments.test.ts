@@ -223,7 +223,7 @@ test('warns about unsupported legacy single-file decisions without reading or mu
   const warnings: string[] = [];
   expect(await readAssessments(root, id, warnings)).toEqual([]);
   expect(warnings).toHaveLength(1);
-  expect(warnings[0]).toContain('/evolution run');
+  expect(warnings[0]).toContain('no longer supported');
   expect(await readFile(legacy, 'utf8')).toBe(text);
 });
 
